@@ -1969,6 +1969,7 @@ extern int vfs_ustat(dev_t, struct kstatfs *);
 extern int freeze_super(struct super_block *super);
 extern int thaw_super(struct super_block *super);
 extern bool our_mnt(struct vfsmount *mnt);
+extern bool fs_fully_visible(struct file_system_type *);
 
 extern int current_umask(void);
 
