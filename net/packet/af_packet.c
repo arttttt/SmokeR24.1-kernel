@@ -1729,26 +1729,6 @@ drop:
 	return 0;
 }
 
-static void tpacket_get_timestamp(struct sk_buff *skb, struct timespec *ts,
-				  unsigned int flags)
-{
-	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
-
-	if (shhwtstamps) {
-		if ((flags & SOF_TIMESTAMPING_SYS_HARDWARE) &&
-		    ktime_to_timespec_cond(shhwtstamps->syststamp, ts))
-			return;
-		if ((flags & SOF_TIMESTAMPING_RAW_HARDWARE) &&
-		    ktime_to_timespec_cond(shhwtstamps->hwtstamp, ts))
-			return;
-	}
-
-	if (ktime_to_timespec_cond(skb->tstamp, ts))
-		return;
-
-	getnstimeofday(ts);
-}
-
 static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 		       struct packet_type *pt, struct net_device *orig_dev)
 {
@@ -1858,7 +1838,8 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	spin_unlock(&sk->sk_receive_queue.lock);
 
 	skb_copy_bits(skb, 0, h.raw + macoff, snaplen);
-	tpacket_get_timestamp(skb, &ts, po->tp_tstamp);
+	if (!tpacket_get_timestamp(skb, &ts, po->tp_tstamp))
+		getnstimeofday(&ts);
 
 	if (!(ts_status = tpacket_get_timestamp(skb, &ts, po->tp_tstamp)))
 		getnstimeofday(&ts);
