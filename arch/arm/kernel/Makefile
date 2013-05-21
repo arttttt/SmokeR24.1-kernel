@@ -86,7 +86,8 @@ obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 
 obj-$(CONFIG_BOOT_INFO) 	+= bootinfo.o
 obj-$(CONFIG_ARM_VIRT_EXT)	+= hyp-stub.o
-obj-$(CONFIG_ARM_PSCI)		+= psci.o psci-call.o
+obj-y						+= psci.o psci-call.o
+obj-$(CONFIG_SMP)			+= psci_smp.o
 
 extra-y := $(head-y) vmlinux.lds
 # vDSO - this must be built first to generate the symbol offsets
