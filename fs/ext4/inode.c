@@ -2827,7 +2827,7 @@ static void ext4_da_invalidatepage(struct page *page, unsigned int offset,
 	if (!page_has_buffers(page))
 		goto out;
 
-	ext4_da_page_release_reservation(page, offset, PAGE_CACHE_SIZE - offset);
+	ext4_da_page_release_reservation(page, offset, length);
 
 out:
 	ext4_invalidatepage(page, offset, length);
@@ -2980,16 +2980,16 @@ ext4_readpages(struct file *file, struct address_space *mapping,
 static void ext4_invalidatepage(struct page *page, unsigned int offset,
 				unsigned int length)
 {
-	trace_ext4_invalidatepage(page, offset, 0);
+	trace_ext4_invalidatepage(page, offset, length);
 
 	/* No journalling happens on data buffers when this function is used */
 	WARN_ON(page_has_buffers(page) && buffer_jbd(page_buffers(page)));
 
-	block_invalidatepage(page, offset, PAGE_CACHE_SIZE - offset);
+	block_invalidatepage(page, offset, length);
 }
 
 static int __ext4_journalled_invalidatepage(struct page *page,
-					    unsigned long offset,
+					    unsigned int offset,
 					    unsigned int length)
 {
 	journal_t *journal = EXT4_JOURNAL(page->mapping->host);
@@ -3010,8 +3010,6 @@ static void ext4_journalled_invalidatepage(struct page *page,
 					   unsigned int offset,
 					   unsigned int length)
 {
-	unsigned int length = PAGE_CACHE_SIZE - offset;
-
 	WARN_ON(__ext4_journalled_invalidatepage(page, offset, length) < 0);
 }
 
