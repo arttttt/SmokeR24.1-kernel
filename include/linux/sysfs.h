@@ -22,6 +22,7 @@
 
 struct kobject;
 struct module;
+struct bin_attribute;
 enum kobj_ns_type;
 
 struct attribute {
@@ -60,9 +61,8 @@ struct attribute_group {
 	umode_t			(*is_visible)(struct kobject *,
 					      struct attribute *, int);
 	struct attribute	**attrs;
+	struct bin_attribute	**bin_attrs;
 };
-
-
 
 /**
  * Use these macros to make defining attributes easier. See include/linux/device.h
