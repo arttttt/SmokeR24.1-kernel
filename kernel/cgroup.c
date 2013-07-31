@@ -466,7 +466,7 @@ static inline void put_css_set_taskexit(struct css_set *cset)
  * @new_cgrp: cgroup that's being entered by the task
  * @template: desired set of css pointers in css_set (pre-calculated)
  *
- * Returns true if "cg" matches "old_cg" except for the hierarchy
+ * Returns true if "cset" matches "old_cset" except for the hierarchy
  * which "new_cgrp" belongs to, for which it should match "new_cgrp".
  */
 static bool compare_css_sets(struct css_set *cset,
@@ -1846,7 +1846,7 @@ EXPORT_SYMBOL_GPL(task_cgroup_path);
 struct task_and_cgroup {
 	struct task_struct	*task;
 	struct cgroup		*cgrp;
-	struct css_set		*cg;
+	struct css_set		*cset;
 };
 
 struct cgroup_taskset {
@@ -2064,8 +2064,8 @@ next:
 
 		tc = flex_array_get(group, i);
 		old_cset = task_css_set(tc->task);
-		tc->cg = find_css_set(old_cset, cgrp);
-		if (!tc->cg) {
+		tc->cset = find_css_set(old_cset, cgrp);
+		if (!tc->cset) {
 			retval = -ENOMEM;
 			goto out_put_css_set_refs;
 		}
@@ -2078,7 +2078,7 @@ next:
 	 */
 	for (i = 0; i < group_size; i++) {
 		tc = flex_array_get(group, i);
-		cgroup_task_migrate(tc->cgrp, tc->task, tc->cg);
+		cgroup_task_migrate(tc->cgrp, tc->task, tc->cset);
 	}
 	/* nothing is sensitive to fork() after this point. */
 
@@ -2098,9 +2098,9 @@ out_put_css_set_refs:
 	if (retval) {
 		for (i = 0; i < group_size; i++) {
 			tc = flex_array_get(group, i);
-			if (!tc->cg)
+			if (!tc->cset)
 				break;
-			put_css_set(tc->cg);
+			put_css_set(tc->cset);
 		}
 	}
 out_cancel_attach:
@@ -2211,9 +2211,9 @@ int cgroup_attach_task_all(struct task_struct *from, struct task_struct *tsk)
 
 	mutex_lock(&cgroup_mutex);
 	for_each_active_root(root) {
-		struct cgroup *from_cg = task_cgroup_from_root(from, root);
+		struct cgroup *from_cgrp = task_cgroup_from_root(from, root);
 
-		retval = cgroup_attach_task(from_cg, tsk, false);
+		retval = cgroup_attach_task(from_cgrp, tsk, false);
 		if (retval)
 			break;
 	}
@@ -3306,8 +3306,8 @@ int cgroup_scan_tasks(struct cgroup_scanner *scan)
 	 * guarantees forward progress and that we don't miss any tasks.
 	 */
 	heap->size = 0;
-	cgroup_iter_start(scan->cg, &it);
-	while ((p = cgroup_iter_next(scan->cg, &it))) {
+	cgroup_iter_start(scan->cgrp, &it);
+	while ((p = cgroup_iter_next(scan->cgrp, &it))) {
 		/*
 		 * Only affect tasks that qualify per the caller's callback,
 		 * if he provided one
@@ -3340,7 +3340,7 @@ int cgroup_scan_tasks(struct cgroup_scanner *scan)
 		 * the heap and wasn't inserted
 		 */
 	}
-	cgroup_iter_end(scan->cg, &it);
+	cgroup_iter_end(scan->cgrp, &it);
 
 	if (heap->size) {
 		for (i = 0; i < heap->size; i++) {
@@ -3386,7 +3386,7 @@ int cgroup_transfer_tasks(struct cgroup *to, struct cgroup *from)
 {
 	struct cgroup_scanner scan;
 
-	scan.cg = from;
+	scan.cgrp = from;
 	scan.test_task = NULL; /* select all tasks in cgroup */
 	scan.process_task = cgroup_transfer_one_task;
 	scan.heap = NULL;
