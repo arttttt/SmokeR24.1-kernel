@@ -20,6 +20,18 @@ enum lp55xx_engine_index {
 	LP55XX_ENGINE_1,
 	LP55XX_ENGINE_2,
 	LP55XX_ENGINE_3,
+	LP55XX_ENGINE_MAX = LP55XX_ENGINE_3,
+};
+
+enum lp55xx_engine_mode {
+	LP55XX_ENGINE_DISABLED,
+	LP55XX_ENGINE_LOAD,
+	LP55XX_ENGINE_RUN,
+};
+
+struct lp55xx_engine {
+	enum lp55xx_engine_mode mode;
+	u16 led_mux;
 };
 
 #define LP55XX_DEV_ATTR_RW(name, show, store)	\
@@ -136,6 +148,7 @@ struct lp55xx_chip {
 	int num_leds;
 	struct lp55xx_device_config *cfg;
 	enum lp55xx_engine_index engine_idx;
+	struct lp55xx_engine engines[LP55XX_ENGINE_MAX];
 	const struct firmware *fw;
 };
 
