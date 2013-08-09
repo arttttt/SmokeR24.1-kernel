@@ -2862,17 +2862,6 @@ static int cgroup_cfts_commit(struct cftype *cfts, bool is_add)
 
 	mutex_unlock(&cgroup_mutex);
 
-	/* @root always needs to be updated */
-	inode = root->dentry->d_inode;
-	mutex_lock(&inode->i_mutex);
-	mutex_lock(&cgroup_mutex);
-	ret = cgroup_addrm_files(root, cfts, is_add);
-	mutex_unlock(&cgroup_mutex);
-	mutex_unlock(&inode->i_mutex);
-
-	if (ret)
-		goto out_deact;
-
 	/* add/rm files for all cgroups created before */
 	rcu_read_lock();
 	css_for_each_descendant_pre(css, cgroup_css(root, ss->subsys_id)) {
@@ -2901,7 +2890,6 @@ static int cgroup_cfts_commit(struct cftype *cfts, bool is_add)
 	}
 	rcu_read_unlock();
 	dput(prev);
-out_deact:
 	deactivate_super(sb);
 	return ret;
 }
@@ -3093,7 +3081,8 @@ EXPORT_SYMBOL_GPL(css_next_child);
  * @root: css whose descendants to walk
  *
  * To be used by css_for_each_descendant_pre().  Find the next descendant
- * to visit for pre-order traversal of @root's descendants.
+ * to visit for pre-order traversal of @root's descendants.  @root is
+ * included in the iteration and the first node to be visited.
  *
  * While this function requires RCU read locking, it doesn't require the
  * whole traversal to be contained in a single RCU critical section.  This
@@ -3108,9 +3097,9 @@ css_next_descendant_pre(struct cgroup_subsys_state *pos,
 
 	WARN_ON_ONCE(!rcu_read_lock_held());
 
-	/* if first iteration, pretend we just visited @root */
+	/* if first iteration, visit @root */
 	if (!pos)
-		pos = root;
+		return root;
 
 	/* visit the first child if exists */
 	next = css_next_child(NULL, pos);
@@ -3180,7 +3169,8 @@ css_leftmost_descendant(struct cgroup_subsys_state *pos)
  * @root: css whose descendants to walk
  *
  * To be used by css_for_each_descendant_post().  Find the next descendant
- * to visit for post-order traversal of @root's descendants.
+ * to visit for post-order traversal of @root's descendants.  @root is
+ * included in the iteration and the last node to be visited.
  *
  * While this function requires RCU read locking, it doesn't require the
  * whole traversal to be contained in a single RCU critical section.  This
@@ -3201,14 +3191,17 @@ css_next_descendant_post(struct cgroup_subsys_state *pos,
 		return next != root ? next : NULL;
 	}
 
+	/* if we visited @root, we're done */
+	if (pos == root)
+		return NULL;
+
 	/* if there's an unvisited sibling, visit its leftmost descendant */
 	next = css_next_child(pos, css_parent(pos));
 	if (next)
 		return css_leftmost_descendant(next);
 
 	/* no sibling left, visit parent */
-	next = css_parent(pos);
-	return next != root ? next : NULL;
+	return css_parent(pos);
 }
 EXPORT_SYMBOL_GPL(css_next_descendant_post);
 
