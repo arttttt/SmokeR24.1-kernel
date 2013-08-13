@@ -1545,11 +1545,13 @@ static int cpuset_write_u64(struct cgroup_subsys_state *css, struct cftype *cft,
 {
 	struct cpuset *cs = css_cs(css);
 	cpuset_filetype_t type = cft->private;
-	int retval = -ENODEV;
+	int retval = 0;
 
 	mutex_lock(&cpuset_mutex);
-	if (!is_cpuset_online(cs))
+	if (!is_cpuset_online(cs)) {
+		retval = -ENODEV;
 		goto out_unlock;
+	}
 
 	switch (type) {
 	case FILE_CPU_EXCLUSIVE:
