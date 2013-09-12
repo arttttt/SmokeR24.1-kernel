@@ -139,11 +139,13 @@ struct sysfs_ops {
 int sysfs_schedule_callback(struct kobject *kobj, void (*func)(void *),
 			    void *data, struct module *owner);
 
-int __must_check sysfs_create_dir(struct kobject *kobj);
+int __must_check sysfs_create_dir_ns(struct kobject *kobj, const void *ns);
 void sysfs_remove_dir(struct kobject *kobj);
-int __must_check sysfs_rename_dir(struct kobject *kobj, const char *new_name);
-int __must_check sysfs_move_dir(struct kobject *kobj,
-				struct kobject *new_parent_kobj);
+int __must_check sysfs_rename_dir_ns(struct kobject *kobj, const char *new_name,
+				     const void *new_ns);
+int __must_check sysfs_move_dir_ns(struct kobject *kobj,
+				   struct kobject *new_parent_kobj,
+				   const void *new_ns);
 
 int __must_check sysfs_create_file_ns(struct kobject *kobj,
 				      const struct attribute *attr,
@@ -215,7 +217,7 @@ static inline int sysfs_schedule_callback(struct kobject *kobj,
 	return -ENOSYS;
 }
 
-static inline int sysfs_create_dir(struct kobject *kobj)
+static inline int sysfs_create_dir_ns(struct kobject *kobj, const void *ns)
 {
 	return 0;
 }
@@ -224,13 +226,15 @@ static inline void sysfs_remove_dir(struct kobject *kobj)
 {
 }
 
-static inline int sysfs_rename_dir(struct kobject *kobj, const char *new_name)
+static inline int sysfs_rename_dir_ns(struct kobject *kobj,
+				      const char *new_name, const void *new_ns)
 {
 	return 0;
 }
 
-static inline int sysfs_move_dir(struct kobject *kobj,
-				 struct kobject *new_parent_kobj)
+static inline int sysfs_move_dir_ns(struct kobject *kobj,
+				    struct kobject *new_parent_kobj,
+				    const void *new_ns)
 {
 	return 0;
 }
