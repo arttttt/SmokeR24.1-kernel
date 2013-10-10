@@ -255,7 +255,7 @@ alloc:
 }
 
 /* Note: this function must be SMP safe */
-static unsigned int twm_nf_hook(unsigned int hook,
+static unsigned int twm_nf_hook(const struct nf_hook_ops *ops,
 			struct sk_buff *skb,
 			const struct net_device *indev,
 			const struct net_device *outdev,
