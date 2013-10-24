@@ -1722,15 +1722,6 @@ static struct page *kmem_getpages(struct kmem_cache *cachep, gfp_t flags,
 {
 	struct page *page;
 	int nr_pages;
-	int i;
-
-#ifndef CONFIG_MMU
-	/*
-	 * Nommu uses slab's for process anonymous memory allocations, and thus
-	 * requires __GFP_COMP to properly refcount higher order allocations
-	 */
-	flags |= __GFP_COMP;
-#endif
 
 	flags |= cachep->allocflags;
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
@@ -1754,12 +1745,9 @@ static struct page *kmem_getpages(struct kmem_cache *cachep, gfp_t flags,
 	else
 		add_zone_page_state(page_zone(page),
 			NR_SLAB_UNRECLAIMABLE, nr_pages);
-	for (i = 0; i < nr_pages; i++) {
-		__SetPageSlab(page + i);
-
-		if (page->pfmemalloc)
-			SetPageSlabPfmemalloc(page);
-	}
+	__SetPageSlab(page);
+	if (page->pfmemalloc)
+		SetPageSlabPfmemalloc(page);
 	memcg_bind_pages(cachep, cachep->gfporder);
 
 	if (kmemcheck_enabled && !(cachep->flags & SLAB_NOTRACK)) {
@@ -1779,8 +1767,7 @@ static struct page *kmem_getpages(struct kmem_cache *cachep, gfp_t flags,
  */
 static void kmem_freepages(struct kmem_cache *cachep, struct page *page)
 {
-	unsigned long i = (1 << cachep->gfporder);
-	const unsigned long nr_freed = i;
+	const unsigned long nr_freed = (1 << cachep->gfporder);
 
 	kmemcheck_free_shadow(page, cachep->gfporder);
 
@@ -1791,12 +1778,9 @@ static void kmem_freepages(struct kmem_cache *cachep, struct page *page)
 		sub_zone_page_state(page_zone(page),
 				NR_SLAB_UNRECLAIMABLE, nr_freed);
 
+	BUG_ON(!PageSlab(page));
 	__ClearPageSlabPfmemalloc(page);
-	while (i--) {
-		BUG_ON(!PageSlab(page));
-		__ClearPageSlab(page);
-		page++;
-	}
+	__ClearPageSlab(page);
 
 	memcg_release_pages(cachep, cachep->gfporder);
 	if (current->reclaim_state)
@@ -2366,7 +2350,7 @@ __kmem_cache_create (struct kmem_cache *cachep, unsigned long flags)
 	cachep->colour = left_over / cachep->colour_off;
 	cachep->slab_size = slab_size;
 	cachep->flags = flags;
-	cachep->allocflags = 0;
+	cachep->allocflags = __GFP_COMP;
 	if (CONFIG_ZONE_DMA_FLAG && (flags & SLAB_CACHE_DMA))
 		cachep->allocflags |= GFP_DMA;
 	cachep->size = size;
@@ -2733,17 +2717,8 @@ static void slab_put_obj(struct kmem_cache *cachep, struct slab *slabp,
 static void slab_map_pages(struct kmem_cache *cache, struct slab *slab,
 			   struct page *page)
 {
-	int nr_pages;
-
-	nr_pages = 1;
-	if (likely(!PageCompound(page)))
-		nr_pages <<= cache->gfporder;
-
-	do {
-		page->slab_cache = cache;
-		page->slab_page = slab;
-		page++;
-	} while (--nr_pages);
+	page->slab_cache = cache;
+	page->slab_page = slab;
 }
 
 /*
