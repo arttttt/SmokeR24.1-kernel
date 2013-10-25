@@ -899,11 +899,6 @@ static void cgroup_diput(struct dentry *dentry, struct inode *inode)
 	iput(inode);
 }
 
-static int cgroup_delete(const struct dentry *d)
-{
-	return 1;
-}
-
 static void remove_dir(struct dentry *d)
 {
 	struct dentry *parent = dget(d->d_parent);
@@ -1457,7 +1452,7 @@ static int cgroup_get_rootdir(struct super_block *sb)
 {
 	static const struct dentry_operations cgroup_dops = {
 		.d_iput = cgroup_diput,
-		.d_delete = cgroup_delete,
+		.d_delete = always_delete_dentry,
 	};
 
 	struct inode *inode =

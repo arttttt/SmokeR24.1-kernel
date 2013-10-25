@@ -471,15 +471,6 @@ struct rpc_filelist {
 	umode_t mode;
 };
 
-static int rpc_delete_dentry(const struct dentry *dentry)
-{
-	return 1;
-}
-
-static const struct dentry_operations rpc_dentry_operations = {
-	.d_delete = rpc_delete_dentry,
-};
-
 static struct inode *
 rpc_get_inode(struct super_block *sb, umode_t mode)
 {
