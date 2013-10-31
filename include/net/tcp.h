@@ -284,7 +284,6 @@ extern int sysctl_tcp_base_mss;
 extern int sysctl_tcp_min_snd_mss;
 extern int sysctl_tcp_workaround_signed_windows;
 extern int sysctl_tcp_slow_start_after_idle;
-extern int sysctl_tcp_max_ssthresh;
 extern int sysctl_tcp_thin_linear_timeouts;
 extern int sysctl_tcp_thin_dupack;
 extern int sysctl_tcp_early_retrans;
@@ -787,7 +786,7 @@ struct tcp_congestion_ops {
 	/* return slow start threshold (required) */
 	u32 (*ssthresh)(struct sock *sk);
 	/* do new cwnd calculation (required) */
-	void (*cong_avoid)(struct sock *sk, u32 ack, u32 in_flight);
+	void (*cong_avoid)(struct sock *sk, u32 ack, u32 acked, u32 in_flight);
 	/* call before changing ca_state (optional) */
 	void (*set_state)(struct sock *sk, u8 new_state);
 	/* call when cwnd event occurs (optional) */
@@ -816,12 +815,12 @@ extern void tcp_get_available_congestion_control(char *buf, size_t len);
 extern void tcp_get_allowed_congestion_control(char *buf, size_t len);
 extern int tcp_set_allowed_congestion_control(char *allowed);
 extern int tcp_set_congestion_control(struct sock *sk, const char *name);
-extern void tcp_slow_start(struct tcp_sock *tp);
+extern int tcp_slow_start(struct tcp_sock *tp, u32 acked);
 extern void tcp_cong_avoid_ai(struct tcp_sock *tp, u32 w);
 
 extern struct tcp_congestion_ops tcp_init_congestion_ops;
 extern u32 tcp_reno_ssthresh(struct sock *sk);
-extern void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 in_flight);
+extern void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked, u32 in_flight);
 extern struct tcp_congestion_ops tcp_reno;
 
 static inline void tcp_set_ca_state(struct sock *sk, const u8 ca_state)

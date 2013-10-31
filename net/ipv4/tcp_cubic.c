@@ -335,7 +335,8 @@ tcp_friendliness:
 		ca->cnt = 1;
 }
 
-static void bictcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
+static void bictcp_cong_avoid(struct sock *sk, u32 ack, u32 acked,
+			      u32 in_flight)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bictcp *ca = inet_csk_ca(sk);
@@ -346,7 +347,7 @@ static void bictcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
 	if (tp->snd_cwnd <= tp->snd_ssthresh) {
 		if (hystart && after(ack, ca->end_seq))
 			bictcp_hystart_reset(sk);
-		tcp_slow_start(tp);
+		tcp_slow_start(tp, acked);
 	} else {
 		bictcp_update(ca, tp->snd_cwnd);
 		tcp_cong_avoid_ai(tp, ca->cnt);
