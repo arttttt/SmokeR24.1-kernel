@@ -862,7 +862,10 @@ int cgroup_transfer_tasks(struct cgroup *to, struct cgroup *from);
 struct cgroup_subsys_state *css_from_dir(struct dentry *dentry,
 					 struct cgroup_subsys *ss);
 
-
+/* XXX: temporary */
+struct cgroup_subsys_state *cgroup_css(struct cgroup *cgrp,
+				       struct cgroup_subsys *ss);
+struct cftype *__file_cft(struct file *file);
 
 #else /* !CONFIG_CGROUPS */
 
