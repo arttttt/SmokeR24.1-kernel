@@ -3461,8 +3461,6 @@ struct cgroup_pidlist {
 	struct list_head links;
 	/* pointer to the cgroup we belong to, for list removal purposes */
 	struct cgroup *owner;
-	/* protects the other fields */
-	struct rw_semaphore rwsem;
 	/* for delayed destruction */
 	struct delayed_work destroy_dwork;
 };
@@ -3521,7 +3519,6 @@ static void cgroup_pidlist_destroy_work_fn(struct work_struct *work)
 	struct cgroup_pidlist *tofree = NULL;
 
 	mutex_lock(&l->owner->pidlist_mutex);
-	down_write(&l->rwsem);
 
 	/*
 	 * Destroy iff we didn't race with a new user or get queued again.
@@ -3534,7 +3531,6 @@ static void cgroup_pidlist_destroy_work_fn(struct work_struct *work)
 		tofree = l;
 	}
 
-	up_write(&l->rwsem);
 	mutex_unlock(&l->owner->pidlist_mutex);
 	kfree(tofree);
 }
@@ -3611,7 +3607,6 @@ static struct cgroup_pidlist *cgroup_pidlist_find_create(struct cgroup *cgrp,
 	if (!l)
 		return l;
 
-	init_rwsem(&l->rwsem);
 	INIT_DELAYED_WORK(&l->destroy_dwork, cgroup_pidlist_destroy_work_fn);
 	l->key.type = type;
 	/* don't need task_nsproxy() if we're looking at ourself */
@@ -3674,12 +3669,10 @@ static int pidlist_array_load(struct cgroup *cgrp, enum cgroup_filetype type,
 	}
 
 	/* store array, freeing old if necessary */
-	down_write(&l->rwsem);
 	pidlist_free(l->list);
 	l->list = array;
 	l->length = length;
 	l->use_count++;
-	up_write(&l->rwsem);
 
 	mutex_unlock(&cgrp->pidlist_mutex);
 
@@ -3761,7 +3754,7 @@ static void *cgroup_pidlist_start(struct seq_file *s, loff_t *pos)
 	int index = 0, pid = *pos;
 	int *iter;
 
-	down_read(&l->rwsem);
+	mutex_lock(&of->cgrp->pidlist_mutex);
 	if (pid) {
 		int end = l->length;
 
@@ -3789,7 +3782,7 @@ static void cgroup_pidlist_stop(struct seq_file *s, void *v)
 {
 	struct cgroup_pidlist_open_file *of = s->private;
 
-	up_read(&of->pidlist->rwsem);
+	mutex_unlock(&of->cgrp->pidlist_mutex);
 }
 
 static void *cgroup_pidlist_next(struct seq_file *s, void *v, loff_t *pos)
@@ -3829,13 +3822,13 @@ static const struct seq_operations cgroup_pidlist_seq_operations = {
 
 static void cgroup_release_pid_array(struct cgroup_pidlist *l)
 {
-	down_write(&l->rwsem);
+	mutex_lock(&l->owner->pidlist_mutex);
 	BUG_ON(!l->use_count);
 	/* if the last user, arm the destroy work */
 	if (!--l->use_count)
 		mod_delayed_work(cgroup_pidlist_destroy_wq, &l->destroy_dwork,
 				 CGROUP_PIDLIST_DESTROY_DELAY);
-	up_write(&l->rwsem);
+	mutex_unlock(&l->owner->pidlist_mutex);
 }
 
 static int cgroup_pidlist_release(struct inode *inode, struct file *file)
