@@ -4617,6 +4617,7 @@ int __init_or_module cgroup_load_subsys(struct cgroup_subsys *ss)
 	if (IS_ERR(css)) {
 		/* failure case - need to deassign the cgroup_subsys[] slot. */
 		cgroup_subsys[ss->subsys_id] = NULL;
+		mutex_unlock(&cgroup_root_mutex);
 		mutex_unlock(&cgroup_mutex);
 		return PTR_ERR(css);
 	}
