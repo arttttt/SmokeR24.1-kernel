@@ -552,7 +552,7 @@ out:
  */
 void kobject_del(struct kobject *kobj)
 {
-	struct sysfs_dirent *sd;
+	struct kernfs_node *sd;
 
 	if (!kobj)
 		return;
