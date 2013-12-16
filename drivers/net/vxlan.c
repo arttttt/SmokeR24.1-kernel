@@ -926,7 +926,7 @@ static __be16 vxlan_src_port(const struct vxlan_dev *vxlan, struct sk_buff *skb)
 	unsigned int range = (vxlan->port_max - vxlan->port_min) + 1;
 	u32 hash;
 
-	hash = skb_get_rxhash(skb);
+	hash = skb_get_hash(skb);
 	if (!hash)
 		hash = jhash(skb->data, 2 * ETH_ALEN,
 			     (__force u32) skb->protocol);

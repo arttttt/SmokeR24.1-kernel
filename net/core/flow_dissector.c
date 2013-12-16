@@ -164,12 +164,12 @@ EXPORT_SYMBOL(skb_flow_dissect);
 static u32 hashrnd __read_mostly;
 
 /*
- * __skb_get_rxhash: calculate a flow hash based on src/dst addresses
+ * __skb_get_hash: calculate a flow hash based on src/dst addresses
  * and src/dst port numbers.  Sets rxhash in skb to non-zero hash value
  * on success, zero indicates no valid hash.  Also, sets l4_rxhash in skb
  * if hash is a canonical 4-tuple hash over transport ports.
  */
-void __skb_get_rxhash(struct sk_buff *skb)
+void __skb_get_hash(struct sk_buff *skb)
 {
 	struct flow_keys keys;
 	u32 hash;
@@ -196,7 +196,7 @@ void __skb_get_rxhash(struct sk_buff *skb)
 
 	skb->rxhash = hash;
 }
-EXPORT_SYMBOL(__skb_get_rxhash);
+EXPORT_SYMBOL(__skb_get_hash);
 
 /*
  * Returns a Tx hash based on the given packet descriptor a Tx queues' number

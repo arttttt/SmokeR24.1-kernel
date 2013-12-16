@@ -3008,7 +3008,7 @@ static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
 	}
 
 	skb_reset_network_header(skb);
-	if (!skb_get_rxhash(skb))
+	if (!skb_get_hash(skb))
 		goto done;
 
 	flow_table = rcu_dereference(rxqueue->rps_flow_table);
