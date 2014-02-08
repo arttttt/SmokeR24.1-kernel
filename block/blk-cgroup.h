@@ -191,7 +191,7 @@ static inline struct blkcg *cgroup_to_blkcg(struct cgroup *cgroup)
 
 static inline struct blkcg *task_blkcg(struct task_struct *tsk)
 {
-	return css_to_blkcg(task_css(tsk, blkio_subsys_id));
+	return css_to_blkcg(task_css(tsk, blkio_cgrp_id));
 }
 
 static inline struct blkcg *bio_blkcg(struct bio *bio)
