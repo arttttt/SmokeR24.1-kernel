@@ -105,20 +105,6 @@ nla_put_failure:
 	goto done;
 }
 
-static void tcf_police_destroy(struct tcf_police *p)
-{
-	spin_lock_bh(&police_hash_info.lock);
-	hlist_del(&p->tcf_head);
-	spin_unlock_bh(&police_hash_info.lock);
-	gen_kill_estimator(&p->tcf_bstats,
-			   &p->tcf_rate_est);
-	/*
-	 * gen_estimator est_timer() might access p->tcf_lock
-	 * or bstats, wait a RCU grace period before freeing p
-	 */
-	kfree_rcu(p, tcf_rcu);
-}
-
 static const struct nla_policy police_policy[TCA_POLICE_MAX + 1] = {
 	[TCA_POLICE_RATE]	= { .len = TC_RTAB_SIZE },
 	[TCA_POLICE_PEAKRATE]	= { .len = TC_RTAB_SIZE },
@@ -159,10 +145,12 @@ static int tcf_act_police_locate(struct net *net, struct nlattr *nla,
 			if (bind) {
 				police->tcf_bindcnt += 1;
 				police->tcf_refcnt += 1;
+				return 0;
 			}
 			if (ovr)
 				goto override;
-			return ret;
+			/* not replacing */
+			return -EEXIST;
 		}
 	}
 
@@ -213,14 +201,14 @@ override:
 	}
 	if (R_tab) {
 		police->rate_present = true;
-		psched_ratecfg_precompute(&police->rate, &R_tab->rate);
+		psched_ratecfg_precompute(&police->rate, &R_tab->rate, 0);
 		qdisc_put_rtab(R_tab);
 	} else {
 		police->rate_present = false;
 	}
 	if (P_tab) {
 		police->peak_present = true;
-		psched_ratecfg_precompute(&police->peak, &P_tab->rate);
+		psched_ratecfg_precompute(&police->peak, &P_tab->rate, 0);
 		qdisc_put_rtab(P_tab);
 	} else {
 		police->peak_present = false;
@@ -258,31 +246,11 @@ override:
 failure_unlock:
 	spin_unlock_bh(&police->tcf_lock);
 failure:
-	if (P_tab)
-		qdisc_put_rtab(P_tab);
-	if (R_tab)
-		qdisc_put_rtab(R_tab);
+	qdisc_put_rtab(P_tab);
+	qdisc_put_rtab(R_tab);
 	if (ret == ACT_P_CREATED)
 		kfree(police);
 	return err;
-}
-
-static int tcf_act_police_cleanup(struct tc_action *a, int bind)
-{
-	struct tcf_police *p = a->priv;
-	int ret = 0;
-
-	if (p != NULL) {
-		if (bind)
-			p->tcf_bindcnt--;
-
-		p->tcf_refcnt--;
-		if (p->tcf_refcnt <= 0 && !p->tcf_bindcnt) {
-			tcf_police_destroy(p);
-			ret = 1;
-		}
-	}
-	return ret;
 }
 
 static int tcf_act_police(struct sk_buff *skb, const struct tc_action *a,
@@ -383,12 +351,10 @@ static struct tc_action_ops act_police_ops = {
 	.kind		=	"police",
 	.hinfo		=	&police_hash_info,
 	.type		=	TCA_ID_POLICE,
-	.capab		=	TCA_CAP_NONE,
 	.owner		=	THIS_MODULE,
 	.act		=	tcf_act_police,
 	.dump		=	tcf_act_police_dump,
-	.cleanup	=	tcf_act_police_cleanup,
-	.lookup		=	tcf_hash_search,
+	.cleanup	=	tcf_hash_release,
 	.init		=	tcf_act_police_locate,
 	.walk		=	tcf_act_police_walker
 };
@@ -396,7 +362,7 @@ static struct tc_action_ops act_police_ops = {
 static int __init
 police_init_module(void)
 {
-	int err = tcf_hashinfo_init(&police_hash_info, POL_TAB_MASK+1);
+	int err = tcf_hashinfo_init(&police_hash_info, POL_TAB_MASK);
 	if (err)
 		return err;
 	err = tcf_register_action(&act_police_ops);

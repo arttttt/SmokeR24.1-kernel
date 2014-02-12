@@ -69,8 +69,9 @@ static void ipt_destroy_target(struct xt_entry_target *t)
 	module_put(par.target->me);
 }
 
-static int tcf_ipt_release(struct tcf_ipt *ipt, int bind)
+static int tcf_ipt_release(struct tc_action *a, int bind)
 {
+	struct tcf_ipt *ipt = to_ipt(a);
 	int ret = 0;
 	if (ipt) {
 		if (bind)
@@ -80,7 +81,7 @@ static int tcf_ipt_release(struct tcf_ipt *ipt, int bind)
 			ipt_destroy_target(ipt->tcfi_t);
 			kfree(ipt->tcfi_tname);
 			kfree(ipt->tcfi_t);
-			tcf_hash_destroy(&ipt->common, &ipt_hash_info);
+			tcf_hash_destroy(a);
 			ret = ACT_P_DELETED;
 		}
 	}
@@ -99,7 +100,6 @@ static int tcf_ipt_init(struct net *net, struct nlattr *nla, struct nlattr *est,
 {
 	struct nlattr *tb[TCA_IPT_MAX + 1];
 	struct tcf_ipt *ipt;
-	struct tcf_common *pc;
 	struct xt_entry_target *td, *t;
 	char *tname;
 	int ret = 0, err;
@@ -125,19 +125,20 @@ static int tcf_ipt_init(struct net *net, struct nlattr *nla, struct nlattr *est,
 	if (tb[TCA_IPT_INDEX] != NULL)
 		index = nla_get_u32(tb[TCA_IPT_INDEX]);
 
-	pc = tcf_hash_check(index, a, bind);
-	if (!pc) {
-		pc = tcf_hash_create(index, est, a, sizeof(*ipt), bind);
-		if (IS_ERR(pc))
-			return PTR_ERR(pc);
+	if (!tcf_hash_check(index, a, bind) ) {
+		ret = tcf_hash_create(index, est, a, sizeof(*ipt), bind);
+		if (ret)
+			return ret;
 		ret = ACT_P_CREATED;
 	} else {
-		if (!ovr) {
-			tcf_ipt_release(to_ipt(pc), bind);
+		if (bind)/* dont override defaults */
+			return 0;
+		tcf_ipt_release(a, bind);
+
+		if (!ovr)
 			return -EEXIST;
-		}
 	}
-	ipt = to_ipt(pc);
+	ipt = to_ipt(a);
 
 	hook = nla_get_u32(tb[TCA_IPT_HOOK]);
 
@@ -168,7 +169,7 @@ static int tcf_ipt_init(struct net *net, struct nlattr *nla, struct nlattr *est,
 	ipt->tcfi_hook  = hook;
 	spin_unlock_bh(&ipt->tcf_lock);
 	if (ret == ACT_P_CREATED)
-		tcf_hash_insert(pc, a->ops->hinfo);
+		tcf_hash_insert(a);
 	return ret;
 
 err3:
@@ -176,19 +177,9 @@ err3:
 err2:
 	kfree(tname);
 err1:
-	if (ret == ACT_P_CREATED) {
-		if (est)
-			gen_kill_estimator(&pc->tcfc_bstats,
-					   &pc->tcfc_rate_est);
-		kfree_rcu(pc, tcfc_rcu);
-	}
+	if (ret == ACT_P_CREATED)
+		tcf_hash_cleanup(a, est);
 	return err;
-}
-
-static int tcf_ipt_cleanup(struct tc_action *a, int bind)
-{
-	struct tcf_ipt *ipt = a->priv;
-	return tcf_ipt_release(ipt, bind);
 }
 
 static int tcf_ipt(struct sk_buff *skb, const struct tc_action *a,
@@ -284,28 +275,22 @@ static struct tc_action_ops act_ipt_ops = {
 	.kind		=	"ipt",
 	.hinfo		=	&ipt_hash_info,
 	.type		=	TCA_ACT_IPT,
-	.capab		=	TCA_CAP_NONE,
 	.owner		=	THIS_MODULE,
 	.act		=	tcf_ipt,
 	.dump		=	tcf_ipt_dump,
-	.cleanup	=	tcf_ipt_cleanup,
-	.lookup		=	tcf_hash_search,
+	.cleanup	=	tcf_ipt_release,
 	.init		=	tcf_ipt_init,
-	.walk		=	tcf_generic_walker
 };
 
 static struct tc_action_ops act_xt_ops = {
 	.kind		=	"xt",
 	.hinfo		=	&ipt_hash_info,
-	.type		=	TCA_ACT_IPT,
-	.capab		=	TCA_CAP_NONE,
+	.type		=	TCA_ACT_XT,
 	.owner		=	THIS_MODULE,
 	.act		=	tcf_ipt,
 	.dump		=	tcf_ipt_dump,
-	.cleanup	=	tcf_ipt_cleanup,
-	.lookup		=	tcf_hash_search,
+	.cleanup	=	tcf_ipt_release,
 	.init		=	tcf_ipt_init,
-	.walk		=	tcf_generic_walker
 };
 
 MODULE_AUTHOR("Jamal Hadi Salim(2002-13)");
@@ -316,7 +301,7 @@ MODULE_ALIAS("act_xt");
 static int __init ipt_init_module(void)
 {
 	int ret1, ret2, err;
-	err = tcf_hashinfo_init(&ipt_hash_info, IPT_TAB_MASK+1);
+	err = tcf_hashinfo_init(&ipt_hash_info, IPT_TAB_MASK);
 	if (err)
 		return err;
 
