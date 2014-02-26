@@ -873,11 +873,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 
 	BUG_ON(!skb || !tcp_skb_pcount(skb));
 
-	/* If congestion control is doing timestamping, we must
-	 * take such a timestamp before we potentially clone/copy.
-	 */
-	if (icsk->icsk_ca_ops->flags & TCP_CONG_RTT_STAMP)
-		__net_timestamp(skb);
+	skb_mstamp_get(&skb->skb_mstamp);
 
 	if (likely(clone_it)) {
 		const struct sk_buff *fclone = skb + 1;
@@ -2002,7 +1998,7 @@ repair:
 bool tcp_schedule_loss_probe(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	u32 rtt = tp->srtt >> 3;
+	u32 rtt = usecs_to_jiffies(tp->srtt_us >> 3);
 	u32 timeout, rto_delta;
 
 	/* Don't do any loss probe on a Fast Open connection before 3WHS
@@ -2014,7 +2010,7 @@ bool tcp_schedule_loss_probe(struct sock *sk)
 	/* Schedule a loss probe in 2*RTT for SACK capable connections
 	 * in Open state, that are either limited by cwnd or application.
 	 */
-	if (sysctl_tcp_early_retrans < 3 || !tp->srtt || !tp->packets_out ||
+	if (sysctl_tcp_early_retrans < 3 || !tp->srtt_us || !tp->packets_out ||
 	    !tcp_is_sack(tp) || inet_csk(sk)->icsk_ca_state != TCP_CA_Open)
 		return false;
 
@@ -3104,8 +3100,9 @@ void tcp_send_delayed_ack(struct sock *sk)
 		 * Do not use inet_csk(sk)->icsk_rto here, use results of rtt measurements
 		 * directly.
 		 */
-		if (tp->srtt) {
-			int rtt = max(tp->srtt >> 3, TCP_DELACK_MIN);
+		if (tp->srtt_us) {
+			int rtt = max_t(int, usecs_to_jiffies(tp->srtt_us >> 3),
+					TCP_DELACK_MIN);
 
 			if (rtt < max_ato)
 				max_ato = rtt;
