@@ -828,7 +828,7 @@ void do_exit(long code)
 	 */
 	perf_event_exit_task(tsk);
 
-	cgroup_exit(tsk, 1);
+	cgroup_exit(tsk);
 
 	proc_exit_connector(tsk);
 
