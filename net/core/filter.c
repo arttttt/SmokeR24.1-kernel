@@ -633,6 +633,37 @@ int sk_chk_filter(struct sock_filter *filter, unsigned int flen)
 }
 EXPORT_SYMBOL(sk_chk_filter);
 
+static int sk_store_orig_filter(struct sk_filter *fp,
+				const struct sock_fprog *fprog)
+{
+	unsigned int fsize = sk_filter_proglen(fprog);
+	struct sock_fprog_kern *fkprog;
+
+	fp->orig_prog = kmalloc(sizeof(*fkprog), GFP_KERNEL);
+	if (!fp->orig_prog)
+		return -ENOMEM;
+
+	fkprog = fp->orig_prog;
+	fkprog->len = fprog->len;
+	fkprog->filter = kmemdup(fp->insns, fsize, GFP_KERNEL);
+	if (!fkprog->filter) {
+		kfree(fp->orig_prog);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void sk_release_orig_filter(struct sk_filter *fp)
+{
+	struct sock_fprog_kern *fprog = fp->orig_prog;
+
+	if (fprog) {
+		kfree(fprog->filter);
+		kfree(fprog);
+	}
+}
+
 /**
  * 	sk_filter_release_rcu - Release a socket filter by rcu_head
  *	@rcu: rcu_head that contains the sk_filter to free
@@ -641,6 +672,7 @@ void sk_filter_release_rcu(struct rcu_head *rcu)
 {
 	struct sk_filter *fp = container_of(rcu, struct sk_filter, rcu);
 
+	sk_release_orig_filter(fp);
 	bpf_jit_free(fp);
 	kfree(fp);
 }
@@ -674,8 +706,8 @@ static int __sk_prepare_filter(struct sk_filter *fp)
 int sk_unattached_filter_create(struct sk_filter **pfp,
 				struct sock_fprog *fprog)
 {
+	unsigned int fsize = sk_filter_proglen(fprog);
 	struct sk_filter *fp;
-	unsigned int fsize = sizeof(struct sock_filter) * fprog->len;
 	int err;
 
 	/* Make sure new filter is there and in the right amounts. */
@@ -685,10 +717,16 @@ int sk_unattached_filter_create(struct sk_filter **pfp,
 	fp = kmalloc(fsize + sizeof(*fp), GFP_KERNEL);
 	if (!fp)
 		return -ENOMEM;
+
 	memcpy(fp->insns, fprog->filter, fsize);
 
 	atomic_set(&fp->refcnt, 1);
 	fp->len = fprog->len;
+	/* Since unattached filters are not copied back to user
+	 * space through sk_get_filter(), we do not need to hold
+	 * a copy here, and can spare us the work.
+	 */
+	fp->orig_prog = NULL;
 
 	err = __sk_prepare_filter(fp);
 	if (err)
@@ -721,7 +759,7 @@ EXPORT_SYMBOL_GPL(sk_unattached_filter_destroy);
 int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk)
 {
 	struct sk_filter *fp, *old_fp;
-	unsigned int fsize = sizeof(struct sock_filter) * fprog->len;
+	unsigned int fsize = sk_filter_proglen(fprog);
 	int err;
 
 	if (sock_flag(sk, SOCK_FILTER_LOCKED))
@@ -734,6 +772,7 @@ int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk)
 	fp = sock_kmalloc(sk, fsize+sizeof(*fp), GFP_KERNEL);
 	if (!fp)
 		return -ENOMEM;
+
 	if (copy_from_user(fp->insns, fprog->filter, fsize)) {
 		sock_kfree_s(sk, fp, fsize+sizeof(*fp));
 		return -EFAULT;
@@ -741,6 +780,12 @@ int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk)
 
 	atomic_set(&fp->refcnt, 1);
 	fp->len = fprog->len;
+
+	err = sk_store_orig_filter(fp, fprog);
+	if (err) {
+		sk_filter_uncharge(sk, fp);
+		return -ENOMEM;
+	}
 
 	err = __sk_prepare_filter(fp);
 	if (err) {
@@ -754,6 +799,7 @@ int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk)
 
 	if (old_fp)
 		sk_filter_uncharge(sk, old_fp);
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sk_attach_filter);
@@ -773,6 +819,7 @@ int sk_detach_filter(struct sock *sk)
 		sk_filter_uncharge(sk, filter);
 		ret = 0;
 	}
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(sk_detach_filter);
@@ -855,34 +902,41 @@ void sk_decode_filter(struct sock_filter *filt, struct sock_filter *to)
 	to->k = filt->k;
 }
 
-int sk_get_filter(struct sock *sk, struct sock_filter __user *ubuf, unsigned int len)
+int sk_get_filter(struct sock *sk, struct sock_filter __user *ubuf,
+		  unsigned int len)
 {
+	struct sock_fprog_kern *fprog;
 	struct sk_filter *filter;
-	int i, ret;
+	int ret = 0;
 
 	lock_sock(sk);
 	filter = rcu_dereference_protected(sk->sk_filter,
-			sock_owned_by_user(sk));
-	ret = 0;
+					   sock_owned_by_user(sk));
 	if (!filter)
 		goto out;
-	ret = filter->len;
+
+	/* We're copying the filter that has been originally attached,
+	 * so no conversion/decode needed anymore.
+	 */
+	fprog = filter->orig_prog;
+
+	ret = fprog->len;
 	if (!len)
+		/* User space only enquires number of filter blocks. */
 		goto out;
+
 	ret = -EINVAL;
-	if (len < filter->len)
+	if (len < fprog->len)
 		goto out;
 
 	ret = -EFAULT;
-	for (i = 0; i < filter->len; i++) {
-		struct sock_filter fb;
+	if (copy_to_user(ubuf, fprog->filter, sk_filter_proglen(fprog)))
+		goto out;
 
-		sk_decode_filter(&filter->insns[i], &fb);
-		if (copy_to_user(&ubuf[i], &fb, sizeof(fb)))
-			goto out;
-	}
-
-	ret = filter->len;
+	/* Instead of bytes, the API requests to return the number
+	 * of filter blocks.
+	 */
+	ret = fprog->len;
 out:
 	release_sock(sk);
 	return ret;
