@@ -24,7 +24,9 @@ struct sock;
 struct sk_filter
 {
 	atomic_t		refcnt;
-	unsigned int         	len;	/* Number of filter blocks */
+	u32			jited:1,	/* Is our filter JIT'ed? */
+				len:31;		/* Number of filter blocks */
+	struct rcu_head		rcu;
 	unsigned int		(*bpf_func)(const struct sk_buff *skb,
 					    const struct sock_filter *filter);
 	struct rcu_head		rcu;

@@ -804,8 +804,11 @@ void bpf_jit_compile(struct sk_filter *fp)
 				       jit.mid, jit.end - jit.mid, false);
 		}
 	}
-	if (jit.start)
+	if (jit.start) {
+		set_memory_ro((unsigned long)header, header->pages);
 		fp->bpf_func = (void *) jit.start;
+		fp->jited = 1;
+	}
 out:
 	kfree(addrs);
 }
@@ -822,9 +825,12 @@ void bpf_jit_free(struct sk_filter *fp)
 {
 	struct work_struct *work;
 
-	if (fp->bpf_func == sk_run_filter)
-		return;
-	work = (struct work_struct *)fp->bpf_func;
-	INIT_WORK(work, jit_free_defer);
-	schedule_work(work);
+	if (!fp->jited)
+		goto free_filter;
+
+	set_memory_rw(addr, header->pages);
+	module_free(NULL, header);
+
+free_filter:
+	kfree(fp);
 }
