@@ -4085,7 +4085,7 @@ static int sdfat_write_inode(struct inode *inode, struct writeback_control *wbc)
 
 static void sdfat_evict_inode(struct inode *inode)
 {
-	truncate_inode_pages(&inode->i_data, 0);
+	truncate_inode_pages_final(&inode->i_data);
 
 	if (!inode->i_nlink) {
 		loff_t old_size = i_size_read(inode);
