@@ -6,6 +6,7 @@
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
 #include <linux/perf_event.h>
+#include <linux/tracepoint.h>
 
 struct trace_array;
 struct trace_buffer;
@@ -203,6 +204,7 @@ enum {
 	TRACE_EVENT_FL_NO_SET_FILTER_BIT,
 	TRACE_EVENT_FL_IGNORE_ENABLE_BIT,
 	TRACE_EVENT_FL_WAS_ENABLED_BIT,
+	TRACE_EVENT_FL_TRACEPOINT_BIT,
 	TRACE_EVENT_FL_KPROBE_BIT,
 	TRACE_EVENT_FL_UPROBE_BIT,
 };
@@ -216,6 +218,7 @@ enum {
  *  WAS_ENABLED   - Set and stays set when an event was ever enabled
  *                    (used for module unloading, if a module event is enabled,
  *                     it is best to clear the buffers that used it).
+ *  TRACEPOINT    - Event is a tracepoint
  *  KPROBE        - Event is a kprobe
  *  UPROBE        - Event is a uprobe
  */
@@ -225,6 +228,7 @@ enum {
 	TRACE_EVENT_FL_NO_SET_FILTER	= (1 << TRACE_EVENT_FL_NO_SET_FILTER_BIT),
 	TRACE_EVENT_FL_IGNORE_ENABLE	= (1 << TRACE_EVENT_FL_IGNORE_ENABLE_BIT),
 	TRACE_EVENT_FL_WAS_ENABLED	= (1 << TRACE_EVENT_FL_WAS_ENABLED_BIT),
+	TRACE_EVENT_FL_TRACEPOINT	= (1 << TRACE_EVENT_FL_TRACEPOINT_BIT),
 	TRACE_EVENT_FL_KPROBE		= (1 << TRACE_EVENT_FL_KPROBE_BIT),
 	TRACE_EVENT_FL_UPROBE           = (1 << TRACE_EVENT_FL_UPROBE_BIT),
 };
@@ -234,7 +238,11 @@ enum {
 struct ftrace_event_call {
 	struct list_head	list;
 	struct ftrace_event_class *class;
-	char			*name;
+	union {
+		char			*name;
+		/* Set TRACE_EVENT_FL_TRACEPOINT flag when using "tp" */
+		struct tracepoint	*tp;
+	};
 	struct trace_event	event;
 	const char		*print_fmt;
 	struct event_filter	*filter;
@@ -247,6 +255,7 @@ struct ftrace_event_call {
 	 *   bit 2:		failed to apply filter
 	 *   bit 3:		ftrace internal event (do not enable)
 	 *   bit 4:		Event was enabled by module
+	 *   bit 5:		Event is a tracepoint
 	 */
 	int			flags; /* static flags of different events */
 
@@ -256,6 +265,15 @@ struct ftrace_event_call {
 	struct bpf_prog			*prog;
 #endif
 };
+
+static inline const char *
+ftrace_event_name(struct ftrace_event_call *call)
+{
+	if (call->flags & TRACE_EVENT_FL_TRACEPOINT)
+		return call->tp ? call->tp->name : NULL;
+	else
+		return call->name;
+}
 
 struct trace_array;
 struct ftrace_subsystem_dir;
@@ -311,7 +329,7 @@ struct ftrace_event_file {
 #define __TRACE_EVENT_FLAGS(name, value)				\
 	static int __init trace_init_flags_##name(void)			\
 	{								\
-		event_##name.flags = value;				\
+		event_##name.flags |= value;				\
 		return 0;						\
 	}								\
 	early_initcall(trace_init_flags_##name);

@@ -156,7 +156,7 @@ static struct trace_uprobe *find_probe_event(const char *event, const char *grou
 	struct trace_uprobe *tu;
 
 	list_for_each_entry(tu, &uprobe_list, list)
-		if (strcmp(tu->call.name, event) == 0 &&
+		if (strcmp(ftrace_event_name(&tu->call), event) == 0 &&
 		    strcmp(tu->call.class->system, group) == 0)
 			return tu;
 
@@ -186,7 +186,7 @@ static int register_trace_uprobe(struct trace_uprobe *tu)
 	mutex_lock(&uprobe_lock);
 
 	/* register as an event */
-	old_tp = find_probe_event(tu->call.name, tu->call.class->system);
+	old_tp = find_probe_event(ftrace_event_name(&tu->call), tu->call.class->system);
 	if (old_tp) {
 		/* delete old event */
 		ret = unregister_trace_uprobe(old_tp);
@@ -458,7 +458,7 @@ static int probes_seq_show(struct seq_file *m, void *v)
 	char c = is_ret_probe(tu) ? 'r' : 'p';
 	int i;
 
-	seq_printf(m, "%c:%s/%s", c, tu->call.class->system, tu->call.name);
+	seq_printf(m, "%c:%s/%s", c, tu->call.class->system, ftrace_event_name(&tu->call));
 	seq_printf(m, " %s:0x%p", tu->filename, (void *)tu->offset);
 
 	for (i = 0; i < tu->nr_args; i++)
@@ -508,7 +508,7 @@ static int probes_profile_seq_show(struct seq_file *m, void *v)
 {
 	struct trace_uprobe *tu = v;
 
-	seq_printf(m, "  %s %-44s %15lu\n", tu->filename, tu->call.name, tu->nhit);
+	seq_printf(m, "  %s %-44s %15lu\n", tu->filename, ftrace_event_name(&tu->call), tu->nhit);
 	return 0;
 }
 
@@ -593,12 +593,12 @@ print_uprobe_event(struct trace_iterator *iter, int flags, struct trace_event *e
 	tu = container_of(event, struct trace_uprobe, call.event);
 
 	if (is_ret_probe(tu)) {
-		if (!trace_seq_printf(s, "%s: (0x%lx <- 0x%lx)", tu->call.name,
+		if (!trace_seq_printf(s, "%s: (0x%lx <- 0x%lx)", ftrace_event_name(&tu->call),
 					entry->vaddr[1], entry->vaddr[0]))
 			goto partial;
 		data = DATAOF_TRACE_ENTRY(entry, true);
 	} else {
-		if (!trace_seq_printf(s, "%s: (0x%lx)", tu->call.name,
+		if (!trace_seq_printf(s, "%s: (0x%lx)", ftrace_event_name(&tu->call),
 					entry->vaddr[0]))
 			goto partial;
 		data = DATAOF_TRACE_ENTRY(entry, false);
@@ -986,7 +986,8 @@ static int register_uprobe_event(struct trace_uprobe *tu)
 	ret = trace_add_event_call(call);
 
 	if (ret) {
-		pr_info("Failed to register uprobe event: %s\n", call->name);
+		pr_info("Failed to register uprobe event: %s\n",
+			ftrace_event_name(call));
 		kfree(call->print_fmt);
 		unregister_ftrace_event(&call->event);
 	}
