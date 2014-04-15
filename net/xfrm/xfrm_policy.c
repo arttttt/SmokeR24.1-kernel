@@ -1826,7 +1826,7 @@ purge_queue:
 	xfrm_queue_purge(&pq->hold_queue);
 }
 
-static int xdst_queue_output(struct sk_buff *skb)
+static int xdst_queue_output(struct sock *sk, struct sk_buff *skb)
 {
 	unsigned long sched_next;
 	struct dst_entry *dst = skb_dst(skb);

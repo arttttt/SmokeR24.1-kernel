@@ -89,7 +89,7 @@ int xfrm4_output_finish(struct sk_buff *skb)
 	return xfrm_output(skb);
 }
 
-int xfrm4_output(struct sk_buff *skb)
+int xfrm4_output(struct sock *sk, struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 	struct xfrm_state *x = dst->xfrm;
