@@ -606,7 +606,8 @@ void sock_update_memcg(struct sock *sk)
 		memcg = mem_cgroup_from_task(current);
 		cg_proto = sk->sk_prot->proto_cgroup(memcg);
 		if (!mem_cgroup_is_root(memcg) &&
-		    memcg_proto_active(cg_proto) && css_tryget(&memcg->css)) {
+		    memcg_proto_active(cg_proto) &&
+		    css_tryget_online(&memcg->css)) {
 			sk->sk_cgrp = cg_proto;
 		}
 		rcu_read_unlock();
@@ -4354,8 +4355,8 @@ void mem_cgroup_uncharge_swap(swp_entry_t ent)
 	memcg = mem_cgroup_lookup(id);
 	if (memcg) {
 		/*
-		 * We uncharge this because swap is freed.
-		 * This memcg can be obsolete one. We avoid calling css_tryget
+		 * We uncharge this because swap is freed.  This memcg can
+		 * be obsolete one. We avoid calling css_tryget_online().
 		 */
 		if (!mem_cgroup_is_root(memcg))
 			res_counter_uncharge(&memcg->memsw, PAGE_SIZE);
@@ -5923,10 +5924,10 @@ static void kmem_cgroup_css_offline(struct mem_cgroup *memcg)
 	 * which is then paired with css_put during uncharge resp. here.
 	 *
 	 * Although this might sound strange as this path is called from
-	 * css_offline() when the referencemight have dropped down to 0
-	 * and shouldn't be incremented anymore (css_tryget would fail)
-	 * we do not have other options because of the kmem allocations
-	 * lifetime.
+	 * css_offline() when the referencemight have dropped down to 0 and
+	 * shouldn't be incremented anymore (css_tryget_online() would
+	 * fail) we do not have other options because of the kmem
+	 * allocations lifetime.
 	 */
 	css_get(&memcg->css);
 
