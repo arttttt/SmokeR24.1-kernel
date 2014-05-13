@@ -204,19 +204,20 @@ static u64 tcp_cgroup_read(struct cgroup_subsys_state *css, struct cftype *cft)
 	return val;
 }
 
-static int tcp_cgroup_reset(struct cgroup_subsys_state *css, unsigned int event)
+static ssize_t tcp_cgroup_reset(struct kernfs_open_file *of,
+				char *buf, size_t nbytes, loff_t off)
 {
 	struct mem_cgroup *memcg;
 	struct tcp_memcontrol *tcp;
 	struct cg_proto *cg_proto;
 
-	memcg = mem_cgroup_from_css(css);
+	memcg = mem_cgroup_from_css(of_css(of));
 	cg_proto = tcp_prot.proto_cgroup(memcg);
 	if (!cg_proto)
-		return 0;
+		return nbytes;
 	tcp = tcp_from_cgproto(cg_proto);
 
-	switch (event) {
+	switch (of_cft(of)->private) {
 	case RES_MAX_USAGE:
 		res_counter_reset_max(&tcp->tcp_memory_allocated);
 		break;
@@ -225,7 +226,7 @@ static int tcp_cgroup_reset(struct cgroup_subsys_state *css, unsigned int event)
 		break;
 	}
 
-	return 0;
+	return nbytes;
 }
 
 unsigned long long tcp_max_memory(const struct mem_cgroup *memcg)
@@ -270,13 +271,13 @@ static struct cftype tcp_files[] = {
 	{
 		.name = "kmem.tcp.failcnt",
 		.private = RES_FAILCNT,
-		.trigger = tcp_cgroup_reset,
+		.write = tcp_cgroup_reset,
 		.read_u64 = tcp_cgroup_read,
 	},
 	{
 		.name = "kmem.tcp.max_usage_in_bytes",
 		.private = RES_MAX_USAGE,
-		.trigger = tcp_cgroup_reset,
+		.write = tcp_cgroup_reset,
 		.read_u64 = tcp_cgroup_read,
 	},
 	{ }	/* terminate */
