@@ -873,7 +873,7 @@ retry:
 	 */
 	__mem_cgroup_remove_exceeded(mz->memcg, mz, mctz);
 	if (!res_counter_soft_limit_excess(&mz->memcg->res) ||
-		!css_tryget(&mz->memcg->css))
+		!css_tryget_online(&mz->memcg->css))
 		goto retry;
 done:
 	return mz;
@@ -1116,7 +1116,7 @@ struct mem_cgroup *try_get_mem_cgroup_from_mm(struct mm_struct *mm)
 		return NULL;
 	/*
 	 * Because we have no locks, mm->owner's may be being moved to other
-	 * cgroup. We use css_tryget() here even if this looks
+	 * cgroup. We use css_tryget_online() here even if this looks
 	 * pessimistic (rather than adding locks here).
 	 */
 	rcu_read_lock();
@@ -1124,7 +1124,7 @@ struct mem_cgroup *try_get_mem_cgroup_from_mm(struct mm_struct *mm)
 		memcg = mem_cgroup_from_task(rcu_dereference(mm->owner));
 		if (unlikely(!memcg))
 			break;
-	} while (!css_tryget(&memcg->css));
+	} while (!css_tryget_online(&memcg->css));
 	rcu_read_unlock();
 	return memcg;
 }
@@ -1154,7 +1154,7 @@ skip_node:
 	if (next_css) {
 		struct mem_cgroup *mem = mem_cgroup_from_css(next_css);
 
-		if (css_tryget(&mem->css))
+		if (css_tryget_online(&mem->css))
 			return mem;
 		else {
 			prev_css = next_css;
@@ -1230,7 +1230,7 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 			 * won't free the object until we release the
 			 * RCU reader lock.  Thus, the dead_count
 			 * check verifies the pointer is still valid,
-			 * css_tryget() verifies the cgroup pointed to
+			 * css_tryget_online() verifies the cgroup pointed to
 			 * is alive.
 			 */
 			dead_count = atomic_read(&root->dead_count);
@@ -1238,7 +1238,7 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 				smp_rmb();
 				last_visited = iter->last_visited;
 				if (last_visited && last_visited != root &&
-				    !css_tryget(&last_visited->css))
+				    !css_tryget_online(&last_visited->css))
 					last_visited = NULL;
 			}
 		}
@@ -2726,14 +2726,14 @@ again:
 			 * But considering how consume_stok works, it's not
 			 * necessary. If consume_stock success, some charges
 			 * from this memcg are cached on this cpu. So, we
-			 * don't need to call css_get()/css_tryget() before
+			 * don't need to call css_get()/css_tryget_online() before
 			 * calling consume_stock().
 			 */
 			rcu_read_unlock();
 			goto done;
 		}
 		/* after here, we may be blocked. we need to get refcnt */
-		if (!css_tryget(&memcg->css)) {
+		if (!css_tryget_online(&memcg->css)) {
 			rcu_read_unlock();
 			goto again;
 		}
@@ -2823,7 +2823,7 @@ static void __mem_cgroup_cancel_local_charge(struct mem_cgroup *memcg,
 
 /*
  * A helper function to get mem_cgroup from ID. must be called under
- * rcu_read_lock().  The caller is responsible for calling css_tryget if
+ * rcu_read_lock().  The caller is responsible for calling css_tryget_online if
  * the mem_cgroup is used for charging. (dropping refcnt from swap can be
  * called against removed memcg.)
  */
@@ -2848,14 +2848,14 @@ struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page)
 	lock_page_cgroup(pc);
 	if (PageCgroupUsed(pc)) {
 		memcg = pc->mem_cgroup;
-		if (memcg && !css_tryget(&memcg->css))
+		if (memcg && !css_tryget_online(&memcg->css))
 			memcg = NULL;
 	} else if (PageSwapCache(page)) {
 		ent.val = page_private(page);
 		id = lookup_swap_cgroup_id(ent);
 		rcu_read_lock();
 		memcg = mem_cgroup_lookup(id);
-		if (memcg && !css_tryget(&memcg->css))
+		if (memcg && !css_tryget_online(&memcg->css))
 			memcg = NULL;
 		rcu_read_unlock();
 	}
@@ -3581,7 +3581,7 @@ struct kmem_cache *__memcg_kmem_get_cache(struct kmem_cache *cachep,
 	}
 
 	/* The corresponding put will be done in the workqueue. */
-	if (!css_tryget(&memcg->css))
+	if (!css_tryget_online(&memcg->css))
 		goto out;
 	rcu_read_unlock();
 
@@ -6120,7 +6120,7 @@ static int cgroup_write_event_control(struct cgroup_subsys_state *css,
 	 * automatically removed on cgroup destruction but the removal is
 	 * asynchronous, so take an extra ref on @css.
 	 */
-	cfile_css = css_tryget_from_dir(cfile.file->f_dentry->d_parent,
+	cfile_css = css_tryget_online_from_dir(cfile.file->f_dentry->d_parent,
 					&memory_cgrp_subsys);
 	ret = -EINVAL;
 	if (IS_ERR(cfile_css))
