@@ -56,8 +56,7 @@
 struct seccomp_filter {
 	atomic_t usage;
 	struct seccomp_filter *prev;
-	unsigned short len;  /* Instruction count */
-	struct sock_filter_int insnsi[];
+	struct sk_filter *prog;
 };
 
 /* Limit any path through the tree to 256KB worth of instructions. */
@@ -195,7 +194,7 @@ static u32 seccomp_run_filters(int syscall)
 	 * value always takes priority (ignoring the DATA).
 	 */
 	for (; f; f = f->prev) {
-		u32 cur_ret = sk_run_filter_int_seccomp(&sd, f->insnsi);
+		u32 cur_ret = SK_RUN_FILTER(f->prog, (void *)&sd);
 		
 		if ((cur_ret & SECCOMP_RET_ACTION) < (ret & SECCOMP_RET_ACTION))
 			ret = cur_ret;
@@ -357,7 +356,7 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 	BUG_ON(INT_MAX / fprog->len < sizeof(struct sock_filter));
 
 	for (filter = current->seccomp.filter; filter; filter = filter->prev)
-		total_insns += filter->len + 4;  /* include a 4 instr penalty */
+		total_insns += filter->prog->len + 4;  /* include a 4 instr penalty */
 	if (total_insns > MAX_INSNS_PER_PATH)
 		return ERR_PTR(-ENOMEM);
 
@@ -398,21 +397,32 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 
 	/* Allocate a new seccomp_filter */
 	ret = -ENOMEM;
-	filter = kzalloc(sizeof(struct seccomp_filter) +
-			 sizeof(struct sock_filter_int) * new_len,
+	filter = kzalloc(sizeof(struct seccomp_filter),
 			 GFP_KERNEL|__GFP_NOWARN);
 	if (!filter)
 		goto free_prog;
 
-	ret = sk_convert_filter(fp, fprog->len, filter->insnsi, &new_len);
-	if (ret)
+	filter->prog = kzalloc(sk_filter_size(new_len),
+			       GFP_KERNEL|__GFP_NOWARN);
+	if (!filter->prog)
 		goto free_filter;
+
+	ret = sk_convert_filter(fp, fprog->len, filter->prog->insnsi, &new_len);
+	if (ret)
+		goto free_filter_prog;
 
 	kfree(fp);
 	atomic_set(&filter->usage, 1);
-	filter->len = new_len;
+	filter->prog->len = new_len;
+	filter->prog->bpf_func = (void *)sk_run_filter_int_seccomp;
+
+	/* JIT internal BPF into native HW instructions */
+	bpf_int_jit_compile(filter->prog);
 
 	return filter;
+
+free_filter_prog:
+	kfree(filter->prog);
 
 free_filter:
 	kfree(filter);
@@ -467,9 +477,9 @@ static long seccomp_attach_filter(unsigned int flags,
 	assert_spin_locked(&current->sighand->siglock);
 
 	/* Validate resulting filter length. */
-	total_insns = filter->len;
+	total_insns = filter->prog->len;
 	for (walker = current->seccomp.filter; walker; walker = walker->prev)
-		total_insns += walker->len + 4;  /* 4 instr penalty */
+		total_insns += walker->prog->len + 4;  /* 4 instr penalty */
 	if (total_insns > MAX_INSNS_PER_PATH)
 		return -ENOMEM;
 
@@ -521,6 +531,7 @@ void put_seccomp_filter(struct task_struct *tsk)
 	while (orig && atomic_dec_and_test(&orig->usage)) {
 		struct seccomp_filter *freeme = orig;
 		orig = orig->prev;
+		bpf_jit_free(freeme->prog);
 		seccomp_filter_free(freeme);
 	}
 }
