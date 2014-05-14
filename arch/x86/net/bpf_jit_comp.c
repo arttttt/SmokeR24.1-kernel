@@ -12,6 +12,7 @@
 #include <linux/netdevice.h>
 #include <linux/filter.h>
 #include <linux/if_vlan.h>
+#include <linux/random.h>
 
 /*
  * Conventions :
@@ -144,45 +145,59 @@ static int pkt_type_offset(void)
 	return -1;
 }
 
-void bpf_jit_compile(struct sk_filter *fp)
+struct bpf_binary_header {
+	unsigned int	pages;
+	/* Note : for security reasons, bpf code will follow a randomly
+	 * sized amount of int3 instructions
+	 */
+	u8		image[];
+};
+
+static struct bpf_binary_header *bpf_alloc_binary(unsigned int proglen,
+						  u8 **image_ptr)
 {
+	unsigned int sz, hole;
+	struct bpf_binary_header *header;
+
+	/* Most of BPF filters are really small,
+	 * but if some of them fill a page, allow at least
+	 * 128 extra bytes to insert a random section of int3
+	 */
+	sz = round_up(proglen + sizeof(*header) + 128, PAGE_SIZE);
+	header = module_alloc(sz);
+	if (!header)
+		return NULL;
+
+	memset(header, 0xcc, sz); /* fill whole space with int3 instructions */
+
+	header->pages = sz / PAGE_SIZE;
+	hole = sz - (proglen + sizeof(*header));
+
+	/* insert a random number of int3 instructions before BPF code */
+	*image_ptr = &header->image[prandom_u32() % hole];
+	return header;
+}
+
+struct jit_context {
+	unsigned int cleanup_addr; /* epilogue code offset */
+	int pc_ret0; /* bpf index of first RET #0 instruction (if any) */
+	u8 seen;
+};
+
+static int do_jit(struct sk_filter *bpf_prog, int *addrs, u8 *image,
+		  int oldproglen, struct jit_context *ctx)
+{
+	const struct sock_filter *filter = bpf_prog->insns;
+	int flen = bpf_prog->len;
 	u8 temp[64];
 	u8 *prog;
-	unsigned int proglen, oldproglen = 0;
-	int ilen, i;
+	int ilen, i, proglen;
 	int t_offset, f_offset;
-	u8 t_op, f_op, seen = 0, pass;
-	u8 *image = NULL;
+	u8 t_op, f_op, seen = 0;
 	u8 *func;
-	int pc_ret0 = -1; /* bpf index of first RET #0 instruction (if any) */
-	unsigned int cleanup_addr; /* epilogue code offset */
-	unsigned int *addrs;
-	const struct sock_filter *filter = fp->insns;
-	int flen = fp->len;
+	unsigned int cleanup_addr = ctx->cleanup_addr;
+	u8 seen_or_pass0 = ctx->seen;
 
-	if (!bpf_jit_enable)
-		return;
-
-	addrs = kmalloc(flen * sizeof(*addrs), GFP_KERNEL);
-	if (addrs == NULL)
-		return;
-
-	/* Before first pass, make a rough estimation of addrs[]
-	 * each bpf instruction is translated to less than 64 bytes
-	 */
-	for (proglen = 0, i = 0; i < flen; i++) {
-		proglen += 64;
-		addrs[i] = proglen;
-	}
-	cleanup_addr = proglen; /* epilogue address */
-
-	/* JITed image shrinks with every pass and the loop iterates
-	 * until the image stops shrinking. Very large bpf programs
-	 * may converge on the last pass. In such case do one more
-	 * pass to emit the final image
-	 */
-	for (pass = 0; pass < 10 || image; pass++) {
-		u8 seen_or_pass0 = (pass == 0) ? (SEEN_XREG | SEEN_DATAREF | SEEN_MEM) : seen;
 		/* no prologue/epilogue for trivial filters (RET something) */
 		proglen = 0;
 		prog = temp;
@@ -295,12 +310,12 @@ void bpf_jit_compile(struct sk_filter *fp)
 			case BPF_S_ALU_DIV_X: /* A /= X; */
 				seen |= SEEN_XREG;
 				EMIT2(0x85, 0xdb);	/* test %ebx,%ebx */
-				if (pc_ret0 > 0) {
+				if (ctx->pc_ret0 > 0) {
 					/* addrs[pc_ret0 - 1] is start address of target
 					 * (addrs[i] - 4) is the address following this jmp
 					 * ("xor %edx,%edx; div %ebx" being 4 bytes long)
 					 */
-					EMIT_COND_JMP(X86_JE, addrs[pc_ret0 - 1] -
+					EMIT_COND_JMP(X86_JE, addrs[ctx->pc_ret0 - 1] -
 								(addrs[i] - 4));
 				} else {
 					EMIT_COND_JMP(X86_JNE, 2 + 5);
@@ -312,12 +327,12 @@ void bpf_jit_compile(struct sk_filter *fp)
 			case BPF_S_ALU_MOD_X: /* A %= X; */
 				seen |= SEEN_XREG;
 				EMIT2(0x85, 0xdb);	/* test %ebx,%ebx */
-				if (pc_ret0 > 0) {
+				if (ctx->pc_ret0 > 0) {
 					/* addrs[pc_ret0 - 1] is start address of target
 					 * (addrs[i] - 6) is the address following this jmp
 					 * ("xor %edx,%edx; div %ebx;mov %edx,%eax" being 6 bytes long)
 					 */
-					EMIT_COND_JMP(X86_JE, addrs[pc_ret0 - 1] -
+					EMIT_COND_JMP(X86_JE, addrs[ctx->pc_ret0 - 1] -
 								(addrs[i] - 6));
 				} else {
 					EMIT_COND_JMP(X86_JNE, 2 + 5);
@@ -411,8 +426,8 @@ void bpf_jit_compile(struct sk_filter *fp)
 				break;
 			case BPF_S_RET_K:
 				if (!K) {
-					if (pc_ret0 == -1)
-						pc_ret0 = i;
+					if (ctx->pc_ret0 == -1)
+						ctx->pc_ret0 = i;
 					CLEAR_A();
 				} else {
 					EMIT1_off32(0xb8, K);	/* mov $imm32,%eax */
@@ -523,13 +538,13 @@ void bpf_jit_compile(struct sk_filter *fp)
 				}
 				break;
 			case BPF_S_ANC_RXHASH:
-				BUILD_BUG_ON(FIELD_SIZEOF(struct sk_buff, rxhash) != 4);
-				if (is_imm8(offsetof(struct sk_buff, rxhash))) {
+				BUILD_BUG_ON(FIELD_SIZEOF(struct sk_buff, hash) != 4);
+				if (is_imm8(offsetof(struct sk_buff, hash))) {
 					/* mov off8(%rdi),%eax */
-					EMIT3(0x8b, 0x47, offsetof(struct sk_buff, rxhash));
+					EMIT3(0x8b, 0x47, offsetof(struct sk_buff, hash));
 				} else {
 					EMIT2(0x8b, 0x87);
-					EMIT(offsetof(struct sk_buff, rxhash), 4);
+					EMIT(offsetof(struct sk_buff, hash), 4);
 				}
 				break;
 			case BPF_S_ANC_QUEUE:
@@ -573,7 +588,7 @@ void bpf_jit_compile(struct sk_filter *fp)
 				int off = pkt_type_offset();
 
 				if (off < 0)
-					goto out;
+					return -EINVAL;
 				if (is_imm8(off)) {
 					/* movzbl off8(%rdi),%eax */
 					EMIT4(0x0f, 0xb6, 0x47, off);
@@ -695,69 +710,113 @@ cond_branch:			f_offset = addrs[i + filter[i].jf] - addrs[i];
 				}
 				EMIT_COND_JMP(f_op, f_offset);
 				break;
-			default:
-				/* hmm, too complex filter, give up with jit compiler */
-				goto out;
-			}
-			ilen = prog - temp;
-			if (image) {
-				if (unlikely(proglen + ilen > oldproglen)) {
-					pr_err("bpb_jit_compile fatal error\n");
-					kfree(addrs);
-					module_free(NULL, image);
-					return;
-				}
-				memcpy(image + proglen, temp, ilen);
-			}
-			proglen += ilen;
-			addrs[i] = proglen;
-			prog = temp;
+		default:
+			/* hmm, too complex filter, give up with jit compiler */
+			return -EINVAL;
 		}
-		/* last bpf instruction is always a RET :
-		 * use it to give the cleanup instruction(s) addr
-		 */
-		cleanup_addr = proglen - 1; /* ret */
-		if (seen_or_pass0)
-			cleanup_addr -= 1; /* leaveq */
-		if (seen_or_pass0 & SEEN_XREG)
-			cleanup_addr -= 4; /* mov  -8(%rbp),%rbx */
+		ilen = prog - temp;
+		if (image) {
+			if (unlikely(proglen + ilen > oldproglen)) {
+				pr_err("bpb_jit_compile fatal error\n");
+				return -EFAULT;
+			}
+			memcpy(image + proglen, temp, ilen);
+		}
+		proglen += ilen;
+		addrs[i] = proglen;
+		prog = temp;
+	}
+	/* last bpf instruction is always a RET :
+	 * use it to give the cleanup instruction(s) addr
+	 */
+	ctx->cleanup_addr = proglen - 1; /* ret */
+	if (seen_or_pass0)
+		ctx->cleanup_addr -= 1; /* leaveq */
+	if (seen_or_pass0 & SEEN_XREG)
+		ctx->cleanup_addr -= 4; /* mov  -8(%rbp),%rbx */
 
+	ctx->seen = seen;
+
+	return proglen;
+}
+
+void bpf_jit_compile(struct sk_filter *prog)
+{
+	struct bpf_binary_header *header = NULL;
+	int proglen, oldproglen = 0;
+	struct jit_context ctx = {};
+	u8 *image = NULL;
+	int *addrs;
+	int pass;
+	int i;
+
+	if (!bpf_jit_enable)
+		return;
+
+	if (!prog || !prog->len)
+		return;
+
+	addrs = kmalloc(prog->len * sizeof(*addrs), GFP_KERNEL);
+	if (!addrs)
+		return;
+
+	/* Before first pass, make a rough estimation of addrs[]
+	 * each bpf instruction is translated to less than 64 bytes
+	 */
+	for (proglen = 0, i = 0; i < prog->len; i++) {
+		proglen += 64;
+		addrs[i] = proglen;
+	}
+	ctx.cleanup_addr = proglen;
+	ctx.seen = SEEN_XREG | SEEN_DATAREF | SEEN_MEM;
+	ctx.pc_ret0 = -1;
+
+	for (pass = 0; pass < 10; pass++) {
+		proglen = do_jit(prog, addrs, image, oldproglen, &ctx);
+		if (proglen <= 0) {
+			image = NULL;
+			if (header)
+				module_free(NULL, header);
+			goto out;
+		}
 		if (image) {
 			if (proglen != oldproglen)
-				pr_err("bpb_jit_compile proglen=%u != oldproglen=%u\n", proglen, oldproglen);
+				pr_err("bpf_jit: proglen=%d != oldproglen=%d\n",
+				       proglen, oldproglen);
 			break;
 		}
 		if (proglen == oldproglen) {
-			image = module_alloc(max_t(unsigned int,
-						   proglen,
-						   sizeof(struct work_struct)));
-			if (!image)
+			header = bpf_alloc_binary(proglen, &image);
+			if (!header)
 				goto out;
 		}
 		oldproglen = proglen;
 	}
 
 	if (bpf_jit_enable > 1)
-		bpf_jit_dump(flen, proglen, pass, image);
+		bpf_jit_dump(prog->len, proglen, 0, image);
 
 	if (image) {
-		bpf_flush_icache(image, image + proglen);
-		fp->bpf_func = (void *)image;
-		fp->jited = 1;
+		bpf_flush_icache(header, image + proglen);
+		set_memory_ro((unsigned long)header, header->pages);
+		prog->bpf_func = (void *)image;
+		prog->jited = 1;
 	}
 out:
 	kfree(addrs);
-	return;
 }
 
-static void jit_free_defer(struct work_struct *arg)
+static void bpf_jit_free_deferred(struct work_struct *work)
 {
-	module_free(NULL, arg);
+	struct sk_filter *fp = container_of(work, struct sk_filter, work);
+	unsigned long addr = (unsigned long)fp->bpf_func & PAGE_MASK;
+	struct bpf_binary_header *header = (void *)addr;
+
+	set_memory_rw(addr, header->pages);
+	module_free(NULL, header);
+	kfree(fp);
 }
 
-/* run from softirq, we must use a work_struct to call
- * module_free() from process context
- */
 void bpf_jit_free(struct sk_filter *fp)
 {
 	if (fp->jited) {
