@@ -414,10 +414,8 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 	kfree(fp);
 	atomic_set(&filter->usage, 1);
 	filter->prog->len = new_len;
-	filter->prog->bpf_func = (void *)sk_run_filter_int_seccomp;
 
-	/* JIT internal BPF into native HW instructions */
-	bpf_int_jit_compile(filter->prog);
+	sk_filter_select_runtime(filter->prog);
 
 	return filter;
 
@@ -531,7 +529,7 @@ void put_seccomp_filter(struct task_struct *tsk)
 	while (orig && atomic_dec_and_test(&orig->usage)) {
 		struct seccomp_filter *freeme = orig;
 		orig = orig->prev;
-		bpf_jit_free(freeme->prog);
+		sk_filter_free(freeme->prog);
 		seccomp_filter_free(freeme);
 	}
 }
