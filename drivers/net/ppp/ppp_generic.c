@@ -755,7 +755,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		err = get_filter(argp, &code);
 		if (err >= 0) {
-			struct sock_fprog fprog = {
+			struct sock_fprog_kern fprog = {
 				.len = err,
 				.filter = code,
 			};
@@ -776,7 +776,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		err = get_filter(argp, &code);
 		if (err >= 0) {
-			struct sock_fprog fprog = {
+			struct sock_fprog_kern fprog = {
 				.len = err,
 				.filter = code,
 			};
