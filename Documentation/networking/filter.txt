@@ -674,7 +674,7 @@ to seccomp_data, for converted BPF filters R1 points to a skb.
 
 A program, that is translated internally consists of the following elements:
 
-  op:16, jt:8, jf:8, k:32    ==>    op:8, a_reg:4, x_reg:4, off:16, imm:32
+  op:16, jt:8, jf:8, k:32    ==>    op:8, dst_reg:4, src_reg:4, off:16, imm:32
 
 Just like the original BPF, the new format runs within a controlled environment,
 is deterministic and the kernel can easily prove that. The safety of the program
