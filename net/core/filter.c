@@ -851,7 +851,7 @@ int sk_convert_filter(struct sock_filter *prog, int len,
 		return -EINVAL;
 
 	if (new_prog) {
-		addrs = kzalloc(len * sizeof(*addrs), GFP_KERNEL);
+		addrs = kcalloc(len, sizeof(*addrs), GFP_KERNEL);
 		if (!addrs)
 			return -ENOMEM;
 	}
@@ -1108,7 +1108,7 @@ static int check_load_and_stores(struct sock_filter *filter, int flen)
 
 	BUILD_BUG_ON(BPF_MEMWORDS > 16);
 
-	masks = kmalloc(flen * sizeof(*masks), GFP_KERNEL);
+	masks = kmalloc_array(flen, sizeof(*masks), GFP_KERNEL);
 	if (!masks)
 		return -ENOMEM;
 
