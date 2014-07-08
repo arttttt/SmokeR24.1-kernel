@@ -1036,6 +1036,11 @@ static void cgroup_put(struct cgroup *cgrp)
 	css_put(&cgrp->self);
 }
 
+static void cgroup_refresh_child_subsys_mask(struct cgroup *cgrp)
+{
+	cgrp->child_subsys_mask = cgrp->subtree_control;
+}
+
 /**
  * cgroup_kn_unlock - unlocking helper for cgroup kernfs methods
  * @kn: the kernfs_node being serviced
@@ -1208,12 +1213,15 @@ static int rebind_subsystems(struct cgroup_root *dst_root, unsigned int ss_mask)
 		up_write(&css_set_rwsem);
 
 		src_root->subsys_mask &= ~(1 << ssid);
-		src_root->cgrp.child_subsys_mask &= ~(1 << ssid);
+		src_root->cgrp.subtree_control &= ~(1 << ssid);
+		cgroup_refresh_child_subsys_mask(&src_root->cgrp);
 
 		/* default hierarchy doesn't enable controllers by default */
 		dst_root->subsys_mask |= 1 << ssid;
-		if (dst_root != &cgrp_dfl_root)
-			dst_root->cgrp.child_subsys_mask |= 1 << ssid;
+		if (dst_root != &cgrp_dfl_root) {
+			dst_root->cgrp.subtree_control |= 1 << ssid;
+			cgroup_refresh_child_subsys_mask(&dst_root->cgrp);
+		}
 
 		if (ss->bind)
 			ss->bind(css);
@@ -2496,7 +2504,7 @@ static int cgroup_controllers_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
 
-	cgroup_print_ss_mask(seq, cgroup_parent(cgrp)->child_subsys_mask);
+	cgroup_print_ss_mask(seq, cgroup_parent(cgrp)->subtree_control);
 	return 0;
 }
 
@@ -2505,7 +2513,7 @@ static int cgroup_subtree_control_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
 
-	cgroup_print_ss_mask(seq, cgrp->child_subsys_mask);
+	cgroup_print_ss_mask(seq, cgrp->subtree_control);
 	return 0;
 }
 
@@ -2650,7 +2658,7 @@ static ssize_t cgroup_subtree_control_write(struct kernfs_open_file *of,
 
 	for_each_subsys(ss, ssid) {
 		if (enable & (1 << ssid)) {
-			if (cgrp->child_subsys_mask & (1 << ssid)) {
+			if (cgrp->subtree_control & (1 << ssid)) {
 				enable &= ~(1 << ssid);
 				continue;
 			}
@@ -2658,7 +2666,7 @@ static ssize_t cgroup_subtree_control_write(struct kernfs_open_file *of,
 			/* unavailable or not enabled on the parent? */
 			if (!(cgrp_dfl_root.subsys_mask & (1 << ssid)) ||
 			    (cgroup_parent(cgrp) &&
-			     !(cgroup_parent(cgrp)->child_subsys_mask & (1 << ssid)))) {
+			     !(cgroup_parent(cgrp)->subtree_control & (1 << ssid)))) {
 				ret = -ENOENT;
 				goto out_unlock;
 			}
@@ -2686,14 +2694,14 @@ static ssize_t cgroup_subtree_control_write(struct kernfs_open_file *of,
 				return restart_syscall();
 			}
 		} else if (disable & (1 << ssid)) {
-			if (!(cgrp->child_subsys_mask & (1 << ssid))) {
+			if (!(cgrp->subtree_control & (1 << ssid))) {
 				disable &= ~(1 << ssid);
 				continue;
 			}
 
 			/* a child has it enabled? */
 			cgroup_for_each_live_child(child, cgrp) {
-				if (child->child_subsys_mask & (1 << ssid)) {
+				if (child->subtree_control & (1 << ssid)) {
 					ret = -EBUSY;
 					goto out_unlock;
 				}
@@ -2707,7 +2715,7 @@ static ssize_t cgroup_subtree_control_write(struct kernfs_open_file *of,
 	}
 
 	/*
-	 * Except for the root, child_subsys_mask must be zero for a cgroup
+	 * Except for the root, subtree_control must be zero for a cgroup
 	 * with tasks so that child cgroups don't compete against tasks.
 	 */
 	if (enable && cgroup_parent(cgrp) && !list_empty(&cgrp->cset_links)) {
@@ -2715,8 +2723,9 @@ static ssize_t cgroup_subtree_control_write(struct kernfs_open_file *of,
 		goto out_unlock;
 	}
 
-	cgrp->child_subsys_mask |= enable;
-	cgrp->child_subsys_mask &= ~disable;
+	cgrp->subtree_control |= enable;
+	cgrp->subtree_control &= ~disable;
+	cgroup_refresh_child_subsys_mask(cgrp);
 
 	/* create new csses */
 	for_each_subsys(ss, ssid) {
@@ -2755,8 +2764,9 @@ out_unlock:
 	return ret ?: nbytes;
 
 err_undo_css:
-	cgrp->child_subsys_mask &= ~enable;
-	cgrp->child_subsys_mask |= disable;
+	cgrp->subtree_control &= ~enable;
+	cgrp->subtree_control |= disable;
+	cgroup_refresh_child_subsys_mask(cgrp);
 
 	for_each_subsys(ss, ssid) {
 		if (!(enable & (1 << ssid)))
@@ -4470,10 +4480,12 @@ static int cgroup_mkdir(struct kernfs_node *parent_kn, const char *name,
 
 	/*
 	 * On the default hierarchy, a child doesn't automatically inherit
-	 * child_subsys_mask from the parent.  Each is configured manually.
+	 * subtree_control from the parent.  Each is configured manually.
 	 */
-	if (!cgroup_on_dfl(cgrp))
-		cgrp->child_subsys_mask = parent->child_subsys_mask;
+	if (!cgroup_on_dfl(cgrp)) {
+		cgrp->subtree_control = parent->subtree_control;
+		cgroup_refresh_child_subsys_mask(cgrp);
+	}
 
 	kernfs_activate(kn);
 
