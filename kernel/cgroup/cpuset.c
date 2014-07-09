@@ -1556,6 +1556,8 @@ typedef enum {
 	FILE_MEMORY_MIGRATE,
 	FILE_CPULIST,
 	FILE_MEMLIST,
+	FILE_EFFECTIVE_CPULIST,
+	FILE_EFFECTIVE_MEMLIST,
 	FILE_CPU_EXCLUSIVE,
 	FILE_MEM_EXCLUSIVE,
 	FILE_MEM_HARDWALL,
@@ -1731,6 +1733,12 @@ static int cpuset_common_seq_show(struct seq_file *sf, void *v)
 	case FILE_MEMLIST:
 		s += nodelist_scnprintf(s, count, cs->mems_allowed);
 		break;
+	case FILE_EFFECTIVE_CPULIST:
+		s += cpulist_scnprintf(s, count, cs->effective_cpus);
+		break;
+	case FILE_EFFECTIVE_MEMLIST:
+		s += nodelist_scnprintf(s, count, cs->effective_mems);
+		break;
 	default:
 		ret = -EINVAL;
 		goto out_unlock;
@@ -1813,6 +1821,18 @@ static struct cftype files[] = {
 		.write = cpuset_write_resmask,
 		.max_write_len = (100U + 6 * MAX_NUMNODES),
 		.private = FILE_MEMLIST,
+	},
+
+	{
+		.name = "effective_cpus",
+		.seq_show = cpuset_common_seq_show,
+		.private = FILE_EFFECTIVE_CPULIST,
+	},
+
+	{
+		.name = "effective_mems",
+		.seq_show = cpuset_common_seq_show,
+		.private = FILE_EFFECTIVE_MEMLIST,
 	},
 
 	{
