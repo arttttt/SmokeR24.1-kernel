@@ -10,23 +10,36 @@
 #include <linux/jiffies.h>
 #include <linux/time.h>
 
-/*
- * Structure holding internal timekeeping values.
+/**
+ * struct tk_read_base - base structure for timekeeping readout
+ * @clock:	Current clocksource used for timekeeping.
+ * @read:	Read function of @clock
+ * @mask:	Bitmask for two's complement subtraction of non 64bit clocks
+ * @cycle_last: @clock cycle value at last update
+ * @mult:	NTP adjusted multiplier for scaled math conversion
+ * @shift:	Shift value for scaled math conversion
+ * @xtime_nsec: Shifted (fractional) nano seconds offset for readout
+ * @base_mono:  ktime_t (nanoseconds) base time for readout
  *
- * Note: wall_to_monotonic is what we need to add to xtime (or xtime
- * corrected for sub jiffie times) to get to monotonic time.
- * Monotonic is pegged at zero at system boot time, so
- * wall_to_monotonic will be negative, however, we will ALWAYS keep
- * the tv_nsec part positive so we can use the usual normalization.
+ * This struct has size 56 byte on 64 bit. Together with a seqcount it
+ * occupies a single 64byte cache line.
  *
- * wall_to_monotonic is moved after resume from suspend for the
- * monotonic time not to jump. We need to add total_sleep_time to
- * wall_to_monotonic to get the real boot based time offset.
- *
- * - wall_to_monotonic is no longer the boot time, getboottime must be
- * used instead.
+ * The struct is separate from struct timekeeper as it is also used
+ * for a fast NMI safe accessor to clock monotonic.
  */
+struct tk_read_base {
+	struct clocksource	*clock;
+	cycle_t			(*read)(struct clocksource *cs);
+	cycle_t			mask;
+	cycle_t			cycle_last;
+	u32			mult;
+	u32			shift;
+	u64			xtime_nsec;
+	ktime_t			base_mono;
+};
+
 struct timekeeper {
+	struct tk_read_base	tkr;
 	/* Current clocksource used for timekeeping. */
 	struct clocksource	*clock;
 	/* Read function of @clock */
@@ -52,9 +65,7 @@ struct timekeeper {
 
 	/* Offset clock monotonic -> clock realtime */
 	ktime_t			offs_real;
-	/* Offset clock monotonic -> clock boottime */
 	ktime_t			offs_boot;
-	/* Offset clock monotonic -> clock tai */
 	ktime_t			offs_tai;
 
 	/* time spent in suspend */
@@ -65,13 +76,10 @@ struct timekeeper {
 	/* The raw monotonic time for the CLOCK_MONOTONIC_RAW posix clock. */
 	struct timespec 	raw_time;
 
-	/* Number of clock cycles in one NTP interval. */
+	/* The following members are for timekeeping internal use */
 	cycle_t			cycle_interval;
-	/* Number of clock shifted nano seconds in one NTP interval. */
 	u64			xtime_interval;
-	/* shifted nano seconds left over when rounding cycle_interval */
 	s64			xtime_remainder;
-	/* Raw nano seconds accumulated per NTP interval. */
 	u32			raw_interval;
 
 	/*
