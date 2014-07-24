@@ -81,7 +81,7 @@ enum {
 /* ALU ops on registers, bpf_add|sub|...: dst_reg += src_reg */
 
 #define BPF_ALU64_REG(OP, DST, SRC)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU64 | BPF_OP(OP) | BPF_X,	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -89,7 +89,7 @@ enum {
 		.imm   = 0 })
 
 #define BPF_ALU32_REG(OP, DST, SRC)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_OP(OP) | BPF_X,		\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -99,7 +99,7 @@ enum {
 /* ALU ops on immediates, bpf_add|sub|...: dst_reg += imm32 */
 
 #define BPF_ALU64_IMM(OP, DST, IMM)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU64 | BPF_OP(OP) | BPF_K,	\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -107,7 +107,7 @@ enum {
 		.imm   = IMM })
 
 #define BPF_ALU32_IMM(OP, DST, IMM)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_OP(OP) | BPF_K,		\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -117,7 +117,7 @@ enum {
 /* Endianess conversion, cpu_to_{l,b}e(), {l,b}e_to_cpu() */
 
 #define BPF_ENDIAN(TYPE, DST, LEN)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_END | BPF_SRC(TYPE),	\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -127,7 +127,7 @@ enum {
 /* Short form of mov, dst_reg = src_reg */
 
 #define BPF_MOV64_REG(DST, SRC)					\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU64 | BPF_MOV | BPF_X,		\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -135,7 +135,7 @@ enum {
 		.imm   = 0 })
 
 #define BPF_MOV32_REG(DST, SRC)					\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_MOV | BPF_X,		\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -145,7 +145,7 @@ enum {
 /* Short form of mov, dst_reg = imm32 */
 
 #define BPF_MOV64_IMM(DST, IMM)					\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU64 | BPF_MOV | BPF_K,		\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -153,7 +153,7 @@ enum {
 		.imm   = IMM })
 
 #define BPF_MOV32_IMM(DST, IMM)					\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_MOV | BPF_K,		\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -163,7 +163,7 @@ enum {
 /* Short form of mov based on type, BPF_X: dst_reg = src_reg, BPF_K: dst_reg = imm32 */
 
 #define BPF_MOV64_RAW(TYPE, DST, SRC, IMM)			\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU64 | BPF_MOV | BPF_SRC(TYPE),	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -171,7 +171,7 @@ enum {
 		.imm   = IMM })
 
 #define BPF_MOV32_RAW(TYPE, DST, SRC, IMM)			\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_MOV | BPF_SRC(TYPE),	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -181,7 +181,7 @@ enum {
 /* Direct packet access, R0 = *(uint *) (skb->data + imm32) */
 
 #define BPF_LD_ABS(SIZE, IMM)					\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_LD | BPF_SIZE(SIZE) | BPF_ABS,	\
 		.dst_reg = 0,					\
 		.src_reg = 0,					\
@@ -191,7 +191,7 @@ enum {
 /* Indirect packet access, R0 = *(uint *) (skb->data + src_reg + imm32) */
 
 #define BPF_LD_IND(SIZE, SRC, IMM)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_LD | BPF_SIZE(SIZE) | BPF_IND,	\
 		.dst_reg = 0,					\
 		.src_reg = SRC,					\
@@ -201,7 +201,7 @@ enum {
 /* Memory load, dst_reg = *(uint *) (src_reg + off16) */
 
 #define BPF_LDX_MEM(SIZE, DST, SRC, OFF)			\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_LDX | BPF_SIZE(SIZE) | BPF_MEM,	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -211,7 +211,7 @@ enum {
 /* Memory store, *(uint *) (dst_reg + off16) = src_reg */
 
 #define BPF_STX_MEM(SIZE, DST, SRC, OFF)			\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_STX | BPF_SIZE(SIZE) | BPF_MEM,	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -221,7 +221,7 @@ enum {
 /* Memory store, *(uint *) (dst_reg + off16) = imm32 */
 
 #define BPF_ST_MEM(SIZE, DST, OFF, IMM)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_ST | BPF_SIZE(SIZE) | BPF_MEM,	\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -231,7 +231,7 @@ enum {
 /* Conditional jumps against registers, if (dst_reg 'op' src_reg) goto pc + off16 */
 
 #define BPF_JMP_REG(OP, DST, SRC, OFF)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_JMP | BPF_OP(OP) | BPF_X,		\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -241,7 +241,7 @@ enum {
 /* Conditional jumps against immediates, if (dst_reg 'op' imm32) goto pc + off16 */
 
 #define BPF_JMP_IMM(OP, DST, IMM, OFF)				\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_JMP | BPF_OP(OP) | BPF_K,		\
 		.dst_reg = DST,					\
 		.src_reg = 0,					\
@@ -251,7 +251,7 @@ enum {
 /* Function call */
 
 #define BPF_EMIT_CALL(FUNC)					\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_JMP | BPF_CALL,			\
 		.dst_reg = 0,					\
 		.src_reg = 0,					\
@@ -261,7 +261,7 @@ enum {
 /* Raw code statement block */
 
 #define BPF_RAW_INSN(CODE, DST, SRC, OFF, IMM)			\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = CODE,					\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
@@ -271,7 +271,7 @@ enum {
 /* Program exit */
 
 #define BPF_EXIT_INSN()						\
-	((struct sock_filter_int) {				\
+	((struct bpf_insn) {					\
 		.code  = BPF_JMP | BPF_EXIT,			\
 		.dst_reg = 0,					\
 		.src_reg = 0,					\
@@ -297,7 +297,7 @@ enum {
 /* Macro to invoke filter function. */
 #define SK_RUN_FILTER(filter, ctx)  (*filter->bpf_func)(ctx, filter->insnsi)
 
-struct sock_filter_int {
+struct bpf_insn {
 	__u8	code;		/* opcode */
 	__u8	dst_reg:4;	/* dest register */
 	__u8	src_reg:4;	/* source register */
@@ -329,10 +329,10 @@ struct sk_filter {
 	struct sock_fprog_kern	*orig_prog;	/* Original BPF program */
 	struct rcu_head		rcu;
 	unsigned int		(*bpf_func)(const struct sk_buff *skb,
-					    const struct sock_filter_int *filter);
+					    const struct bpf_insn *filter);
 	union {
 		struct sock_filter	insns[0];
-		struct sock_filter_int	insnsi[0];
+		struct bpf_insn		insnsi[0];
 		struct work_struct	work;
 	};
 };
@@ -362,7 +362,7 @@ void sk_filter_select_runtime(struct sk_filter *fp);
 void sk_filter_free(struct sk_filter *fp);
 
 int sk_convert_filter(struct sock_filter *prog, int len,
-		      struct sock_filter_int *new_prog, int *new_len);
+		      struct bpf_insn *new_prog, int *new_len);
 
 int sk_unattached_filter_create(struct sk_filter **pfp,
 				struct sock_fprog_kern *fprog);
