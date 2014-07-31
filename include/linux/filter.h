@@ -360,8 +360,8 @@ static inline unsigned int sk_filter_size(unsigned int proglen)
 void sk_filter_select_runtime(struct sk_filter *fp);
 void sk_filter_free(struct sk_filter *fp);
 
-int sk_convert_filter(struct sock_filter *prog, int len,
-		      struct bpf_insn *new_prog, int *new_len);
+int bpf_convert_filter(struct sock_filter *prog, int len,
+		       struct bpf_insn *new_prog, int *new_len);
 
 int sk_unattached_filter_create(struct sk_filter **pfp,
 				struct sock_fprog_kern *fprog);
