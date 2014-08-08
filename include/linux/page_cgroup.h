@@ -12,8 +12,10 @@ enum {
 #ifndef __GENERATING_BOUNDS_H
 #include <generated/bounds.h>
 
+struct pglist_data;
+
 #ifdef CONFIG_MEMCG
-#include <linux/bit_spinlock.h>
+struct mem_cgroup;
 
 /*
  * Page Cgroup can be considered as an extended mem_map.
@@ -27,16 +29,16 @@ struct page_cgroup {
 	struct mem_cgroup *mem_cgroup;
 };
 
-void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat);
+extern void pgdat_page_cgroup_init(struct pglist_data *pgdat);
 
 #ifdef CONFIG_SPARSEMEM
-static inline void __init page_cgroup_init_flatmem(void)
+static inline void page_cgroup_init_flatmem(void)
 {
 }
-extern void __init page_cgroup_init(void);
+extern void page_cgroup_init(void);
 #else
-void __init page_cgroup_init_flatmem(void);
-static inline void __init page_cgroup_init(void)
+extern void page_cgroup_init_flatmem(void);
+static inline void page_cgroup_init(void)
 {
 }
 #endif
@@ -81,11 +83,10 @@ static inline void unlock_page_cgroup(struct page_cgroup *pc)
 {
 	bit_spin_unlock(PCG_LOCK, &pc->flags);
 }
-
-#else /* CONFIG_MEMCG */
+#else /* !CONFIG_MEMCG */
 struct page_cgroup;
 
-static inline void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat)
+static inline void pgdat_page_cgroup_init(struct pglist_data *pgdat)
 {
 }
 
@@ -98,10 +99,9 @@ static inline void page_cgroup_init(void)
 {
 }
 
-static inline void __init page_cgroup_init_flatmem(void)
+static inline void page_cgroup_init_flatmem(void)
 {
 }
-
 #endif /* CONFIG_MEMCG */
 
 #include <linux/swap.h>
