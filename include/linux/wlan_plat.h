@@ -25,7 +25,7 @@ struct wifi_platform_data {
 	int (*set_carddetect)(int val);
 	void *(*mem_prealloc)(int section, unsigned long size);
 	int (*get_mac_addr)(unsigned char *buf);
-	void *(*get_country_code)(char *ccode);
+	void *(*get_country_code)(char *ccode, u32 flags);
 	struct sysedp_consumer *sysedpc;
 	int (*get_wake_irq)(void);
 };
