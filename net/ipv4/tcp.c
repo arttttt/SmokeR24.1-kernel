@@ -1147,7 +1147,7 @@ new_segment:
 				 * already been sent.
 				 */
 				if (tp->repair)
-					TCP_SKB_CB(skb)->when = tcp_time_stamp;
+					skb_mstamp_get(&skb->skb_mstamp);
 
 				/*
 				 * Check whether we can use HW checksum.

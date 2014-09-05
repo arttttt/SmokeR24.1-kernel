@@ -680,6 +680,12 @@ void tcp_send_window_probe(struct sock *sk);
  */
 #define tcp_time_stamp		((__u32)(jiffies))
 
+static inline u32 tcp_skb_timestamp(const struct sk_buff *skb)
+{
+	return skb->skb_mstamp.stamp_jiffies;
+}
+
+
 #define tcp_flag_byte(th) (((u_int8_t *)th)[13])
 
 #define TCPHDR_FIN 0x01
@@ -712,12 +718,7 @@ struct tcp_skb_cb {
 	};
 	__u32		seq;		/* Starting sequence number	*/
 	__u32		end_seq;	/* SEQ + FIN + SYN + datalen	*/
-	union {
-		/* used in output path */
-		__u32		when;	/* used to compute rtt's	*/
-		/* used in input path */
-		__u32		tcp_tw_isn; /* isn chosen by tcp_timewait_state_process() */
-	};
+	__u32		tcp_tw_isn;	/* isn chosen by tcp_timewait_state_process() */
 	__u8		tcp_flags;	/* TCP header flags. (tcp[13])	*/
 
 	__u8		sacked;		/* State flags for SACK/FACK.	*/
@@ -1646,7 +1647,7 @@ static inline s32 tcp_rto_delta(const struct sock *sk)
 {
 	const struct sk_buff *skb = tcp_write_queue_head(sk);
 	const u32 rto = inet_csk(sk)->icsk_rto;
-	const u32 rto_time_stamp = TCP_SKB_CB(skb)->when + rto;
+	const u32 rto_time_stamp = tcp_skb_timestamp(skb) + rto;
 
 	return (s32)(rto_time_stamp - tcp_time_stamp);
 }
