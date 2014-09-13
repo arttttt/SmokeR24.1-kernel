@@ -54,10 +54,12 @@ struct tc_u_knode {
 	struct tcf_result	res;
 	struct tc_u_hnode	*ht_down;
 #ifdef CONFIG_CLS_U32_PERF
-	struct tc_u32_pcnt	*pf;
+	struct tc_u32_pcnt __percpu *pf;
 #endif
 #ifdef CONFIG_CLS_U32_MARK
-	struct tc_u32_mark	mark;
+	u32			val;
+	u32			mask;
+	u32 __percpu		*pcpu_success;
 #endif
 	struct tc_u32_sel	sel;
 };
@@ -114,16 +116,16 @@ next_knode:
 		struct tc_u32_key *key = n->sel.keys;
 
 #ifdef CONFIG_CLS_U32_PERF
-		n->pf->rcnt += 1;
+		__this_cpu_inc(n->pf->rcnt);
 		j = 0;
 #endif
 
 #ifdef CONFIG_CLS_U32_MARK
-		if ((skb->mark & n->mark.mask) != n->mark.val) {
+		if ((skb->mark & n->mask) != n->val) {
 			n = n->next;
 			goto next_knode;
 		} else {
-			n->mark.success++;
+			__this_cpu_inc(*n->pcpu_success);
 		}
 #endif
 
@@ -142,7 +144,7 @@ next_knode:
 				goto next_knode;
 			}
 #ifdef CONFIG_CLS_U32_PERF
-			n->pf->kcnts[j] += 1;
+			__this_cpu_inc(n->pf->kcnts[j]);
 			j++;
 #endif
 		}
@@ -158,7 +160,7 @@ check_terminal:
 				}
 #endif
 #ifdef CONFIG_CLS_U32_PERF
-				n->pf->rhit += 1;
+				__this_cpu_inc(n->pf->rhit);
 #endif
 				r = tcf_exts_exec(skb, &n->exts, res);
 				if (r < 0) {
@@ -341,7 +343,7 @@ static int u32_destroy_key(struct tcf_proto *tp, struct tc_u_knode *n)
 	if (n->ht_down)
 		n->ht_down->refcnt--;
 #ifdef CONFIG_CLS_U32_PERF
-	kfree(n->pf);
+	free_percpu(n->pf);
 #endif
 	kfree(n);
 	return 0;
@@ -553,6 +555,9 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 	struct nlattr *tb[TCA_U32_MAX + 1];
 	u32 htid;
 	int err;
+#ifdef CONFIG_CLS_U32_PERF
+	size_t size;
+#endif
 
 	if (opt == NULL)
 		return handle ? -EINVAL : 0;
@@ -631,8 +636,9 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 		return -ENOBUFS;
 
 #ifdef CONFIG_CLS_U32_PERF
-	n->pf = kzalloc(sizeof(struct tc_u32_pcnt) + s->nkeys*sizeof(u64), GFP_KERNEL);
-	if (n->pf == NULL) {
+	size = sizeof(struct tc_u32_pcnt) + s->nkeys * sizeof(u64);
+	n->pf = __alloc_percpu(size, __alignof__(struct tc_u32_pcnt));
+	if (!n->pf) {
 		kfree(n);
 		return -ENOBUFS;
 	}
@@ -645,12 +651,14 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 	tcf_exts_init(&n->exts, TCA_U32_ACT, TCA_U32_POLICE);
 
 #ifdef CONFIG_CLS_U32_MARK
+	n->pcpu_success = alloc_percpu(u32);
+
 	if (tb[TCA_U32_MARK]) {
 		struct tc_u32_mark *mark;
 
 		mark = nla_data(tb[TCA_U32_MARK]);
-		memcpy(&n->mark, mark, sizeof(struct tc_u32_mark));
-		n->mark.success = 0;
+		n->val = mark->val;
+		n->mask = mark->mask;
 	}
 #endif
 
@@ -734,6 +742,11 @@ static int u32_dump(struct net *net, struct tcf_proto *tp, unsigned long fh,
 		if (nla_put_u32(skb, TCA_U32_DIVISOR, divisor))
 			goto nla_put_failure;
 	} else {
+#ifdef CONFIG_CLS_U32_PERF
+		struct tc_u32_pcnt *gpf;
+#endif
+		int cpu;
+
 		if (nla_put(skb, TCA_U32_SEL,
 			    sizeof(n->sel) + n->sel.nkeys*sizeof(struct tc_u32_key),
 			    &n->sel))
@@ -751,9 +764,20 @@ static int u32_dump(struct net *net, struct tcf_proto *tp, unsigned long fh,
 			goto nla_put_failure;
 
 #ifdef CONFIG_CLS_U32_MARK
-		if ((n->mark.val || n->mark.mask) &&
-		    nla_put(skb, TCA_U32_MARK, sizeof(n->mark), &n->mark))
-			goto nla_put_failure;
+		if ((n->val || n->mask)) {
+			struct tc_u32_mark mark = {.val = n->val,
+						   .mask = n->mask,
+						   .success = 0};
+
+			for_each_possible_cpu(cpu) {
+				__u32 cnt = *per_cpu_ptr(n->pcpu_success, cpu);
+
+				mark.success += cnt;
+			}
+
+			if (nla_put(skb, TCA_U32_MARK, sizeof(mark), &mark))
+				goto nla_put_failure;
+		}
 #endif
 
 		if (tcf_exts_dump(skb, &n->exts) < 0)
@@ -765,10 +789,29 @@ static int u32_dump(struct net *net, struct tcf_proto *tp, unsigned long fh,
 			goto nla_put_failure;
 #endif
 #ifdef CONFIG_CLS_U32_PERF
+		gpf = kzalloc(sizeof(struct tc_u32_pcnt) +
+			      n->sel.nkeys * sizeof(u64),
+			      GFP_KERNEL);
+		if (!gpf)
+			goto nla_put_failure;
+
+		for_each_possible_cpu(cpu) {
+			int i;
+			struct tc_u32_pcnt *pf = per_cpu_ptr(n->pf, cpu);
+
+			gpf->rcnt += pf->rcnt;
+			gpf->rhit += pf->rhit;
+			for (i = 0; i < n->sel.nkeys; i++)
+				gpf->kcnts[i] += pf->kcnts[i];
+		}
+
 		if (nla_put(skb, TCA_U32_PCNT,
 			    sizeof(struct tc_u32_pcnt) + n->sel.nkeys*sizeof(u64),
-			    n->pf))
+			    gpf)) {
+			kfree(gpf);
 			goto nla_put_failure;
+		}
+		kfree(gpf);
 #endif
 	}
 
