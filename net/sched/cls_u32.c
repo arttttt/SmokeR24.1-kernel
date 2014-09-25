@@ -354,7 +354,7 @@ static int u32_init(struct tcf_proto *tp)
 static int u32_destroy_key(struct tcf_proto *tp, struct tc_u_knode *n)
 {
 	tcf_unbind_filter(tp, &n->res);
-	tcf_exts_destroy(tp, &n->exts);
+	tcf_exts_destroy(&n->exts);
 	if (n->ht_down)
 		n->ht_down->refcnt--;
 #ifdef CONFIG_CLS_U32_PERF
@@ -574,7 +574,7 @@ static int u32_set_parms(struct net *net, struct tcf_proto *tp,
 
 	return 0;
 errout:
-	tcf_exts_destroy(tp, &e);
+	tcf_exts_destroy(&e);
 	return err;
 }
 
