@@ -1316,6 +1316,7 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 	unsigned char *b = skb_tail_pointer(skb);
 	struct gnet_dump d;
 	struct qdisc_size_table *stab;
+	__u32 qlen;
 
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*tcm), flags);
 	if (!nlh)
@@ -1332,7 +1333,7 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 		goto nla_put_failure;
 	if (q->ops->dump && q->ops->dump(q, skb) < 0)
 		goto nla_put_failure;
-	q->qstats.qlen = q->q.qlen;
+	qlen = q->q.qlen;
 
 	stab = rtnl_dereference(q->stab);
 	if (stab && qdisc_dump_stab(skb, stab) < 0)
@@ -1350,7 +1351,7 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 
 	if (gnet_stats_copy_basic(&d, cpu_bstats, &q->bstats) < 0 ||
 	    gnet_stats_copy_rate_est(&d, &q->bstats, &q->rate_est) < 0 ||
-	    gnet_stats_copy_queue(&d, &q->qstats) < 0)
+	    gnet_stats_copy_queue(&d, &q->qstats, qlen) < 0)
 		goto nla_put_failure;
 
 	if (gnet_stats_finish_copy(&d) < 0)
