@@ -447,11 +447,6 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 	return randomize_base(mm->brk);
 }
 
-unsigned long randomize_et_dyn(unsigned long base)
-{
-	return randomize_base(base);
-}
-
 void arch_cpu_idle_enter(void)
 {
 	idle_notifier_call_chain(IDLE_START);
