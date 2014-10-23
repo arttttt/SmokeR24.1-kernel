@@ -4137,6 +4137,20 @@ SYSCALL_DEFINE2(rename, const char __user *, oldname, const char __user *, newna
 	return sys_renameat(AT_FDCWD, oldname, AT_FDCWD, newname);
 }
 
+int vfs_whiteout(struct inode *dir, struct dentry *dentry)
+{
+	int error = may_create(dir, dentry);
+	if (error)
+		return error;
+
+	if (!dir->i_op->mknod)
+		return -EPERM;
+
+	return dir->i_op->mknod(dir, dentry,
+				S_IFCHR | WHITEOUT_MODE, WHITEOUT_DEV);
+}
+EXPORT_SYMBOL(vfs_whiteout);
+
 int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen, const char *link)
 {
 	int len;
