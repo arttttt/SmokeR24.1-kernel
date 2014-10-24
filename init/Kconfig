@@ -1289,6 +1289,10 @@ config PANIC_TIMEOUT
 	help
 	  Set default panic timeout.
 
+# interpreter that classic socket filters depend on
+config BPF
+	bool
+
 menuconfig EXPERT
 	bool "Configure standard kernel features (expert users)"
 	# Unhide debug options, to make the on-by-default options visible
@@ -1448,6 +1452,16 @@ config EVENTFD
 	  kernel notification (ie. KAIO) or userspace notifications.
 
 	  If unsure, say Y.
+
+# syscall, maps, verifier
+config BPF_SYSCALL
+	bool "Enable bpf() system call" if EXPERT
+	select ANON_INODES
+	select BPF
+	default n
+	help
+	  Enable the bpf() system call that allows to manipulate eBPF
+	  programs and maps via file descriptors.
 
 config SHMEM
 	bool "Use full shmem filesystem" if EXPERT
