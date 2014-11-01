@@ -24,6 +24,7 @@
 #include <net/netns/conntrack.h>
 #endif
 #include <net/netns/xfrm.h>
+#include <linux/ns_common.h>
 
 struct user_namespace;
 struct proc_dir_entry;
@@ -58,7 +59,7 @@ struct net {
 
 	struct user_namespace   *user_ns;	/* Owning user namespace */
 
-	unsigned int		proc_inum;
+	struct ns_common	ns;
 
 	struct proc_dir_entry 	*proc_net;
 	struct proc_dir_entry 	*proc_net_stat;
