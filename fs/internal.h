@@ -140,3 +140,8 @@ extern long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
  * pipe.c
  */
 extern const struct file_operations pipefifo_fops;
+
+/*
+ * fs/nsfs.c
+ */
+extern struct dentry_operations ns_dentry_operations;
