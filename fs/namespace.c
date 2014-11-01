@@ -1385,6 +1385,13 @@ SYSCALL_DEFINE1(oldumount, char __user *, name)
 
 #endif
 
+static bool is_mnt_ns_file(struct dentry *dentry)
+{
+	/* Is this a proxy for a mount namespace? */
+	struct inode *inode = dentry->d_inode;
+	return proc_ns_inode(inode) && dentry->d_fsdata == &mntns_operations;
+}
+
 struct mnt_namespace *to_mnt_ns(struct ns_common *ns)
 {
 	return container_of(ns, struct mnt_namespace, ns);
@@ -1395,18 +1402,11 @@ static bool mnt_ns_loop(struct path *path)
 	/* Could bind mounting the mount namespace inode cause a
 	 * mount namespace loop?
 	 */
-	struct inode *inode = path->dentry->d_inode;
-	struct proc_ns *ei;
 	struct mnt_namespace *mnt_ns;
-
-	if (!proc_ns_inode(inode))
+	if (!is_mnt_ns_file(path->dentry))
 		return false;
 
-	ei = get_proc_ns(inode);
-	if (ei->ns_ops != &mntns_operations)
-		return false;
-
-	mnt_ns = to_mnt_ns(ei->ns);
+	mnt_ns = to_mnt_ns(get_proc_ns(path->dentry->d_inode));
 	return current->nsproxy->mnt_ns->seq >= mnt_ns->seq;
 }
 
