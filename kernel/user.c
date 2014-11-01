@@ -52,6 +52,9 @@ struct user_namespace init_user_ns = {
 	.group = GLOBAL_ROOT_GID,
 	.ns.inum = PROC_USER_INIT_INO,
 	.flags = USERNS_INIT_FLAGS,
+#ifdef CONFIG_USER_NS
+	.ns.ops = &userns_operations,
+#endif
 };
 EXPORT_SYMBOL_GPL(init_user_ns);
 
