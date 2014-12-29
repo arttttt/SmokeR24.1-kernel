@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2012-2016, NVIDIA Corporation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -44,6 +44,11 @@
 #define		DCD_DETECTED			BIT(26)
 
 #define	XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1	0x84
+#define		VON_DIV2P0_DET			BIT(0)
+#define		VON_DIV2P7_DET			BIT(1)
+#define		VOP_DIV2P0_DET			BIT(2)
+#define		VOP_DIV2P7_DET			BIT(3)
+#define		DIV_DET_EN			BIT(4)
 #define		VBUS_VREG_FIX18			BIT(6)
 #define		VBUS_VREG_LEV(x)		(((x) & 0x3) << 7)
 #define		USBOP_RPD_OVRD			BIT(16)
@@ -310,6 +315,82 @@ static void tegra21x_usb_vbus_pad_protection(struct tegra_usb_cd *ucd,
 	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
 }
 
+static bool tegra21x_usb_apple_500ma_charger_detect(struct tegra_usb_cd *ucd)
+{
+	void __iomem *base = ucd->regs;
+	unsigned long val;
+	bool ret = false;
+	DBG(ucd->dev, "Begin");
+
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+	val |= DIV_DET_EN;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+
+	udelay(10);
+
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+	val &= ~DIV_DET_EN;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+
+	DBG(ucd->dev, "val = 0x%lx", val);
+	if ((val & VOP_DIV2P0_DET) && (val & VON_DIV2P0_DET))
+		ret = true;
+
+	DBG(ucd->dev, "End");
+	return ret;
+}
+
+static bool tegra21x_usb_apple_1000ma_charger_detect(struct tegra_usb_cd *ucd)
+{
+	void __iomem *base = ucd->regs;
+	unsigned long val;
+	bool ret = false;
+	DBG(ucd->dev, "Begin");
+
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+	val |= DIV_DET_EN;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+
+	udelay(10);
+
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+	val &= ~DIV_DET_EN;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+
+	DBG(ucd->dev, "val = 0x%lx", val);
+	if ((val & VOP_DIV2P0_DET) && (val & VON_DIV2P7_DET))
+		ret = true;
+
+	DBG(ucd->dev, "End");
+	return ret;
+}
+
+static bool tegra21x_usb_apple_2000ma_charger_detect(struct tegra_usb_cd *ucd)
+{
+	void __iomem *base = ucd->regs;
+	unsigned long val;
+	bool ret = false;
+	DBG(ucd->dev, "Begin");
+
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+	val |= DIV_DET_EN;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+
+	udelay(10);
+
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+	val &= ~DIV_DET_EN;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
+
+	DBG(ucd->dev, "val = 0x%lx", val);
+	if (((val & VOP_DIV2P7_DET) && (val & VON_DIV2P0_DET))
+			|| ((val & VOP_DIV2P7_DET) && (val & VON_DIV2P7_DET)))
+		ret = true;
+
+	DBG(ucd->dev, "End");
+	return ret;
+}
+
 static struct tegra_usb_cd_ops tegra21_ucd_ops = {
 	.open = tegra21x_pad_open,
 	.close = tegra21x_pad_close,
@@ -317,6 +398,9 @@ static struct tegra_usb_cd_ops tegra21_ucd_ops = {
 	.power_off = tegra21x_pad_power_off,
 	.dcp_cd = tegra21x_usb_dcp_charger_detect,
 	.cdp_cd = tegra21x_usb_cdp_charger_detect,
+	.apple_500ma_cd = tegra21x_usb_apple_500ma_charger_detect,
+	.apple_1000ma_cd = tegra21x_usb_apple_1000ma_charger_detect,
+	.apple_2000ma_cd = tegra21x_usb_apple_2000ma_charger_detect,
 	.vbus_pad_protection = tegra21x_usb_vbus_pad_protection,
 };
 
