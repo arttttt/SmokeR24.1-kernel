@@ -80,4 +80,6 @@ int module_finalize(const Elf_Ehdr *hdr,
 /* Any cleanup needed when module leaves. */
 void module_arch_cleanup(struct module *mod);
 
+/* Any cleanup before freeing mod->module_init */
+void module_arch_freeing_init(struct module *mod);
 #endif
