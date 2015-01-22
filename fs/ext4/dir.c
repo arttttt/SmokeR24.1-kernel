@@ -26,6 +26,7 @@
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
+#include <linux/fsnotify.h>
 #include "ext4.h"
 #include "xattr.h"
 
@@ -102,7 +103,7 @@ int __ext4_check_dir_entry(const char *function, unsigned int line,
 	return 1;
 }
 
-static int ext4_readdir(struct file *file, struct dir_context *ctx)
+static int ext4_readdir2(struct file *file, struct dir_context *ctx)
 {
 	unsigned int offset;
 	int i;
@@ -245,6 +246,18 @@ static int ext4_readdir(struct file *file, struct dir_context *ctx)
 		}
 	}
 	return 0;
+}
+
+static int ext4_readdir(struct file *file,
+			void *dirent, filldir_t filldir)
+{
+	struct dir_context ctx = { filldir, dirent, file->f_pos };
+	int ret;
+
+	ret = ext4_readdir2(file, &ctx);
+	file->f_pos = ctx.pos;
+	fsnotify_access(file);
+	return ret;
 }
 
 static inline int is_32bit_api(void)
@@ -597,7 +610,7 @@ int ext4_check_all_de(struct inode *dir, struct buffer_head *bh, void *buf,
 const struct file_operations ext4_dir_operations = {
 	.llseek		= ext4_dir_llseek,
 	.read		= generic_read_dir,
-	.iterate	= ext4_readdir,
+	.readdir	= ext4_readdir,
 	.unlocked_ioctl = ext4_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ext4_compat_ioctl,
