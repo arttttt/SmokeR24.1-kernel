@@ -2283,6 +2283,7 @@ retry:
 	return err;
 }
 
+#if 0
 static int ext4_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	handle_t *handle;
@@ -2320,6 +2321,7 @@ err_unlock_inode:
 	unlock_new_inode(inode);
 	return err;
 }
+#endif
 
 struct ext4_dir_entry_2 *ext4_init_dot_dotdot(struct inode *inode,
 			  struct ext4_dir_entry_2 *de,
@@ -3147,6 +3149,7 @@ static void ext4_rename_delete(handle_t *handle, struct ext4_renament *ent,
 	}
 }
 
+#if 0
 static void ext4_update_dir_count(handle_t *handle, struct ext4_renament *ent)
 {
 	if (ent->dir_nlink_delta) {
@@ -3190,6 +3193,7 @@ retry:
 	}
 	return wh;
 }
+#endif
 
 /*
  * Anybody can rename anything with this: the permission checks are left to the
@@ -3259,13 +3263,16 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	credits = (2 * EXT4_DATA_TRANS_BLOCKS(old.dir->i_sb) +
 		   EXT4_INDEX_EXTRA_TRANS_BLOCKS + 2);
+#if 0
 	if (!(flags & RENAME_WHITEOUT)) {
+#endif
 		handle = ext4_journal_start(old.dir, EXT4_HT_DIR, credits);
 		if (IS_ERR(handle)) {
 			retval = PTR_ERR(handle);
 			handle = NULL;
 			goto end_rename;
 		}
+#if 0
 	} else {
 		whiteout = ext4_whiteout_for_rename(&old, credits, &handle);
 		if (IS_ERR(whiteout)) {
@@ -3274,7 +3281,7 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 			goto end_rename;
 		}
 	}
-
+#endif
 	if (IS_DIRSYNC(old.dir) || IS_DIRSYNC(new.dir))
 		ext4_handle_sync(handle);
 
@@ -3387,6 +3394,7 @@ end_rename:
 	return retval;
 }
 
+#if 0
 static int ext4_cross_rename(struct inode *old_dir, struct dentry *old_dentry,
 			     struct inode *new_dir, struct dentry *new_dentry)
 {
@@ -3512,20 +3520,12 @@ end_rename:
 		ext4_journal_stop(handle);
 	return retval;
 }
+#endif
 
 static int ext4_rename2(struct inode *old_dir, struct dentry *old_dentry,
-			struct inode *new_dir, struct dentry *new_dentry,
-			unsigned int flags)
+			struct inode *new_dir, struct dentry *new_dentry)
 {
-	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
-		return -EINVAL;
-
-	if (flags & RENAME_EXCHANGE) {
-		return ext4_cross_rename(old_dir, old_dentry,
-					 new_dir, new_dentry);
-	}
-
-	return ext4_rename(old_dir, old_dentry, new_dir, new_dentry, flags);
+	return ext4_rename(old_dir, old_dentry, new_dir, new_dentry, 0);
 }
 
 /*
@@ -3540,15 +3540,19 @@ const struct inode_operations ext4_dir_inode_operations = {
 	.mkdir		= ext4_mkdir,
 	.rmdir		= ext4_rmdir,
 	.mknod		= ext4_mknod,
+#if 0
 	.tmpfile	= ext4_tmpfile,
-	.rename2	= ext4_rename2,
+#endif
+	.rename		= ext4_rename2,
 	.setattr	= ext4_setattr,
 	.setxattr	= generic_setxattr,
 	.getxattr	= generic_getxattr,
 	.listxattr	= ext4_listxattr,
 	.removexattr	= generic_removexattr,
 	.get_acl	= ext4_get_acl,
+#if 0
 	.set_acl	= ext4_set_acl,
+#endif
 	.fiemap         = ext4_fiemap,
 };
 
@@ -3559,5 +3563,7 @@ const struct inode_operations ext4_special_inode_operations = {
 	.listxattr	= ext4_listxattr,
 	.removexattr	= generic_removexattr,
 	.get_acl	= ext4_get_acl,
+#if 0
 	.set_acl	= ext4_set_acl,
+#endif
 };
