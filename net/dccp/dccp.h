@@ -314,10 +314,8 @@ extern int	   compat_dccp_setsockopt(struct sock *sk,
 				char __user *optval, unsigned int optlen);
 #endif
 extern int	   dccp_ioctl(struct sock *sk, int cmd, unsigned long arg);
-extern int	   dccp_sendmsg(struct kiocb *iocb, struct sock *sk,
-				struct msghdr *msg, size_t size);
-extern int	   dccp_recvmsg(struct kiocb *iocb, struct sock *sk,
-				struct msghdr *msg, size_t len, int nonblock,
+extern int	   dccp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
+extern int	   dccp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int nonblock,
 				int flags, int *addr_len);
 extern void	   dccp_shutdown(struct sock *sk, int how);
 extern int	   inet_dccp_listen(struct socket *sock, int backlog);

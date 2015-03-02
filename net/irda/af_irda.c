@@ -1283,14 +1283,13 @@ static int irda_release(struct socket *sock)
 }
 
 /*
- * Function irda_sendmsg (iocb, sock, msg, len)
+ * Function irda_sendmsg (sock, msg, len)
  *
  *    Send message down to TinyTP. This function is used for both STREAM and
  *    SEQPACK services. This is possible since it forces the client to
  *    fragment the message if necessary
  */
-static int irda_sendmsg(struct kiocb *iocb, struct socket *sock,
-			struct msghdr *msg, size_t len)
+static int irda_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self;
@@ -1375,13 +1374,13 @@ out:
 }
 
 /*
- * Function irda_recvmsg_dgram (iocb, sock, msg, size, flags)
+ * Function irda_recvmsg_dgram (sock, msg, size, flags)
  *
  *    Try to receive message and copy it to user. The frame is discarded
  *    after being read, regardless of how much the user actually read
  */
-static int irda_recvmsg_dgram(struct kiocb *iocb, struct socket *sock,
-			      struct msghdr *msg, size_t size, int flags)
+static int irda_recvmsg_dgram(struct socket *sock, struct msghdr *msg,
+			      size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self = irda_sk(sk);
@@ -1427,10 +1426,10 @@ static int irda_recvmsg_dgram(struct kiocb *iocb, struct socket *sock,
 }
 
 /*
- * Function irda_recvmsg_stream (iocb, sock, msg, size, flags)
+ * Function irda_recvmsg_stream (sock, msg, size, flags)
  */
-static int irda_recvmsg_stream(struct kiocb *iocb, struct socket *sock,
-			       struct msghdr *msg, size_t size, int flags)
+static int irda_recvmsg_stream(struct socket *sock, struct msghdr *msg,
+			       size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self = irda_sk(sk);
@@ -1546,14 +1545,14 @@ static int irda_recvmsg_stream(struct kiocb *iocb, struct socket *sock,
 }
 
 /*
- * Function irda_sendmsg_dgram (iocb, sock, msg, len)
+ * Function irda_sendmsg_dgram (sock, msg, len)
  *
  *    Send message down to TinyTP for the unreliable sequenced
  *    packet service...
  *
  */
-static int irda_sendmsg_dgram(struct kiocb *iocb, struct socket *sock,
-			      struct msghdr *msg, size_t len)
+static int irda_sendmsg_dgram(struct socket *sock, struct msghdr *msg,
+			      size_t len)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self;
@@ -1626,14 +1625,14 @@ out:
 }
 
 /*
- * Function irda_sendmsg_ultra (iocb, sock, msg, len)
+ * Function irda_sendmsg_ultra (sock, msg, len)
  *
  *    Send message down to IrLMP for the unreliable Ultra
  *    packet service...
  */
 #ifdef CONFIG_IRDA_ULTRA
-static int irda_sendmsg_ultra(struct kiocb *iocb, struct socket *sock,
-			      struct msghdr *msg, size_t len)
+static int irda_sendmsg_ultra(struct socket *sock, struct msghdr *msg,
+			      size_t len)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self;

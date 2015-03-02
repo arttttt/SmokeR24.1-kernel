@@ -1483,8 +1483,7 @@ static void tun_sock_write_space(struct sock *sk)
 	kill_fasync(&tfile->fasync, SIGIO, POLL_OUT);
 }
 
-static int tun_sendmsg(struct kiocb *iocb, struct socket *sock,
-		       struct msghdr *m, size_t total_len)
+static int tun_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len)
 {
 	int ret;
 	struct tun_file *tfile = container_of(sock, struct tun_file, socket);
@@ -1499,8 +1498,7 @@ static int tun_sendmsg(struct kiocb *iocb, struct socket *sock,
 }
 
 
-static int tun_recvmsg(struct kiocb *iocb, struct socket *sock,
-		       struct msghdr *m, size_t total_len,
+static int tun_recvmsg(struct socket *sock, struct msghdr *m, size_t total_len,
 		       int flags)
 {
 	struct tun_file *tfile = container_of(sock, struct tun_file, socket);

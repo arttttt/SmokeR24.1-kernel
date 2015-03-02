@@ -938,8 +938,8 @@ static unsigned int vsock_poll(struct file *file, struct socket *sock,
 	return mask;
 }
 
-static int vsock_dgram_sendmsg(struct kiocb *kiocb, struct socket *sock,
-			       struct msghdr *msg, size_t len)
+static int vsock_dgram_sendmsg(struct socket *sock, struct msghdr *msg,
+			       size_t len)
 {
 	int err;
 	struct sock *sk;
@@ -1062,11 +1062,10 @@ out:
 	return err;
 }
 
-static int vsock_dgram_recvmsg(struct kiocb *kiocb, struct socket *sock,
-			       struct msghdr *msg, size_t len, int flags)
+static int vsock_dgram_recvmsg(struct socket *sock, struct msghdr *msg,
+			       size_t len, int flags)
 {
-	return transport->dgram_dequeue(kiocb, vsock_sk(sock->sk), msg, len,
-					flags);
+	return transport->dgram_dequeue(vsock_sk(sock->sk), msg, len, flags);
 }
 
 static const struct proto_ops vsock_dgram_ops = {
@@ -1513,8 +1512,8 @@ static int vsock_stream_getsockopt(struct socket *sock,
 	return 0;
 }
 
-static int vsock_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
-				struct msghdr *msg, size_t len)
+static int vsock_stream_sendmsg(struct socket *sock, struct msghdr *msg,
+				size_t len)
 {
 	struct sock *sk;
 	struct vsock_sock *vsk;
@@ -1652,9 +1651,8 @@ out:
 
 
 static int
-vsock_stream_recvmsg(struct kiocb *kiocb,
-		     struct socket *sock,
-		     struct msghdr *msg, size_t len, int flags)
+vsock_stream_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
+		     int flags)
 {
 	struct sock *sk;
 	struct vsock_sock *vsk;

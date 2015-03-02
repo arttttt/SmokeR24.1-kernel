@@ -628,20 +628,15 @@ static unsigned int unix_dgram_poll(struct file *, struct socket *,
 				    poll_table *);
 static int unix_ioctl(struct socket *, unsigned int, unsigned long);
 static int unix_shutdown(struct socket *, int);
-static int unix_stream_sendmsg(struct kiocb *, struct socket *,
-			       struct msghdr *, size_t);
-static int unix_stream_recvmsg(struct kiocb *, struct socket *,
-			       struct msghdr *, size_t, int);
-static int unix_dgram_sendmsg(struct kiocb *, struct socket *,
-			      struct msghdr *, size_t);
-static int unix_dgram_recvmsg(struct kiocb *, struct socket *,
-			      struct msghdr *, size_t, int);
+static int unix_stream_sendmsg(struct socket *, struct msghdr *, size_t);
+static int unix_stream_recvmsg(struct socket *, struct msghdr *, size_t, int);
+static int unix_dgram_sendmsg(struct socket *, struct msghdr *, size_t);
+static int unix_dgram_recvmsg(struct socket *, struct msghdr *, size_t, int);
 static int unix_dgram_connect(struct socket *, struct sockaddr *,
 			      int, int);
-static int unix_seqpacket_sendmsg(struct kiocb *, struct socket *,
-				  struct msghdr *, size_t);
-static int unix_seqpacket_recvmsg(struct kiocb *, struct socket *,
-				  struct msghdr *, size_t, int);
+static int unix_seqpacket_sendmsg(struct socket *, struct msghdr *, size_t);
+static int unix_seqpacket_recvmsg(struct socket *, struct msghdr *, size_t,
+				  int);
 
 static int unix_set_peek_off(struct sock *sk, int val)
 {
@@ -1578,8 +1573,8 @@ static void maybe_add_creds(struct sk_buff *skb, const struct socket *sock,
  *	Send AF_UNIX data.
  */
 
-static int unix_dgram_sendmsg(struct kiocb *kiocb, struct socket *sock,
-			      struct msghdr *msg, size_t len)
+static int unix_dgram_sendmsg(struct socket *sock, struct msghdr *msg,
+			      size_t len)
 {
 	struct sock_iocb *siocb = kiocb_to_siocb(kiocb);
 	struct sock *sk = sock->sk;
@@ -1783,8 +1778,8 @@ out:
 }
 
 
-static int unix_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
-			       struct msghdr *msg, size_t len)
+static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
+			       size_t len)
 {
 	struct sock_iocb *siocb = kiocb_to_siocb(kiocb);
 	struct sock *sk = sock->sk;
@@ -1903,8 +1898,8 @@ out_err:
 	return sent ? : err;
 }
 
-static int unix_seqpacket_sendmsg(struct kiocb *kiocb, struct socket *sock,
-				  struct msghdr *msg, size_t len)
+static int unix_seqpacket_sendmsg(struct socket *sock, struct msghdr *msg,
+				  size_t len)
 {
 	int err;
 	struct sock *sk = sock->sk;
@@ -1919,19 +1914,18 @@ static int unix_seqpacket_sendmsg(struct kiocb *kiocb, struct socket *sock,
 	if (msg->msg_namelen)
 		msg->msg_namelen = 0;
 
-	return unix_dgram_sendmsg(kiocb, sock, msg, len);
+	return unix_dgram_sendmsg(sock, msg, len);
 }
 
-static int unix_seqpacket_recvmsg(struct kiocb *iocb, struct socket *sock,
-			      struct msghdr *msg, size_t size,
-			      int flags)
+static int unix_seqpacket_recvmsg(struct socket *sock, struct msghdr *msg,
+				  size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 
 	if (sk->sk_state != TCP_ESTABLISHED)
 		return -ENOTCONN;
 
-	return unix_dgram_recvmsg(iocb, sock, msg, size, flags);
+	return unix_dgram_recvmsg(sock, msg, size, flags);
 }
 
 static void unix_copy_addr(struct msghdr *msg, struct sock *sk)
@@ -1944,9 +1938,8 @@ static void unix_copy_addr(struct msghdr *msg, struct sock *sk)
 	}
 }
 
-static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
-			      struct msghdr *msg, size_t size,
-			      int flags)
+static int unix_dgram_recvmsg(struct socket *sock, struct msghdr *msg,
+			      size_t size, int flags)
 {
 	struct sock_iocb *siocb = kiocb_to_siocb(iocb);
 	struct scm_cookie tmp_scm;
@@ -2080,9 +2073,8 @@ static long unix_stream_data_wait(struct sock *sk, long timeo,
 	return timeo;
 }
 
-static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
-			       struct msghdr *msg, size_t size,
-			       int flags)
+static int unix_stream_recvmsg(struct socket *sock, struct msghdr *msg,
+			       size_t size, int flags)
 {
 	struct sock_iocb *siocb = kiocb_to_siocb(iocb);
 	struct scm_cookie tmp_scm;

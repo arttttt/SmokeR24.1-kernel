@@ -101,8 +101,7 @@ void pingv6_exit(void)
 	inet6_unregister_protosw(&pingv6_protosw);
 }
 
-int ping_v6_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
-		    size_t len)
+int ping_v6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);

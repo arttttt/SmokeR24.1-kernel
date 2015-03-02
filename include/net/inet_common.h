@@ -21,12 +21,11 @@ extern int __inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 extern int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
 			      int addr_len, int flags);
 extern int inet_accept(struct socket *sock, struct socket *newsock, int flags);
-extern int inet_sendmsg(struct kiocb *iocb, struct socket *sock,
-			struct msghdr *msg, size_t size);
+extern int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size);
 extern ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset,
 			     size_t size, int flags);
-extern int inet_recvmsg(struct kiocb *iocb, struct socket *sock,
-			struct msghdr *msg, size_t size, int flags);
+extern int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
+			int flags);
 extern int inet_shutdown(struct socket *sock, int how);
 extern int inet_listen(struct socket *sock, int backlog);
 extern void inet_sock_destruct(struct sock *sk);
