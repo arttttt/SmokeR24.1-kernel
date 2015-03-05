@@ -137,7 +137,6 @@ struct hw_perf_event {
 			struct hrtimer	hrtimer;
 		};
 		struct { /* tracepoint */
-			struct task_struct	*tp_target;
 			/* for tp_event->class */
 			struct list_head	tp_list;
 		};
@@ -148,12 +147,12 @@ struct hw_perf_event {
 			 * problem hw_breakpoint has with context
 			 * creation and event initalization.
 			 */
-			struct task_struct		*bp_target;
 			struct arch_hw_breakpoint	info;
 			struct list_head		bp_list;
 		};
 #endif
 	};
+	struct task_struct		*target;
 	int				state;
 	local64_t			prev_count;
 	u64				sample_period;
