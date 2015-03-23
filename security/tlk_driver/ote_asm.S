@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,11 +53,22 @@ ENTRY(tlk_fiq_glue_aarch64)
 	b	.
 ENDPROC(tlk_fiq_glue_aarch64)
 
+ENTRY(_tlk_get_mair)
+	mrs	x0, mair_el1
+	ret
+ENDPROC(_tlk_get_mair)
+
 #else
 
 ENTRY(_tlk_generic_smc)
 	smc	#0
 	mov	pc, lr
 ENDPROC(_tlk_generic_smc)
+
+ENTRY(_tlk_get_mair)
+	mrc	p15, 0, r0, c10, c2, 0
+	mrc	p15, 0, r1, c10, c2, 1
+	mov	pc, lr
+ENDPROC(_tlk_get_mair)
 
 #endif

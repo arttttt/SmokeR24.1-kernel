@@ -22,6 +22,7 @@ tlk_driver-objs += ote_comms.o
 tlk_driver-objs += ote_fs.o
 tlk_driver-objs += ote_asm.o
 tlk_driver-objs += ote_log.o
+tlk_driver-objs += ote_memory.o
 
 ifeq ($(CONFIG_ARM),y)
 plus_sec := $(call as-instr,.arch_extension sec,+sec)

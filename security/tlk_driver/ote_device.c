@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2013-2016 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,32 +40,46 @@ DEFINE_MUTEX(smc_lock);
 static int te_create_free_cmd_list(struct tlk_device *dev)
 {
 	int cmd_desc_count, ret = 0;
-	struct te_cmd_req_desc *req_desc, *tmp_req_desc;
+	struct te_cmd_req_desc *req_desc = NULL, *tmp_req_desc = NULL;
 	int bitmap_size;
 	int req_buf_size;
+	void *req_buf;
 
 	/*
 	 * TLK can map in the shared req/param buffers and do_smc
 	 * only needs to send the offsets within each (with cache coherency
 	 * being maintained by HW through an NS mapping).
 	 */
-	req_buf_size = (2 * PAGE_SIZE);
-	dev->req_param_buf = kmalloc(req_buf_size, GFP_KERNEL);
-	if (!dev->req_param_buf) {
+	req_buf_size = (4 * PAGE_SIZE);
+	req_buf = kmalloc(req_buf_size, GFP_KERNEL);
+	if (!req_buf) {
+		pr_err("%s: Failed to allocate param buffer!\n", __func__);
 		ret = -ENOMEM;
 		goto error;
 	}
 
-	/* requests in the first page, params in the second */
-	dev->req_addr   = (struct te_request *) dev->req_param_buf;
+	/* requests in 1st page, params in 2nd, pagelists in 3rd and 4th pages */
+	dev->req_addr = (struct te_request *)
+			(req_buf + (0 * PAGE_SIZE));
 	dev->param_addr = (struct te_oper_param *)
-				(dev->req_param_buf + PAGE_SIZE);
+			(req_buf + (1 * PAGE_SIZE));
+	dev->plist_addr = (uint64_t *)
+			(req_buf + (2 * PAGE_SIZE));
 
 	/* alloc param bitmap allocator */
 	bitmap_size = BITS_TO_LONGS(TE_PARAM_MAX) * sizeof(long);
 	dev->param_bitmap = kzalloc(bitmap_size, GFP_KERNEL);
 	if (!dev->param_bitmap) {
-		pr_err("Failed to allocate param bitmap\n");
+		pr_err("%s: Failed to allocate param bitmap\n", __func__);
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	/* alloc plist bitmap allocator */
+	bitmap_size = BITS_TO_LONGS(TE_PLIST_MAX) * sizeof(long);
+	dev->plist_bitmap = kzalloc(bitmap_size, GFP_KERNEL);
+	if (!dev->plist_bitmap) {
+		pr_err("%s: Failed to allocate plist bitmap\n", __func__);
 		ret = -ENOMEM;
 		goto error;
 	}
@@ -73,12 +87,20 @@ static int te_create_free_cmd_list(struct tlk_device *dev)
 	send_smc(TE_SMC_REGISTER_REQ_BUF,
 			(uintptr_t)dev->req_addr, req_buf_size);
 
+	if (!dev->req_addr || !dev->param_addr || !dev->plist_addr) {
+		pr_err("%s: Bad dev request addr/param addr/plist addr!\n",
+			__func__);
+		ret = -ENOMEM;
+		goto error;
+	}
+
 	for (cmd_desc_count = 0;
 		cmd_desc_count < TE_CMD_DESC_MAX; cmd_desc_count++) {
 
 		req_desc = kzalloc(sizeof(struct te_cmd_req_desc), GFP_KERNEL);
 		if (req_desc == NULL) {
-			pr_err("Failed to allocate cmd req descriptor\n");
+			pr_err("%s: Failed to allocate cmd req descriptor\n",
+				__func__);
 			ret = -ENOMEM;
 			goto error;
 		}
@@ -90,10 +112,10 @@ static int te_create_free_cmd_list(struct tlk_device *dev)
 	}
 	return 0;
 error:
-	if (dev->req_param_buf)
-		kfree(dev->req_param_buf);
-	if (dev->param_bitmap)
-		kfree(dev->param_bitmap);
+	pr_err("%s: Error, returning %d\n", __func__, ret);
+	kfree(req_buf);
+	kfree(dev->param_bitmap);
+	kfree(dev->plist_bitmap);
 	list_for_each_entry_safe(req_desc, tmp_req_desc,
 			&(dev->free_cmd_list), list)
 		kfree(req_desc);
@@ -247,7 +269,7 @@ static int tlk_device_release(struct inode *inode, struct file *file)
 }
 
 static int copy_params_from_user(struct te_request *req,
-	struct te_operation *operation)
+	struct te_operation *operation, struct te_oper_param *caller_params)
 {
 	struct te_oper_param *param_array;
 	struct te_oper_param *user_param;
@@ -267,18 +289,22 @@ static int copy_params_from_user(struct te_request *req,
 		if (copy_from_user(param_array + i, user_param,
 					sizeof(struct te_oper_param))) {
 			pr_err("Failed to copy operation parameter:%d, %p, " \
-					"list_count: %d\n",
-					i, user_param, operation->list_count);
+				"list_count: %d\n",
+				i, user_param, operation->list_count);
 			return 1;
 		}
 		user_param = (struct te_oper_param *)(uintptr_t)
 			param_array[i].next_ptr_user;
 	}
+
+	memcpy(caller_params, param_array,
+			sizeof(struct te_oper_param) * operation->list_count);
+
 	return 0;
 }
 
 static int copy_params_to_user(struct te_request *req,
-	struct te_operation *operation)
+	struct te_operation *operation, struct te_oper_param *caller_params)
 {
 	struct te_oper_param *param_array;
 	struct te_oper_param *user_param;
@@ -296,10 +322,25 @@ static int copy_params_to_user(struct te_request *req,
 	user_param =
 		(struct te_oper_param *)(uintptr_t)operation->list_head;
 	for (i = 0; i < req->params_size; i++) {
+		/* clear flags */
+		param_array[i].type &= ~TE_PARAM_TYPE_ALL_FLAGS;
+
+		switch(param_array[i].type) {
+		/*
+		 * Restore the memory base address as it can be overridden
+		 * while sending it to secure world
+		 */
+		case TE_PARAM_TYPE_MEM_RO:
+		case TE_PARAM_TYPE_MEM_RW:
+		case TE_PARAM_TYPE_PERSIST_MEM_RO:
+		case TE_PARAM_TYPE_PERSIST_MEM_RW:
+			param_array[i].u.Mem.base = caller_params[i].u.Mem.base;
+		}
+
 		if (copy_to_user(user_param, param_array + i,
 					sizeof(struct te_oper_param))) {
 			pr_err("Failed to copy back parameter:%d %p\n", i,
-					user_param);
+				user_param);
 			return 1;
 		}
 		user_param = (struct te_oper_param *)(uintptr_t)
@@ -315,6 +356,7 @@ static long te_handle_trustedapp_ioctl(struct file *file,
 	union te_cmd cmd;
 	struct te_operation *operation = NULL;
 	struct te_oper_param *params = NULL;
+	struct te_oper_param *caller_params = NULL;
 	struct te_request *request;
 	void __user *ptr_user_answer = NULL;
 	struct te_answer answer;
@@ -353,9 +395,19 @@ static long te_handle_trustedapp_ioctl(struct file *file,
 		request->params = (uintptr_t)params;
 		request->params_size = operation->list_count;
 
-		if (copy_params_from_user(request, operation)) {
+		if (operation->list_count > 0) {
+			caller_params = kmalloc(sizeof(struct te_oper_param) *
+					operation->list_count, GFP_KERNEL);
+			if (!caller_params) {
+				pr_err("%s: failed to allocate caller params\n", __func__);
+				err = -ENOMEM;
+				goto error;
+			}
+		}
+
+		if (copy_params_from_user(request, operation, caller_params)) {
 			err = -EFAULT;
-			pr_info("failed to copy params from user\n");
+			pr_err("%s: failed to copy params from user\n", __func__);
 			goto error;
 		}
 
@@ -404,9 +456,19 @@ static long te_handle_trustedapp_ioctl(struct file *file,
 		request->params = (uintptr_t)params;
 		request->params_size = operation->list_count;
 
-		if (copy_params_from_user(request, operation)) {
+		if (operation->list_count > 0) {
+			caller_params = kmalloc(sizeof(struct te_oper_param) *
+					operation->list_count, GFP_KERNEL);
+			if (!caller_params) {
+				pr_err("%s: failed to allocate caller params\n", __func__);
+				err = -ENOMEM;
+				goto error;
+			}
+		}
+
+		if (copy_params_from_user(request, operation, caller_params)) {
 			err = -EFAULT;
-			pr_info("failed to copy params from user\n");
+			pr_info("%s: failed to copy params from user\n", __func__);
 			goto error;
 		}
 
@@ -428,7 +490,7 @@ static long te_handle_trustedapp_ioctl(struct file *file,
 		}
 	}
 	if (request->params && !err) {
-		if (copy_params_to_user(request, operation)) {
+		if (copy_params_to_user(request, operation, caller_params)) {
 			pr_err("Failed to copy return params\n");
 			err = -EFAULT;
 		}
@@ -439,6 +501,7 @@ error:
 		te_put_used_cmd_desc(dev, cmd_desc);
 	if (params)
 		te_put_free_params(dev, params, operation->list_count);
+	kfree(caller_params);
 	return err;
 }
 
