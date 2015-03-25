@@ -1318,7 +1318,7 @@ static int register_probe_event(struct trace_probe *tp)
 		kfree(call->print_fmt);
 		return -ENODEV;
 	}
-	call->flags = 0;
+	call->flags = TRACE_EVENT_FL_KPROBE;
 	call->class->reg = kprobe_register;
 	call->data = tp;
 	ret = trace_add_event_call(call);
