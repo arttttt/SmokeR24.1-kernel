@@ -15,20 +15,13 @@
 /* core.c */
 extern unsigned int nf_iterate(struct list_head *head,
 				struct sk_buff *skb,
-				unsigned int hook,
-				const struct net_device *indev,
-				const struct net_device *outdev,
-				struct nf_hook_ops **elemp,
-				int (*okfn)(struct sk_buff *),
-				int hook_thresh);
+				struct nf_hook_state *state,
+				struct nf_hook_ops **elemp);
 
 /* nf_queue.c */
 extern int nf_queue(struct sk_buff *skb,
 		    struct nf_hook_ops *elem,
-		    u_int8_t pf, unsigned int hook,
-		    struct net_device *indev,
-		    struct net_device *outdev,
-		    int (*okfn)(struct sk_buff *),
+		    struct nf_hook_state *state,
 		    unsigned int queuenum);
 extern int __init netfilter_queue_init(void);
 
