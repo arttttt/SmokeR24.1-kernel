@@ -47,14 +47,13 @@ static unsigned int alloc_null_binding(struct nf_conn *ct, unsigned int hooknum)
 }
 
 static unsigned int nf_nat_rule_find(struct sk_buff *skb, unsigned int hooknum,
-				     const struct net_device *in,
-				     const struct net_device *out,
+				     const struct nf_hook_state *state,
 				     struct nf_conn *ct)
 {
 	struct net *net = nf_ct_net(ct);
 	unsigned int ret;
 
-	ret = ip6t_do_table(skb, hooknum, in, out, net->ipv6.ip6table_nat);
+	ret = ip6t_do_table(skb, hooknum, state, net->ipv6.ip6table_nat);
 	if (ret == NF_ACCEPT) {
 		if (!nf_nat_initialized(ct, HOOK2MANIP(hooknum)))
 			ret = alloc_null_binding(ct, hooknum);
@@ -123,8 +122,7 @@ nf_nat_ipv6_fn(const struct nf_hook_ops *ops,
 		if (!nf_nat_initialized(ct, maniptype)) {
 			unsigned int ret;
 
-			ret = nf_nat_rule_find(skb, ops->hooknum, state->in,
-					       state->out, ct);
+			ret = nf_nat_rule_find(skb, ops->hooknum, state, ct);
 			if (ret != NF_ACCEPT)
 				return ret;
 		} else {
