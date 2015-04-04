@@ -1246,8 +1246,7 @@ ignore_cp:
  */
 static unsigned int
 ip_vs_reply4(const struct nf_hook_ops *ops, struct sk_buff *skb,
-	     const struct net_device *in, const struct net_device *out,
-	     int (*okfn)(struct sk_buff *))
+	     const struct nf_hook_state *state)
 {
 	return ip_vs_out(ops->hooknum, skb, AF_INET);
 }
@@ -1258,8 +1257,7 @@ ip_vs_reply4(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_local_reply4(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		   const struct net_device *in, const struct net_device *out,
-		   int (*okfn)(struct sk_buff *))
+		   const struct nf_hook_state *state)
 {
 	return ip_vs_out(ops->hooknum, skb, AF_INET);
 }
@@ -1273,8 +1271,7 @@ ip_vs_local_reply4(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_reply6(const struct nf_hook_ops *ops, struct sk_buff *skb,
-	     const struct net_device *in, const struct net_device *out,
-	     int (*okfn)(struct sk_buff *))
+	     const struct nf_hook_state *state)
 {
 	return ip_vs_out(ops->hooknum, skb, AF_INET6);
 }
@@ -1285,8 +1282,7 @@ ip_vs_reply6(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_local_reply6(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		   const struct net_device *in, const struct net_device *out,
-		   int (*okfn)(struct sk_buff *))
+		   const struct nf_hook_state *state)
 {
 	return ip_vs_out(ops->hooknum, skb, AF_INET6);
 }
@@ -1738,9 +1734,7 @@ ip_vs_in(unsigned int hooknum, struct sk_buff *skb, int af)
  */
 static unsigned int
 ip_vs_remote_request4(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		      const struct net_device *in,
-		      const struct net_device *out,
-		      int (*okfn)(struct sk_buff *))
+		      const struct nf_hook_state *state)
 {
 	return ip_vs_in(ops->hooknum, skb, AF_INET);
 }
@@ -1751,8 +1745,7 @@ ip_vs_remote_request4(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_local_request4(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		     const struct net_device *in, const struct net_device *out,
-		     int (*okfn)(struct sk_buff *))
+		     const struct nf_hook_state *state)
 {
 	return ip_vs_in(ops->hooknum, skb, AF_INET);
 }
@@ -1765,9 +1758,7 @@ ip_vs_local_request4(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_remote_request6(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		      const struct net_device *in,
-		      const struct net_device *out,
-		      int (*okfn)(struct sk_buff *))
+		      const struct nf_hook_state *state)
 {
 	return ip_vs_in(ops->hooknum, skb, AF_INET6);
 }
@@ -1778,8 +1769,7 @@ ip_vs_remote_request6(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_local_request6(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		     const struct net_device *in, const struct net_device *out,
-		     int (*okfn)(struct sk_buff *))
+		     const struct nf_hook_state *state)
 {
 	return ip_vs_in(ops->hooknum, skb, AF_INET6);
 }
@@ -1798,8 +1788,7 @@ ip_vs_local_request6(const struct nf_hook_ops *ops, struct sk_buff *skb,
  */
 static unsigned int
 ip_vs_forward_icmp(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		   const struct net_device *in, const struct net_device *out,
-		   int (*okfn)(struct sk_buff *))
+		   const struct nf_hook_state *state)
 {
 	int r;
 	struct net *net;
@@ -1820,8 +1809,7 @@ ip_vs_forward_icmp(const struct nf_hook_ops *ops, struct sk_buff *skb,
 #ifdef CONFIG_IP_VS_IPV6
 static unsigned int
 ip_vs_forward_icmp_v6(const struct nf_hook_ops *ops, struct sk_buff *skb,
-		      const struct net_device *in, const struct net_device *out,
-		      int (*okfn)(struct sk_buff *))
+		      const struct nf_hook_state *state)
 {
 	int r;
 	struct net *net;
