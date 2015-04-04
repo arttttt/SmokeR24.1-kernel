@@ -63,9 +63,7 @@ static unsigned int nf_nat_rule_find(struct sk_buff *skb, unsigned int hooknum,
 static unsigned int
 nf_nat_ipv4_fn(const struct nf_hook_ops *ops,
 	       struct sk_buff *skb,
-	       const struct net_device *in,
-	       const struct net_device *out,
-	       int (*okfn)(struct sk_buff *))
+	       const struct nf_hook_state *state)
 {
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
@@ -121,14 +119,16 @@ nf_nat_ipv4_fn(const struct nf_hook_ops *ops,
 		if (!nf_nat_initialized(ct, maniptype)) {
 			unsigned int ret;
 
-			ret = nf_nat_rule_find(skb, ops->hooknum, in, out, ct);
+			ret = nf_nat_rule_find(skb, ops->hooknum, state->in,
+					       state->out, ct);
 			if (ret != NF_ACCEPT)
 				return ret;
 		} else {
 			pr_debug("Already setup manip %s for ct %p\n",
 				 maniptype == NF_NAT_MANIP_SRC ? "SRC" : "DST",
 				 ct);
-			if (nf_nat_oif_changed(ops->hooknum, ctinfo, nat, out))
+			if (nf_nat_oif_changed(ops->hooknum, ctinfo, nat,
+					       state->out))
 				goto oif_changed;
 		}
 		break;
@@ -137,7 +137,8 @@ nf_nat_ipv4_fn(const struct nf_hook_ops *ops,
 		/* ESTABLISHED */
 		NF_CT_ASSERT(ctinfo == IP_CT_ESTABLISHED ||
 			     ctinfo == IP_CT_ESTABLISHED_REPLY);
-		if (nf_nat_oif_changed(ops->hooknum, ctinfo, nat, out))
+		if (nf_nat_oif_changed(ops->hooknum, ctinfo, nat,
+				       state->out))
 			goto oif_changed;
 	}
 
@@ -151,14 +152,12 @@ oif_changed:
 static unsigned int
 nf_nat_ipv4_in(const struct nf_hook_ops *ops,
 	       struct sk_buff *skb,
-	       const struct net_device *in,
-	       const struct net_device *out,
-	       int (*okfn)(struct sk_buff *))
+	       const struct nf_hook_state *state)
 {
 	unsigned int ret;
 	__be32 daddr = ip_hdr(skb)->daddr;
 
-	ret = nf_nat_ipv4_fn(ops, skb, in, out, okfn);
+	ret = nf_nat_ipv4_fn(ops, skb, state);
 	if (ret != NF_DROP && ret != NF_STOLEN &&
 	    daddr != ip_hdr(skb)->daddr)
 		skb_dst_drop(skb);
@@ -169,9 +168,7 @@ nf_nat_ipv4_in(const struct nf_hook_ops *ops,
 static unsigned int
 nf_nat_ipv4_out(const struct nf_hook_ops *ops,
 		struct sk_buff *skb,
-		const struct net_device *in,
-		const struct net_device *out,
-		int (*okfn)(struct sk_buff *))
+		const struct nf_hook_state *state)
 {
 #ifdef CONFIG_XFRM
 	const struct nf_conn *ct;
@@ -185,7 +182,7 @@ nf_nat_ipv4_out(const struct nf_hook_ops *ops,
 	    ip_hdrlen(skb) < sizeof(struct iphdr))
 		return NF_ACCEPT;
 
-	ret = nf_nat_ipv4_fn(ops, skb, in, out, okfn);
+	ret = nf_nat_ipv4_fn(ops, skb, state);
 #ifdef CONFIG_XFRM
 	if (ret != NF_DROP && ret != NF_STOLEN &&
 	    !(IPCB(skb)->flags & IPSKB_XFRM_TRANSFORMED) &&
@@ -209,9 +206,7 @@ nf_nat_ipv4_out(const struct nf_hook_ops *ops,
 static unsigned int
 nf_nat_ipv4_local_fn(const struct nf_hook_ops *ops,
 		     struct sk_buff *skb,
-		     const struct net_device *in,
-		     const struct net_device *out,
-		     int (*okfn)(struct sk_buff *))
+		     const struct nf_hook_state *state)
 {
 	const struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
@@ -223,7 +218,7 @@ nf_nat_ipv4_local_fn(const struct nf_hook_ops *ops,
 	    ip_hdrlen(skb) < sizeof(struct iphdr))
 		return NF_ACCEPT;
 
-	ret = nf_nat_ipv4_fn(ops, skb, in, out, okfn);
+	ret = nf_nat_ipv4_fn(ops, skb, state);
 	if (ret != NF_DROP && ret != NF_STOLEN &&
 	    (ct = nf_ct_get(skb, &ctinfo)) != NULL) {
 		enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
