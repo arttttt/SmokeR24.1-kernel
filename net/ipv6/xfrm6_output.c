@@ -122,17 +122,17 @@ int xfrm6_prepare_output(struct xfrm_state *x, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(xfrm6_prepare_output);
 
-int xfrm6_output_finish(struct sk_buff *skb)
+int xfrm6_output_finish(struct sock *sk, struct sk_buff *skb)
 {
 #ifdef CONFIG_NETFILTER
 	IP6CB(skb)->flags |= IP6SKB_XFRM_TRANSFORMED;
 #endif
 
 	skb->protocol = htons(ETH_P_IPV6);
-	return xfrm_output(skb);
+	return xfrm_output(sk, skb);
 }
 
-static int __xfrm6_output(struct sk_buff *skb)
+static int __xfrm6_output(struct sock *sk, struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 	struct xfrm_state *x = dst->xfrm;
@@ -149,13 +149,14 @@ static int __xfrm6_output(struct sk_buff *skb)
 	if (x->props.mode == XFRM_MODE_TUNNEL &&
 	    ((skb->len > mtu && !skb_is_gso(skb)) ||
 		dst_allfrag(skb_dst(skb)))) {
-			return ip6_fragment(skb, x->outer_mode->afinfo->output_finish);
+			return ip6_fragment(sk, skb,
+					    x->outer_mode->afinfo->output_finish);
 	}
-	return x->outer_mode->afinfo->output_finish(skb);
+	return x->outer_mode->afinfo->output_finish(sk, skb);
 }
 
 int xfrm6_output(struct sock *sk, struct sk_buff *skb)
 {
-	return NF_HOOK(NFPROTO_IPV6, NF_INET_POST_ROUTING, skb, NULL,
-		       skb_dst(skb)->dev, __xfrm6_output);
+	return NF_HOOK(NFPROTO_IPV6, NF_INET_POST_ROUTING, sk, skb,
+		       NULL, skb_dst(skb)->dev, __xfrm6_output);
 }

@@ -104,7 +104,7 @@ static int ip_forward_finish_gso(struct sk_buff *skb)
 	return ret;
 }
 
-static int ip_forward_finish(struct sk_buff *skb)
+static int ip_forward_finish(struct sock *sk, struct sk_buff *skb)
 {
 	struct ip_options *opt	= &(IPCB(skb)->opt);
 
@@ -117,7 +117,7 @@ static int ip_forward_finish(struct sk_buff *skb)
 	if (ip_gso_exceeds_dst_mtu(skb))
 		return ip_forward_finish_gso(skb);
 
-	return dst_output(skb);
+	return dst_output_sk(sk, skb);
 }
 
 int ip_forward(struct sk_buff *skb)
@@ -184,8 +184,8 @@ int ip_forward(struct sk_buff *skb)
 
 	skb->priority = rt_tos2priority(iph->tos);
 
-	return NF_HOOK(NFPROTO_IPV4, NF_INET_FORWARD, skb, skb->dev,
-		       rt->dst.dev, ip_forward_finish);
+	return NF_HOOK(NFPROTO_IPV4, NF_INET_FORWARD, NULL, skb,
+		       skb->dev, rt->dst.dev, ip_forward_finish);
 
 sr_failed:
 	/*

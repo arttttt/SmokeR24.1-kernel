@@ -1671,7 +1671,7 @@ static void ip_encap(struct sk_buff *skb, __be32 saddr, __be32 daddr)
 	nf_reset(skb);
 }
 
-static inline int ipmr_forward_finish(struct sk_buff *skb)
+static inline int ipmr_forward_finish(struct sock *sk, struct sk_buff *skb)
 {
 	struct ip_options *opt = &(IPCB(skb)->opt);
 
@@ -1681,7 +1681,7 @@ static inline int ipmr_forward_finish(struct sk_buff *skb)
 	if (unlikely(opt->optlen))
 		ip_forward_options(skb);
 
-	return dst_output(skb);
+	return dst_output_sk(sk, skb);
 }
 
 /*
@@ -1780,7 +1780,8 @@ static void ipmr_queue_xmit(struct net *net, struct mr_table *mrt,
 	 * not mrouter) cannot join to more than one interface - it will
 	 * result in receiving multiple packets.
 	 */
-	NF_HOOK(NFPROTO_IPV4, NF_INET_FORWARD, skb, skb->dev, dev,
+	NF_HOOK(NFPROTO_IPV4, NF_INET_FORWARD, NULL, skb,
+		skb->dev, dev,
 		ipmr_forward_finish);
 	return;
 

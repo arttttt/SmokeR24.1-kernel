@@ -404,10 +404,10 @@ extern int br_fdb_dump(struct sk_buff *skb,
 /* br_forward.c */
 extern void br_deliver(const struct net_bridge_port *to,
 		struct sk_buff *skb);
-extern int br_dev_queue_push_xmit(struct sk_buff *skb);
+extern int br_dev_queue_push_xmit(struct sock *sk, struct sk_buff *skb);
 extern void br_forward(const struct net_bridge_port *to,
 		struct sk_buff *skb, struct sk_buff *skb0);
-extern int br_forward_finish(struct sk_buff *skb);
+extern int br_forward_finish(struct sock *sk, struct sk_buff *skb);
 extern void br_flood_deliver(struct net_bridge *br, struct sk_buff *skb);
 extern void br_flood_forward(struct net_bridge *br, struct sk_buff *skb,
 			     struct sk_buff *skb2);
@@ -426,7 +426,7 @@ extern netdev_features_t br_features_recompute(struct net_bridge *br,
 	netdev_features_t features);
 
 /* br_input.c */
-extern int br_handle_frame_finish(struct sk_buff *skb);
+extern int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb);
 extern rx_handler_result_t br_handle_frame(struct sk_buff **pskb);
 
 static inline bool br_rx_handler_check_rcu(const struct net_device *dev)
