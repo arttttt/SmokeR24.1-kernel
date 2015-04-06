@@ -1694,8 +1694,12 @@ extern int		dev_alloc_name(struct net_device *dev, const char *name);
 extern int		dev_open(struct net_device *dev);
 extern int		dev_close(struct net_device *dev);
 extern void		dev_disable_lro(struct net_device *dev);
-extern int		dev_loopback_xmit(struct sk_buff *newskb);
-extern int		dev_queue_xmit(struct sk_buff *skb);
+extern int		dev_loopback_xmit(struct sock *sk, struct sk_buff *newskb);
+extern int		dev_queue_xmit_sk(struct sock *sk, struct sk_buff *skb);
+static inline int dev_queue_xmit(struct sk_buff *skb)
+{
+	return dev_queue_xmit_sk(skb->sk, skb);
+}
 extern int		register_netdevice(struct net_device *dev);
 extern void		unregister_netdevice_queue(struct net_device *dev,
 						   struct list_head *head);
@@ -2211,7 +2215,11 @@ extern void dev_kfree_skb_any(struct sk_buff *skb);
 
 extern int		netif_rx(struct sk_buff *skb);
 extern int		netif_rx_ni(struct sk_buff *skb);
-extern int		netif_receive_skb(struct sk_buff *skb);
+extern int		netif_receive_skb_sk(struct sock *sk, struct sk_buff *skb);
+static inline int netif_receive_skb(struct sk_buff *skb)
+{
+	return netif_receive_skb_sk(skb->sk, skb);
+}
 extern gro_result_t	napi_gro_receive(struct napi_struct *napi,
 					 struct sk_buff *skb);
 extern void		napi_gro_flush(struct napi_struct *napi, bool flush_old);
