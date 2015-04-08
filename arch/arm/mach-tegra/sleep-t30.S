@@ -925,13 +925,14 @@ pllm_state:
  *
  * LP0 entry check conditions w.r.t BB take place here
  */
-tegra3_tear_down_core:
+ENTRY(tegra3_tear_down_core)
 	bl	tegra3_save_config
 	bl	tegra3_sdram_self_refresh
 	bl	tegra3_cpu_clk32k
 	b	tegra3_enter_sleep
+ENDPROC(tegra3_tear_down_core)
 
-tegra3_stop_mc_clk:
+ENTRY(tegra3_stop_mc_clk)
 	bl	tegra3_save_config
 	bl	tegra3_sdram_self_refresh
 	mov	r1, #(1 << 25)
@@ -967,6 +968,7 @@ tegra3_stop_mc_clk:
 	str	r0, [r5, #CLK_RESET_PLLM_BASE]
 
 	b	tegra3_enter_sleep
+ENDPROC(tegra3_stop_mc_clk)
 
 /*
  * tegra3_cpu_clk32k
