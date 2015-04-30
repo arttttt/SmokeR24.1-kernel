@@ -1154,7 +1154,12 @@ static bool tcp_check_dsack(struct sock *sk, const struct sk_buff *ack_skb,
 struct tcp_sacktag_state {
 	int	reord;
 	int	fack_count;
-	long	rtt_us; /* RTT measured by SACKing never-retransmitted data */
+	/* Timestamps for earliest and latest never-retransmitted segment
+	 * that was SACKed. RTO needs the earliest RTT to stay conservative,
+	 * but congestion control should still get an accurate delay signal.
+	 */
+	struct skb_mstamp first_sackt;
+	struct skb_mstamp last_sackt;
 	int	flag;
 };
 
@@ -1259,14 +1264,9 @@ static u8 tcp_sacktag_one(struct sock *sk,
 							   state->reord);
 				if (!after(end_seq, tp->high_seq))
 					state->flag |= FLAG_ORIG_SACK_ACKED;
-				/* Pick the earliest sequence sacked for RTT */
-				if (state->rtt_us < 0) {
-					struct skb_mstamp now;
-
-					skb_mstamp_get(&now);
-					state->rtt_us = skb_mstamp_us_delta(&now,
-								xmit_time);
-				}
+				if (state->first_sackt.v64 == 0)
+					state->first_sackt = *xmit_time;
+				state->last_sackt = *xmit_time;
 			}
 
 			if (sacked & TCPCB_LOST) {
@@ -3125,7 +3125,8 @@ static u32 tcp_tso_acked(struct sock *sk, struct sk_buff *skb)
  * arrived at the other end.
  */
 static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
-			       u32 prior_snd_una, int *acked, long sack_rtt_us)
+			       u32 prior_snd_una, int *acked,
+			       struct tcp_sacktag_state *sack)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct skb_mstamp first_ackt, last_ackt, now;
@@ -3133,8 +3134,9 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 	u32 prior_sacked = tp->sacked_out;
 	u32 reord = tp->packets_out;
 	bool fully_acked = true;
-	long ca_rtt_us = -1L;
+	long sack_rtt_us = -1L;
 	long seq_rtt_us = -1L;
+	long ca_rtt_us = -1L;
 	struct sk_buff *skb;
 	u32 pkts_acked = 0;
 	u32 last_in_flight = 0;
@@ -3228,6 +3230,10 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 	if (first_ackt.v64) {
 		seq_rtt_us = skb_mstamp_us_delta(&now, &first_ackt);
 		ca_rtt_us = skb_mstamp_us_delta(&now, &last_ackt);
+	}
+	if (sack->first_sackt.v64) {
+		sack_rtt_us = skb_mstamp_us_delta(&now, &sack->first_sackt);
+		ca_rtt_us = skb_mstamp_us_delta(&now, &sack->last_sackt);
 	}
 
 	rtt_update = tcp_ack_update_rtt(sk, flag, seq_rtt_us, sack_rtt_us,
@@ -3558,7 +3564,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	int acked = 0; /* Number of packets newly acked */
 	int rexmit = REXMIT_NONE; /* Flag to (re)transmit to recover losses */
 
-	sack_state.rtt_us = -1L;
+	sack_state.first_sackt.v64 = 0;
 
 	/* If the ack is older than previous acks
 	 * then we can probably ignore it.
@@ -3631,7 +3637,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 	/* See if we can take anything off of the retransmit queue. */
 	flag |= tcp_clean_rtx_queue(sk, prior_fackets, prior_snd_una, &acked,
-				    sack_state.rtt_us);
+				    &sack_state);
 
 	if (tp->tlp_high_seq)
 		tcp_process_tlp_ack(sk, ack, flag);
