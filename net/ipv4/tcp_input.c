@@ -3240,9 +3240,6 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 					ca_rtt_us);
 
 	if (flag & FLAG_ACKED) {
-		const struct tcp_congestion_ops *ca_ops
-			= inet_csk(sk)->icsk_ca_ops;
-
 		tcp_rearm_rto(sk);
 		if (unlikely(icsk->icsk_mtup.probe_size &&
 			     !after(tp->mtu_probe.probe_seq_end, tp->snd_una))) {
@@ -3264,14 +3261,6 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 		}
 
 		tp->fackets_out -= min(pkts_acked, tp->fackets_out);
-
-		if (ca_ops->pkts_acked) {
-			struct ack_sample sample = { .pkts_acked = pkts_acked,
-						     .rtt_us = ca_rtt_us,
-						     .in_flight = last_in_flight };
-			ca_ops->pkts_acked(sk, &sample);
-		}
-
 	} else if (skb && rtt_update && sack_rtt_us >= 0 &&
 		   sack_rtt_us > skb_mstamp_us_delta(&now, &skb->skb_mstamp)) {
 		/* Do not re-arm RTO if the sack RTT is measured from data sent
@@ -3279,6 +3268,13 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 		 * timeout may continue to extend in loss recovery.
 		 */
 		tcp_rearm_rto(sk);
+	}
+
+        if (icsk->icsk_ca_ops->pkts_acked) {
+                struct ack_sample sample = { .pkts_acked = pkts_acked,
+                                             .rtt_us = ca_rtt_us,
+                                             .in_flight = last_in_flight };
+		icsk->icsk_ca_ops->pkts_acked(sk, &sample);
 	}
 
 #if FASTRETRANS_DEBUG > 0
