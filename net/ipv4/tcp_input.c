@@ -1677,7 +1677,7 @@ static int tcp_sack_cache_ok(const struct tcp_sock *tp, const struct tcp_sack_bl
 
 static int
 tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
-			u32 prior_snd_una, long *sack_rtt_us)
+			u32 prior_snd_una, struct tcp_sacktag_state *state)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	const unsigned char *ptr = (skb_transport_header(ack_skb) +
@@ -1685,7 +1685,6 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 	struct tcp_sack_block_wire *sp_wire = (struct tcp_sack_block_wire *)(ptr+2);
 	struct tcp_sack_block sp[TCP_NUM_SACKS];
 	struct tcp_sack_block *cache;
-	struct tcp_sacktag_state state;
 	struct sk_buff *skb;
 	int num_sacks = min(TCP_NUM_SACKS, (ptr[1] - TCPOLEN_SACK_BASE) >> 3);
 	int used_sacks;
@@ -1693,9 +1692,8 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 	int i, j;
 	int first_sack_index;
 
-	state.flag = 0;
-	state.reord = tp->packets_out;
-	state.rtt_us = -1L;
+	state->flag = 0;
+	state->reord = tp->packets_out;
 
 	if (!tp->sacked_out) {
 		if (WARN_ON(tp->fackets_out))
@@ -1706,7 +1704,7 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 	found_dup_sack = tcp_check_dsack(sk, ack_skb, sp_wire,
 					 num_sacks, prior_snd_una);
 	if (found_dup_sack)
-		state.flag |= FLAG_DSACKING_ACK;
+		state->flag |= FLAG_DSACKING_ACK;
 
 	/* Eliminate too old ACKs, but take into
 	 * account more or less fresh ones, they can
@@ -1771,7 +1769,7 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 	}
 
 	skb = tcp_write_queue_head(sk);
-	state.fack_count = 0;
+	state->fack_count = 0;
 	i = 0;
 
 	if (!tp->sacked_out) {
@@ -1805,10 +1803,10 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 
 			/* Head todo? */
 			if (before(start_seq, cache->start_seq)) {
-				skb = tcp_sacktag_skip(skb, sk, &state,
+				skb = tcp_sacktag_skip(skb, sk, state,
 						       start_seq);
 				skb = tcp_sacktag_walk(skb, sk, next_dup,
-						       &state,
+						       state,
 						       start_seq,
 						       cache->start_seq,
 						       dup_sack);
@@ -1819,7 +1817,7 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 				goto advance_sp;
 
 			skb = tcp_maybe_skipping_dsack(skb, sk, next_dup,
-						       &state,
+						       state,
 						       cache->end_seq);
 
 			/* ...tail remains todo... */
@@ -1828,12 +1826,12 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 				skb = tcp_highest_sack(sk);
 				if (skb == NULL)
 					break;
-				state.fack_count = tp->fackets_out;
+				state->fack_count = tp->fackets_out;
 				cache++;
 				goto walk;
 			}
 
-			skb = tcp_sacktag_skip(skb, sk, &state, cache->end_seq);
+			skb = tcp_sacktag_skip(skb, sk, state, cache->end_seq);
 			/* Check overlap against next cached too (past this one already) */
 			cache++;
 			continue;
@@ -1843,12 +1841,12 @@ tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
 			skb = tcp_highest_sack(sk);
 			if (skb == NULL)
 				break;
-			state.fack_count = tp->fackets_out;
+			state->fack_count = tp->fackets_out;
 		}
-		skb = tcp_sacktag_skip(skb, sk, &state, start_seq);
+		skb = tcp_sacktag_skip(skb, sk, state, start_seq);
 
 walk:
-		skb = tcp_sacktag_walk(skb, sk, next_dup, &state,
+		skb = tcp_sacktag_walk(skb, sk, next_dup, state,
 				       start_seq, end_seq, dup_sack);
 
 advance_sp:
@@ -1863,13 +1861,13 @@ advance_sp:
 	for (j = 0; j < used_sacks; j++)
 		tp->recv_sack_cache[i++] = sp[j];
 
-	tcp_mark_lost_retrans(sk, &state.flag);
+	tcp_mark_lost_retrans(sk, &state->flag);
 
 	tcp_verify_left_out(tp);
 
-	if ((state.reord < tp->fackets_out) &&
+	if ((state->reord < tp->fackets_out) &&
 	    ((inet_csk(sk)->icsk_ca_state != TCP_CA_Loss) || tp->undo_marker))
-		tcp_update_reordering(sk, tp->fackets_out - state.reord, 0);
+		tcp_update_reordering(sk, tp->fackets_out - state->reord, 0);
 
 out:
 
@@ -1879,8 +1877,7 @@ out:
 	WARN_ON((int)tp->retrans_out < 0);
 	WARN_ON((int)tcp_packets_in_flight(tp) < 0);
 #endif
-	*sack_rtt_us = state.rtt_us;
-	return state.flag;
+	return state->flag;
 }
 
 /* Limits sacked_out so that sum with lost_out isn't ever larger than
@@ -3549,6 +3546,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_sacktag_state sack_state;
 	u32 prior_snd_una = tp->snd_una;
 	u32 ack_seq = TCP_SKB_CB(skb)->seq;
 	u32 ack = TCP_SKB_CB(skb)->ack_seq;
@@ -3559,7 +3557,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	u32 prior_delivered = tp->delivered;
 	int acked = 0; /* Number of packets newly acked */
 	int rexmit = REXMIT_NONE; /* Flag to (re)transmit to recover losses */
-	long sack_rtt_us = -1L;
+
+	sack_state.rtt_us = -1L;
 
 	/* If the ack is older than previous acks
 	 * then we can probably ignore it.
@@ -3613,7 +3612,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 		if (TCP_SKB_CB(skb)->sacked)
 			flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una,
-							&sack_rtt_us);
+							&sack_state);
 
 		if (TCP_ECN_rcv_ecn_echo(tp, tcp_hdr(skb)))
 			flag |= FLAG_ECE;
@@ -3632,7 +3631,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 	/* See if we can take anything off of the retransmit queue. */
 	flag |= tcp_clean_rtx_queue(sk, prior_fackets, prior_snd_una, &acked,
-				    sack_rtt_us);
+				    sack_state.rtt_us);
 
 	if (tp->tlp_high_seq)
 		tcp_process_tlp_ack(sk, ack, flag);
@@ -3680,7 +3679,7 @@ old_ack:
 	 */
 	if (TCP_SKB_CB(skb)->sacked) {
 		flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una,
-						&sack_rtt_us);
+						&sack_state);
 		tcp_fastretrans_alert(sk, acked, is_dupack, &flag, &rexmit);
 		tcp_xmit_recovery(sk, rexmit);
 	}
