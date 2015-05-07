@@ -33,6 +33,8 @@
 #include "s5h1411.h"
 #include "lgdt3305.h"
 #include "mb86a20s.h"
+#include "si2157.h"
+#include "lgdt3306a.h"
 
 MODULE_DESCRIPTION("driver for cx231xx based DVB cards");
 MODULE_AUTHOR("Srinivasa Deevi <srinivasa.deevi@conexant.com>");
@@ -149,6 +151,23 @@ static struct tda18271_config pv_tda18271_config = {
 	.std_map = &mb86a20s_tda18271_config,
 	.gate    = TDA18271_GATE_DIGITAL,
 	.small_i2c = TDA18271_03_BYTE_CHUNK_INIT,
+};
+
+static struct lgdt3306a_config hauppauge_955q_lgdt3306a_config = {
+	.i2c_addr           = 0x59,
+	.qam_if_khz         = 4000,
+	.vsb_if_khz         = 3250,
+	.deny_i2c_rptr      = 1,
+	.spectral_inversion = 1,
+	.mpeg_mode          = LGDT3306A_MPEG_SERIAL,
+	.tpclk_edge         = LGDT3306A_TPCLK_RISING_EDGE,
+	.tpvalid_polarity   = LGDT3306A_TP_VALID_HIGH,
+	.xtalMHz            = 25,
+};
+
+static struct si2157_config si2157_config = {
+	.i2c_addr           = 0x60,
+	.inversion			= true,
 };
 
 static inline void print_err_status(struct cx231xx *dev, int packet, int status)
@@ -701,6 +720,30 @@ static int dvb_init(struct cx231xx *dev)
 		dvb_attach(tda18271_attach, dev->dvb->frontend,
 			   0x60, &dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
 			   &hcw_tda18271_config);
+		break;
+
+	case CX231XX_BOARD_HAUPPAUGE_955Q:
+
+		printk(KERN_INFO "%s: looking for tuner / demod on i2c bus: %d\n",
+		       __func__, i2c_adapter_id(&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap));
+
+		dev->dvb->frontend = dvb_attach(lgdt3306a_attach,
+						&hauppauge_955q_lgdt3306a_config,
+						&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap);
+
+		if (dev->dvb->frontend == NULL) {
+			printk(DRIVER_NAME
+			       ": Failed to attach LG3306A front end\n");
+			result = -EINVAL;
+			goto out_free;
+		}
+
+		/* define general-purpose callback pointer */
+		dvb->frontend->callback = cx231xx_tuner_callback;
+
+		dvb_attach(si2157_attach, dev->dvb->frontend,
+			   &dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
+			   &si2157_config);
 		break;
 
 	case CX231XX_BOARD_PV_PLAYTV_USB_HYBRID:
