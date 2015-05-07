@@ -73,6 +73,9 @@
 #define CX231XX_BOARD_ELGATO_VIDEO_CAPTURE_V2 16
 #define CX231XX_BOARD_OTG102 17
 #define CX231XX_BOARD_HAUPPAUGE_955Q 18
+#define CX231XX_BOARD_AVERMEDIA_H837A 19
+#define CX231XX_BOARD_AVERMEDIA_H837B 20
+#define CX231XX_BOARD_AVERMEDIA_H837M 21
 
 /* Limits minimum and default number of buffers */
 #define CX231XX_MIN_BUF                 4
@@ -1006,4 +1009,16 @@ static inline unsigned int norm_maxh(struct cx231xx *dev)
 	else
 		return (dev->norm & V4L2_STD_625_50) ? 576 : 480;
 }
+
+static inline bool is_model_avermedia_h837_series(int model)
+{
+	switch (model) {
+		case CX231XX_BOARD_AVERMEDIA_H837A:
+		case CX231XX_BOARD_AVERMEDIA_H837B:
+		case CX231XX_BOARD_AVERMEDIA_H837M:
+			return true;
+	}
+	return false;
+}
+
 #endif
