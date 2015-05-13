@@ -129,6 +129,7 @@
 #include <linux/inetdevice.h>
 #include <linux/cpu_rmap.h>
 #include <linux/static_key.h>
+#include <linux/netfilter_ingress.h>
 
 #include "net-sysfs.h"
 
@@ -3418,6 +3419,13 @@ static inline struct sk_buff *handle_ing(struct sk_buff *skb,
 
 	return skb;
 }
+#else
+static inline struct sk_buff *handle_ing(struct sk_buff *skb,
+					 struct packet_type **pt_prev,
+					 int *ret, struct net_device *orig_dev)
+{
+	return skb;
+}
 #endif
 
 /**
@@ -3507,6 +3515,28 @@ static bool skb_pfmemalloc_protocol(struct sk_buff *skb)
 	}
 }
 
+#ifdef CONFIG_NETFILTER_INGRESS
+static inline int nf_ingress(struct sk_buff *skb, struct packet_type **pt_prev,
+			     int *ret, struct net_device *orig_dev)
+{
+	if (nf_hook_ingress_active(skb)) {
+		if (*pt_prev) {
+			*ret = deliver_skb(skb, *pt_prev, orig_dev);
+			*pt_prev = NULL;
+		}
+
+		return nf_hook_ingress(skb);
+	}
+	return 0;
+}
+#else
+static inline int nf_ingress(struct sk_buff *skb, struct packet_type **pt_prev,
+			     int *ret, struct net_device *orig_dev)
+{
+	return 0;
+}
+#endif
+
 static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 {
 	struct packet_type *ptype, *pt_prev;
@@ -3569,6 +3599,9 @@ skip_taps:
 	if (static_key_false(&ingress_needed)) {
 		skb = handle_ing(skb, &pt_prev, &ret, orig_dev);
 		if (!skb)
+			goto out;
+
+		if (nf_ingress(skb, &pt_prev, &ret, orig_dev) < 0)
 			goto out;
 	}
 #endif
@@ -5814,6 +5847,9 @@ struct net_device *alloc_netdev_mqs(int sizeof_priv, const char *name,
 	dev->group = INIT_NETDEV_GROUP;
 	if (!dev->ethtool_ops)
 		dev->ethtool_ops = &default_ethtool_ops;
+
+	nf_hook_ingress_init(dev);
+
 	return dev;
 
 free_all:
