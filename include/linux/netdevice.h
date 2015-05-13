@@ -1208,6 +1208,9 @@ struct net_device {
 	struct tcf_proto __rcu  *ingress_cl_list;
 #endif
 	struct netdev_queue __rcu *ingress_queue;
+#ifdef CONFIG_NETFILTER_INGRESS
+	struct list_head	nf_hooks_ingress;
+#endif
 
 	unsigned char		broadcast[MAX_ADDR_LEN];	/* hw bcast add	*/
 
