@@ -3400,11 +3400,12 @@ __setup("thash_entries=", set_thash_entries);
 
 void tcp_init_mem(struct net *net)
 {
-	unsigned long limit = nr_free_buffer_pages() / 8;
+	unsigned long limit = nr_free_buffer_pages() / 16;
+
 	limit = max(limit, 128UL);
-	net->ipv4.sysctl_tcp_mem[0] = limit / 4 * 3;
-	net->ipv4.sysctl_tcp_mem[1] = limit;
-	net->ipv4.sysctl_tcp_mem[2] = net->ipv4.sysctl_tcp_mem[0] * 2;
+	net->ipv4.sysctl_tcp_mem[0] = limit / 4 * 3;		/* 4.68 % */
+	net->ipv4.sysctl_tcp_mem[1] = limit;			/* 6.25 % */
+	net->ipv4.sysctl_tcp_mem[2] = net->ipv4.sysctl_tcp_mem[0] * 2;	/* 9.37 % */
 }
 
 void __init tcp_init(void)
