@@ -42,7 +42,7 @@ static int tuner = -1;
 module_param(tuner, int, 0444);
 MODULE_PARM_DESC(tuner, "tuner type");
 
-static int transfer_mode = 1;
+static int transfer_mode = 0;
 module_param(transfer_mode, int, 0444);
 MODULE_PARM_DESC(transfer_mode, "transfer mode (1-ISO or 0-BULK)");
 

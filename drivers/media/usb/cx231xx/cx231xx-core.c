@@ -941,7 +941,7 @@ void cx231xx_uninit_bulk(struct cx231xx *dev)
 			if (dev->video_mode.bulk_ctl.transfer_buffer[i]) {
 				usb_free_coherent(dev->udev,
 						urb->transfer_buffer_length,
-						dev->video_mode.isoc_ctl.
+						dev->video_mode.bulk_ctl.
 						transfer_buffer[i],
 						urb->transfer_dma);
 			}
