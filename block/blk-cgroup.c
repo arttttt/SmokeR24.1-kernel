@@ -861,9 +861,44 @@ done:
  */
 int blkcg_init_queue(struct request_queue *q)
 {
-	might_sleep();
+	struct blkcg_gq *new_blkg, *blkg;
+	bool preloaded;
+	int ret;
 
-	return blk_throtl_init(q);
+	new_blkg = blkg_alloc(&blkcg_root, q, GFP_KERNEL);
+	if (!new_blkg)
+		return -ENOMEM;
+
+	preloaded = !radix_tree_preload(GFP_KERNEL);
+
+	/*
+	 * Make sure the root blkg exists and count the existing blkgs.  As
+	 * @q is bypassing at this point, blkg_lookup_create() can't be
+	 * used.  Open code insertion.
+	 */
+	rcu_read_lock();
+	spin_lock_irq(q->queue_lock);
+	blkg = blkg_create(&blkcg_root, q, new_blkg);
+	spin_unlock_irq(q->queue_lock);
+	rcu_read_unlock();
+
+	if (preloaded)
+		radix_tree_preload_end();
+
+	/* blkg_create() has freed @new_blkg on failure */
+	if (IS_ERR(blkg))
+		return PTR_ERR(blkg);
+
+	q->root_blkg = blkg;
+	q->root_rl.blkg = blkg;
+
+	ret = blk_throtl_init(q);
+	if (ret) {
+		spin_lock_irq(q->queue_lock);
+		blkg_destroy_all(q);
+		spin_unlock_irq(q->queue_lock);
+	}
+	return ret;
 }
 
 /**
@@ -971,54 +1006,20 @@ int blkcg_activate_policy(struct request_queue *q,
 			  const struct blkcg_policy *pol)
 {
 	LIST_HEAD(pds);
-	struct blkcg_gq *blkg, *new_blkg;
+	struct blkcg_gq *blkg;
 	struct blkg_policy_data *pd, *n;
 	int cnt = 0, ret;
-	bool preloaded;
 
 	if (blkcg_policy_enabled(q, pol))
 		return 0;
 
-	/* preallocations for root blkg */
-	new_blkg = blkg_alloc(&blkcg_root, q, GFP_KERNEL);
-	if (!new_blkg)
-		return -ENOMEM;
-
+	/* count and allocate policy_data for all existing blkgs */
 	blk_queue_bypass_start(q);
-
-	preloaded = !radix_tree_preload(GFP_KERNEL);
-
-	/*
-	 * Make sure the root blkg exists and count the existing blkgs.  As
-	 * @q is bypassing at this point, blkg_lookup_create() can't be
-	 * used.  Open code it.
-	 */
 	spin_lock_irq(q->queue_lock);
-
-	rcu_read_lock();
-	blkg = __blkg_lookup(&blkcg_root, q, false);
-	if (blkg)
-		blkg_free(new_blkg);
-	else
-		blkg = blkg_create(&blkcg_root, q, new_blkg);
-	rcu_read_unlock();
-
-	if (preloaded)
-		radix_tree_preload_end();
-
-	if (IS_ERR(blkg)) {
-		ret = PTR_ERR(blkg);
-		goto out_unlock;
-	}
-	q->root_blkg = blkg;
-	q->root_rl.blkg = blkg;
-
 	list_for_each_entry(blkg, &q->blkg_list, q_node)
 		cnt++;
-
 	spin_unlock_irq(q->queue_lock);
 
-	/* allocate policy_data for all existing blkgs */
 	while (cnt--) {
 		pd = kzalloc_node(pol->pd_size, GFP_KERNEL, q->node);
 		if (!pd) {
@@ -1086,10 +1087,6 @@ void blkcg_deactivate_policy(struct request_queue *q,
 	spin_lock_irq(q->queue_lock);
 
 	__clear_bit(pol->plid, q->blkcg_pols);
-
-	/* if no policy is left, no need for blkgs - shoot them down */
-	if (bitmap_empty(q->blkcg_pols, BLKCG_MAX_POLS))
-		blkg_destroy_all(q);
 
 	list_for_each_entry(blkg, &q->blkg_list, q_node) {
 		/* grab blkcg lock too while removing @pd from @blkg */
