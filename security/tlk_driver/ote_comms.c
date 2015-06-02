@@ -37,15 +37,12 @@ core_param(verbose_smc, verbose_smc, bool, 0644);
 #define SET_RESULT(req, r, ro)	{ req->result = r; req->result_origin = ro; }
 
 static int te_pin_user_pages(void *buffer, size_t size,
-		unsigned long *pages_ptr, uint32_t buf_type)
+		unsigned long *pages_ptr, uint32_t buf_type, uint32_t nr_pages)
 {
 	int ret = 0;
-	unsigned int nr_pages;
 	struct page **pages = NULL;
 	bool writable;
-
-	nr_pages = (((uintptr_t)buffer & (PAGE_SIZE - 1)) +
-			(size + PAGE_SIZE - 1)) >> PAGE_SHIFT;
+	int i;
 
 	pages = kzalloc(nr_pages * sizeof(struct page *), GFP_KERNEL);
 	if (!pages)
@@ -61,9 +58,20 @@ static int te_pin_user_pages(void *buffer, size_t size,
 
 	up_read(&current->mm->mmap_sem);
 
+	if (ret < nr_pages) {
+		nr_pages = ret;
+		pr_err("%s: Error %d in get_user_pages\n", __func__, ret);
+		goto error;
+	}
+
 	*pages_ptr = (unsigned long) pages;
 
-	return ret;
+	return OTE_SUCCESS;
+error:
+	for (i = 0; i < nr_pages; i++)
+		put_page(pages[i]);
+	kfree(pages);
+	return OTE_ERROR_OUT_OF_MEMORY;
 }
 
 static int te_prep_mem_buffer(uint32_t session_id,
@@ -72,7 +80,8 @@ static int te_prep_mem_buffer(uint32_t session_id,
 {
 	unsigned long pages = 0;
 	struct te_shmem_desc *shmem_desc = NULL;
-	int ret = 0, nr_pages = 0;
+	int ret = 0;
+	uint32_t nr_pages;
 
 	/* allocate new shmem descriptor */
 	shmem_desc = kzalloc(sizeof(struct te_shmem_desc), GFP_KERNEL);
@@ -82,12 +91,13 @@ static int te_prep_mem_buffer(uint32_t session_id,
 		goto error;
 	}
 
+	nr_pages = (((uintptr_t)buffer & (PAGE_SIZE - 1)) +
+				(size + PAGE_SIZE - 1)) >> PAGE_SHIFT;
 	/* pin pages */
-	nr_pages = te_pin_user_pages(buffer, size, &pages, buf_type);
-	if (nr_pages <= 0) {
+	ret = te_pin_user_pages(buffer, size, &pages, buf_type, nr_pages);
+	if (ret != OTE_SUCCESS) {
 		pr_err("%s: te_pin_user_pages failed (%d)\n", __func__,
 			nr_pages);
-		ret = OTE_ERROR_OUT_OF_MEMORY;
 		kfree(shmem_desc);
 		goto error;
 	}
@@ -136,7 +146,7 @@ static int te_prep_mem_buffers(struct te_request *request,
 				params[i].u.Mem.len,
 				params[i].type,
 				session);
-			if (ret < 0) {
+			if (ret != OTE_SUCCESS) {
 				pr_err("%s failed with err (%d)\n",
 					__func__, ret);
 				ret = OTE_ERROR_BAD_PARAMETERS;
