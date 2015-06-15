@@ -898,7 +898,7 @@ static void cx231xx_isoc_irq_callback(struct urb *urb)
 	case -ESHUTDOWN:
 		return;
 	default:		/* error */
-		cx231xx_isocdbg("urb completition error %d.\n", urb->status);
+		cx231xx_isocdbg("urb completion error %d.\n", urb->status);
 		break;
 	}
 
@@ -941,8 +941,11 @@ static void cx231xx_bulk_irq_callback(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		return;
+	case -EPIPE:		/* stall */
+		cx231xx_isocdbg("urb completion error - device is stalled.\n");
+		return;
 	default:		/* error */
-		cx231xx_isocdbg("urb completition error %d.\n", urb->status);
+		cx231xx_isocdbg("urb completion error %d.\n", urb->status);
 		break;
 	}
 
@@ -1017,6 +1020,7 @@ void cx231xx_uninit_bulk(struct cx231xx *dev)
 	struct cx231xx_dmaqueue *dma_q = &dev->video_mode.vidq;
 	struct urb *urb;
 	int i;
+	bool broken_pipe = false;
 
 	cx231xx_isocdbg("cx231xx: called cx231xx_uninit_bulk\n");
 
@@ -1036,10 +1040,17 @@ void cx231xx_uninit_bulk(struct cx231xx *dev)
 						transfer_buffer[i],
 						urb->transfer_dma);
 			}
+			if (urb->status == -EPIPE) {
+				broken_pipe = true;
+			}
 			usb_free_urb(urb);
 			dev->video_mode.bulk_ctl.urb[i] = NULL;
 		}
 		dev->video_mode.bulk_ctl.transfer_buffer[i] = NULL;
+	}
+	if (broken_pipe) {
+		cx231xx_err("Reset endpoint to recover broken pipe.");
+		usb_reset_endpoint(dev->udev, dev->video_mode.end_point_addr);
 	}
 
 	kfree(dev->video_mode.bulk_ctl.urb);
