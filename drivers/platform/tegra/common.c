@@ -126,6 +126,7 @@
 #define CONSOLE_MEM_SIZE SZ_512K
 #define FTRACE_MEM_SIZE SZ_512K
 #define RTRACE_MEM_SIZE SZ_512K
+#define PMSG_MEM_SIZE SZ_256K
 #endif
 
 #ifdef CONFIG_PM_GENERIC_DOMAINS_OF
@@ -1831,6 +1832,9 @@ static void __init tegra_reserve_ramoops_memory(unsigned long reserve_size)
 #endif
 #ifdef CONFIG_PSTORE_RTRACE
 	ramoops_data.rtrace_size = RTRACE_MEM_SIZE;
+#endif
+#ifdef CONFIG_PSTORE_PMSG
+	ramoops_data.pmsg_size = PMSG_MEM_SIZE;
 #endif
 	ramoops_data.dump_oops = 1;
 	if (memblock_remove(ramoops_data.mem_address, ramoops_data.mem_size))
