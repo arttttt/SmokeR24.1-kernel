@@ -204,6 +204,7 @@ enum {
 	TRACE_EVENT_FL_IGNORE_ENABLE_BIT,
 	TRACE_EVENT_FL_WAS_ENABLED_BIT,
 	TRACE_EVENT_FL_KPROBE_BIT,
+	TRACE_EVENT_FL_UPROBE_BIT,
 };
 
 /*
@@ -216,6 +217,7 @@ enum {
  *                    (used for module unloading, if a module event is enabled,
  *                     it is best to clear the buffers that used it).
  *  KPROBE        - Event is a kprobe
+ *  UPROBE        - Event is a uprobe
  */
 enum {
 	TRACE_EVENT_FL_FILTERED		= (1 << TRACE_EVENT_FL_FILTERED_BIT),
@@ -224,7 +226,10 @@ enum {
 	TRACE_EVENT_FL_IGNORE_ENABLE	= (1 << TRACE_EVENT_FL_IGNORE_ENABLE_BIT),
 	TRACE_EVENT_FL_WAS_ENABLED	= (1 << TRACE_EVENT_FL_WAS_ENABLED_BIT),
 	TRACE_EVENT_FL_KPROBE		= (1 << TRACE_EVENT_FL_KPROBE_BIT),
+	TRACE_EVENT_FL_UPROBE           = (1 << TRACE_EVENT_FL_UPROBE_BIT),
 };
+
+#define TRACE_EVENT_FL_UKPROBE (TRACE_EVENT_FL_KPROBE | TRACE_EVENT_FL_UPROBE)
 
 struct ftrace_event_call {
 	struct list_head	list;
