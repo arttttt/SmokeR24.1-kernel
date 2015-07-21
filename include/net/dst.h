@@ -58,6 +58,7 @@ struct dst_entry {
 #define DST_FAKE_RTABLE		0x0080
 #define DST_XFRM_TUNNEL		0x0100
 #define DST_XFRM_QUEUE		0x0200
+#define DST_METADATA		0x0200
 
 	unsigned short		pending_confirm;
 
@@ -366,6 +367,9 @@ extern void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
 		       unsigned short flags);
 extern void __dst_free(struct dst_entry *dst);
 extern struct dst_entry *dst_destroy(struct dst_entry *dst);
+void dst_init(struct dst_entry *dst, struct dst_ops *ops,
+	      struct net_device *dev, int initial_ref, int initial_obsolete,
+	      unsigned short flags);
 
 static inline void dst_free(struct dst_entry *dst)
 {
@@ -461,7 +465,7 @@ static inline struct dst_entry *dst_check(struct dst_entry *dst, u32 cookie)
 	return dst;
 }
 
-extern void		dst_init(void);
+void dst_subsys_init(void);
 
 /* Flags for xfrm_lookup flags argument. */
 enum {
