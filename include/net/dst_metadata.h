@@ -8,6 +8,9 @@
 struct metadata_dst {
 	struct dst_entry		dst;
 	size_t				opts_len;
+	union {
+		struct ip_tunnel_info	tun_info;
+	} u;
 };
 
 static inline struct metadata_dst *skb_metadata_dst(struct sk_buff *skb)
@@ -20,6 +23,26 @@ static inline struct metadata_dst *skb_metadata_dst(struct sk_buff *skb)
 	return NULL;
 }
 
+static inline struct ip_tunnel_info *skb_tunnel_info(struct sk_buff *skb,
+						     int family)
+{
+	struct metadata_dst *md_dst = skb_metadata_dst(skb);
+	struct rtable *rt;
+
+	if (md_dst)
+		return &md_dst->u.tun_info;
+
+	switch (family) {
+//	case AF_INET:
+//		rt = (struct rtable *)skb_dst(skb);
+//		if (rt && rt->rt_lwtstate)
+//			return lwt_tun_info(rt->rt_lwtstate);
+//		break;
+	}
+
+	return NULL;
+}
+
 static inline bool skb_valid_dst(const struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
@@ -28,5 +51,6 @@ static inline bool skb_valid_dst(const struct sk_buff *skb)
 }
 
 struct metadata_dst *metadata_dst_alloc(u8 optslen, gfp_t flags);
+struct metadata_dst __percpu *metadata_dst_alloc_percpu(u8 optslen, gfp_t flags);
 
 #endif /* __NET_DST_METADATA_H */
