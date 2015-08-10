@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2013-2016 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,6 +26,9 @@
 #include <linux/dma-mapping.h>
 
 #include "ote_protocol.h"
+
+/* SS operation timeout in milliseconds */
+#define SS_OP_TIME_OUT 5000
 
 static DECLARE_COMPLETION(req_ready);
 static DECLARE_COMPLETION(req_complete);
@@ -76,7 +79,7 @@ int tlk_ss_op(void)
 
 	/* wait for the consumer's signal */
 	if (!wait_for_completion_timeout(&req_complete,
-						msecs_to_jiffies(5000))) {
+				msecs_to_jiffies(SS_OP_TIME_OUT))) {
 		/* daemon didn't respond */
 		tlk_ss_reset();
 		return OTE_ERROR_CANCEL;
@@ -92,7 +95,7 @@ static int __init tlk_ss_init(void)
 	/* storage disabled? */
 	ret = ote_property_is_disabled("storage");
 	if (ret) {
-		pr_err("%s: fail (%d)\n", __func__, ret);
+		pr_warn("%s: tlk storage is disabled (%d)\n", __func__, ret);
 		return ret;
 	}
 

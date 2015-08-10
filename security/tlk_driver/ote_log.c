@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2013-2016 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -58,7 +58,7 @@ static int circ_buf_init(struct circular_buffer **cbptr)
 	*cbptr = (struct circular_buffer *) dma_alloc_coherent(NULL,
 			sizeof(struct circular_buffer), &tp, GFP_KERNEL);
 	if (!*cbptr) {
-		pr_err("%s: no memory avaiable for circular buffer struct\n",
+		pr_err("%s: no memory available for circular buffer struct\n",
 			__func__);
 		return -ENOMEM;
 	}
@@ -71,7 +71,7 @@ static int circ_buf_init(struct circular_buffer **cbptr)
 	(*cbptr)->buf = (char *) dma_alloc_coherent(NULL, LOGBUF_SIZE,
 			&tp, GFP_KERNEL);
 	if (!(*cbptr)->buf) {
-			pr_err("%s: no memory avaiable for shared buffer\n",
+			pr_err("%s: no memory available for shared buffer\n",
 				__func__);
 		/* Frees the memory allocated using dma_alloc_coherent */
 			dma_free_coherent(NULL,
@@ -132,14 +132,17 @@ void ote_print_logs(void)
 		return;
 
 	buffer = kzalloc(LOGBUF_SIZE, GFP_KERNEL);
-	BUG_ON(!buffer);
+	if (!buffer) {
+		pr_err("%s: memory allocation failed\n", __func__);
+		return;
+	}
 
 	/* This detects if the buffer proved to be too small to hold the data.
 	 * If buffer is not large enough, it overwrites it's oldest data,
 	 * This warning serves to alert the user to possibly use a bigger buffer
 	 */
 	if (cb->overflow == 1) {
-		pr_info("\n[TLK] **WARNING** TLK buffer overwritten.\n\n");
+		pr_warn("[TLK] **WARNING** TLK buffer overwritten.\n");
 		cb->overflow = 0;
 	}
 
@@ -149,9 +152,9 @@ void ote_print_logs(void)
 	}
 	cb->buf[cb->end] = '\0';
 
-	/* In case no delimiter was found,
-	 * the token is taken to be the entire string *stringp,
-	 * and *stringp is made NULL.
+	/*
+	 * In case no delimiter was found, strsep returns the entire string as
+	 * token and the original string is made as NULL
 	 */
 	text = buffer;
 	temp = strsep(&text, "\n");
@@ -173,32 +176,25 @@ void ote_print_logs(void)
  */
 static int __init ote_logger_init(void)
 {
-	uintptr_t smc_args[MAX_EXT_SMC_ARGS];
 	int ret;
 
 	/* logger disabled? */
 	ret = ote_property_is_disabled("logger");
 	if (ret == -ENODEV) {
 		/* TLK device node is absent */
-		pr_err("%s: fail (%d)\n", __func__, ret);
+		pr_warn("%s: TLK logger is disabled (%d)\n", __func__, ret);
 		return ret;
 	} else if (ret == -ENOTSUPP) {
 		/* Node is present, but logger is disabled */
-		smc_args[0] = TE_SMC_INIT_LOGGER;
-		smc_args[1] = 0;
-		send_smc(smc_args[0], smc_args[1], 0);
-
+		send_smc(TE_SMC_INIT_LOGGER, 0, 0);
 		return ret;
 	}
 
 	if (circ_buf_init(&cb) != 0)
 		return -1;
 
-	smc_args[0] = TE_SMC_INIT_LOGGER;
-	smc_args[1] = (uintptr_t)cb;
-
 	/* enable logging only if secure firmware supports it */
-	if (!send_smc(smc_args[0], smc_args[1], 0))
+	if (!send_smc(TE_SMC_INIT_LOGGER, (uintptr_t)cb, 0))
 		ote_logging_enabled = 1;
 
 	ote_print_logs();

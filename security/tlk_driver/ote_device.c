@@ -40,49 +40,38 @@ DEFINE_MUTEX(smc_lock);
 static int te_create_free_cmd_list(struct tlk_device *dev)
 {
 	int cmd_desc_count, ret = 0;
-	struct te_cmd_req_desc *req_desc;
+	struct te_cmd_req_desc *req_desc, *tmp_req_desc;
 	int bitmap_size;
-	bool use_reqbuf;
+	int req_buf_size;
 
 	/*
-	 * Check if new shared req/param register SMC is supported.
-	 *
-	 * If it is, TLK can map in the shared req/param buffers and do_smc
+	 * TLK can map in the shared req/param buffers and do_smc
 	 * only needs to send the offsets within each (with cache coherency
 	 * being maintained by HW through an NS mapping).
-	 *
-	 * If the SMC support is not yet present, then fallback to the old
-	 * mode of writing to an uncached buffer to maintain coherency (and
-	 * phys addresses are passed in do_smc).
 	 */
-	dev->req_param_buf = NULL;
-	use_reqbuf = !send_smc(TE_SMC_REGISTER_REQ_BUF, 0, 0);
-
-	if (use_reqbuf) {
-		dev->req_param_buf = kmalloc((2 * PAGE_SIZE), GFP_KERNEL);
-
-		/* requests in the first page, params in the second */
-		dev->req_addr   = (struct te_request *) dev->req_param_buf;
-		dev->param_addr = (struct te_oper_param *)
-					(dev->req_param_buf + PAGE_SIZE);
-
-		send_smc(TE_SMC_REGISTER_REQ_BUF,
-				(uintptr_t)dev->req_addr, (2 * PAGE_SIZE));
-	} else {
-		dev->req_addr = dma_alloc_coherent(NULL, PAGE_SIZE,
-					&dev->req_addr_phys, GFP_KERNEL);
-		dev->param_addr = dma_alloc_coherent(NULL, PAGE_SIZE,
-					&dev->param_addr_phys, GFP_KERNEL);
-	}
-
-	if (!dev->req_addr || !dev->param_addr || !dev->req_param_buf) {
+	req_buf_size = (2 * PAGE_SIZE);
+	dev->req_param_buf = kmalloc(req_buf_size, GFP_KERNEL);
+	if (!dev->req_param_buf) {
 		ret = -ENOMEM;
 		goto error;
 	}
 
+	/* requests in the first page, params in the second */
+	dev->req_addr   = (struct te_request *) dev->req_param_buf;
+	dev->param_addr = (struct te_oper_param *)
+				(dev->req_param_buf + PAGE_SIZE);
+
 	/* alloc param bitmap allocator */
 	bitmap_size = BITS_TO_LONGS(TE_PARAM_MAX) * sizeof(long);
 	dev->param_bitmap = kzalloc(bitmap_size, GFP_KERNEL);
+	if (!dev->param_bitmap) {
+		pr_err("Failed to allocate param bitmap\n");
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	send_smc(TE_SMC_REGISTER_REQ_BUF,
+			(uintptr_t)dev->req_addr, req_buf_size);
 
 	for (cmd_desc_count = 0;
 		cmd_desc_count < TE_CMD_DESC_MAX; cmd_desc_count++) {
@@ -99,8 +88,15 @@ static int te_create_free_cmd_list(struct tlk_device *dev)
 		/* Add the cmd param descriptor to free list */
 		list_add_tail(&req_desc->list, &(dev->free_cmd_list));
 	}
-
+	return 0;
 error:
+	if (dev->req_param_buf)
+		kfree(dev->req_param_buf);
+	if (dev->param_bitmap)
+		kfree(dev->param_bitmap);
+	list_for_each_entry_safe(req_desc, tmp_req_desc,
+			&(dev->free_cmd_list), list)
+		kfree(req_desc);
 	return ret;
 }
 
@@ -512,7 +508,6 @@ static int __init tlk_init(void)
 
 	/* check if the driver node is present in the device tree */
 	if (get_tlk_device_node() == NULL) {
-		pr_err("%s: fail\n", __func__);
 		return -ENODEV;
 	}
 
@@ -536,7 +531,7 @@ int ote_property_is_disabled(const char *str)
 	/* check if the driver node is present in the device tree */
 	tlk = get_tlk_device_node();
 	if (!tlk) {
-		pr_err("%s: fail\n", __func__);
+		pr_warn("%s: TLK device is not present\n", __func__);
 		return -ENODEV;
 	}
 

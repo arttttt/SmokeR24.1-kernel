@@ -25,7 +25,7 @@ obj-$(CONFIG_SECURITY_TOMOYO)		+= tomoyo/built-in.o
 obj-$(CONFIG_SECURITY_APPARMOR)		+= apparmor/built-in.o
 obj-$(CONFIG_SECURITY_YAMA)		+= yama/built-in.o
 obj-$(CONFIG_CGROUP_DEVICE)		+= device_cgroup.o
-obj-$(CONFIG_TRUSTED_LITTLE_KERNEL)	+= tlk_driver/built-in.o
+obj-$(CONFIG_TRUSTED_LITTLE_KERNEL)	+= tlk_driver/
 
 # Object integrity file lists
 subdir-$(CONFIG_INTEGRITY)		+= integrity
