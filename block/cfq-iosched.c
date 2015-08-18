@@ -3482,7 +3482,7 @@ static void check_ioprio_changed(struct cfq_io_cq *cic, struct bio *bio)
 	if (cfqq) {
 		struct cfq_queue *new_cfqq;
 		new_cfqq = cfq_get_queue(cfqd, BLK_RW_ASYNC, cic, bio,
-					 GFP_ATOMIC);
+					 GFP_NOWAIT);
 		if (new_cfqq) {
 			cic->cfqq[BLK_RW_ASYNC] = new_cfqq;
 			cfq_put_queue(cfqq);
