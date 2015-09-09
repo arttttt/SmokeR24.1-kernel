@@ -1886,7 +1886,7 @@ static void comedi_vm_close(struct vm_area_struct *area)
 	mutex_unlock(&dev->mutex);
 }
 
-static struct vm_operations_struct comedi_vm_ops = {
+static const struct vm_operations_struct comedi_vm_ops = {
 	.open = comedi_vm_open,
 	.close = comedi_vm_close,
 };
