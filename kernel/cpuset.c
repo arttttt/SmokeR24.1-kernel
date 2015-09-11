@@ -1449,7 +1449,7 @@ static void cpuset_attach(struct cgroup_subsys_state *css,
 	/* static buf protected by cpuset_mutex */
 	static nodemask_t cpuset_attach_nodemask_to;
 	struct task_struct *task;
-	struct task_struct *leader = cgroup_taskset_first(tset);
+	struct task_struct *leader;
 	struct cpuset *cs = css_cs(css);
 	struct cpuset *oldcs = effective_nodemask_cpuset(cpuset_attach_old_cs);
 	struct cpuset *cpus_cs = effective_cpumask_cpuset(cs);
@@ -1477,12 +1477,11 @@ static void cpuset_attach(struct cgroup_subsys_state *css,
 	}
 
 	/*
-	 * Change mm, possibly for multiple threads in a threadgroup. This
-	 * is expensive and may sleep and should be moved outside migration
-	 * path proper.
+	 * Change mm for all threadgroup leaders. This is expensive and may
+	 * sleep and should be moved outside migration path proper.
 	 */
 	cpuset_attach_nodemask_to = cs->mems_allowed;
-	if (thread_group_leader(leader)) {
+	cgroup_taskset_for_each_leader(leader, tset) {
 		struct mm_struct *mm = get_task_mm(leader);
 
 		if (mm) {
