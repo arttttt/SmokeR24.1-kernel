@@ -358,24 +358,25 @@ void qdisc_class_hash_remove(struct Qdisc_class_hash *,
 void qdisc_class_hash_grow(struct Qdisc *, struct Qdisc_class_hash *);
 void qdisc_class_hash_destroy(struct Qdisc_class_hash *);
 
-extern void dev_init_scheduler(struct net_device *dev);
-extern void dev_shutdown(struct net_device *dev);
-extern void dev_activate(struct net_device *dev);
-extern void dev_deactivate(struct net_device *dev);
-extern void dev_deactivate_many(struct list_head *head);
-extern struct Qdisc *dev_graft_qdisc(struct netdev_queue *dev_queue,
-				     struct Qdisc *qdisc);
-extern void qdisc_reset(struct Qdisc *qdisc);
-extern void qdisc_destroy(struct Qdisc *qdisc);
-extern void qdisc_tree_decrease_qlen(struct Qdisc *qdisc, unsigned int n);
-extern struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
-				 const struct Qdisc_ops *ops);
-extern struct Qdisc *qdisc_create_dflt(struct netdev_queue *dev_queue,
-				       const struct Qdisc_ops *ops, u32 parentid);
-extern void __qdisc_calculate_pkt_len(struct sk_buff *skb,
-				      const struct qdisc_size_table *stab);
-extern bool tcf_destroy(struct tcf_proto *tp, bool force);
-extern void tcf_destroy_chain(struct tcf_proto __rcu **fl);
+void dev_init_scheduler(struct net_device *dev);
+void dev_shutdown(struct net_device *dev);
+void dev_activate(struct net_device *dev);
+void dev_deactivate(struct net_device *dev);
+void dev_deactivate_many(struct list_head *head);
+struct Qdisc *dev_graft_qdisc(struct netdev_queue *dev_queue,
+			      struct Qdisc *qdisc);
+void qdisc_reset(struct Qdisc *qdisc);
+void qdisc_destroy(struct Qdisc *qdisc);
+void qdisc_tree_decrease_qlen(struct Qdisc *qdisc, unsigned int n);
+struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
+			  const struct Qdisc_ops *ops);
+struct Qdisc *qdisc_create_dflt(struct netdev_queue *dev_queue,
+				const struct Qdisc_ops *ops, u32 parentid);
+void __qdisc_calculate_pkt_len(struct sk_buff *skb,
+			       const struct qdisc_size_table *stab);
+bool tcf_destroy(struct tcf_proto *tp, bool force);
+void tcf_destroy_chain(struct tcf_proto __rcu **fl);
+int skb_do_redirect(struct sk_buff *);
 
 /* Reset all TX qdiscs greater then index of a device.  */
 static inline void qdisc_reset_all_tx_gt(struct net_device *dev, unsigned int i)
