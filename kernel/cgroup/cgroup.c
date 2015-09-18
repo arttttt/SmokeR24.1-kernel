@@ -273,6 +273,19 @@ static bool cgroup_ssid_no_v1(int ssid)
 	return cgroup_no_v1_mask & (1 << ssid);
 }
 
+/**
+ * cgroup_ssid_enabled - cgroup subsys enabled test by subsys ID
+ * @ssid: subsys ID of interest
+ *
+ * cgroup_subsys_enabled() can only be used with literal subsys names which
+ * is fine for individual subsystems but unsuitable for cgroup core.  This
+ * is slower static_key_enabled() based test indexed by @ssid.
+ */
+static bool cgroup_ssid_enabled(int ssid)
+{
+	return static_key_enabled(cgroup_subsys_enabled_key[ssid]);
+}
+
 /* IDR wrappers which synchronize using cgroup_idr_lock */
 static int cgroup_idr_alloc(struct idr *idr, void *ptr, int start, int end,
 			    gfp_t gfp_mask)
@@ -1701,7 +1714,7 @@ static int parse_cgroupfs_options(char *data, struct cgroup_sb_opts *opts)
 		for_each_subsys(ss, i) {
 			if (strcmp(token, ss->legacy_name))
 				continue;
-			if (ss->disabled)
+			if (!cgroup_ssid_enabled(i))
 				continue;
 			if (cgroup_ssid_no_v1(i))
 				continue;
@@ -1725,7 +1738,7 @@ static int parse_cgroupfs_options(char *data, struct cgroup_sb_opts *opts)
 	 */
 	if (all_ss || (!one_ss && !opts->none && !opts->name))
 		for_each_subsys(ss, i)
-			if ((!ss->disabled) && !cgroup_ssid_no_v1(i))
+			if (cgroup_ssid_enabled(i) && !cgroup_ssid_no_v1(i))
 				opts->subsys_mask |= (1 << i);
 
 	/*
@@ -3373,7 +3386,7 @@ static ssize_t cgroup_subtree_control_write(struct kernfs_open_file *of,
 		if (tok[0] == '\0')
 			continue;
 		do_each_subsys_mask(ss, ssid, ~cgrp_dfl_inhibit_ss_mask) {
-			if (ss->disabled ||
+			if (!cgroup_ssid_enabled(ssid) ||
 			    strcmp(tok + 1, ss->name))
 				continue;
 
@@ -3964,7 +3977,7 @@ static int cgroup_add_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
 {
 	int ret;
 
-	if (ss->disabled)
+	if (!cgroup_ssid_enabled(ss->id))
 		return 0;
 
 	if (!cfts || cfts[0].name[0] == '\0')
@@ -5856,7 +5869,7 @@ int __init cgroup_init(void)
 		 * disabled flag and cftype registration needs kmalloc,
 		 * both of which aren't available during early_init.
 		 */
-		if (ss->disabled)
+		if (!cgroup_ssid_enabled(ssid))
 			continue;
 
 		if (cgroup_ssid_no_v1(ssid))
@@ -6059,7 +6072,8 @@ static int proc_cgroupstats_show(struct seq_file *m, void *v)
 	for_each_subsys(ss, i)
 		seq_printf(m, "%s\t%d\t%d\t%d\n",
 			   ss->legacy_name, ss->root->hierarchy_id,
-			   atomic_read(&ss->root->nr_cgrps), !ss->disabled);
+			   atomic_read(&ss->root->nr_cgrps),
+			   cgroup_ssid_enabled(i));
 
 	mutex_unlock(&cgroup_mutex);
 	return 0;
@@ -6342,7 +6356,6 @@ static int __init cgroup_disable(char *str)
 				continue;
 
 			static_branch_disable(cgroup_subsys_enabled_key[i]);
-			ss->disabled = 1;
 			printk(KERN_INFO "Disabling %s control group subsystem\n",
 			       ss->name);
 			break;
