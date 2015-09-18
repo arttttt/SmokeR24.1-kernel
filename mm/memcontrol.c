@@ -7187,7 +7187,7 @@ static void mem_cgroup_bind(struct cgroup_subsys_state *root_css)
 	 * guarantees that @root doesn't have any children, so turning it
 	 * on for the root memcg is enough.
 	 */
-	if (cgroup_on_dfl(root_css->cgroup))
+	if (cgroup_subsys_on_dfl(memory_cgrp_subsys))
 		mem_cgroup_from_css(root_css)->use_hierarchy = true;
 }
 
