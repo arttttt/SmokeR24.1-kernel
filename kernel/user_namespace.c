@@ -930,6 +930,21 @@ bool userns_may_setgroups(const struct user_namespace *ns)
 	return allowed;
 }
 
+/*
+ * Returns true if @ns is the same namespace as or a descendant of
+ * @target_ns.
+ */
+bool current_in_userns(const struct user_namespace *target_ns)
+{
+       struct user_namespace *ns;
+       for (ns = current_user_ns(); ns; ns = ns->parent) {
+               if (ns == target_ns)
+                       return true;
+       }
+       return false;
+}
+
+
 static void *userns_get(struct task_struct *task)
 {
 	struct user_namespace *user_ns;
