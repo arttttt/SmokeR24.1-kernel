@@ -278,7 +278,8 @@ static int cls_bpf_prog_from_ops(struct nlattr **tb, struct cls_bpf_prog *prog)
 	return 0;
 }
 
-static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog)
+static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog,
+				 const struct tcf_proto *tp)
 {
 	struct bpf_prog *fp;
 	char *name = NULL;
@@ -309,6 +310,9 @@ static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog)
 	prog->bpf_fd = bpf_fd;
 	prog->bpf_name = name;
 	prog->filter = fp;
+
+	if (fp->dst_needed)
+		netif_keep_dst(qdisc_dev(tp->q));
 
 	return 0;
 }
@@ -346,7 +350,7 @@ static int cls_bpf_modify_existing(struct net *net, struct tcf_proto *tp,
 	prog->exts_integrated = have_exts;
 
 	ret = is_bpf ? cls_bpf_prog_from_ops(tb, prog) :
-		       cls_bpf_prog_from_efd(tb, prog);
+		       cls_bpf_prog_from_efd(tb, prog, tp);
 	if (ret < 0) {
 		tcf_exts_destroy(&exts);
 		return ret;
