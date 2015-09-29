@@ -53,6 +53,14 @@ extern void dhdsdio_isr(void * args);
 #include "dhd_custom_sysfs_tegra.h"
 #endif
 
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+#include "dhd_custom_net_bw_est_tegra.h"
+#endif
+
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_DIAG_TEGRA
+#include "dhd_custom_net_diag_tegra.h"
+#endif
+
 extern int bcmdhd_irq_number;
 
 /* driver info, initialized when bcmsdh_register is called */
@@ -195,6 +203,27 @@ void* bcmsdh_probe(osl_t *osh, void *dev, void *sdioh, void *adapter_info, uint 
 		goto err;
 	}
 #endif
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+	if (tegra_net_bw_est_register(dev) < 0) {
+		pr_err("%s: tegra_net_bw_est_register() failed\n", __func__);
+#ifdef	CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		tegra_sysfs_unregister(dev);
+#endif
+		goto err;
+	}
+#endif
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_DIAG_TEGRA
+	if (tegra_net_diag_register(dev) < 0) {
+		pr_err("%s: tegra_net_diag_register() failed\n", __func__);
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+		tegra_net_bw_est_unregister(dev);
+#endif
+#ifdef	CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		tegra_sysfs_unregister(dev);
+#endif
+		goto err;
+	}
+#endif
 	return bcmsdh;
 
 	/* error handling */
@@ -210,6 +239,14 @@ int bcmsdh_remove(bcmsdh_info_t *bcmsdh)
 {
 	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
 
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_DIAG_TEGRA
+	if (bcmsdh_osinfo->dev)
+		tegra_net_diag_unregister(bcmsdh_osinfo->dev);
+#endif
+#ifdef	CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+	if (bcmsdh_osinfo->dev)
+		tegra_net_bw_est_unregister(bcmsdh_osinfo->dev);
+#endif
 #ifdef	CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 	if (bcmsdh_osinfo->dev)
 		tegra_sysfs_unregister(bcmsdh_osinfo->dev);
