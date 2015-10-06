@@ -4384,20 +4384,6 @@ out:
 	return 0;
 }
 
-/*
- * XXX Merge this list with the debugger/profiler
- * session regops whitelists?
- */
-static u32 wl_addr_gk20a[] = {
-	/* this list must be sorted (low to high) */
-	0x404468, /* gr_pri_mme_max_instructions       */
-	0x418800, /* gr_pri_gpcs_setup_debug           */
-	0x419a04, /* gr_pri_gpcs_tpcs_tex_lod_dbg      */
-	0x419a08, /* gr_pri_gpcs_tpcs_tex_samp_dbg     */
-	0x419e10, /* gr_pri_gpcs_tpcs_sm_dbgr_control0 */
-	0x419f78, /* gr_pri_gpcs_tpcs_sm_disp_ctrl     */
-};
-
 static int gr_gk20a_init_access_map(struct gk20a *g)
 {
 	struct gr_gk20a *gr = &g->gr;
@@ -4406,6 +4392,8 @@ static int gr_gk20a_init_access_map(struct gk20a *g)
 	u32 w, nr_pages =
 		DIV_ROUND_UP(gr->ctx_vars.priv_access_map_size,
 			     PAGE_SIZE);
+	u32 *whitelist = NULL;
+	int num_entries = 0;
 
 	data = vmap(gr->global_ctx_buffer[PRIV_ACCESS_MAP].mem.pages,
 		    PAGE_ALIGN(gr->global_ctx_buffer[PRIV_ACCESS_MAP].mem.size) >>
@@ -4419,13 +4407,15 @@ static int gr_gk20a_init_access_map(struct gk20a *g)
 
 	memset(data, 0x0, PAGE_SIZE * nr_pages);
 
-	for (w = 0; w < ARRAY_SIZE(wl_addr_gk20a); w++) {
+	g->ops.gr.get_access_map(g, &whitelist, &num_entries);
+
+	for (w = 0; w < num_entries; w++) {
 		u32 map_bit, map_byte, map_shift;
-		map_bit = wl_addr_gk20a[w] >> 2;
+		map_bit = whitelist[w] >> 2;
 		map_byte = map_bit >> 3;
 		map_shift = map_bit & 0x7; /* i.e. 0-7 */
 		gk20a_dbg_info("access map addr:0x%x byte:0x%x bit:%d",
-		  wl_addr_gk20a[w], map_byte, map_shift);
+			       whitelist[w], map_byte, map_shift);
 		((u8 *)data)[map_byte] |= 1 << map_shift;
 	}
 
@@ -7382,6 +7372,23 @@ static void gr_gk20a_init_cyclestats(struct gk20a *g)
 #endif
 }
 
+static void gr_gk20a_get_access_map(struct gk20a *g,
+				   u32 **whitelist, int *num_entries)
+{
+	static u32 wl_addr_gk20a[] = {
+		/* this list must be sorted (low to high) */
+		0x404468, /* gr_pri_mme_max_instructions       */
+		0x418800, /* gr_pri_gpcs_setup_debug           */
+		0x419a04, /* gr_pri_gpcs_tpcs_tex_lod_dbg      */
+		0x419a08, /* gr_pri_gpcs_tpcs_tex_samp_dbg     */
+		0x419e10, /* gr_pri_gpcs_tpcs_sm_dbgr_control0 */
+		0x419f78, /* gr_pri_gpcs_tpcs_sm_disp_ctrl     */
+	};
+
+	*whitelist = wl_addr_gk20a;
+	*num_entries = ARRAY_SIZE(wl_addr_gk20a);
+}
+
 void gk20a_init_gr_ops(struct gpu_ops *gops)
 {
 	gops->gr.access_smpc_reg = gr_gk20a_access_smpc_reg;
@@ -7432,4 +7439,5 @@ void gk20a_init_gr_ops(struct gpu_ops *gops)
 	gops->gr.init_sm_dsm_reg_info = gr_gk20a_init_sm_dsm_reg_info;
 	gops->gr.wait_empty = gr_gk20a_wait_idle;
 	gops->gr.init_cyclestats = gr_gk20a_init_cyclestats;
+	gops->gr.get_access_map = gr_gk20a_get_access_map;
 }

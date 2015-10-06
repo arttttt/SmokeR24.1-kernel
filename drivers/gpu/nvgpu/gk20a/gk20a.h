@@ -179,6 +179,8 @@ struct gpu_ops {
 		       u32 expect_delay);
 		void (*init_cyclestats)(struct gk20a *g);
 		void (*enable_cde_in_fecs)(void *ctx_ptr);
+		void (*get_access_map)(struct gk20a *g,
+				      u32 **whitelist, int *num_entries);
 	} gr;
 	const char *name;
 	struct {
