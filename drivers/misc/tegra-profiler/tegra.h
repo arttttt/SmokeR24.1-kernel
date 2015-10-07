@@ -1,7 +1,7 @@
 /*
  * drivers/misc/tegra-profiler/tegra.h
  *
- * Copyright (c) 2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -18,7 +18,7 @@
 #define __QUADD_TEGRA_H
 
 #include <linux/smp.h>
-#include <asm/ptrace.h>
+#include <linux/ptrace.h>
 
 #ifdef CONFIG_TEGRA_CLUSTER_CONTROL
 #include <linux/io.h>
