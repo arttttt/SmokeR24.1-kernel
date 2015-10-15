@@ -5151,7 +5151,7 @@ static int memcg_update_kmem_limit(struct cgroup_subsys_state *css, u64 val)
 	mutex_lock(&memcg_create_mutex);
 	mutex_lock(&set_limit_mutex);
 	if (!memcg->kmem_account_flags && val != RESOURCE_MAX) {
-		if (cgroup_has_tasks(css->cgroup) || memcg_has_children(memcg)) {
+		if (cgroup_is_populated(css->cgroup) || memcg_has_children(memcg)) {
 			ret = -EBUSY;
 			goto out;
 		}
