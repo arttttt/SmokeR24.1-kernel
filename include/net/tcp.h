@@ -552,6 +552,7 @@ extern void tcp_cwnd_application_limited(struct sock *sk);
 extern void tcp_resume_early_retransmit(struct sock *sk);
 extern void tcp_rearm_rto(struct sock *sk);
 extern void tcp_reset(struct sock *sk);
+extern void tcp_skb_mark_lost_uncond_verify(struct tcp_sock *tp, struct sk_buff *skb);
 
 /* tcp_timer.c */
 extern void tcp_init_xmit_timers(struct sock *);
@@ -1023,6 +1024,14 @@ static inline void tcp_update_wl(struct tcp_sock *tp, u32 seq)
 }
 
 /* tcp_recovery.c */
+
+/* Flags to enable various loss recovery features. See below */
+extern int sysctl_tcp_recovery;
+
+/* Use TCP RACK to detect (some) tail and retransmit losses */
+#define TCP_RACK_LOST_RETRANS  0x1
+
+extern int tcp_rack_mark_lost(struct sock *sk);
 
 extern void tcp_rack_advance(struct tcp_sock *tp,
 			     const struct skb_mstamp *xmit_time, u8 sacked);
