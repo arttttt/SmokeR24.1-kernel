@@ -1009,6 +1009,11 @@ static inline void tcp_update_wl(struct tcp_sock *tp, u32 seq)
 	tp->snd_wl1 = seq;
 }
 
+/* tcp_recovery.c */
+
+extern void tcp_rack_advance(struct tcp_sock *tp,
+			     const struct skb_mstamp *xmit_time, u8 sacked);
+
 /*
  * Calculate(/check) TCP checksum
  */

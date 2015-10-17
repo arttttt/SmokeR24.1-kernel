@@ -1228,6 +1228,8 @@ static u8 tcp_sacktag_one(struct sock *sk,
 		return sacked;
 
 	if (!(sacked & TCPCB_SACKED_ACKED)) {
+		tcp_rack_advance(tp, xmit_time, sacked);
+
 		if (sacked & TCPCB_SACKED_RETRANS) {
 			/* If the segment is not tagged as lost,
 			 * we do not clear RETRANS, believing
@@ -2336,6 +2338,16 @@ static inline void tcp_moderate_cwnd(struct tcp_sock *tp)
 	tp->snd_cwnd_stamp = tcp_time_stamp;
 }
 
+/* skb is spurious retransmitted if the returned timestamp echo
+ * reply is prior to the skb transmission time
+ */
+static bool tcp_skb_spurious_retrans(const struct tcp_sock *tp,
+				     const struct sk_buff *skb)
+{
+	return (TCP_SKB_CB(skb)->sacked & TCPCB_RETRANS) &&
+	       tcp_tsopt_ecr_before(tp, tcp_skb_timestamp(skb));
+}
+
 /* Nothing was retransmitted or returned timestamp is less
  * than timestamp of the first retransmission.
  */
@@ -3128,6 +3140,8 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 
 		if (sacked & TCPCB_SACKED_ACKED)
 			tp->sacked_out -= acked_pcount;
+		else if (tcp_is_sack(tp) && !tcp_skb_spurious_retrans(tp, skb))
+			tcp_rack_advance(tp, &skb->skb_mstamp, sacked);
 		if (sacked & TCPCB_LOST)
 			tp->lost_out -= acked_pcount;
 
