@@ -174,6 +174,7 @@ void generic_exec_single(int cpu, struct call_single_data *csd, int wait)
 void generic_smp_call_function_single_interrupt(void)
 {
 	struct call_single_queue *q = &__get_cpu_var(call_single_queue);
+	static bool warned;
 	LIST_HEAD(list);
 
 	/*
@@ -192,6 +193,10 @@ void generic_smp_call_function_single_interrupt(void)
 		csd = list_entry(list.next, struct call_single_data, list);
 		list_del(&csd->list);
 
+		if (unlikely(!cpu_online(smp_processor_id())) && !warned)
+			pr_err("IPI callback %pS sent to offline CPU\n",
+				csd->func);
+
 		/*
 		 * 'csd' can be invalid after this call if flags == 0
 		 * (when called through generic_exec_single()),
@@ -207,6 +212,9 @@ void generic_smp_call_function_single_interrupt(void)
 		if (csd_flags & CSD_FLAG_LOCK)
 			csd_unlock(csd);
 	}
+
+	if (unlikely(!cpu_online(smp_processor_id())) && !warned)
+		warned = true;
 }
 
 static DEFINE_PER_CPU_SHARED_ALIGNED(struct call_single_data, csd_data);
