@@ -29,6 +29,7 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/pci.h>
+#include <linux/pci-aspm.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
@@ -2342,17 +2343,19 @@ static void tegra_pcie_config_l1ss_l12_thtime(void)
 	u32 data = 0, pos = 0;
 
 	PR_FUNC_LINE;
-	/* program same LTR L1.2 threshold = 55us for all devices */
+	/* program same LTR L1.2 threshold = 55us *only* for root ports */
 	for_each_pci_dev(pdev) {
+		if (pci_pcie_type(pdev) != PCI_EXP_TYPE_ROOT_PORT)
+			continue;
 		pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
+		if (!pos)
+			continue;
 		pci_read_config_dword(pdev, pos + PCI_L1SS_CTRL1, &data);
 		data |= 0x37 << PCI_L1SS_CTRL1_L12TH_VAL_SHIFT;
 		pci_write_config_dword(pdev, pos + PCI_L1SS_CTRL1, data);
 		pci_read_config_dword(pdev, pos + PCI_L1SS_CTRL1, &data);
 		data |= 0x02 << PCI_L1SS_CTRL1_L12TH_SCALE_SHIFT;
 		pci_write_config_dword(pdev, pos + PCI_L1SS_CTRL1, data);
-		if (pci_pcie_type(pdev) != PCI_EXP_TYPE_ROOT_PORT)
-			break;
 	}
 }
 
@@ -2360,23 +2363,31 @@ static void tegra_pcie_enable_ltr_support(void)
 {
 	struct pci_dev *pdev = NULL;
 	u16 val = 0;
-	u32 data = 0;
+	u32 data = 0, pos = 0;
 
 	PR_FUNC_LINE;
-	/* enable LTR mechanism for L1.2 support */
+	/* enable LTR mechanism for L1.2 support in end points */
 	for_each_pci_dev(pdev) {
+		if ((pci_pcie_type(pdev) == PCI_EXP_TYPE_DOWNSTREAM) ||
+			(pci_pcie_type(pdev) == PCI_EXP_TYPE_ROOT_PORT))
+			continue;
+		pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
+		if (!pos)
+			continue;
+		pci_read_config_dword(pdev, pos + PCI_L1SS_CAP, &data);
+		if (!((data & PCI_L1SS_CAP_ASPM_L12S) ||
+			(data & PCI_L1SS_CAP_PM_L12S)))
+			continue;
 		pcie_capability_read_dword(pdev, PCI_EXP_DEVCAP2, &data);
 		if (data & PCI_EXP_DEVCAP2_LTR) {
 			pcie_capability_read_word(pdev, PCI_EXP_DEVCTL2, &val);
 			val |= PCI_EXP_LTR_EN;
 			pcie_capability_write_word(pdev, PCI_EXP_DEVCTL2, val);
 		}
-		if (pci_pcie_type(pdev) != PCI_EXP_TYPE_ROOT_PORT)
-			break;
 	}
 }
 #if defined(CONFIG_ARCH_TEGRA_21x_SOC)
-static void tegra_pcie_config_clkreq(struct tegra_pcie *pcie, bool enable)
+static void tegra_pcie_config_clkreq(struct tegra_pcie *pcie, u32 port)
 {
 	static struct pinctrl_dev *pctl_dev = NULL;
 	unsigned long od_conf, tr_conf;
@@ -2391,62 +2402,40 @@ static void tegra_pcie_config_clkreq(struct tegra_pcie *pcie, bool enable)
 			"%s(): tegra pincontrol does not found\n", __func__);
 		return;
 	}
-	if (enable) {
-		od_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_OPEN_DRAIN,
-					TEGRA_PIN_ENABLE);
-		tr_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_TRISTATE,
-					TEGRA_PIN_DISABLE);
-	} else {
-		od_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_OPEN_DRAIN,
-					TEGRA_PIN_DISABLE);
-		tr_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_TRISTATE,
-					TEGRA_PIN_ENABLE);
-	}
-	if (enable) {
-		/* Make CLKREQ# bi-directional if L1PM SS are enabled */
-		pinctrl_set_config_for_group_name(pctl_dev,
-				pin_pex_l0_clkreq, tr_conf);
-		pinctrl_set_config_for_group_name(pctl_dev,
-				pin_pex_l0_clkreq, od_conf);
-		pinctrl_set_config_for_group_name(pctl_dev,
-				pin_pex_l1_clkreq, tr_conf);
-		pinctrl_set_config_for_group_name(pctl_dev,
-				pin_pex_l1_clkreq, od_conf);
-	} else {
-		struct pci_dev *pdev = NULL;
-		u16 val = 0;
 
-		/* Make CLKREQ# input only if L1PM SS is disabled later */
-		/* also disable ASPM L1 momentarily before doing this */
-		for_each_pci_dev(pdev) {
-			pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &val);
-			val &= ~PCI_EXP_LNKCTL_ASPM_L1;
-			pcie_capability_write_word(pdev, PCI_EXP_LNKCTL, val);
-		}
-		pinctrl_set_config_for_group_name(pctl_dev,
-				pin_pex_l0_clkreq, tr_conf);
-		pinctrl_set_config_for_group_name(pctl_dev,
-				pin_pex_l0_clkreq, od_conf);
+	od_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_OPEN_DRAIN,
+				TEGRA_PIN_ENABLE);
+	tr_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_TRISTATE,
+				TEGRA_PIN_DISABLE);
+
+	/* Make CLKREQ# bi-directional if L1PM SS are enabled */
+	if (port) {
 		pinctrl_set_config_for_group_name(pctl_dev,
 				pin_pex_l1_clkreq, tr_conf);
 		pinctrl_set_config_for_group_name(pctl_dev,
 				pin_pex_l1_clkreq, od_conf);
-		for_each_pci_dev(pdev) {
-			pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &val);
-			val |= PCI_EXP_LNKCTL_ASPM_L1;
-			pcie_capability_write_word(pdev, PCI_EXP_LNKCTL, val);
-		}
+	} else {
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l0_clkreq, tr_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l0_clkreq, od_conf);
 	}
 }
 #endif
+
+struct dev_ids {
+	unsigned short	vid;
+	unsigned short	did;
+};
+
+static struct dev_ids aspm_l0s_whitelist_dev[0] = {
+/*	{0x14e4, 0x4355},	// BCM-4359	*/
+};
 
 /* Enable ASPM support of all devices based on it's capability */
 static void tegra_pcie_enable_aspm(struct tegra_pcie *pcie)
 {
 	struct pci_dev *pdev = NULL;
-	u32 aspm = 0;
-	int pos = 0;
-	bool config_l1ss = true;
 
 	PR_FUNC_LINE;
 	if (!pcie_aspm_support_enabled()) {
@@ -2454,31 +2443,55 @@ static void tegra_pcie_enable_aspm(struct tegra_pcie *pcie)
 		return;
 	}
 
-	/* L1SS configuration as per IAS */
+	/* disable ASPM-L0s for all links unless the endpoint
+	 * is a known device with proper ASPM-L0s functionality
+	 */
 	for_each_pci_dev(pdev) {
-		/* check if L1SS capability is supported in current device */
-		pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
-		if (!pos) {
-			config_l1ss = false;
-			break;
+		struct pci_dev *parent = NULL;
+		struct tegra_pcie_port *port = NULL;
+		unsigned long ctrl = 0;
+		u32 rp = 0, val = 0, disable = 0, i = 0;
+		bool whitelist = false;
+
+		if ((pci_pcie_type(pdev) == PCI_EXP_TYPE_ROOT_PORT) ||
+			(pci_pcie_type(pdev) == PCI_EXP_TYPE_DOWNSTREAM))
+			continue;
+		parent = pdev->bus->self;
+		rp = PCI_SLOT(parent->devfn);
+		list_for_each_entry(port, &pcie->ports, list)
+			if (rp == port->index + 1)
+				break;
+		ctrl = tegra_pcie_port_get_pex_ctrl(port);
+		/* AFI_PEX_STATUS is AFI_PEX_CTRL + 4 */
+		val = afi_readl(port->pcie, ctrl + 4);
+		if (val & 0x1)
+			disable |= PCIE_LINK_STATE_CLKPM;
+
+		/* Enable ASPM-l0s for only whitelisted devices */
+		for (i = 0; i < ARRAY_SIZE(aspm_l0s_whitelist_dev); i++) {
+			if ((pdev->vendor == aspm_l0s_whitelist_dev[i].vid) &&
+				(pdev->device == aspm_l0s_whitelist_dev[i].did))
+				whitelist = true;
 		}
-		/* avoid L1SS config if no support of L1PM substate feature */
-		pci_read_config_dword(pdev, pos + PCI_L1SS_CAP, &aspm);
-		if (((aspm & PCI_L1SS_CAP_L1PMS) == 0) ||
-			((aspm & PCI_L1SS_CAP_L1PM_MASK) == 0)) {
-			config_l1ss = false;
-			break;
-		}
-		if (pci_pcie_type(pdev) != PCI_EXP_TYPE_ROOT_PORT)
-			break;
-	}
-	if (config_l1ss) {
+		if (!whitelist)
+			disable |= PCIE_LINK_STATE_L0S;
+		pci_disable_link_state_locked(pdev, disable);
+
 #if defined(CONFIG_ARCH_TEGRA_21x_SOC)
-		tegra_pcie_config_clkreq(pcie, true);
+		/* check if L1SS capability is supported in current device */
+		i = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
+		if (!i)
+			continue;
+		/* avoid L1SS config if no support of L1PM substate feature */
+		pci_read_config_dword(pdev, i + PCI_L1SS_CAP, &val);
+		if ((val & PCI_L1SS_CAP_L1PMS) ||
+			(val & PCI_L1SS_CAP_L1PM_MASK))
+			tegra_pcie_config_clkreq(pcie, port->index);
 #endif
-		tegra_pcie_config_l1ss_l12_thtime();
-		tegra_pcie_enable_ltr_support();
 	}
+	/* L1.2 specific common configuration */
+	tegra_pcie_config_l1ss_l12_thtime();
+	tegra_pcie_enable_ltr_support();
 }
 
 static void tegra_pcie_enable_features(struct tegra_pcie *pcie)
