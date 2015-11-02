@@ -366,7 +366,14 @@ enum stopmachine_state {
 	/* Awaiting everyone to be scheduled. */
 	STOPMACHINE_PREPARE,
 	/* Disable interrupts. */
+#ifdef CONFIG_TEGRA_SERIALIZE_DISABLE_IRQ
+	STOPMACHINE_DISABLE_IRQ_3,
+	STOPMACHINE_DISABLE_IRQ_2,
+	STOPMACHINE_DISABLE_IRQ_1,
+	STOPMACHINE_DISABLE_IRQ_0,
+#else
 	STOPMACHINE_DISABLE_IRQ,
+#endif
 	/* Run the function */
 	STOPMACHINE_RUN,
 	/* Exit */
@@ -427,10 +434,37 @@ static int stop_machine_cpu_stop(void *data)
 		if (smdata->state != curstate) {
 			curstate = smdata->state;
 			switch (curstate) {
+#ifdef CONFIG_TEGRA_SERIALIZE_DISABLE_IRQ
+			case STOPMACHINE_DISABLE_IRQ_3:
+				if (cpu == 3) {
+					local_irq_disable();
+					hard_irq_disable();
+				}
+				break;
+			case STOPMACHINE_DISABLE_IRQ_2:
+				if (cpu == 2) {
+					local_irq_disable();
+					hard_irq_disable();
+				}
+				break;
+			case STOPMACHINE_DISABLE_IRQ_1:
+				if (cpu == 1) {
+					local_irq_disable();
+					hard_irq_disable();
+				}
+				break;
+			case STOPMACHINE_DISABLE_IRQ_0:
+				if (cpu == 0) {
+					local_irq_disable();
+					hard_irq_disable();
+				}
+				break;
+#else
 			case STOPMACHINE_DISABLE_IRQ:
 				local_irq_disable();
 				hard_irq_disable();
 				break;
+#endif
 			case STOPMACHINE_RUN:
 				if (is_active)
 					err = smdata->fn(smdata->data);
