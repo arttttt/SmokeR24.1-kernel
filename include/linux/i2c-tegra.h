@@ -34,6 +34,7 @@ struct tegra_i2c_platform_data {
 	bool needs_cl_dvfs_clock;
 	bool bit_banging_xfer_after_shutdown;
 	bool is_interruptable_xfer;
+	bool is_multimaster_mode;
 };
 
 struct tegra_i2c_slave_platform_data {
