@@ -1627,7 +1627,7 @@ split_fallthrough:
 		 */
 		mark_page_accessed(page);
 	}
-	if ((flags & FOLL_POPULATE) && (vma->vm_flags & VM_LOCKED)) {
+	if ((flags & FOLL_MLOCK) && (vma->vm_flags & VM_LOCKED)) {
 		/*
 		 * The preliminary mapping check is mainly to avoid the
 		 * pointless overhead of lock_page on the ZERO_PAGE
@@ -1890,6 +1890,9 @@ follow_page_again:
 				int ret;
 				unsigned int fault_flags = 0;
 
+				/* mlock all present pages, but do not fault in new pages */
+				if ((foll_flags & (FOLL_POPULATE | FOLL_MLOCK)) == FOLL_MLOCK)
+					goto next_page;
 				if (foll_flags & FOLL_WRITE)
 					fault_flags |= FAULT_FLAG_WRITE;
 				if (nonblocking)
