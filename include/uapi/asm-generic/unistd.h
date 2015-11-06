@@ -704,6 +704,8 @@ __SYSCALL(__NR_renameat2, sys_renameat2)
 __SYSCALL(__NR_seccomp, sys_seccomp)
 #define __NR_getrandom 278
 __SYSCALL(__NR_getrandom, sys_getrandom)
+#define __NR_mlock2 284
+__SYSCALL(__NR_mlock2, sys_mlock2)
 #define __NR_pidfd_send_signal 424
 __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
 #define __NR_pidfd_open 434
