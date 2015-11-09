@@ -767,6 +767,32 @@ static int tegra_i2c_copy_next_to_current(struct tegra_i2c_dev *i2c_dev)
 	return 0;
 }
 
+static int tegra_i2c_disable_packet_mode(struct tegra_i2c_dev *i2c_dev)
+{
+	u32 cnfg;
+	unsigned long timeout;
+
+	cnfg = i2c_readl(i2c_dev, I2C_CNFG);
+	if (cnfg & I2C_CNFG_PACKET_MODE_EN)
+		i2c_writel(i2c_dev, cnfg & (~I2C_CNFG_PACKET_MODE_EN),
+				I2C_CNFG);
+
+	if (i2c_dev->chipdata->has_config_load_reg) {
+		i2c_writel(i2c_dev, I2C_MSTR_CONFIG_LOAD,
+				I2C_CONFIG_LOAD);
+		timeout = jiffies + msecs_to_jiffies(1000);
+		while (i2c_readl(i2c_dev, I2C_CONFIG_LOAD) != 0) {
+			if (time_after(jiffies, timeout)) {
+				dev_err(i2c_dev->dev,
+						"timeout config_load");
+				return -ETIMEDOUT;
+			}
+			udelay(2);
+		}
+	}
+	return 0;
+}
+
 static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 {
 	u32 status;
@@ -776,6 +802,9 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 					| I2C_INT_TX_FIFO_OVERFLOW;
 	struct tegra_i2c_dev *i2c_dev = dev_id;
 	u32 mask;
+
+	if (!i2c_dev->is_interruptable_xfer)
+		spin_lock_irqsave(&i2c_dev->fifo_lock, flags);
 
 	status = i2c_readl(i2c_dev, I2C_INT_STATUS);
 
@@ -794,6 +823,7 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 	}
 
 	if (unlikely(status & status_err)) {
+		tegra_i2c_disable_packet_mode(i2c_dev);
 		dev_dbg(i2c_dev->dev, "I2c error status 0x%08x\n", status);
 		if (status & I2C_INT_NO_ACK) {
 			i2c_dev->msg_err |= I2C_ERR_NO_ACK;
@@ -873,17 +903,8 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 	}
 
 	if (!i2c_dev->msg_read && (status & I2C_INT_TX_FIFO_DATA_REQ)) {
-		if (i2c_dev->msg_buf_remaining) {
-
-			if (!i2c_dev->is_interruptable_xfer)
-				spin_lock_irqsave(&i2c_dev->fifo_lock, flags);
-
+		if (i2c_dev->msg_buf_remaining)
 			tegra_i2c_fill_tx_fifo(i2c_dev);
-
-			if (!i2c_dev->is_interruptable_xfer)
-				spin_unlock_irqrestore(&i2c_dev->fifo_lock, flags);
-
-		}
 		else
 			tegra_i2c_mask_irq(i2c_dev, I2C_INT_TX_FIFO_DATA_REQ);
 	}
@@ -902,8 +923,7 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 		complete(&i2c_dev->msg_complete);
 	}
 
-	return IRQ_HANDLED;
-
+	goto done;
 err:
 	dev_dbg(i2c_dev->dev, "reg: 0x%08x 0x%08x 0x%08x 0x%08x\n",
 		 i2c_readl(i2c_dev, I2C_CNFG), i2c_readl(i2c_dev, I2C_STATUS),
@@ -952,6 +972,10 @@ err:
 
 	complete(&i2c_dev->msg_complete);
 
+done:
+	if (!i2c_dev->is_interruptable_xfer)
+		spin_unlock_irqrestore(&i2c_dev->fifo_lock, flags);
+
 	return IRQ_HANDLED;
 }
 
@@ -996,6 +1020,46 @@ static int tegra_i2c_send_next_read_msg_pkt_header(struct tegra_i2c_dev *i2c_dev
 					<<  I2C_HEADER_MASTER_ADDR_SHIFT);
 	}
 	i2c_writel(i2c_dev, i2c_dev->next_io_header, I2C_TX_FIFO);
+
+	return 0;
+}
+
+static int tegra_i2c_issue_bus_clear(struct tegra_i2c_dev *i2c_dev)
+{
+	unsigned long timeout;
+
+	if (i2c_dev->chipdata->has_hw_arb_support) {
+		INIT_COMPLETION(i2c_dev->msg_complete);
+		i2c_writel(i2c_dev, I2C_BC_ENABLE
+				| I2C_BC_SCLK_THRESHOLD
+				| I2C_BC_STOP_COND
+				| I2C_BC_TERMINATE
+				, I2C_BUS_CLEAR_CNFG);
+		if (i2c_dev->chipdata->has_config_load_reg) {
+			i2c_writel(i2c_dev, I2C_MSTR_CONFIG_LOAD,
+					I2C_CONFIG_LOAD);
+			timeout = jiffies + msecs_to_jiffies(1000);
+			while (i2c_readl(i2c_dev, I2C_CONFIG_LOAD) != 0) {
+				if (time_after(jiffies, timeout)) {
+					dev_warn(i2c_dev->dev,
+						"timeout config_load");
+					return -ETIMEDOUT;
+				}
+				msleep(1);
+			}
+		}
+		tegra_i2c_unmask_irq(i2c_dev, I2C_INT_BUS_CLEAR_DONE);
+
+		wait_for_completion_timeout(&i2c_dev->msg_complete,
+				TEGRA_I2C_TIMEOUT);
+		if (!(i2c_readl(i2c_dev, I2C_BUS_CLEAR_STATUS) & I2C_BC_STATUS))
+			dev_warn(i2c_dev->dev, "Un-recovered Arbitration lost\n");
+	} else {
+		i2c_algo_busclear_gpio(i2c_dev->dev,
+				i2c_dev->scl_gpio, GPIOF_OPEN_DRAIN,
+				i2c_dev->sda_gpio, GPIOF_OPEN_DRAIN,
+				MAX_BUSCLEAR_CLOCK, 100000);
+	}
 
 	return 0;
 }
@@ -1052,6 +1116,9 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 		}
 	}
 	i2c_writel(i2c_dev, 0, I2C_INT_MASK);
+	int_mask = I2C_INT_NO_ACK | I2C_INT_ARBITRATION_LOST
+					| I2C_INT_TX_FIFO_OVERFLOW;
+	tegra_i2c_unmask_irq(i2c_dev, int_mask);
 
 	val = 7 << I2C_FIFO_CONTROL_TX_TRIG_SHIFT |
 		0 << I2C_FIFO_CONTROL_RX_TRIG_SHIFT;
@@ -1125,10 +1192,9 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 			i2c_dev->chipdata->has_xfer_complete_interrupt))
 		int_mask |= I2C_INT_ALL_PACKETS_XFER_COMPLETE;
 
+	tegra_i2c_unmask_irq(i2c_dev, int_mask);
 	if (!i2c_dev->is_interruptable_xfer)
 		spin_unlock_irqrestore(&i2c_dev->fifo_lock, flags);
-
-	tegra_i2c_unmask_irq(i2c_dev, int_mask);
 
 	dev_dbg(i2c_dev->dev, "unmasked irq: %02x\n",
 		i2c_readl(i2c_dev, I2C_INT_MASK));
@@ -1169,26 +1235,8 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 	if (i2c_dev->is_dvc)
 		dvc_i2c_mask_irq(i2c_dev, DVC_CTRL_REG3_I2C_DONE_INTR_EN);
 
-	cnfg = i2c_readl(i2c_dev, I2C_CNFG);
-	if (cnfg & I2C_CNFG_PACKET_MODE_EN)
-		i2c_writel(i2c_dev, cnfg & (~I2C_CNFG_PACKET_MODE_EN),
-								I2C_CNFG);
-	else
-		dev_err(i2c_dev->dev, "i2c_cnfg PACKET_MODE_EN not set\n");
-
-	if (i2c_dev->chipdata->has_config_load_reg) {
-		i2c_writel(i2c_dev, I2C_MSTR_CONFIG_LOAD,
-					I2C_CONFIG_LOAD);
-		timeout = jiffies + msecs_to_jiffies(1000);
-		while (i2c_readl(i2c_dev, I2C_CONFIG_LOAD) != 0) {
-			if (time_after(jiffies, timeout)) {
-				dev_warn(i2c_dev->dev,
-					"timeout config_load");
-				return -ETIMEDOUT;
-			}
-			udelay(2);
-		}
-	}
+	if (likely(i2c_dev->msg_err == I2C_ERR_NONE))
+		tegra_i2c_disable_packet_mode(i2c_dev);
 
 	if (ret == 0) {
 		dev_err(i2c_dev->dev,
@@ -1252,40 +1300,10 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 
 	/* Arbitration Lost occurs, Start recovery */
 	if (i2c_dev->msg_err == I2C_ERR_ARBITRATION_LOST) {
-		if (i2c_dev->chipdata->has_hw_arb_support) {
-			INIT_COMPLETION(i2c_dev->msg_complete);
-			i2c_writel(i2c_dev, I2C_BC_ENABLE
-					| I2C_BC_SCLK_THRESHOLD
-					| I2C_BC_STOP_COND
-					| I2C_BC_TERMINATE
-					, I2C_BUS_CLEAR_CNFG);
-
-			if (i2c_dev->chipdata->has_config_load_reg) {
-				i2c_writel(i2c_dev, I2C_MSTR_CONFIG_LOAD,
-							I2C_CONFIG_LOAD);
-				timeout = jiffies + msecs_to_jiffies(1000);
-				while (i2c_readl(i2c_dev, I2C_CONFIG_LOAD) != 0) {
-					if (time_after(jiffies, timeout)) {
-						dev_warn(i2c_dev->dev,
-							"timeout config_load");
-						return -ETIMEDOUT;
-					}
-					msleep(1);
-				}
-			}
-
-			tegra_i2c_unmask_irq(i2c_dev, I2C_INT_BUS_CLEAR_DONE);
-
-			wait_for_completion_timeout(&i2c_dev->msg_complete,
-				TEGRA_I2C_TIMEOUT);
-
-			if (!(i2c_readl(i2c_dev, I2C_BUS_CLEAR_STATUS) & I2C_BC_STATUS))
-				dev_warn(i2c_dev->dev, "Un-recovered Arbitration lost\n");
-		} else {
-			i2c_algo_busclear_gpio(i2c_dev->dev,
-				i2c_dev->scl_gpio, GPIOF_OPEN_DRAIN,
-				i2c_dev->sda_gpio,GPIOF_OPEN_DRAIN,
-				MAX_BUSCLEAR_CLOCK, 100000);
+		if (!i2c_dev->is_multimaster_mode) {
+			ret = tegra_i2c_issue_bus_clear(i2c_dev);
+			if (ret)
+				return ret;
 		}
 		return -EAGAIN;
 	}
