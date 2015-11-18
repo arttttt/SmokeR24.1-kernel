@@ -399,7 +399,7 @@
 		CALL(sys_ni_syscall)
 		CALL(sys_ni_syscall)
 		CALL(sys_ni_syscall)
-/* 390 */	CALL(sys_ni_syscall)
+/* 390 */	CALL(sys_mlock2)
 		CALL(sys_ni_syscall)
 		CALL(sys_ni_syscall)
 		CALL(sys_ni_syscall)

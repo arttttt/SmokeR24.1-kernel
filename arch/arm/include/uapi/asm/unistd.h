@@ -415,6 +415,7 @@
 #define __NR_getrandom			(__NR_SYSCALL_BASE+384)
 #define __NR_memfd_create		(__NR_SYSCALL_BASE+385)
 #define __NR_bpf			(__NR_SYSCALL_BASE+386)
+#define __NR_mlock2			(__NR_SYSCALL_BASE+390)
 #define __NR_pidfd_send_signal		(__NR_SYSCALL_BASE+424)
 #define __NR_pidfd_open			(__NR_SYSCALL_BASE+434)
 
