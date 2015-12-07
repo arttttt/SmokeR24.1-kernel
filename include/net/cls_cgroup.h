@@ -16,17 +16,16 @@
 #include <linux/cgroup.h>
 #include <linux/hardirq.h>
 #include <linux/rcupdate.h>
+#include <net/sock.h>
 
-#if IS_ENABLED(CONFIG_NET_CLS_CGROUP)
-struct cgroup_cls_state
-{
+#ifdef CONFIG_CGROUP_NET_CLASSID
+struct cgroup_cls_state {
 	struct cgroup_subsys_state css;
 	u32 classid;
 };
 
-extern void sock_update_classid(struct sock *sk);
+struct cgroup_cls_state *task_cls_state(struct task_struct *p);
 
-#if IS_BUILTIN(CONFIG_NET_CLS_CGROUP)
 static inline u32 task_cls_classid(struct task_struct *p)
 {
 	u32 classid;
@@ -41,25 +40,14 @@ static inline u32 task_cls_classid(struct task_struct *p)
 
 	return classid;
 }
-#elif IS_MODULE(CONFIG_NET_CLS_CGROUP)
-static inline u32 task_cls_classid(struct task_struct *p)
+
+static inline void sock_update_classid(struct sock_cgroup_data *skcd)
 {
-	struct cgroup_subsys_state *css;
-	u32 classid = 0;
+	u32 classid;
 
-	if (in_interrupt())
-		return 0;
-
-	rcu_read_lock();
-	css = task_css(p, net_cls_subsys_id);
-	if (css)
-		classid = container_of(css,
-				       struct cgroup_cls_state, css)->classid;
-	rcu_read_unlock();
-
-	return classid;
+	classid = task_cls_classid(current);
+	sock_cgroup_set_classid(skcd, classid);
 }
-#endif
 
 static inline u32 task_get_classid(const struct sk_buff *skb)
 {
@@ -75,29 +63,23 @@ static inline u32 task_get_classid(const struct sk_buff *skb)
 	 * softirqs always disables bh.
 	 */
 	if (in_serving_softirq()) {
-		/* If there is an sk_classid we'll use that. */
+		/* If there is an sock_cgroup_classid we'll use that. */
 		if (!skb->sk)
 			return 0;
 
-		classid = skb->sk->sk_classid;
+		classid = sock_cgroup_classid(&skb->sk->sk_cgrp_data);
 	}
 
 	return classid;
 }
-
-#else /* !CGROUP_NET_CLS_CGROUP */
-static inline void sock_update_classid(struct sock *sk)
+#else /* !CONFIG_CGROUP_NET_CLASSID */
+static inline void sock_update_classid(struct sock_cgroup_data *skcd)
 {
-}
-
-static inline u32 task_cls_classid(struct task_struct *p)
-{
-	return 0;
 }
 
 static inline u32 task_get_classid(const struct sk_buff *skb)
 {
 	return 0;
 }
-#endif /* CGROUP_NET_CLS_CGROUP */
+#endif /* CONFIG_CGROUP_NET_CLASSID */
 #endif  /* _NET_CLS_CGROUP_H */

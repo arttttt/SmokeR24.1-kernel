@@ -13,21 +13,17 @@
 
 #ifndef _NETPRIO_CGROUP_H
 #define _NETPRIO_CGROUP_H
+
 #include <linux/cgroup.h>
 #include <linux/hardirq.h>
 #include <linux/rcupdate.h>
 
-
-#if IS_ENABLED(CONFIG_NETPRIO_CGROUP)
+#if IS_ENABLED(CONFIG_CGROUP_NET_PRIO)
 struct netprio_map {
 	struct rcu_head rcu;
 	u32 priomap_len;
 	u32 priomap[];
 };
-
-extern void sock_update_netprioidx(struct sock *sk);
-
-#if IS_BUILTIN(CONFIG_NETPRIO_CGROUP)
 
 static inline u32 task_netprioidx(struct task_struct *p)
 {
@@ -41,31 +37,24 @@ static inline u32 task_netprioidx(struct task_struct *p)
 	return idx;
 }
 
-#elif IS_MODULE(CONFIG_NETPRIO_CGROUP)
-
-static inline u32 task_netprioidx(struct task_struct *p)
+static inline void sock_update_netprioidx(struct sock_cgroup_data *skcd)
 {
-	struct cgroup_subsys_state *css;
-	u32 idx = 0;
+	if (in_interrupt())
+		return;
 
-	rcu_read_lock();
-	css = task_css(p, net_prio_subsys_id);
-	if (css)
-		idx = css->cgroup->id;
-	rcu_read_unlock();
-	return idx;
+	sock_cgroup_set_prioidx(skcd, task_netprioidx(current));
 }
-#endif
 
-#else /* !CONFIG_NETPRIO_CGROUP */
+#else /* !CONFIG_CGROUP_NET_PRIO */
 
 static inline u32 task_netprioidx(struct task_struct *p)
 {
 	return 0;
 }
 
-#define sock_update_netprioidx(sk)
+static inline void sock_update_netprioidx(struct sock_cgroup_data *skcd)
+{
+}
 
-#endif /* CONFIG_NETPRIO_CGROUP */
-
+#endif /* CONFIG_CGROUP_NET_PRIO */
 #endif  /* _NET_CLS_CGROUP_H */
