@@ -70,6 +70,7 @@ static unsigned int force_cpupwr;
 static unsigned int force_cpupwr_freqcap;
 
 static bool force_policy_max;
+static bool initialized;
 
 static int force_policy_max_set(const char *arg, const struct kernel_param *kp)
 {
@@ -723,7 +724,7 @@ int tegra_update_cpu_speed(unsigned long rate)
 	struct cpufreq_freqs actual_freqs;
 	unsigned int mode, mode_limit;
 
-	if (!cpu_clk)
+	if (!initialized)
 		return -EINVAL;
 
 	freqs.old = tegra_getspeed(0);
@@ -1180,7 +1181,7 @@ int tegra_cpu_set_speed_cap_locked(unsigned int *speed_cap)
 	if (is_suspended)
 		return -EBUSY;
 
-	if (!cpu_clk)
+	if (!initialized)
 		return -EINVAL;
 
 	/* Caps based on virtual G-cpu freq */
@@ -1540,7 +1541,11 @@ static int __init tegra_cpufreq_init(void)
 	if (ret)
 		return ret;
 
-	return cpufreq_register_driver(&tegra_cpufreq_driver);
+	ret = cpufreq_register_driver(&tegra_cpufreq_driver);
+	if (!ret)
+		initialized = true;
+
+	return ret;
 }
 
 #ifdef CONFIG_TEGRA_CPU_FREQ_GOVERNOR_KERNEL_START
