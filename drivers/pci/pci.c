@@ -934,6 +934,44 @@ static void pci_restore_pcix_state(struct pci_dev *dev)
 	pci_write_config_word(dev, pos + PCI_X_CMD, cap[i++]);
 }
 
+static int pci_save_l1_pm_ss_state(struct pci_dev *dev)
+{
+	int pos;
+	struct pci_cap_saved_state *save_state;
+
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_L1SS);
+	if (pos <= 0)
+		return 0;
+
+	save_state = pci_find_saved_ext_cap(dev, PCI_EXT_CAP_ID_L1SS);
+	if (!save_state) {
+		dev_err(&dev->dev, "buffer not found in %s\n", __func__);
+		return -ENOMEM;
+	}
+
+	pci_read_config_dword(dev, pos + PCI_L1SS_CTRL1,
+		&save_state->cap.data[0]);
+	pci_read_config_dword(dev, pos + PCI_L1SS_CTRL2,
+		&save_state->cap.data[1]);
+
+	return 0;
+}
+
+static void pci_restore_l1_pm_ss_state(struct pci_dev *dev)
+{
+	int pos;
+	struct pci_cap_saved_state *save_state;
+
+	save_state = pci_find_saved_ext_cap(dev, PCI_EXT_CAP_ID_L1SS);
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_L1SS);
+	if (!save_state || pos <= 0)
+		return;
+
+	pci_write_config_dword(dev, pos + PCI_L1SS_CTRL1,
+		save_state->cap.data[0]);
+	pci_write_config_dword(dev, pos + PCI_L1SS_CTRL2,
+		save_state->cap.data[1]);
+}
 
 /**
  * pci_save_state - save the PCI configuration space of a device before suspending
@@ -950,6 +988,8 @@ pci_save_state(struct pci_dev *dev)
 	if ((i = pci_save_pcie_state(dev)) != 0)
 		return i;
 	if ((i = pci_save_pcix_state(dev)) != 0)
+		return i;
+	if ((i = pci_save_l1_pm_ss_state(dev)) != 0)
 		return i;
 	return 0;
 }
@@ -1017,6 +1057,7 @@ void pci_restore_state(struct pci_dev *dev)
 	pci_restore_config_space(dev);
 
 	pci_restore_pcix_state(dev);
+	pci_restore_l1_pm_ss_state(dev);
 	pci_restore_msi_state(dev);
 	pci_restore_iov_state(dev);
 
@@ -2066,6 +2107,12 @@ void pci_allocate_cap_save_buffers(struct pci_dev *dev)
 	if (error)
 		dev_err(&dev->dev,
 			"unable to preallocate PCI-X save buffer\n");
+	error = pci_add_ext_cap_save_buffer(dev, PCI_EXT_CAP_ID_L1SS,
+		2 * sizeof(u32));
+	if (error)
+		dev_err(&dev->dev,
+			"unable to preallocate L1 PM-SS save buffer\n");
+
 }
 
 void pci_free_cap_save_buffers(struct pci_dev *dev)
