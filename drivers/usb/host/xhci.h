@@ -1129,6 +1129,8 @@ struct xhci_event_cmd {
 
 /* Block Event Interrupt */
 #define	TRB_BEI			(1<<9)
+/* Transfer State Preserve */
+#define TRB_TSP			(1<<9)
 
 /* Control transfer TRB specific fields */
 #define TRB_DIR_IN		(1<<16)
@@ -1316,6 +1318,7 @@ struct xhci_ring {
 	unsigned int		num_trbs_free_temp;
 	enum xhci_ring_type	type;
 	bool			last_td_was_short;
+	bool			soft_try;
 };
 
 struct xhci_erst_entry {
@@ -1820,6 +1823,8 @@ int xhci_queue_configure_endpoint(struct xhci_hcd *xhci, dma_addr_t in_ctx_ptr,
 int xhci_queue_evaluate_context(struct xhci_hcd *xhci, dma_addr_t in_ctx_ptr,
 		u32 slot_id, bool command_must_succeed);
 int xhci_queue_reset_ep(struct xhci_hcd *xhci, int slot_id,
+		unsigned int ep_index);
+int xhci_queue_soft_retry(struct xhci_hcd *xhci, int slot_id,
 		unsigned int ep_index);
 int xhci_queue_reset_device(struct xhci_hcd *xhci, u32 slot_id);
 void xhci_find_new_dequeue_state(struct xhci_hcd *xhci,
