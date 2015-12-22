@@ -417,6 +417,13 @@ static inline void must_have_sync_lock(struct tegra_xhci_hcd *tegra)
 		&& (_pad >= 0);	\
 		_pad = find_next_enabled_ss_pad(_tegra_xhci_hcd, _pad + 1))
 
+#define for_each_enabled_ss_pad_with_otg(_pad, _tegra_xhci_hcd)		\
+	for (_pad = find_next_enabled_ss_pad_with_otg(_tegra_xhci_hcd, 0);\
+		(_pad < (_tegra_xhci_hcd->soc_config->ss_pad_count))	\
+		&& (_pad >= 0);	\
+		_pad = find_next_enabled_ss_pad_with_otg(\
+			_tegra_xhci_hcd, _pad + 1))
+
 #define for_each_enabled_utmi_pad(_pad, _tegra_xhci_hcd)		\
 	for (_pad = find_next_enabled_utmi_pad(_tegra_xhci_hcd, 0);	\
 		(_pad < (_tegra_xhci_hcd->soc_config->utmi_pad_count))	\
@@ -497,6 +504,20 @@ static inline int find_next_enabled_ss_pad(struct tegra_xhci_hcd *tegra,
 		return -1;
 
 	return find_next_enabled_pad(tegra, start, last) - XUSB_SS_INDEX;
+}
+
+static inline int find_next_enabled_ss_pad_with_otg(
+		struct tegra_xhci_hcd *tegra, int curr_pad)
+{
+	int ss_pads = tegra->soc_config->ss_pad_count;
+	int start = XUSB_SS_INDEX + curr_pad;
+	int last = XUSB_SS_INDEX + ss_pads;
+
+	if ((curr_pad < 0) || (curr_pad >= ss_pads))
+		return -1;
+
+	return find_next_enabled_pad_with_otg(tegra, start, last) -
+						XUSB_SS_INDEX;
 }
 
 static void tegra_xhci_setup_gpio_for_ss_lane(struct tegra_xhci_hcd *tegra)
@@ -2807,6 +2828,51 @@ static int get_wake_sources_for_host_controlled_ports(int enabled_ports)
 	return wake_events;
 }
 
+#if defined(CONFIG_ARCH_TEGRA_21x_SOC)
+static struct tegra_rx_ctrl_ops t210_rx_ctrl_ops = {
+	.receiver_detector = t210_receiver_detector,
+	.clamp_en_early = t210_clamp_en_early,
+};
+#endif
+
+static void tegra_xhci_enable_receiver_detector(struct tegra_xhci_hcd *tegra,
+						unsigned port)
+{
+	dev_dbg(&tegra->pdev->dev, "%s port %d\n", __func__, port);
+
+	if (tegra->rx_ctrl_ops && tegra->rx_ctrl_ops->receiver_detector)
+		tegra->rx_ctrl_ops->receiver_detector(port, true);
+
+}
+
+static void tegra_xhci_disable_receiver_detector(struct tegra_xhci_hcd *tegra,
+						unsigned port)
+{
+	dev_dbg(&tegra->pdev->dev, "%s port %d\n", __func__, port);
+
+	if (tegra->rx_ctrl_ops && tegra->rx_ctrl_ops->receiver_detector)
+		tegra->rx_ctrl_ops->receiver_detector(port, false);
+}
+
+static void tegra_xhci_enable_clamp_en_early(struct tegra_xhci_hcd *tegra,
+						unsigned port)
+{
+	dev_dbg(&tegra->pdev->dev, "%s port %d\n", __func__, port);
+
+	if (tegra->rx_ctrl_ops && tegra->rx_ctrl_ops->clamp_en_early)
+		tegra->rx_ctrl_ops->clamp_en_early(port, true);
+
+}
+
+static void tegra_xhci_disable_clamp_en_early(struct tegra_xhci_hcd *tegra,
+						unsigned port)
+{
+	dev_dbg(&tegra->pdev->dev, "%s port %d\n", __func__, port);
+
+	if (tegra->rx_ctrl_ops && tegra->rx_ctrl_ops->clamp_en_early)
+		tegra->rx_ctrl_ops->clamp_en_early(port, false);
+}
+
 /* SS ELPG Entry initiated by fw */
 static int tegra_xhci_ss_elpg_entry(struct tegra_xhci_hcd *tegra)
 {
@@ -3580,7 +3646,12 @@ tegra_xhci_process_mbox_message(struct work_struct *work)
 	case MBOX_CMD_ENABLE_SS_LFPS_DETECTION:
 		ports = tegra->cmd_data;
 		for_each_set_bit(port, &ports, BITS_PER_LONG) {
+			unsigned long flags;
+
+			spin_lock_irqsave(&xhci->lock, flags);
 			t210_enable_lfps_detector(tegra, port - 1);
+			tegra_xhci_enable_receiver_detector(tegra, port - 1);
+			spin_unlock_irqrestore(&xhci->lock, flags);
 		}
 		sw_resp = CMD_DATA(tegra->cmd_data);
 		sw_resp |= CMD_TYPE(MBOX_CMD_ACK);
@@ -4241,11 +4312,13 @@ static int tegra_xhci_hub_control(struct usb_hcd *hcd, u16 type_req,
 
 static int tegra_xhci_hub_status_data(struct usb_hcd *hcd, char *buf)
 {
-	if (hcd->speed == HCD_USB2) {
-		struct xhci_hcd *xhci = hcd_to_xhci(hcd);
-		struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
-		int port;
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
+	unsigned long flags;
+	int port;
 
+
+	if (hcd->speed == HCD_USB2) {
 		for_each_enabled_utmi_pad_with_otg(port, tegra) {
 			u32 portsc = xhci_readl(xhci, xhci->usb2_ports[port]);
 			if (portsc == 0xffffffff)
@@ -4257,6 +4330,27 @@ static int tegra_xhci_hub_status_data(struct usb_hcd *hcd, char *buf)
 		}
 	}
 
+	if ((hcd->speed != HCD_USB3) || !tegra->rx_ctrl_ops)
+		goto no_rx_control;
+
+	for_each_enabled_ss_pad_with_otg(port, tegra) {
+		u32 portsc = xhci_readl(xhci, xhci->usb3_ports[port]);
+		if (portsc == 0xffffffff)
+			break;
+
+		spin_lock_irqsave(&xhci->lock, flags);
+		if ((portsc & PORT_PLS_MASK) == XDEV_U0) {
+			tegra_xhci_disable_receiver_detector(tegra, port);
+		} else {
+			if ((portsc & PORT_PLS_MASK) == XDEV_RXDETECT)
+				tegra_xhci_disable_clamp_en_early(tegra, port);
+
+			tegra_xhci_enable_receiver_detector(tegra, port);
+		}
+		spin_unlock_irqrestore(&xhci->lock, flags);
+	}
+
+no_rx_control:
 	return xhci_hub_status_data(hcd, buf);
 }
 
@@ -4270,6 +4364,51 @@ static int tegra_xhci_update_hub_device(struct usb_hcd *hcd,
 		hdev->lpm_capable = 0;
 
 	return xhci_update_hub_device(hcd, hdev, tt, mem_flags);
+}
+
+static void tegra_xhci_endpoint_soft_retry(struct usb_hcd *hcd,
+		struct usb_host_endpoint *ep, bool on)
+{
+	struct usb_device *udev = (struct usb_device *) ep->hcpriv;
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
+	int port = -1;
+	int delay = 0;
+	u32 portsc;
+
+	if (!udev || udev->speed != USB_SPEED_SUPER || !tegra->rx_ctrl_ops)
+		return;
+
+	/* trace back to roothub port */
+	while (udev->parent) {
+		if (udev->parent == udev->bus->root_hub) {
+			port = udev->portnum - 1;
+			break;
+		}
+		udev = udev->parent;
+	}
+
+	if (port < 0)
+		return;
+
+	portsc = xhci_readl(xhci, xhci->usb3_ports[port]);
+	dev_dbg(&tegra->pdev->dev, "%s port %d on %d portsc 0x%x\n",
+		__func__, port, on, portsc);
+
+	if (on) {
+		while ((portsc & PORT_PLS_MASK) != XDEV_U0 && delay++ < 6) {
+			udelay(50);
+			portsc = xhci_readl(xhci, xhci->usb3_ports[port]);
+		}
+
+		if ((portsc & PORT_PLS_MASK) != XDEV_U0) {
+			dev_info(&tegra->pdev->dev, "%s port %d doesn't reach U0 in 300us, portsc 0x%x\n",
+				__func__, port, portsc);
+		}
+		tegra_xhci_disable_receiver_detector(tegra, port);
+		tegra_xhci_enable_clamp_en_early(tegra, port);
+	} else
+		tegra_xhci_disable_clamp_en_early(tegra, port);
 }
 
 static void tegra_xhci_reset_otg_sspi_work(struct work_struct *work)
@@ -4351,6 +4490,7 @@ static const struct hc_driver tegra_plat_xhci_driver = {
 	.add_endpoint =		xhci_add_endpoint,
 	.drop_endpoint =	xhci_drop_endpoint,
 	.endpoint_reset =	xhci_endpoint_reset,
+	.endpoint_soft_retry =	tegra_xhci_endpoint_soft_retry,
 	.check_bandwidth =	xhci_check_bandwidth,
 	.reset_bandwidth =	xhci_reset_bandwidth,
 	.address_device =	xhci_address_device,
@@ -4371,8 +4511,10 @@ static const struct hc_driver tegra_plat_xhci_driver = {
 	.bus_resume =		tegra_xhci_bus_resume,
 #endif
 
+#if !defined(CONFIG_ARCH_TEGRA_21x_SOC)
 	.enable_usb3_lpm_timeout =	xhci_enable_usb3_lpm_timeout,
 	.disable_usb3_lpm_timeout =	xhci_disable_usb3_lpm_timeout,
+#endif
 	.hcd_reinit =	tegra_xhci_hcd_reinit,
 
 #ifdef CONFIG_NV_GAMEPAD_RESET
@@ -5529,6 +5671,11 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 			tegra->transceiver = NULL;
 		}
 	}
+
+#if defined(CONFIG_ARCH_TEGRA_21x_SOC)
+	if (XUSB_IS_T210(tegra))
+		tegra->rx_ctrl_ops = &t210_rx_ctrl_ops;
+#endif
 
 	tegra->padregs = soc_config->padctl_offsets;
 
