@@ -171,7 +171,7 @@ static inline void udp_lib_close(struct sock *sk, long timeout)
 }
 
 extern int udp_lib_get_port(struct sock *sk, unsigned short snum,
-			    int (*)(const struct sock *,const struct sock *),
+			    int (*)(const struct sock *,const struct sock *, bool),
 			    unsigned int hash2_nulladdr);
 
 /* net/ipv4/udp.c */
