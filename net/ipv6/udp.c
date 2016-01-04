@@ -239,7 +239,7 @@ begin:
 				struct sock *sk2;
 				hash = inet6_ehashfn(net, daddr, hnum,
 						     saddr, sport);
-				sk2 = reuseport_select_sock(sk, hash);
+				sk2 = reuseport_select_sock(sk, hash, NULL, 0);
 				if (sk2) {
 					result = sk2;
 					goto exact_match;
@@ -278,7 +278,8 @@ exact_match:
 struct sock *__udp6_lib_lookup(struct net *net,
 				      const struct in6_addr *saddr, __be16 sport,
 				      const struct in6_addr *daddr, __be16 dport,
-				      int dif, struct udp_table *udptable)
+				      int dif, struct udp_table *udptable,
+				      struct sk_buff *skb)
 {
 	struct sock *sk, *result;
 	struct hlist_nulls_node *node;
@@ -326,7 +327,8 @@ begin:
 				struct sock *sk2;
 				hash = inet6_ehashfn(net, daddr, hnum,
 						     saddr, sport);
-				sk2 = reuseport_select_sock(sk, hash);
+				sk2 = reuseport_select_sock(sk, hash, skb,
+							sizeof(struct udphdr));
 				if (sk2) {
 					result = sk2;
 					goto found;
@@ -374,13 +376,13 @@ static struct sock *__udp6_lib_lookup_skb(struct sk_buff *skb,
 		return sk;
 	return __udp6_lib_lookup(dev_net(skb_dst(skb)->dev), &iph->saddr, sport,
 				 &iph->daddr, dport, inet6_iif(skb),
-				 udptable);
+				 udptable, skb);
 }
 
 struct sock *udp6_lib_lookup(struct net *net, const struct in6_addr *saddr, __be16 sport,
 			     const struct in6_addr *daddr, __be16 dport, int dif)
 {
-	return __udp6_lib_lookup(net, saddr, sport, daddr, dport, dif, &udp_table);
+	return __udp6_lib_lookup(net, saddr, sport, daddr, dport, dif, &udp_table, NULL);
 }
 EXPORT_SYMBOL_GPL(udp6_lib_lookup);
 
@@ -546,7 +548,7 @@ void __udp6_lib_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	int err;
 
 	sk = __udp6_lib_lookup(dev_net(skb->dev), daddr, uh->dest,
-			       saddr, uh->source, inet6_iif(skb), udptable);
+			       saddr, uh->source, inet6_iif(skb), udptable, skb);
 	if (sk == NULL)
 		return;
 
