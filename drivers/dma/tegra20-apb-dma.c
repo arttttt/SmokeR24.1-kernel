@@ -176,6 +176,7 @@ struct tegra_dma_desc {
 	struct dma_async_tx_descriptor	txd;
 	int				bytes_requested;
 	int				bytes_transferred;
+	u32				dma_position;
 	enum dma_status			dma_status;
 	struct list_head		node;
 	struct list_head		tx_list;
@@ -597,6 +598,7 @@ static void handle_once_dma_done(struct tegra_dma_channel *tdc,
 	dma_desc->bytes_transferred = (dma_desc->bytes_transferred +
 					sgreq->req_len) %
 					dma_desc->bytes_requested;
+	dma_desc->dma_position = dma_desc->bytes_transferred;
 
 	list_del(&sgreq->node);
 	if (sgreq->last_sg) {
@@ -634,6 +636,7 @@ static void handle_cont_sngl_cycle_dma_done(struct tegra_dma_channel *tdc,
 	dma_desc->bytes_transferred = (dma_desc->bytes_transferred +
 					sgreq->req_len) %
 					dma_desc->bytes_requested;
+	dma_desc->dma_position = dma_desc->bytes_transferred;
 
 	/* Callback need to be call */
 	if (!dma_desc->cb_count)
@@ -797,6 +800,7 @@ static void tegra_dma_terminate_all(struct dma_chan *dc)
 				(sgreq->dma_desc->bytes_transferred +
 				get_current_xferred_count(tdc, sgreq, wcount)) %
 				sgreq->dma_desc->bytes_requested;
+		sgreq->dma_desc->dma_position = sgreq->dma_desc->bytes_transferred;
 	}
 	tegra_dma_resume(tdc);
 	clk_disable(tdc->tdma->dma_clk);
@@ -837,7 +841,7 @@ static enum dma_status tegra_dma_tx_status(struct dma_chan *dc,
 	list_for_each_entry(dma_desc, &tdc->free_dma_desc, node) {
 		if (dma_desc->txd.cookie == cookie) {
 			residual =  dma_desc->bytes_requested -
-					dma_desc->bytes_transferred;
+					dma_desc->dma_position;
 			dma_set_residue(txstate, residual);
 			ret = dma_desc->dma_status;
 			spin_unlock_irqrestore(&tdc->lock, flags);
@@ -849,8 +853,19 @@ static enum dma_status tegra_dma_tx_status(struct dma_chan *dc,
 	list_for_each_entry(sg_req, &tdc->pending_sg_req, node) {
 		dma_desc = sg_req->dma_desc;
 		if (dma_desc->txd.cookie == cookie) {
+			if (tdc->tdma->chip_data->support_separate_wcount_reg) {
+				u32 wcount = tdc_read(tdc,
+					TEGRA_APBDMA_CHAN_WORD_TRANSFER);
+				u32 dma_pos = get_current_xferred_count(tdc,
+								sg_req, wcount);
+				dma_pos += dma_desc->bytes_transferred;
+
+				/* Ensure position does not move backwards */
+				if (dma_pos > dma_desc->dma_position)
+					dma_desc->dma_position = dma_pos;
+			}
 			residual =  dma_desc->bytes_requested -
-					dma_desc->bytes_transferred;
+					dma_desc->dma_position;
 			dma_set_residue(txstate, residual);
 			ret = dma_desc->dma_status;
 			spin_unlock_irqrestore(&tdc->lock, flags);
@@ -1015,6 +1030,7 @@ static struct dma_async_tx_descriptor *tegra_dma_prep_slave_sg(
 	dma_desc->cb_count = 0;
 	dma_desc->bytes_requested = 0;
 	dma_desc->bytes_transferred = 0;
+	dma_desc->dma_position = 0;
 	dma_desc->dma_status = DMA_IN_PROGRESS;
 
 	/* Make transfer requests */
