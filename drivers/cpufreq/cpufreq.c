@@ -716,9 +716,15 @@ static ssize_t store(struct kobject *kobj, struct attribute *attr,
 	struct cpufreq_policy *policy = to_policy(kobj);
 	struct freq_attr *fattr = to_attr(attr);
 	ssize_t ret = -EINVAL;
+
+	get_online_cpus();
+
+	if (!cpu_online(policy->cpu))
+		goto unlock;
+
 	policy = cpufreq_cpu_get_sysfs(policy->cpu);
 	if (!policy)
-		goto no_policy;
+		goto unlock;
 
 	if (lock_policy_rwsem_write(policy->cpu) < 0)
 		goto fail;
@@ -731,7 +737,9 @@ static ssize_t store(struct kobject *kobj, struct attribute *attr,
 	unlock_policy_rwsem_write(policy->cpu);
 fail:
 	cpufreq_cpu_put_sysfs(policy);
-no_policy:
+unlock:
+	put_online_cpus();
+
 	return ret;
 }
 
