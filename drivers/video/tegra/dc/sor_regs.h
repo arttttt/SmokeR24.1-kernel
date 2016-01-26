@@ -1,18 +1,18 @@
 /*
-* drivers/video/tegra/dc/sor_regs.h
-*
-* Copyright (c) 2011-2015, NVIDIA CORPORATION, All rights reserved.
-*
-* This software is licensed under the terms of the GNU General Public
-* License version 2, as published by the Free Software Foundation, and
-* may be copied, distributed, and modified under those terms.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
-* GNU General Public License for more details.
-*
-*/
+ * drivers/video/tegra/dc/sor_regs.h
+ *
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION, All rights reserved.
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
+ * GNU General Public License for more details.
+ *
+ */
 
 #ifndef __DRIVER_VIDEO_TEGRA_DC_SOR_REGS_H__
 #define __DRIVER_VIDEO_TEGRA_DC_SOR_REGS_H__
@@ -723,6 +723,7 @@
 #define NV_SOR_DC_LANE0_DP_LANE2_P1_LEVEL2			(43)
 #define NV_SOR_DC_LANE0_DP_LANE2_P0_LEVEL3			(51)
 #define NV_SOR_LANE_DRIVE_CURRENT(i)				(0x4e + (i))
+#define NV_SOR_LANE4_DRIVE_CURRENT(i)				(0x50 + (i))
 #define NV_SOR_PR(i)						(0x52 + (i))
 #define NV_SOR_PR_LANE3_DP_LANE3_SHIFT				(24)
 #define NV_SOR_PR_LANE3_DP_LANE3_MASK				(0xff << 24)
