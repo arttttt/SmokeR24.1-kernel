@@ -2057,6 +2057,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 {
 	bool is_v2 = fs_type == &cgroup2_fs_type;
 	struct super_block *pinned_sb = NULL;
+	struct cgroup_namespace *ns = current->nsproxy->cgroup_ns;
 	struct cgroup_subsys *ss;
 	struct cgroup_root *root = NULL;
 	struct cgroup_sb_opts opts;
@@ -2064,6 +2065,14 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 	int ret;
 	int i;
 	bool new_sb;
+
+	get_cgroup_ns(ns);
+
+	/* Check if the caller has permission to mount. */
+	if (!ns_capable(ns->user_ns, CAP_SYS_ADMIN)) {
+		put_cgroup_ns(ns);
+		return ERR_PTR(-EPERM);
+	}
 
 	/*
 	 * The first time anyone tries to mount a cgroup, enable the list
@@ -2075,6 +2084,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 	if (is_v2) {
 		if (data) {
 			pr_err("cgroup2: unknown option \"%s\"\n", (char *)data);
+			put_cgroup_ns(ns);
 			return ERR_PTR(-EINVAL);
 		}
 		cgrp_dfl_root_visible = true;
@@ -2180,6 +2190,16 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		goto out_unlock;
 	}
 
+	/*
+	 * We know this subsystem has not yet been bound.  Users in a non-init
+	 * user namespace may only mount hierarchies with no bound subsystems,
+	 * i.e. 'none,name=user1'
+	 */
+	if (!opts.none && !capable(CAP_SYS_ADMIN)) {
+		ret = -EPERM;
+		goto out_unlock;
+	}
+
 	root = kzalloc(sizeof(*root), GFP_KERNEL);
 	if (!root) {
 		ret = -ENOMEM;
@@ -2198,12 +2218,37 @@ out_free:
 	kfree(opts.release_agent);
 	kfree(opts.name);
 
-	if (ret)
+	if (ret) {
+		put_cgroup_ns(ns);
 		return ERR_PTR(ret);
+	}
 out_mount:
 	dentry = kernfs_mount(fs_type, flags, root->kf_root,
 			      is_v2 ? CGROUP2_SUPER_MAGIC : CGROUP_SUPER_MAGIC,
 			      &new_sb);
+
+	/*
+	 * In non-init cgroup namespace, instead of root cgroup's
+	 * dentry, we return the dentry corresponding to the
+	 * cgroupns->root_cgrp.
+	 */
+	if (!IS_ERR(dentry) && ns != &init_cgroup_ns) {
+		struct dentry *nsdentry;
+		struct cgroup *cgrp;
+
+		mutex_lock(&cgroup_mutex);
+		spin_lock_bh(&css_set_lock);
+
+		cgrp = cset_cgroup_from_root(ns->root_cset, root);
+
+		spin_unlock_bh(&css_set_lock);
+		mutex_unlock(&cgroup_mutex);
+
+		nsdentry = kernfs_node_dentry(cgrp->kn, dentry->d_sb);
+		dput(dentry);
+		dentry = nsdentry;
+	}
+
 	if (IS_ERR(dentry) || !new_sb)
 		cgroup_put(&root->cgrp);
 
@@ -2216,6 +2261,7 @@ out_mount:
 		deactivate_super(pinned_sb);
 	}
 
+	put_cgroup_ns(ns);
 	return dentry;
 }
 
