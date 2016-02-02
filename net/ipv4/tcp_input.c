@@ -3179,7 +3179,7 @@ static u32 tcp_tso_acked(struct sock *sk, struct sk_buff *skb)
  * arrived at the other end.
  */
 static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
-			       u32 prior_snd_una, long sack_rtt_us)
+			       u32 prior_snd_una, int *acked, long sack_rtt_us)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct skb_mstamp first_ackt, last_ackt, now;
@@ -3352,6 +3352,7 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 		}
 	}
 #endif
+	*acked = pkts_acked;
 	return flag;
 }
 
@@ -3664,11 +3665,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 		goto no_queue;
 
 	/* See if we can take anything off of the retransmit queue. */
-	acked = tp->packets_out;
-	flag |= tcp_clean_rtx_queue(sk, prior_fackets, prior_snd_una,
+	flag |= tcp_clean_rtx_queue(sk, prior_fackets, prior_snd_una, &acked,
 				    sack_rtt_us);
-
-	acked -= tp->packets_out;
 
 	if (tp->tlp_high_seq)
 		tcp_process_tlp_ack(sk, ack, flag);
