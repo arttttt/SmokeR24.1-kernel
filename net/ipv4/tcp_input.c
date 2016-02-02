@@ -3681,7 +3681,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 		tcp_cwnd_reduction(sk, acked_sacked, flag);
 	} else if (tcp_may_raise_cwnd(sk, flag)) {
 		/* Advance cwnd if state allows */
-		tcp_cong_avoid(sk, ack, acked, prior_in_flight);
+		tcp_cong_avoid(sk, ack, acked_sacked, prior_in_flight);
 	}
 
 	if (tcp_ack_is_dubious(sk, flag)) {
