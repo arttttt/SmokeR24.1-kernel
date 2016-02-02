@@ -3397,6 +3397,24 @@ static inline bool tcp_may_raise_cwnd(const struct sock *sk, const int flag)
 	return flag & FLAG_DATA_ACKED;
 }
 
+/* The "ultimate" congestion control function that aims to replace the rigid
+ * cwnd increase and decrease control (tcp_cong_avoid,tcp_*cwnd_reduction).
+ * It's called toward the end of processing an ACK with precise rate
+ * information. All transmission or retransmission are delayed afterwards.
+ */
+static void tcp_cong_control(struct sock *sk, u32 ack, u32 acked_sacked,
+			     int flag, u32 prior_in_flight)
+{
+	if (tcp_in_cwnd_reduction(sk)) {
+		/* Reduce cwnd if state mandates */
+		tcp_cwnd_reduction(sk, acked_sacked, flag);
+	} else if (tcp_may_raise_cwnd(sk, flag)) {
+		/* Advance cwnd if state allows */
+		tcp_cong_avoid(sk, ack, acked_sacked, prior_in_flight);
+	}
+	tcp_update_pacing_rate(sk);
+}
+
 /* Check that window update is acceptable.
  * The function assumes that snd_una<=ack<=snd_next.
  */
@@ -3591,7 +3609,6 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	int prior_packets = tp->packets_out;
 	u32 prior_delivered = tp->delivered;
 	int acked = 0; /* Number of packets newly acked */
-	u32 acked_sacked; /* Number of packets newly acked or sacked */
 	int rexmit = REXMIT_NONE; /* Flag to (re)transmit to recover losses */
 	long sack_rtt_us = -1L;
 
@@ -3674,16 +3691,6 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	if (flag & FLAG_SET_XMIT_TIMER)
 		tcp_set_xmit_timer(sk);
 
-	acked_sacked = tp->delivered - prior_delivered;
-	/* Advance cwnd if state allows */
-	if (tcp_in_cwnd_reduction(sk)) {
-		/* Reduce cwnd if state mandates */
-		tcp_cwnd_reduction(sk, acked_sacked, flag);
-	} else if (tcp_may_raise_cwnd(sk, flag)) {
-		/* Advance cwnd if state allows */
-		tcp_cong_avoid(sk, ack, acked_sacked, prior_in_flight);
-	}
-
 	if (tcp_ack_is_dubious(sk, flag)) {
 		is_dupack = !(flag & (FLAG_SND_UNA_ADVANCED | FLAG_NOT_DUP));
 		tcp_fastretrans_alert(sk, acked, is_dupack, &flag, &rexmit);
@@ -3695,7 +3702,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 			dst_confirm(dst);
 	}
 
-	tcp_update_pacing_rate(sk);
+	tcp_cong_control(sk, ack, tp->delivered - prior_delivered, flag, prior_in_flight);
 	tcp_xmit_recovery(sk, rexmit);
 	return 1;
 
