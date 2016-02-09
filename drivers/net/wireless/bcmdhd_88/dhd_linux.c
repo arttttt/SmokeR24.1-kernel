@@ -5253,6 +5253,7 @@ dhd_module_init(void)
 		wl_android_wifictrl_func_del();
 #endif /* defined(CONFIG_WIFI_CONTROL_FUNC) */
 		dhd_customer_gpio_wlan_ctrl(WLAN_POWER_OFF);
+		OSL_SLEEP(500 * (POWERUP_MAX_RETRY - retry + 1));
 	} while (retry-- > 0);
 
 	if (!chip_up) {

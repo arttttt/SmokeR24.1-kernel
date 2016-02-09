@@ -714,6 +714,7 @@ int wl_android_wifi_on(struct net_device *dev)
 			DHD_ERROR(("\nfailed to power up wifi chip, retry again (%d left) **\n\n",
 				retry+1));
 			dhd_customer_gpio_wlan_ctrl(WLAN_RESET_OFF);
+			OSL_SLEEP(500 * (POWERUP_MAX_RETRY - retry + 1));
 		} while (retry-- >= 0);
 		if (ret != 0) {
 			DHD_ERROR(("\nfailed to power up wifi chip, max retry reached **\n\n"));
