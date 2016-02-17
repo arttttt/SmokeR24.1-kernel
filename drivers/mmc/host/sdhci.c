@@ -3662,7 +3662,11 @@ int sdhci_suspend_host(struct sdhci_host *host)
 	int ret;
 	struct mmc_host *mmc = host->mmc;
 
-	host->suspend_task = current;
+	/* we need to enable clocks during
+	 * mmc_suspend_host for SDHCI_QUIRK2_NON_STD_RTPM
+	 */
+	if (!(host->quirks2 & SDHCI_QUIRK2_NON_STD_RTPM))
+		host->suspend_task = current;
 
 	if (host->ops->platform_suspend)
 		host->ops->platform_suspend(host);
@@ -3693,7 +3697,8 @@ int sdhci_suspend_host(struct sdhci_host *host)
 
 		sdhci_enable_card_detection(host);
 
-		host->suspend_task = NULL;
+		if (!(host->quirks2 & SDHCI_QUIRK2_NON_STD_RTPM))
+			host->suspend_task = NULL;
 		return ret;
 	}
 	/* cancel delayed clk gate work */
@@ -3734,7 +3739,8 @@ int sdhci_suspend_host(struct sdhci_host *host)
 				host->ops->set_clock(host, 0);
 	}
 
-	host->suspend_task = NULL;
+	if (!(host->quirks2 & SDHCI_QUIRK2_NON_STD_RTPM))
+		host->suspend_task = NULL;
 
 	return ret;
 }
