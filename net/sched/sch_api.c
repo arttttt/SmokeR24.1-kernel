@@ -1835,6 +1835,7 @@ reset:
 	}
 
 	tp = old_tp;
+	protocol = tc_skb_protocol(skb);
 	goto reclassify;
 #endif
 }
