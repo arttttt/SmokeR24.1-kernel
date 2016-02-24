@@ -1661,6 +1661,44 @@ static int exar_handle_irq(struct uart_port *port)
 	return ret;
 }
 
+void serial8250_save_port_stats(struct uart_port *port,
+		struct uart_icount *stats)
+{
+	stats->rx          = port->icount.rx;
+	stats->tx          = port->icount.tx;
+	stats->frame       = port->icount.frame;
+	stats->overrun     = port->icount.overrun;
+	stats->parity      = port->icount.parity;
+	stats->brk         = port->icount.brk;
+	stats->buf_overrun = port->icount.buf_overrun;
+	stats->cts         = port->icount.cts;
+	stats->dsr         = port->icount.dsr;
+	stats->rng         = port->icount.rng;
+	stats->dcd         = port->icount.dcd;
+}
+
+void serial8250_dump_port_stats(struct uart_port *port,
+	struct uart_icount stats)
+{
+	pr_err_ratelimited(
+		"old_stats: rx %d, tx %d frame %d ovrun %d parity %d\n",
+		stats.rx, stats.tx, stats.frame, stats.overrun,
+		stats.parity);
+	pr_err_ratelimited(
+		"old_stats: brk %d ovrun %d cts %d, dsr %d rng %d dcd %d\n",
+		stats.brk, stats.buf_overrun, stats.cts, stats.dsr,
+		stats.rng, stats.dcd);
+
+	pr_err_ratelimited(
+		"curr_stats: rx %d, tx %d frame %d ovrun %d parity %d\n",
+		port->icount.rx, port->icount.tx, port->icount.frame,
+		port->icount.overrun, port->icount.parity);
+	pr_err_ratelimited(
+		"curr_stats: brk %d ovrun %d cts %d, dsr %d rng %d dcd %d\n",
+		port->icount.brk, port->icount.buf_overrun, port->icount.cts,
+		port->icount.dsr, port->icount.rng, port->icount.dcd);
+}
+
 /*
  * This is the serial driver's interrupt routine.
  *
@@ -1689,9 +1727,11 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 	do {
 		struct uart_8250_port *up;
 		struct uart_port *port;
+		struct uart_icount old_stats;
 
 		up = list_entry(l, struct uart_8250_port, list);
 		port = &up->port;
+		serial8250_save_port_stats(port, &old_stats);
 
 		if (port->handle_irq(port)) {
 			handled = 1;
@@ -1709,6 +1749,7 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 			/* If we hit this, we're dead. */
 			printk_ratelimited(KERN_ERR
 				"serial8250: too much work for irq%d\n", irq);
+			serial8250_dump_port_stats(port, old_stats);
 			break;
 		}
 	} while (l != end);
