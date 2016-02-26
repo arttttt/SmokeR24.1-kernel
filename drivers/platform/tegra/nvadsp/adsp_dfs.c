@@ -159,7 +159,7 @@ static int adsp_dfs_rc_callback(
 	struct notifier_block *nb, unsigned long rate, void *v)
 {
 	unsigned long freq = rate / 1000;
-	int old_index, new_index;
+	int old_index, new_index = 0;
 
 	/* update states */
 	adspfreq_stats_update();
