@@ -92,7 +92,6 @@ struct te_shmem_desc {
 	size_t size;
 	struct page **pages;
 	unsigned int nr_pages;
-	bool is_locked;
 };
 
 /*

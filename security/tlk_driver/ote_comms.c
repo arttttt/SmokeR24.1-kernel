@@ -26,7 +26,6 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
-#include <linux/syscalls.h>
 #include <asm/smp_plat.h>
 
 #include "ote_protocol.h"
@@ -38,16 +37,12 @@ core_param(verbose_smc, verbose_smc, bool, 0644);
 #define SET_RESULT(req, r, ro)	{ req->result = r; req->result_origin = ro; }
 
 static int te_pin_user_pages(void *buffer, size_t size,
-		unsigned long *pages_ptr, uint32_t buf_type, bool *is_locked)
+		unsigned long *pages_ptr, uint32_t buf_type)
 {
 	int ret = 0;
 	unsigned int nr_pages;
 	struct page **pages = NULL;
 	bool writable;
-	struct vm_area_struct *vma = NULL;
-	unsigned int flags;
-	int i;
-	bool is_locked_prev;
 
 	nr_pages = (((uintptr_t)buffer & (PAGE_SIZE - 1)) +
 			(size + PAGE_SIZE - 1)) >> PAGE_SHIFT;
@@ -66,68 +61,9 @@ static int te_pin_user_pages(void *buffer, size_t size,
 
 	up_read(&current->mm->mmap_sem);
 
-	if (ret <= 0) {
-		pr_err("%s: Error %d in get_user_pages\n", __func__, ret);
-		return ret;
-	}
-
 	*pages_ptr = (unsigned long) pages;
-	nr_pages = ret;
 
-	down_read(&current->mm->mmap_sem);
-
-	is_locked_prev = false;
-	vma = find_extend_vma(current->mm, (unsigned long)buffer);
-	if (vma && (vma->vm_flags & VM_LOCKED))
-		is_locked_prev = true;
-
-	up_read(&current->mm->mmap_sem);
-
-	/*
-	 * Lock the pages if they are not already locked to ensure that
-	 * AF bit is not set to zero.
-	 */
-	*is_locked = false;
-	if (!is_locked_prev) {
-		ret = sys_mlock((unsigned long)buffer, size);
-		if (!ret)
-			*is_locked = true;
-		else
-			/*
-			 * Follow through even if mlock failed as it can be
-			 * failed due to memory restrictions or invalid
-			 * capabilities
-			 */
-			pr_warn("%s: Error %d in mlock, continuing session\n",
-								__func__, ret);
-	}
-
-	down_read(&current->mm->mmap_sem);
-
-	/* Fault pages to set the AF bit in PTE */
-	flags = FAULT_FLAG_USER;
-	if (writable)
-		flags |= FAULT_FLAG_WRITE;
-	for (i = 0; i < nr_pages; i++) {
-		ret = fixup_user_fault(current, current->mm,
-			(unsigned long)(buffer + (i * PAGE_SIZE)), flags);
-		if (ret) {
-			pr_err("%s: Error %d in fixup_user_fault\n",
-							__func__, ret);
-			break;
-		}
-	}
-
-	up_read(&current->mm->mmap_sem);
-
-	if (ret) {
-		if (*is_locked)
-			sys_munlock((unsigned long)buffer, size);
-		return ret;
-	}
-
-	/* Return the number of pages pinned */
-	return nr_pages;
+	return ret;
 }
 
 static int te_prep_mem_buffer(uint32_t session_id,
@@ -137,7 +73,6 @@ static int te_prep_mem_buffer(uint32_t session_id,
 	unsigned long pages = 0;
 	struct te_shmem_desc *shmem_desc = NULL;
 	int ret = 0, nr_pages = 0;
-	bool is_locked = false;
 
 	/* allocate new shmem descriptor */
 	shmem_desc = kzalloc(sizeof(struct te_shmem_desc), GFP_KERNEL);
@@ -148,8 +83,7 @@ static int te_prep_mem_buffer(uint32_t session_id,
 	}
 
 	/* pin pages */
-	nr_pages = te_pin_user_pages(buffer, size, &pages,
-					buf_type, &is_locked);
+	nr_pages = te_pin_user_pages(buffer, size, &pages, buf_type);
 	if (nr_pages <= 0) {
 		pr_err("%s: te_pin_user_pages failed (%d)\n", __func__,
 			nr_pages);
@@ -164,7 +98,6 @@ static int te_prep_mem_buffer(uint32_t session_id,
 	shmem_desc->size = size;
 	shmem_desc->nr_pages = nr_pages;
 	shmem_desc->pages = (struct page **)(uintptr_t)pages;
-	shmem_desc->is_locked = is_locked;
 
 	/* add shmem descriptor to proper list */
 	if ((buf_type == TE_PARAM_TYPE_MEM_RO) ||
@@ -222,7 +155,6 @@ static int te_prep_mem_buffers(struct te_request *request,
 static void te_release_mem_buffer(struct te_shmem_desc *shmem_desc)
 {
 	uint32_t i;
-	int status;
 
 	list_del(&shmem_desc->list);
 	for (i = 0; i < shmem_desc->nr_pages; i++) {
@@ -232,14 +164,6 @@ static void te_release_mem_buffer(struct te_shmem_desc *shmem_desc)
 		page_cache_release(shmem_desc->pages[i]);
 	}
 	kfree(shmem_desc->pages);
-
-	if (shmem_desc->is_locked) {
-		status = sys_munlock((unsigned long)shmem_desc->buffer,
-							shmem_desc->size);
-		if (status)
-			pr_err("%s:Error %d in munlock\n", __func__, status);
-	}
-
 	kfree(shmem_desc);
 }
 
