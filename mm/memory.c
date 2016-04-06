@@ -3796,6 +3796,7 @@ int handle_pte_fault(struct mm_struct *mm,
 {
 	pte_t entry;
 	spinlock_t *ptl;
+	bool fix_prot = false;
 
 	entry = *pte;
 	if (!pte_present(entry)) {
@@ -3816,10 +3817,24 @@ int handle_pte_fault(struct mm_struct *mm,
 	if (pte_numa(entry))
 		return do_numa_page(mm, vma, address, entry, pte, pmd);
 
+	if (vma->vm_ops && vma->vm_ops->fixup_prot && vma->vm_ops->fault &&
+		(entry == pte_modify(entry, vm_get_page_prot(VM_NONE)))) {
+		pgoff_t pgoff = (((address & PAGE_MASK)
+				- vma->vm_start) >> PAGE_SHIFT) + vma->vm_pgoff;
+		if (!vma->vm_ops->fixup_prot(vma, address & PAGE_MASK, pgoff))
+			return VM_FAULT_SIGSEGV; /* access not granted */
+		fix_prot = true;
+	}
+
 	ptl = pte_lockptr(mm, pmd);
 	spin_lock(ptl);
 	if (unlikely(!pte_same(*pte, entry)))
 		goto unlock;
+	if (fix_prot) {
+		entry = pte_modify(entry, vma->vm_page_prot);
+		vm_stat_account(mm, VM_NONE, vma->vm_file, -1);
+		vm_stat_account(mm, vma->vm_flags, vma->vm_file, 1);
+	}
 	if (flags & FAULT_FLAG_WRITE) {
 		if (!pte_write(entry))
 			return do_wp_page(mm, vma, address,
