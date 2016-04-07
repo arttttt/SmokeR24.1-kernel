@@ -849,7 +849,7 @@ static void uprobe_perf_print(struct trace_uprobe *tu,
 	if (hlist_empty(head))
 		goto out;
 
-	entry = perf_trace_buf_prepare(size, call->event.type, NULL, &rctx);
+	entry = perf_trace_buf_alloc(size, NULL, &rctx);
 	if (!entry)
 		goto out;
 
@@ -865,7 +865,8 @@ static void uprobe_perf_print(struct trace_uprobe *tu,
 	for (i = 0; i < tu->nr_args; i++)
 		call_fetch(&tu->args[i].fetch, regs, data + tu->args[i].offset);
 
-	perf_trace_buf_submit(entry, size, rctx, 0, 1, regs, head, NULL);
+	perf_trace_buf_submit(entry, size, rctx, call->event.type, 1, regs,
+			      head, NULL);
  out:
 	preempt_enable();
 }
