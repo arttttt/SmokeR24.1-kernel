@@ -329,6 +329,14 @@ struct nvgpu_gpu_vsms_mapping {
 	__u64 vsms_map_buf_addr;
 };
 
+struct nvgpu_gpu_get_gpu_time_args {
+	/* raw GPU counter (PTIMER) value */
+	__u64 gpu_timestamp;
+
+	/* reserved for future extensions */
+	__u64 reserved;
+};
+
 #define NVGPU_GPU_IOCTL_ZCULL_GET_CTX_SIZE \
 	_IOR(NVGPU_GPU_IOCTL_MAGIC, 1, struct nvgpu_gpu_zcull_get_ctx_size_args)
 #define NVGPU_GPU_IOCTL_ZCULL_GET_INFO \
@@ -367,9 +375,11 @@ struct nvgpu_gpu_vsms_mapping {
 	_IOWR(NVGPU_GPU_IOCTL_MAGIC, 18, struct nvgpu_gpu_num_vsms)
 #define NVGPU_GPU_IOCTL_VSMS_MAPPING \
 	_IOWR(NVGPU_GPU_IOCTL_MAGIC, 19, struct nvgpu_gpu_vsms_mapping)
-
+#define NVGPU_GPU_IOCTL_GET_GPU_TIME \
+	_IOWR(NVGPU_GPU_IOCTL_MAGIC, 25, \
+			struct nvgpu_gpu_get_gpu_time_args)
 #define NVGPU_GPU_IOCTL_LAST		\
-	_IOC_NR(NVGPU_GPU_IOCTL_VSMS_MAPPING)
+	_IOC_NR(NVGPU_GPU_IOCTL_GET_GPU_TIME)
 #define NVGPU_GPU_IOCTL_MAX_ARG_SIZE	\
 	sizeof(struct nvgpu_gpu_prepare_compressible_read_args)
 

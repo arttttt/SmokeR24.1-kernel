@@ -98,4 +98,12 @@ static inline u32 timer_pri_timeout_fecs_errcode_r(void)
 {
 	return 0x0000908c;
 }
+static inline u32 timer_time_0_r(void)
+{
+        return 0x00009400;
+}
+static inline u32 timer_time_1_r(void)
+{
+        return 0x00009410;
+}
 #endif
