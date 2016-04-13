@@ -286,9 +286,9 @@
 							    254 254 254 254 255 255 255 255 >;
 				};
 				cmu_adobe_rgb {
-						nvidia,cmu-csc = < 0x106 0x3FE 0x3FA
-							   0x3FF 0x0FB 0x004
-							   0x3FF 0x006 0x0FE >;
+						nvidia,cmu-csc = < 0x106 0x3FF 0x3FA
+							   0x000 0x0FB 0x004
+							   0x3FE 0x006 0x0FC >;
 						nvidia,cmu-lut1 = < 0 1 2 4 5 6 7 9
 							    10 11 12 14 15 16 18 20
 							    21 23 25 27 29 31 33 35
