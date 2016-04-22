@@ -66,8 +66,7 @@ static DECLARE_WAIT_QUEUE_HEAD(wq_worker);
 #define HDCP_MSG_SIZE_MASK		0x03FF
 #define HDCP22_PROTOCOL			1
 #define HDCP1X_PROTOCOL			0
-#define HDCP_MAX_RETRIES		5
-#define HDCP_MIN_RETRIES		0
+#define HDCP_INFINITE_RETRIES		-1
 #define HDCP_DEBUG                      0
 #define SEQ_NUM_M_MAX_RETRIES		1
 
@@ -1547,14 +1546,15 @@ static void nvhdcp_downstream_worker(struct work_struct *work)
 
 failure:
 	nvhdcp->fail_count++;
-	if (nvhdcp->fail_count > nvhdcp->max_retries) {
-		nvhdcp_err("nvhdcp failure - too many failures, giving up!\n");
-	} else {
+	if (nvhdcp->max_retries <= HDCP_INFINITE_RETRIES ||
+		nvhdcp->fail_count < nvhdcp->max_retries) {
 		nvhdcp_err("nvhdcp failure - renegotiating in 1 second\n");
 		if (!nvhdcp_is_plugged(nvhdcp))
 			goto lost_hdmi;
 		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->hdcp1x_work,
 						msecs_to_jiffies(1000));
+	} else {
+		nvhdcp_err("nvhdcp failure - too many failures, giving up!\n");
 	}
 
 lost_hdmi:
@@ -1769,14 +1769,15 @@ static void nvhdcp2_downstream_worker(struct work_struct *work)
 failure:
 
 	nvhdcp->fail_count++;
-	if (nvhdcp->fail_count > nvhdcp->max_retries) {
-		nvhdcp_err("nvhdcp failure - too many failures, giving up!\n");
-	} else {
+	if (nvhdcp->max_retries <= HDCP_INFINITE_RETRIES ||
+		nvhdcp->fail_count < nvhdcp->max_retries) {
 		nvhdcp_err("nvhdcp failure - renegotiating in 1 second\n");
 		if (!nvhdcp_is_plugged(nvhdcp))
 			goto lost_hdmi;
 		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->hdcp22_work,
 						msecs_to_jiffies(1000));
+	} else {
+		nvhdcp_err("nvhdcp failure - too many failures, giving up!\n");
 	}
 
 lost_hdmi:
@@ -2066,7 +2067,7 @@ struct tegra_nvhdcp *tegra_nvhdcp_create(struct tegra_hdmi *hdmi,
 	nvhdcp->info.addr = 0x74 >> 1;
 	nvhdcp->info.platform_data = nvhdcp;
 	nvhdcp->fail_count = 0;
-	nvhdcp->max_retries = HDCP_MAX_RETRIES;
+	nvhdcp->max_retries = HDCP_INFINITE_RETRIES;
 	atomic_set(&nvhdcp->policy, hdmi->dc->pdata->default_out->hdcp_policy);
 
 	adapter = i2c_get_adapter(bus);
@@ -2141,10 +2142,10 @@ static int tegra_nvhdcp_max_retries_dbg_show(struct seq_file *m, void *unused)
 
 /*
  * sw control for hdcp max retries.
- * 5 is the normal number of max retries.
- * 1 is the minimum number of retries.
- * 5 is the maximum number of retries.
- * sw should keep the number of retries to 5 until unless a change is required
+ * -1 is the default value which indicates infinite retries
+ * If a non-infinite value is desired, set max_retries to a non-negative
+ *  integer
+ * 0 is the minimum number of retries.
  */
 static ssize_t tegra_nvhdcp_max_retries_dbg_write(struct file *file,
 						const char __user *addr,
@@ -2162,9 +2163,7 @@ static ssize_t tegra_nvhdcp_max_retries_dbg_write(struct file *file,
 	if (ret < 0)
 		return ret;
 
-	if (new_max_retries >= HDCP_MIN_RETRIES &&
-		new_max_retries <= HDCP_MAX_RETRIES)
-		hdcp->max_retries = new_max_retries;
+	hdcp->max_retries = new_max_retries;
 
 	return len;
 }
