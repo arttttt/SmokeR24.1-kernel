@@ -306,6 +306,7 @@ static void tegra_channel_capture_frame(struct tegra_channel *chan,
 				       struct tegra_channel_buffer *buf)
 {
 	struct vb2_buffer *vb = &buf->buf;
+	struct timespec ts;
 	int err = 0;
 	u32 val, frame_start, mw_ack_done;
 	int bytes_per_line = chan->format.bytesperline;
@@ -349,7 +350,7 @@ static void tegra_channel_capture_frame(struct tegra_channel *chan,
 			chan->syncpt[index], thresh[index],
 			TEGRA_VI_SYNCPT_WAIT_TIMEOUT,
 			NULL,
-			NULL);
+			&ts);
 		if (err) {
 			dev_err(&chan->video.dev,
 				"frame start syncpt timeout!%d\n", index);
@@ -362,7 +363,8 @@ static void tegra_channel_capture_frame(struct tegra_channel *chan,
 		state = VB2_BUF_STATE_ERROR;
 
 	/* update time stamp and add buffer to queue */
-	v4l2_get_timestamp(&vb->v4l2_buf.timestamp);
+	vb->v4l2_buf.timestamp.tv_sec = ts.tv_sec;
+	vb->v4l2_buf.timestamp.tv_usec = ts.tv_nsec / NSEC_PER_USEC;
 	tegra_channel_ring_buffer(chan, vb, state);
 }
 
@@ -451,7 +453,8 @@ void tegra_channel_query_hdmiin_unplug(struct tegra_channel *chan,
 	if (v4l2_subdev_has_op(sd, video, s_dv_timings))
 		is_hdmiin = true;
 
-	if (!is_hdmiin)
+	/* Do not process notifier if channel is not streaming or not HDMI */
+	if (!is_hdmiin || !atomic_read(&chan->is_streaming))
 		return;
 
 	ret = v4l2_subdev_call(sd, video, query_dv_timings,
@@ -469,10 +472,19 @@ void tegra_channel_query_hdmiin_unplug(struct tegra_channel *chan,
 				return;
 
 			atomic_set(&chan->is_hdmiin_unplug, 1);
-			for (index = 0; index < valid_ports; index++)
+			/*
+			 * Need to peform two CPU increments because
+			 * capture thread tracks both frame start and
+			 * mw_ack events, threshold has to incr by 2.
+			 */
+			for (index = 0; index < valid_ports; index++) {
 				nvhost_syncpt_cpu_incr_ext(
 						chan->vi->ndev,
 						chan->syncpt[index]);
+				nvhost_syncpt_cpu_incr_ext(
+						chan->vi->ndev,
+						chan->syncpt[index]);
+			}
 
 			tegra_channel_stop_kthreads(chan);
 		}
@@ -501,8 +513,9 @@ tegra_channel_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
 	sizes[0] = fmt ? fmt->fmt.pix.sizeimage : chan->format.sizeimage;
 	alloc_ctxs[0] = chan->alloc_ctx;
 
-	if (!*nbuffers)
-		*nbuffers = 2;
+	/* Make sure minimum number of buffers are passed */
+	if (*nbuffers < (QUEUED_BUFFERS - 1))
+		*nbuffers = QUEUED_BUFFERS - 1;
 
 	return 0;
 }
@@ -704,8 +717,16 @@ static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
  */
 static int tegra_channel_set_stream(struct tegra_channel *chan, bool on)
 {
-	return v4l2_device_call_until_err(chan->video.v4l2_dev,
+	int ret = 0;
+
+	ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
 			chan->grp_id, video, s_stream, on);
+	if (ret)
+		return ret;
+
+	atomic_set(&chan->is_streaming, on);
+
+	return 0;
 }
 
 static int tegra_channel_set_power(struct tegra_channel *chan, bool on)
@@ -1655,6 +1676,7 @@ static int tegra_channel_init(struct tegra_mc_vi *vi, unsigned int index)
 	mutex_init(&chan->stop_kthread_lock);
 	init_completion(&chan->capture_comp);
 	atomic_set(&chan->is_hdmiin_unplug, 0);
+	atomic_set(&chan->is_streaming, 0);
 
 	/* Init video format */
 	chan->fmtinfo = tegra_core_get_format_by_code(TEGRA_VF_DEF);
