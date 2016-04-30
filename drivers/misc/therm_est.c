@@ -1,7 +1,7 @@
 /*
  * drivers/misc/therm_est.c
  *
- * Copyright (c) 2010-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2010-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -32,8 +32,20 @@
 #include <linux/module.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/suspend.h>
+#include <linux/extcon.h>
 
 #define	DEFAULT_TSKIN			25000 /* default tskin in mC */
+#define TABLE_LT_5V2			0
+#define TABLE_5V2			1
+struct therm_estimator *est;
+
+struct therm_est_psy_cables {
+	const char *dt_cable_name;
+	struct notifier_block nb;
+	struct device *dev;
+	struct extcon_specific_cable_nb ec_cable_nb;
+	struct extcon_cable *ec_cable;
+};
 
 struct therm_estimator {
 	struct thermal_zone_device *thz;
@@ -49,12 +61,17 @@ struct therm_estimator {
 	int tc1;
 	int tc2;
 	struct therm_est_subdevice *subdevice;
-	bool *tripped_info;
 
+	bool dual_coeff_table;
+	int n_psy_cables;
+	const char **psy_cable_names;
+
+	bool *tripped_info;
 	int use_activator;
 #ifdef CONFIG_PM
 	struct notifier_block pm_nb;
 #endif
+	struct therm_est_psy_cables		*therm_est_cables;
 };
 
 static int therm_est_subdev_match(struct thermal_zone_device *thz, void *data)
@@ -242,14 +259,18 @@ static int therm_est_polling(struct therm_estimator *est,
 	return 0;
 }
 
-static int switch_active_coeffs(struct therm_estimator *est, int active_coeffs)
+static int switch_active_coeffs(struct device *dev, int active_coeffs)
 {
+	struct therm_estimator *est = dev_get_drvdata(dev);
 	struct therm_est_subdevice *subdevice = est->subdevice;
 
-	if (active_coeffs < 0 || active_coeffs >= subdevice->num_coeffs)
+	if (active_coeffs < 0 || active_coeffs >= subdevice->num_coeffs){
+		dev_err(dev, "Switch Coefficients failed\n");
 		return -EINVAL;
-
+	}
 	subdevice->active_coeffs = active_coeffs;
+	dev_info(dev, "Active Coefficient SET [%d]\n",
+		subdevice->active_coeffs);
 
 	return 0;
 }
@@ -414,13 +435,12 @@ static ssize_t set_active_coeffs(struct device *dev,
 			struct device_attribute *da,
 			const char *buf, size_t count)
 {
-	struct therm_estimator *est = dev_get_drvdata(dev);
 	int active_coeffs, ret;
 
 	if (kstrtoint(buf, 0, &active_coeffs))
 		return -EINVAL;
 
-	ret = switch_active_coeffs(est, active_coeffs);
+	ret = switch_active_coeffs(dev, active_coeffs);
 	if (ret)
 		return ret;
 
@@ -718,8 +738,10 @@ static struct therm_est_data *therm_est_get_pdata(struct device *dev)
 {
 	struct device_node *np, *subdev_np;
 	struct therm_est_data *data;
+	struct property *prop;
+	const char *names;
 	u32 val;
-	int ret;
+	int ret, count;
 
 	np = dev->of_node;
 	if (!np)
@@ -749,6 +771,24 @@ static struct therm_est_data *therm_est_get_pdata(struct device *dev)
 		return ERR_PTR(ret);
 	data->use_activator = val;
 
+	data->dual_coeff_table = of_property_read_bool(np,
+		"nvidia,enable-dual-coeff-table");
+	if (data->dual_coeff_table) {
+		data->n_psy_cables = of_property_count_strings(np,
+			"extcon-cable-names");
+		data->psy_cable_names = devm_kzalloc(dev,
+				(data->n_psy_cables + 1) *
+				sizeof(*data->psy_cable_names), GFP_KERNEL);
+		if (!data->psy_cable_names)
+			return ERR_PTR(-ENOMEM);
+
+		count = 0;
+		of_property_for_each_string(np, "extcon-cable-names",
+			prop, names)
+			data->psy_cable_names[count++] = names;
+		data->psy_cable_names[count] = NULL;
+	}
+
 	subdev_np = of_get_child_by_name(np, "subdev");
 	if (!subdev_np)
 		return ERR_PTR(-ENOENT);
@@ -762,9 +802,74 @@ static struct therm_est_data *therm_est_get_pdata(struct device *dev)
 	return data;
 }
 
+static int therm_est_extcon_extcon_notifier(struct notifier_block *self,
+		unsigned long event, void *ptr)
+{
+	struct therm_est_psy_cables *therm_est_cables = container_of(
+					self,
+					struct therm_est_psy_cables,
+					nb);
+	struct device *dev = therm_est_cables->dev;
+
+	if (event == 0) {
+		switch_active_coeffs(dev, TABLE_LT_5V2);
+	} else if (event == 1) {
+		switch_active_coeffs(dev, TABLE_5V2);
+	}
+
+	return NOTIFY_DONE;
+}
+
+static void register_psy_cable(struct device *dev)
+{
+	uint8_t j;
+	int ret;
+	int state = 0;
+	int	max_psy_cables;
+	struct therm_estimator *est = dev_get_drvdata(dev);
+
+	max_psy_cables = est->n_psy_cables;
+	for (j = 0; j < max_psy_cables; j++) {
+		struct therm_est_psy_cables *therm_est_cable =
+			 est->therm_est_cables+j;
+
+		therm_est_cable->nb.notifier_call =
+			therm_est_extcon_extcon_notifier;
+		therm_est_cable->dev = dev;
+		therm_est_cable->ec_cable = extcon_get_extcon_cable(dev,
+						therm_est_cable->dt_cable_name);
+		if (IS_ERR(therm_est_cable->ec_cable)) {
+			dev_err(dev,
+				"Cable %s get failed\n",
+				therm_est_cable->dt_cable_name);
+			continue;
+		}
+
+		ret = extcon_register_cable_interest(
+			&therm_est_cable->ec_cable_nb,
+			therm_est_cable->ec_cable, &therm_est_cable->nb);
+		if (ret < 0) {
+			extcon_put_extcon_cable(therm_est_cable->ec_cable);
+			therm_est_cable->ec_cable = NULL;
+			dev_err(dev,
+				"Cable %s registration failed: %d\n",
+				therm_est_cable->dt_cable_name, ret);
+		}
+		state = extcon_get_cable_state_(
+			therm_est_cable->ec_cable->edev,
+			therm_est_cable->ec_cable->cable_index);
+		if (state) {
+			dev_info(dev, "Cable %s in connected state\n",
+				therm_est_cable->dt_cable_name);
+			switch_active_coeffs(dev, TABLE_5V2);
+		}
+
+	}
+}
+
 static int therm_est_probe(struct platform_device *pdev)
 {
-	int i, ret;
+	int i, ret = 0;
 	struct therm_estimator *est;
 	struct therm_est_data *data;
 	struct thermal_of_sensor_ops sops = {
@@ -773,12 +878,12 @@ static int therm_est_probe(struct platform_device *pdev)
 		.trip_update = therm_est_trip_update,
 	};
 
+
 	est = kzalloc(sizeof(struct therm_estimator), GFP_KERNEL);
 	if (IS_ERR_OR_NULL(est))
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, est);
-
 	data = pdev->dev.platform_data;
 	if (!data) {
 		data = therm_est_get_pdata(&pdev->dev);
@@ -790,6 +895,9 @@ static int therm_est_probe(struct platform_device *pdev)
 	est->polling_period = data->polling_period;
 	est->tc1 = data->tc1;
 	est->tc2 = data->tc2;
+	est->dual_coeff_table = data->dual_coeff_table;
+	est->n_psy_cables = data->n_psy_cables;
+	est->psy_cable_names = data->psy_cable_names;
 	est->cur_temp = DEFAULT_TSKIN;
 	est->use_activator = data->use_activator;
 
@@ -828,6 +936,22 @@ static int therm_est_probe(struct platform_device *pdev)
 	est->pm_nb.notifier_call = therm_est_pm_notify,
 	register_pm_notifier(&est->pm_nb);
 #endif
+
+	if (est->dual_coeff_table) {
+		est->therm_est_cables = devm_kzalloc(&pdev->dev,
+			sizeof(struct therm_est_psy_cables) * est->n_psy_cables,
+			GFP_KERNEL);
+		if (IS_ERR_OR_NULL(est->therm_est_cables))
+			return -ENOMEM;
+
+		for (i = 0; i < est->n_psy_cables; i++) {
+			struct therm_est_psy_cables *therm_est_cable =
+			 est->therm_est_cables+i;
+			therm_est_cable->dt_cable_name =
+				est->psy_cable_names[i];
+		}
+		register_psy_cable(&pdev->dev);
+	}
 
 	if (!est->use_activator)
 		queue_delayed_work(est->workqueue, &est->therm_est_work,
@@ -888,4 +1012,4 @@ static int __init therm_est_driver_init(void)
 {
 	return platform_driver_register(&therm_est_driver);
 }
-device_initcall_sync(therm_est_driver_init);
+late_initcall(therm_est_driver_init);
