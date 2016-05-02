@@ -2112,7 +2112,8 @@ static dma_addr_t arm_coherent_iommu_map_page(struct device *dev, struct page *p
 	 * compound page then there's probably a bug somewhere.
 	 */
 	if (page_offset > 0)
-		BUG_ON(page_count(page) == 1);
+		BUG_ON(page_offset > (1 << compound_order(compound_head(page)))
+			- ((page - compound_head(page)) << PAGE_SHIFT));
 
 	dma_addr = __alloc_iova(mapping, len, attrs);
 	if (dma_addr == DMA_ERROR_CODE)
