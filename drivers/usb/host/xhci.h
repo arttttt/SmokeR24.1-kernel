@@ -1411,6 +1411,8 @@ static inline unsigned int hcd_index(struct usb_hcd *hcd)
 struct xhci_err_cnt {
 	unsigned int version;
 	unsigned int comp_tx_err;
+	unsigned int soft_retry_success;
+	unsigned int soft_retry_failure;
 };
 
 /* There is one xhci_hcd structure per controller */

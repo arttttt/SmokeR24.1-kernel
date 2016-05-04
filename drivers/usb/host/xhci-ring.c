@@ -2512,6 +2512,11 @@ check_soft_try:
 		if (ep_ring->soft_try) {
 			xhci_dbg(xhci, "soft retry completed successfully\n");
 			ep_ring->soft_try = false;
+			xhci->xhci_ereport.soft_retry_success++;
+			xhci_dbg(xhci, "soft_retry_success counter %u\n",
+				xhci->xhci_ereport.soft_retry_success);
+			xhci_dbg(xhci, "soft_retry_failure counter %u\n",
+				xhci->xhci_ereport.soft_retry_failure);
 			xhci_endpoint_soft_retry(xhci,
 						slot_id, ep_index + 1, false);
 		}
@@ -2555,6 +2560,11 @@ check_soft_try:
 			} else {
 				xhci_dbg(xhci, "soft retry complete but transfer still failed\n");
 				ep_ring->soft_try = false;
+				xhci->xhci_ereport.soft_retry_failure++;
+				xhci_dbg(xhci, "soft_retry_success counter %u\n",
+					xhci->xhci_ereport.soft_retry_success);
+				xhci_dbg(xhci, "soft_retry_failure counter %u\n",
+					xhci->xhci_ereport.soft_retry_failure);
 			}
 			xhci_endpoint_soft_retry(xhci,
 						slot_id, ep_index + 1, false);

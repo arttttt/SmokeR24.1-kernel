@@ -68,7 +68,7 @@ static ssize_t show_xhci_stats(struct device *dev,
 	struct platform_device *pdev = NULL;
 	struct tegra_xhci_hcd *tegra = NULL;
 	struct xhci_hcd *xhci = NULL;
-	ssize_t ret;
+	ssize_t ret = 0;
 
 	if (dev != NULL)
 		pdev = to_platform_device(dev);
@@ -78,11 +78,18 @@ static ssize_t show_xhci_stats(struct device *dev,
 
 	if (tegra != NULL) {
 		xhci = tegra->xhci;
-		ret =  snprintf(buf, PAGE_SIZE, "comp_tx_err:%u\nversion:%u\n",
-			xhci->xhci_ereport.comp_tx_err,
+		ret += snprintf(&buf[ret], PAGE_SIZE - ret, "version:%u\n",
 			xhci->xhci_ereport.version);
+		ret += snprintf(&buf[ret], PAGE_SIZE - ret, "comp_tx_err:%u\n",
+			xhci->xhci_ereport.comp_tx_err);
+		ret += snprintf(&buf[ret], PAGE_SIZE - ret,
+			"soft_retry_success:%u\n",
+			xhci->xhci_ereport.soft_retry_success);
+		ret += snprintf(&buf[ret], PAGE_SIZE - ret,
+			"soft_retry_failure:%u\n",
+			xhci->xhci_ereport.soft_retry_failure);
 	} else
-		ret = snprintf(buf, PAGE_SIZE, "comp_tx_err:0\nversion:0\n");
+		ret = snprintf(buf, PAGE_SIZE, "counters are not available\n");
 
 	return ret;
 }
