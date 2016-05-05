@@ -138,6 +138,8 @@ NVIDIA TEGRA210 High Definition Multimedia Interface
    There are nine entries in total.
  - nvidia,use-vpulse2: With enabled, run histogram on vpulse2 rather than vsync.
  - nvidia,bl-device-name: Backlight device name.
+ - nvidia,bias0: By default set to BIAS_MSB to allow for work around a HW issue, but can
+   be overridden with this property.
 
  Optional properties:
  - nvidia,sd-enable: By default, smartdimmer will be enabled if its device tree node

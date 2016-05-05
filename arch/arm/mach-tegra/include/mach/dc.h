@@ -588,6 +588,8 @@ struct tegra_dc_sd_settings {
 	atomic_t *sd_brightness;
 	char *bl_device_name;
 	struct backlight_device *bl_device;
+
+	u8 bias0;
 };
 
 enum {

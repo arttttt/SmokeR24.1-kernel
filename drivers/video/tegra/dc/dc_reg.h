@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Google, Inc.
  * Author: Erik Gilling <konkers@android.com>
  *
- * Copyright (c) 2010-2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2010-2016, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -797,6 +797,7 @@
 #define  SD_SMOOTH_K_ENABLE		(1 << 15)
 #define  SD_VSYNC			(0 << 28)
 #define  SD_VPULSE2			(1 << 28)
+#define  SD_BIAS0(x)			(((x) & 0x3) << 29)
 
 #define NUM_BIN_WIDTHS 4
 #define STEPS_PER_AGG_LVL 64
@@ -845,6 +846,7 @@
 #define  SD_BLC_MODE_MAN		(0 << 0)
 #define  SD_BLC_MODE_AUTO		(1 << 1)
 #define  SD_BLC_BRIGHTNESS(val)		(((val) & (0xff << 8)) >> 8)
+#define  BRIGHTNESS_THEORETICAL_MAX 0xffu
 
 #define DC_DISP_SD_HW_K_VALUES			0x4dd
 #define  SD_HW_K_R(val)			(((val) & (0x3ff << 0)) >> 0)
