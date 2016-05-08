@@ -675,3 +675,200 @@ error:
 	mutex_unlock(&smc_lock);
 }
 EXPORT_SYMBOL(te_authenticate_vrr);
+
+/*
+ * Command to open a session with the trusted app.
+ * This API should only be called from the kernel space.
+ * Takes UUID of the TA and size as argument
+ * Returns Session ID if success or ERR when failure
+ */
+int te_open_trusted_session(u32 *ta_uuid, u32 uuid_size,
+				u32 *session_id)
+{
+	struct te_request *request;
+	struct te_cmd_req_desc *cmd_desc = NULL;
+
+	mutex_lock(&smc_lock);
+
+	/* Open & submit the work to SMC */
+	cmd_desc = te_get_free_cmd_desc(&tlk_dev);
+
+	if (!cmd_desc) {
+		pr_err("%s: failed to get cmd_desc\n", __func__);
+		goto error;
+	}
+
+	request = cmd_desc->req_addr;
+	memset(request, 0, sizeof(struct te_request));
+	request->type = TE_SMC_OPEN_SESSION;
+
+	if (uuid_size != sizeof(request->dest_uuid)) {
+		pr_err("%s: Invalid size sent!\n", __func__);
+		goto error;
+	}
+
+	if (ta_uuid == NULL || session_id == NULL) {
+		pr_err("%s: Null parameters sent!\n", __func__);
+		goto error;
+	}
+
+	memcpy(request->dest_uuid, ta_uuid, sizeof(*ta_uuid)*4);
+
+	do_smc(request, &tlk_dev);
+
+	if (request->result) {
+		pr_err("%s: error opening session: 0x%08x\n",
+		__func__, request->result);
+		goto error;
+	}
+
+	*session_id = request->session_id;
+	if (cmd_desc)
+		te_put_used_cmd_desc(&tlk_dev, cmd_desc);
+
+	mutex_unlock(&smc_lock);
+	return OTE_SUCCESS;
+
+error:
+	if (cmd_desc)
+		te_put_used_cmd_desc(&tlk_dev, cmd_desc);
+
+	mutex_unlock(&smc_lock);
+	return OTE_ERROR_GENERIC;
+}
+EXPORT_SYMBOL(te_open_trusted_session);
+
+/*
+ * Command to close session opened with the trusted app.
+ * This API should only be called from the kernel space.
+ * Takes session Id and UUID of the TA as arguments
+ */
+void te_close_trusted_session(u32 session_id, u32 *ta_uuid,
+				u32 uuid_size)
+{
+	struct te_request *request;
+	struct te_cmd_req_desc *cmd_desc = NULL;
+
+	mutex_lock(&smc_lock);
+
+	/* Open & submit the work to SMC */
+	cmd_desc = te_get_free_cmd_desc(&tlk_dev);
+
+	if (!cmd_desc) {
+		pr_err("%s: failed to get cmd_desc\n", __func__);
+		goto error;
+	}
+
+	/* Close the session */
+	request = cmd_desc->req_addr;
+	memset(request, 0, sizeof(struct te_request));
+	request->type = TE_SMC_CLOSE_SESSION;
+	request->session_id = session_id;
+
+	if (uuid_size != sizeof(request->dest_uuid)) {
+		pr_err("%s: Invalid size sent!\n", __func__);
+		goto error;
+	}
+
+	memcpy(request->dest_uuid, ta_uuid, sizeof(*ta_uuid)*4);
+
+	do_smc(request, &tlk_dev);
+
+	if (request->result) {
+		pr_err("%s: error closing session: 0x%08x\n",
+		__func__, request->result);
+		goto error;
+	}
+
+error:
+	if (cmd_desc)
+		te_put_used_cmd_desc(&tlk_dev, cmd_desc);
+	mutex_unlock(&smc_lock);
+}
+EXPORT_SYMBOL(te_close_trusted_session);
+
+/*
+ * Command to launch operations from the linux kernel to
+ * the trusted app.
+ * This API should be called only from the kernel space.
+ * The pointer to the buffer from the kernel, length of thus buffer,
+ * session Id, UUID of the TA and the command requested from the
+ * TA should be passed as arguments
+ * Returns SUCCESS or FAILURE
+ */
+int te_launch_trusted_oper(u8 *buf_ptr, u32 buf_len, u32 session_id,
+			u32 *ta_uuid, u32 ta_cmd, u32 uuid_size)
+{
+	u32 i;
+	struct te_request *request;
+	struct te_oper_param user_param;
+	struct te_oper_param *param_array;
+	struct te_oper_param *params = NULL;
+	struct te_cmd_req_desc *cmd_desc = NULL;
+	u32 no_of_params = 1;
+
+	mutex_lock(&smc_lock);
+
+	/* Open & submit the work to SMC */
+	cmd_desc = te_get_free_cmd_desc(&tlk_dev);
+	params = te_get_free_params(&tlk_dev, no_of_params);
+
+	if (!cmd_desc || !params) {
+		pr_err("%s: failed to get cmd_desc/params\n", __func__);
+		goto error;
+	}
+
+	/* launch operation */
+	request = cmd_desc->req_addr;
+	memset(request, 0, sizeof(struct te_request));
+	request->params = (uintptr_t)params;
+	request->params_size = no_of_params;
+	request->session_id = session_id;
+	request->command_id = ta_cmd;
+	request->type = TE_SMC_LAUNCH_OPERATION;
+	user_param.index = 0;
+	user_param.u.Mem.len = buf_len;
+	user_param.type = TE_PARAM_TYPE_MEM_RW;
+	user_param.u.Mem.type = TE_MEM_TYPE_NS_KERNEL;
+	user_param.u.Mem.base = (uint64_t)(uintptr_t)buf_ptr;
+
+	if (uuid_size != sizeof(request->dest_uuid)) {
+		pr_err("%s: Invalid size sent\n", __func__);
+		goto error;
+	}
+
+	memcpy(request->dest_uuid, ta_uuid, sizeof(*ta_uuid)*4);
+
+	param_array = (struct te_oper_param *)(uintptr_t)request->params;
+
+	for (i = 0; i < no_of_params; i++)
+		memcpy(param_array + i, &user_param,
+		sizeof(struct te_oper_param));
+
+	do_smc(request, &tlk_dev);
+
+	if (request->result) {
+		pr_err("%s: error launching session: 0x%08x\n",
+		__func__, request->result);
+		goto error;
+	} else {
+		if (cmd_desc)
+			te_put_used_cmd_desc(&tlk_dev, cmd_desc);
+
+		if (params)
+			te_put_free_params(&tlk_dev, params, no_of_params);
+
+		mutex_unlock(&smc_lock);
+		return OTE_SUCCESS;
+	}
+error:
+	if (cmd_desc)
+		te_put_used_cmd_desc(&tlk_dev, cmd_desc);
+
+	if (params)
+		te_put_free_params(&tlk_dev, params, no_of_params);
+
+	mutex_unlock(&smc_lock);
+	return OTE_ERROR_GENERIC;
+}
+EXPORT_SYMBOL(te_launch_trusted_oper);
