@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/nvhdcp_hdcp22_methods.c
  *
- * Copyright (c) 2014-2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -38,6 +38,7 @@
 
 #define HDCP22_SRM_PATH "etc/hdcpsrm/hdcp2x.srm"
 #define HDCP11_SRM_PATH "etc/hdcpsrm/hdcp1x.srm"
+#define HDCP_CMAC_SIZE		16
 
 static u8 g_seq_num_init;
 
@@ -359,18 +360,58 @@ exit:
 	return err;
 }
 
-int tsec_hdcp_revocation_check(struct hdcp_context_t *hdcp_context)
+int tsec_hdcp_generate_nonce(struct hdcp_context_t *hdcp_context,
+				unsigned char *nonce)
+{
+	int err = 0;
+	struct hdcp_get_current_nonce_param nonce_param;
+	if (!hdcp_context || !nonce) {
+		hdcp_err("tsec_hdcp_generate_nonce: null params sent!");
+		return -EINVAL;
+	}
+	memset(&nonce_param, 0,
+			sizeof(struct hdcp_get_current_nonce_param));
+	memset(hdcp_context->cpuvaddr_mthd_buf_aligned, 0,
+		HDCP_MTHD_RPLY_BUF_SIZE);
+	nonce_param.session_id = hdcp_context->session_id;
+	memcpy(hdcp_context->cpuvaddr_mthd_buf_aligned,
+		&nonce_param,
+		sizeof(struct hdcp_get_current_nonce_param));
+	tsec_send_method(hdcp_context,
+		HDCP_GET_CURRENT_NONCE,
+		HDCP_MTHD_FLAGS_SB);
+	memcpy(&nonce_param,
+		hdcp_context->cpuvaddr_mthd_buf_aligned,
+		sizeof(struct hdcp_get_current_nonce_param));
+	if (nonce_param.ret_code) {
+		hdcp_err("tsec_hdcp_get_current_nonce: failed with error %d\n",
+			nonce_param.ret_code);
+		goto exit;
+	}
+	memcpy(nonce, (u8 *)nonce_param.nonce, HDCP_NONCE_SIZE);
+exit:
+	err = nonce_param.ret_code;
+	return err;
+}
+
+int tsec_hdcp_revocation_check(struct hdcp_context_t *hdcp_context,
+		unsigned char *cmac, unsigned int *tsec_address)
 {
 	int err = 0;
 	struct file *fp = NULL;
 	mm_segment_t seg;
 	struct hdcp_revocation_check_param revocation_check_param;
+	if (!hdcp_context || !cmac || !tsec_address) {
+		hdcp_err("tsec_hdcp_revocation_check: null params sent!");
+		return -EINVAL;
+	}
 	memset(&revocation_check_param, 0,
 			sizeof(struct hdcp_revocation_check_param));
 	memset(hdcp_context->cpuvaddr_mthd_buf_aligned, 0,
 		HDCP_MTHD_RPLY_BUF_SIZE);
 	revocation_check_param.trans_id.session_id = hdcp_context->session_id;
 	revocation_check_param.is_ver_hdcp2x = 1;
+	revocation_check_param.tsec_gsc_address = *tsec_address;
 	fp = filp_open(HDCP22_SRM_PATH, O_RDONLY, 0);
 	if (IS_ERR(fp) || !fp) {
 		hdcp_err("Opening SRM file failed!\n");
@@ -382,6 +423,10 @@ int tsec_hdcp_revocation_check(struct hdcp_context_t *hdcp_context)
 			HDCP_SRM_SIZE, &fp->f_pos);
 	set_fs(seg);
 	revocation_check_param.srm_size = fp->f_pos;
+
+	/* send the cmac generated from secure service */
+	revocation_check_param.srm_size = fp->f_pos;
+	memcpy(revocation_check_param.srm_cmac, cmac, HDCP_CMAC_SIZE);
 	filp_close(fp, NULL);
 	memcpy(hdcp_context->cpuvaddr_mthd_buf_aligned,
 		&revocation_check_param,
@@ -423,12 +468,17 @@ int tsec_dp_hdcp_revocation_check(struct hdcp_context_t *hdcp_context)
 	return size;
 }
 
-int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context)
+int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context,
+					unsigned char *cmac)
 {
 	int err = 0;
 	u16 rxinfo;
 	u8 seq_num_start[HDCP_SIZE_SEQ_NUM_V_8] = {0x00, 0x00, 0x00};
 	struct hdcp_verify_vprime_param verify_vprime_param;
+	if (!cmac || !hdcp_context) {
+		hdcp_err("tsec_hdcp_verify_vprime: null params sent!");
+		return -EINVAL;
+	}
 	memset(&verify_vprime_param, 0,
 			sizeof(struct hdcp_verify_vprime_param));
 	memset(hdcp_context->cpuvaddr_mthd_buf_aligned, 0,
@@ -443,6 +493,7 @@ int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context)
 	memcpy(verify_vprime_param.vprime,
 		hdcp_context->msg.vprime,
 		HDCP_SIZE_VPRIME_2X_8/2);
+	memcpy(verify_vprime_param.srm_cmac, cmac, HDCP_CMAC_SIZE);
 	verify_vprime_param.rxinfo = hdcp_context->msg.rxinfo;
 
 	verify_vprime_param.trans_id.session_id = hdcp_context->session_id;

@@ -81,6 +81,18 @@ static DECLARE_WAIT_QUEUE_HEAD(wq_worker);
 #define HDCP1X_EESS_END			(0x210)
 #define HDMI_VSYNC_WINDOW		(0xc2)
 
+#define HDCP_SERVICE_UUID		{0x13F616F9, 0x4A6F8572,\
+				 0xAA04F1A1, 0xFFF9059B}
+#define HDCP_PKT_SIZE		        16
+#define HDCP_SESSION_SUCCESS		0
+#define HDCP_SESSION_FAILURE		1
+#define HDCP_CMAC_OFFSET		6
+#define HDCP_TSEC_ADDR_OFFSET		22
+#define HDCP_CMD_GEN_CMAC		0xA
+
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+static u32 g_session_id;
+#endif
 #ifdef VERBOSE_DEBUG
 #define nvhdcp_vdbg(...)	\
 		pr_debug("nvhdcp: " __VA_ARGS__)
@@ -1036,6 +1048,12 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 	u8 version = 2;
 	u16 caps = 0;
 	u16 txcaps = 0x0;
+	uint8_t *pkt = NULL;
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+	unsigned char nonce[HDCP_NONCE_SIZE];
+	uint32_t hdcp_uuid[4] = HDCP_SERVICE_UUID;
+#endif
+
 	err =  tsec_hdcp_readcaps(hdcp_context);
 	if (err)
 		goto exit;
@@ -1093,9 +1111,43 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 		&hdcp_context->msg.rxcaps_capmask);
 	if (err)
 		goto exit;
-	err =  tsec_hdcp_revocation_check(hdcp_context);
+	pkt = kmalloc(HDCP_PKT_SIZE, GFP_KERNEL);
+	if (!pkt) {
+		nvhdcp_err("Memory allocation failed!\n");
+		goto exit;
+	}
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+	/* generate nonce in the ucode */
+	err = tsec_hdcp_generate_nonce(hdcp_context, nonce);
+	if (err) {
+		nvhdcp_err("Error generating nonce!\n");
+		goto exit;
+	}
+	/* pass the nonce to hdcp TA and get the signature back */
+	err = te_open_trusted_session(hdcp_uuid, sizeof(hdcp_uuid),
+					&g_session_id);
+	if (err) {
+		nvhdcp_err("Error opening trusted session\n");
+		goto exit;
+	}
+	memcpy(pkt, nonce, HDCP_NONCE_SIZE);
+	err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, g_session_id,
+			hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
+	if (err) {
+		nvhdcp_err("Error launching session\n");
+		goto exit;
+	}
+#endif
+	err =  tsec_hdcp_revocation_check(hdcp_context,
+	(pkt + HDCP_CMAC_OFFSET),
+	(unsigned int *)(pkt + HDCP_TSEC_ADDR_OFFSET));
 	if (err)
 		goto exit;
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+	if (g_session_id)
+		te_close_trusted_session(g_session_id, hdcp_uuid,
+					sizeof(hdcp_uuid));
+#endif
 	err = nvhdcp_poll_ready(nvhdcp, 1000);
 	if (err)
 		goto exit;
@@ -1182,10 +1234,39 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 			g_fallback = 1;
 			goto exit;
 		}
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+		/* generate_nonce in the ucode for v' verification */
+		err = tsec_hdcp_generate_nonce(hdcp_context, nonce);
+		if (err) {
+			nvhdcp_err("Error generating nonce!\n");
+			goto exit;
+		}
 
-		err =  tsec_hdcp_verify_vprime(hdcp_context);
+		/* pass the nonce to hdcp TA and get the signature back */
+		err = te_open_trusted_session(hdcp_uuid, sizeof(hdcp_uuid),
+					&g_session_id);
+		if (err) {
+			nvhdcp_err("Error opening session\n");
+			goto exit;
+		}
+		memcpy(pkt, nonce, HDCP_NONCE_SIZE);
+		err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, g_session_id,
+		hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
+		if (err) {
+			nvhdcp_err("Error launching session\n");
+			goto exit;
+		}
+#endif
+		err =  tsec_hdcp_verify_vprime(hdcp_context,
+				(pkt + HDCP_CMAC_OFFSET));
 		if (err)
 			goto exit;
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+		if (g_session_id)
+			te_close_trusted_session(g_session_id, hdcp_uuid,
+						sizeof(hdcp_uuid));
+#endif
+		kfree(pkt);
 		hdcp_context->msg.rptr_send_ack_msg_id = ID_SEND_RPTR_ACK;
 		err = nvhdcp_rptr_ack_send(nvhdcp,
 			&hdcp_context->msg.rptr_send_ack_msg_id);
@@ -1244,6 +1325,12 @@ stream_manage_send:
 exit:
 	if (err)
 		nvhdcp_err("HDCP authentication failed with err %d\n", err);
+	kfree(pkt);
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+	if (g_session_id)
+		te_close_trusted_session(g_session_id, hdcp_uuid,
+					sizeof(hdcp_uuid));
+#endif
 	return err;
 }
 
@@ -1512,6 +1599,11 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 {
 	u16 rx_status = 0;
 	int err = 0;
+	uint8_t *pkt = NULL;
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+	char nonce[HDCP_NONCE_SIZE];
+	uint32_t hdcp_uuid[4] = HDCP_SERVICE_UUID;
+#endif
 
 	nvhdcp_i2c_read16(nvhdcp, HDCP_RX_STATUS, &rx_status);
 	if (nvhdcp->repeater && (rx_status & HDCP_RX_STATUS_MSG_READY_YES)) {
@@ -1538,9 +1630,44 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 							msecs_to_jiffies(10));
 			goto exit;
 		}
-		err =  tsec_hdcp_verify_vprime(hdcp_context);
+		pkt = kmalloc(HDCP_PKT_SIZE, GFP_KERNEL);
+		if (!pkt) {
+			nvhdcp_err("Memory allocation failed\n");
+			goto exit;
+		}
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+		/* generate_nonce in the ucode for v' verification */
+		err = tsec_hdcp_generate_nonce(hdcp_context, nonce);
+		if (err) {
+			nvhdcp_err("Error generating nonce!\n");
+			goto exit;
+		}
+
+		/* pass the nonce to hdcp TA and get the signature back */
+		err = te_open_trusted_session(hdcp_uuid, sizeof(hdcp_uuid),
+						&g_session_id);
+		if (err) {
+			nvhdcp_err("Error opening session\n");
+			goto exit;
+		}
+		memcpy(pkt, nonce, HDCP_NONCE_SIZE);
+		err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, g_session_id,
+			hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
+		if (err) {
+			nvhdcp_err("Error launching session\n");
+			goto exit;
+		}
+#endif
+		err =  tsec_hdcp_verify_vprime(hdcp_context,
+				(pkt + HDCP_CMAC_OFFSET));
 		if (err)
 			goto exit;
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+		if (g_session_id)
+			te_close_trusted_session(g_session_id, hdcp_uuid,
+						sizeof(hdcp_uuid));
+#endif
+		kfree(pkt);
 		hdcp_context->msg.rptr_send_ack_msg_id = ID_SEND_RPTR_ACK;
 		err = nvhdcp_rptr_ack_send(nvhdcp,
 			&hdcp_context->msg.rptr_send_ack_msg_id);
@@ -1550,6 +1677,12 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 	} else
 		return rx_status & HDCP_RX_STATUS_MSG_REAUTH_REQ;
 exit:
+	kfree(pkt);
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+	if (g_session_id)
+		te_close_trusted_session(g_session_id, hdcp_uuid,
+					sizeof(hdcp_uuid));
+#endif
 		return 1;
 }
 

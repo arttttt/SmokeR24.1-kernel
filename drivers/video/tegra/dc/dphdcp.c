@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/dphdcp.c
  *
- * Copyright (c) 2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -1214,7 +1214,7 @@ static int tsec_hdcp_authentication(struct tegra_dc_dp_data *dp,
 		goto exit;
 
 	/* device in revocation list ? */
-	err = tsec_hdcp_revocation_check(hdcp_context);
+	err = tsec_hdcp_revocation_check(hdcp_context, NULL, NULL);
 	if (err)
 		goto exit;
 	/* H' should be ready within 1 sec */
@@ -1304,7 +1304,7 @@ static int tsec_hdcp_authentication(struct tegra_dc_dp_data *dp,
 		if (err)
 			goto exit;
 
-		err = tsec_hdcp_verify_vprime(hdcp_context);
+		err = tsec_hdcp_verify_vprime(hdcp_context, NULL);
 		if (err)
 			goto exit;
 

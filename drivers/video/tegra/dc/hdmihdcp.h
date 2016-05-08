@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/hdmihdcp.h
  *
- * Copyright (c) 2014, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -83,6 +83,12 @@ struct tegra_nvhdcp *tegra_nvhdcp_create(struct tegra_hdmi *hdmi,
 					int id, int bus);
 void tegra_nvhdcp_destroy(struct tegra_nvhdcp *nvhdcp);
 void tegra_nvhdcp_debugfs_init(struct tegra_nvhdcp *nvhdcp);
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+extern int te_open_trusted_session(u32 *ta_uuid, u32 size, u32 *session_id);
+extern int te_launch_trusted_oper(u8 *buf, u32 buflen, u32 session_id,
+		u32 *ta_uuid, u32 comd_id, u32 size);
+extern void te_close_trusted_session(u32 session_id, u32 *ta_uuid, u32 size);
+#endif
 #else
 static inline void tegra_nvhdcp_set_plug(struct tegra_nvhdcp *nvhdcp, bool hpd)
 {

@@ -1,6 +1,7 @@
 GCOV_PROFILE := y
 subdir-ccflags-y := -Werror
 EXTRA_CFLAGS += -Idrivers/video/tegra/host
+ccflags-$(CONFIG_TRUSTED_LITTLE_KERNEL) += -Isecurity/tlk_driver
 ccflags-$(CONFIG_ADF_TEGRA) += -Idrivers/video/tegra -Idrivers/staging/android
 obj-y += dc.o bandwidth.o mode.o clock.o window.o
 obj-$(CONFIG_TEGRA_CSC) += csc.o
