@@ -781,6 +781,11 @@ enum tcp_ca_ack_event_flags {
 
 #define TCP_CONG_NON_RESTRICTED 0x1
 
+struct ack_sample {
+	u32 pkts_acked;
+	s32 rtt_us;
+};
+
 struct tcp_congestion_ops {
 	struct list_head	list;
 	unsigned long flags;
@@ -803,7 +808,7 @@ struct tcp_congestion_ops {
 	/* new value of cwnd after loss (optional) */
 	u32  (*undo_cwnd)(struct sock *sk);
 	/* hook for packet ack accounting (optional) */
-	void (*pkts_acked)(struct sock *sk, u32 num_acked, s32 rtt_us);
+	void (*pkts_acked)(struct sock *sk, const struct ack_sample *sample);
 	/* get info for inet_diag (optional) */
 	void (*get_info)(struct sock *sk, u32 ext, struct sk_buff *skb);
 
