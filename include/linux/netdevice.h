@@ -2678,7 +2678,6 @@ extern void netdev_stats_to_stats64(struct rtnl_link_stats64 *stats64,
 extern int		netdev_max_backlog;
 extern int		netdev_tstamp_prequeue;
 extern int		weight_p;
-extern int		bpf_jit_enable;
 
 extern bool netdev_has_upper_dev(struct net_device *dev,
 				 struct net_device *upper_dev);
