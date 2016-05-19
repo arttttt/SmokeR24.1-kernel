@@ -515,11 +515,12 @@ static ssize_t ina219_show_channel(struct device *dev,
 
 	switch (this_attr->address) {
 	case CHANNEL_NAME:
-		return sprintf(buf, "%s\n", chip->pdata->rail_name);
+		return snprintf(buf, PAGE_SIZE, "%s\n",
+				chip->pdata->rail_name);
 
 	case CHANNEL_STATE:
 		mutex_lock(&chip->mutex);
-		count = sprintf(buf, "%d\n", chip->state);
+		count = snprintf(buf, PAGE_SIZE, "%d\n", chip->state);
 		mutex_unlock(&chip->mutex);
 		return count;
 
