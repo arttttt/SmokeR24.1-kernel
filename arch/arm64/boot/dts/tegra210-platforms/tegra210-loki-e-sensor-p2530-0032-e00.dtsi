@@ -27,6 +27,7 @@
 			interrupts = <TEGRA_GPIO(X, 2) 0x00>;
 			accelerometer_matrix = [ff 00 00 00 01 00 00 00 ff];
 			gyroscope_matrix = [ff 00 00 00 01 00 00 00 ff];
+			gyroscope_delay_us_max = <100000>;
 		};
 
 		ak8963c@0c {
