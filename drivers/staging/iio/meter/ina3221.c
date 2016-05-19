@@ -320,7 +320,7 @@ static int ina3221_get_mode(struct ina3221_chip *chip, char *buf)
 
 	v = (IS_TRIGGERED(chip->mode)) ? 0 : 1;
 	mutex_unlock(&chip->mutex);
-	return sprintf(buf, "%d\n", v);
+	return snprintf(buf, PAGE_SIZE, "%d\n", v);
 }
 
 static int ina3221_set_mode_val(struct ina3221_chip *chip, long val)
@@ -826,19 +826,19 @@ static ssize_t ina3221_show_channel(struct device *dev,
 
 	switch (mode) {
 	case CHANNEL_NAME:
-		return sprintf(buf, "%s\n",
-			chip->pdata->cpdata[channel].rail_name);
+		return snprintf(buf, PAGE_SIZE, "%s\n",
+				chip->pdata->cpdata[channel].rail_name);
 
 	case CRIT_CURRENT_LIMIT:
 		ret = ina3221_get_channel_critical(chip, channel, &current_ma);
 		if (!ret)
-			return sprintf(buf, "%d ma\n", current_ma);
+			return snprintf(buf, PAGE_SIZE, "%d ma\n", current_ma);
 		return ret;
 
 	case WARN_CURRENT_LIMIT:
 		ret = ina3221_get_channel_warning(chip, channel, &current_ma);
 		if (!ret)
-			return sprintf(buf, "%d ma\n", current_ma);
+			return snprintf(buf, PAGE_SIZE, "%d ma\n", current_ma);
 
 		return ret;
 
@@ -849,7 +849,8 @@ static ssize_t ina3221_show_channel(struct device *dev,
 		ret = ina3221_get_channel_vbus_voltage_current(chip,
 					channel, &current_ma, &voltage_mv);
 		if (!ret)
-			return sprintf(buf, "%d %d\n", voltage_mv, current_ma);
+			return snprintf(buf, PAGE_SIZE, "%d %d\n",
+					voltage_mv, current_ma);
 		return ret;
 
 	default:
