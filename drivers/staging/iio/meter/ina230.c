@@ -579,7 +579,7 @@ static int ina230_show_alert_flag(struct ina230_chip *chip, char *buf)
 	mutex_unlock(&chip->mutex);
 
 	alert_flag = (alert_flag >> 4) & 0x1;
-	return sprintf(buf, "%d\n", alert_flag);
+	return snprintf(buf, PAGE_SIZE, "%d\n", alert_flag);
 }
 
 static int ina230_hotplug_notify(struct notifier_block *nb,
@@ -667,10 +667,12 @@ static ssize_t ina230_show_channel(struct device *dev,
 
 	switch (this_attr->address) {
 	case CHANNEL_NAME:
-		return sprintf(buf, "%s\n", chip->pdata->rail_name);
+		return snprintf(buf, PAGE_SIZE, "%s\n",
+				chip->pdata->rail_name);
 
 	case CURRENT_THRESHOLD:
-		return sprintf(buf, "%d mA\n", chip->pdata->current_threshold);
+		return snprintf(buf, PAGE_SIZE, "%d mA\n",
+				chip->pdata->current_threshold);
 
 	case ALERT_FLAG:
 		return ina230_show_alert_flag(chip, buf);
@@ -679,7 +681,8 @@ static ssize_t ina230_show_channel(struct device *dev,
 		ret = ina230_get_vbus_voltage_current(chip, &current_ma,
 						      &voltage_mv);
 		if (!ret)
-			return sprintf(buf, "%d %d\n", voltage_mv, current_ma);
+			return snprintf(buf, PAGE_SIZE, "%d %d\n",
+					voltage_mv, current_ma);
 		return ret;
 
 	default:
