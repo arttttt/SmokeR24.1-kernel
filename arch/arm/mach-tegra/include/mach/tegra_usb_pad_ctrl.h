@@ -138,10 +138,22 @@ static inline enum padctl_lane usb3_laneowner_to_lane_enum(u8 laneowner)
 #define S0_CTL8_PLL0_RCAL_OVRD				(1 << 15)
 #define S0_CTL8_PLL0_RCAL_DONE				(1 << 31)
 
+#define XUSB_PADCTL_UPHY_MISC_PAD_PX_CTL1(x)	(0x460 + ((x) * 0x40))
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL1	0x460
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL1_AUX_RX_IDLE_TH_MASK	(0x3 << 24)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL1_AUX_RX_IDLE_TH	(1 << 24)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL1_AUX_TX_RDET_STATUS	(1 << 7)
+
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_RX_IDLE_MODE_SHIFT 20
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_RX_IDLE_MODE_MASK 0x3
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_RX_IDLE_MODE_VAL 0x1
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_RX_TERM_EN BIT(18)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_RX_MODE_OVRD BIT(13)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_MODE_OVRD BIT(12)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_RDET_CLK_EN BIT(6)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_RDET_BYP BIT(5)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_RDET_EN BIT(4)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_TERM_EN BIT(2)
 
 #define XUSB_PADCTL_UPHY_MISC_PAD_P1_CTL1	0x4A0
 #define XUSB_PADCTL_UPHY_MISC_PAD_P1_CTL1_AUX_TX_RDET_STATUS	(1 << 7)
@@ -155,6 +167,7 @@ static inline enum padctl_lane usb3_laneowner_to_lane_enum(u8 laneowner)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P4_CTL1	0x560
 #define XUSB_PADCTL_UPHY_MISC_PAD_P4_CTL1_AUX_TX_RDET_STATUS	(1 << 7)
 
+#define XUSB_PADCTL_UPHY_MISC_PAD_PX_CTL2(x)	(0x464 + ((x) * 0x40))
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL2	0x464
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL2_TX_IDDQ	(1 << 0)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL2_RX_IDDQ	(1 << 8)
@@ -164,6 +177,10 @@ static inline enum padctl_lane usb3_laneowner_to_lane_enum(u8 laneowner)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL2_RX_SLEEP	(3 << 12)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL2_TX_PWR_OVRD	(1 << 24)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P0_CTL2_RX_PWR_OVRD	(1 << 25)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL2_RX_IDDQ_OVRD (1 << 9)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL2_RX_IDDQ (1 << 8)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL2_TX_IDDQ_OVRD (1 << 1)
+#define XUSB_PADCTL_UPHY_MISC_PAD_CTL2_TX_IDDQ (1 << 0)
 
 #define XUSB_PADCTL_UPHY_MISC_PAD_P1_CTL2	0x4A4
 #define XUSB_PADCTL_UPHY_MISC_PAD_P2_CTL2	0x4E4
@@ -171,6 +188,8 @@ static inline enum padctl_lane usb3_laneowner_to_lane_enum(u8 laneowner)
 #define XUSB_PADCTL_UPHY_MISC_PAD_P4_CTL2	0x564
 #define XUSB_PADCTL_UPHY_MISC_PAD_P5_CTL2	0x5A4
 #define XUSB_PADCTL_UPHY_MISC_PAD_P6_CTL2	0x5E4
+
+#define XUSB_PADCTL_UPHY_MISC_PAD_S0_CTL1	0x960
 #define XUSB_PADCTL_UPHY_MISC_PAD_S0_CTL2	0x964
 
 #define XUSB_PADCTL_UPHY_PLL_S0_CTL_1_0 0x860
@@ -247,6 +266,7 @@ static inline enum padctl_lane usb3_laneowner_to_lane_enum(u8 laneowner)
 
 #define XUSB_PADCTL_ELPG_PROGRAM_0		0x20
 #define XUSB_PADCTL_ELPG_PROGRAM_1		0x24
+#define SSPX_ELPG_CLAMP_EN_EARLY(x)           (1 << ((x)*3 + 1))
 #define SSP0_ELPG_CLAMP_EN			(1 << 0)
 #define SSP0_ELPG_CLAMP_EN_EARLY	(1 << 1)
 #define SSP0_ELPG_VCORE_DOWN		(1 << 2)
@@ -685,5 +705,10 @@ void xusb_utmi_pad_driver_power(int port, bool on);
 
 int tegra_padctl_init_sata_pad(void);
 int tegra_padctl_enable_sata_pad(bool enable);
+
+#ifdef CONFIG_ARCH_TEGRA_21x_SOC
+void t210_receiver_detector(unsigned port, bool on);
+void t210_clamp_en_early(unsigned port, bool on);
+#endif
 
 #endif

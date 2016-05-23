@@ -84,6 +84,7 @@ struct tegra_padctl {
 	u32 lane_map; /* used for PCIE lanes */
 	bool enable_sata_port; /* used for SATA lane */
 };
+static struct tegra_padctl *padctl;
 #endif
 
 void tegra_xhci_release_otg_port(bool release)
@@ -2513,7 +2514,6 @@ tegra_padctl_probe(struct platform_device *pdev)
 	bool enable_sata_port;
 	int err = 0;
 	const struct of_device_id *match;
-	struct tegra_padctl *padctl;
 	struct clk *plle_clk;
 	struct clk *plle_hw_clk;
 
@@ -2631,6 +2631,99 @@ static int __init tegra_xusb_padctl_init(void)
 	return 0;
 }
 fs_initcall(tegra_xusb_padctl_init);
+
+#define reg_dump(_name, _reg) \
+	pr_debug("%s @%x = 0x%x\n", #_name, (_reg), \
+		 ioread32(IO_ADDRESS(TEGRA_XUSB_PADCTL_BASE) + (_reg)))
+static bool clamp_en_early_enabled[4] = {false};
+void t210_clamp_en_early(unsigned port, bool on)
+{
+	u32 mask;
+
+	if ((on && clamp_en_early_enabled[port]) ||
+			(!on && !clamp_en_early_enabled[port]))
+		return;
+
+	clamp_en_early_enabled[port] = on;
+	pr_debug("%s %s SS port %d\n", __func__,
+			on ? "enable" : "disable", port);
+
+	mask = SSPX_ELPG_CLAMP_EN_EARLY(port);
+	if (on) {
+		tegra_usb_pad_reg_update(XUSB_PADCTL_ELPG_PROGRAM_1, 0, mask);
+		udelay(60);
+	} else
+		tegra_usb_pad_reg_update(XUSB_PADCTL_ELPG_PROGRAM_1, mask, 0);
+
+	reg_dump("elpg_program1", XUSB_PADCTL_ELPG_PROGRAM_1);
+}
+EXPORT_SYMBOL_GPL(t210_clamp_en_early);
+
+static bool receiver_detector_disabled[4] = {false};
+void t210_receiver_detector(unsigned port, bool on)
+{
+	u8 lane;
+	enum padctl_lane lane_enum;
+	u32 misc_pad_ctl1, misc_pad_ctl2;
+	u32 mask;
+
+	if (!padctl)
+		return;
+
+	lane = (padctl->lane_owner >> (port * 4)) & 0xf;
+	lane_enum = usb3_laneowner_to_lane_enum(lane);
+	if ((lane == USB3_LANE_NOT_ENABLED) || (lane_enum < 0))
+		return;
+
+	if ((on && !receiver_detector_disabled[port]) ||
+			(!on && receiver_detector_disabled[port]))
+		return;
+
+	receiver_detector_disabled[port] = !on;
+
+	if (lane_enum == SATA_S0) {
+		misc_pad_ctl1 = XUSB_PADCTL_UPHY_MISC_PAD_S0_CTL1;
+		misc_pad_ctl2 = XUSB_PADCTL_UPHY_MISC_PAD_S0_CTL2;
+	} else {
+		misc_pad_ctl1 = XUSB_PADCTL_UPHY_MISC_PAD_PX_CTL1(lane_enum);
+		misc_pad_ctl2 = XUSB_PADCTL_UPHY_MISC_PAD_PX_CTL2(lane_enum);
+	}
+
+	pr_debug("%s %s SS port %d lane %d CTL1 addr 0x%x CTL2 addr 0x%x\n",
+		__func__, on ? "enable" : "disable", port, lane_enum,
+		misc_pad_ctl1, misc_pad_ctl2);
+
+	if (!on) {
+		mask = XUSB_PADCTL_UPHY_MISC_PAD_CTL2_TX_IDDQ |
+			XUSB_PADCTL_UPHY_MISC_PAD_CTL2_RX_IDDQ;
+		tegra_usb_pad_reg_update(misc_pad_ctl2, mask, 0);
+
+		mask = XUSB_PADCTL_UPHY_MISC_PAD_CTL2_TX_IDDQ_OVRD |
+			XUSB_PADCTL_UPHY_MISC_PAD_CTL2_RX_IDDQ_OVRD;
+		tegra_usb_pad_reg_update(misc_pad_ctl2, 0, mask);
+
+		mask = (XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_RDET_CLK_EN |
+			XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_RDET_BYP |
+			XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_RDET_EN |
+			XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_TERM_EN);
+		tegra_usb_pad_reg_update(misc_pad_ctl1, mask, 0);
+
+		mask = XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_MODE_OVRD;
+		tegra_usb_pad_reg_update(misc_pad_ctl1, 0, mask);
+	} else {
+		mask = XUSB_PADCTL_UPHY_MISC_PAD_CTL1_AUX_TX_MODE_OVRD;
+		tegra_usb_pad_reg_update(misc_pad_ctl1, mask, 0);
+
+		mask = XUSB_PADCTL_UPHY_MISC_PAD_CTL2_TX_IDDQ_OVRD |
+			XUSB_PADCTL_UPHY_MISC_PAD_CTL2_RX_IDDQ_OVRD;
+		tegra_usb_pad_reg_update(misc_pad_ctl2, mask, 0);
+	}
+
+	reg_dump("ctrl1", misc_pad_ctl1);
+	reg_dump("ctrl2", misc_pad_ctl2);
+	reg_dump("elpg_program1", XUSB_PADCTL_ELPG_PROGRAM_1);
+}
+EXPORT_SYMBOL_GPL(t210_receiver_detector);
 
 #else
 
