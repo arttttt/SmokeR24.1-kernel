@@ -1646,6 +1646,13 @@ void emc_set_clock_r21015(struct tegra21_emc_table *next_timing,
 		prelock_dll_en = 1;
 	} else {
 		emc_cc_dbg(INFO, "Disabling DLL for target frequency.\n");
+
+		/*
+		 * Ensure that even if the DLL is disabled for the given
+		 * frequency it still has an active clock source. If it does
+		 * not then it will not work during the next clock change.
+		 */
+		change_dll_src(next_timing, clksrc);
 		dll_disable(channel_mode);
 	}
 
