@@ -129,7 +129,11 @@ static void usbep_struct_setup(struct nv_udc_s *nvudc, u32 index, u8 *name);
 static bool u1_enable;
 module_param(u1_enable, bool, S_IRUGO|S_IWUSR);
 
+#ifdef NV_DISABLE_RCV_DET
+static bool u2_enable;
+#else
 static bool u2_enable = true;
+#endif
 module_param(u2_enable, bool, S_IRUGO|S_IWUSR);
 
 /* Used as a WAR to disable LPM for HS and FS */
@@ -381,6 +385,146 @@ static void init_chip(struct nv_udc_s *nvudc)
 	}
 }
 
+#ifdef NV_DISABLE_RCV_DET
+
+struct nv_babble_req {
+	struct nv_udc_ep *udc_ep_ptr;
+	struct nv_udc_request *udc_req_ptr;
+	struct list_head list;
+};
+
+static void nvudc_examine_PLS_U0(struct nv_udc_s *nvudc)
+{
+	u32 portsc = ioread32(nvudc->mmio_reg_base + PORTSC);
+	int try_count = 0;
+
+	while (XDEV_U0 != (portsc & PORTSC_PLS_MASK)) {
+		/* direct to U0 */
+		portsc &= ~PORTSC_PLS_MASK;
+		portsc |= PORTSC_LWS;
+		iowrite32(portsc, nvudc->mmio_reg_base + PORTSC);
+
+		udelay(10);
+		portsc = ioread32(nvudc->mmio_reg_base + PORTSC);
+
+		if (++try_count > 100) {
+			dev_dbg(nvudc->dev, "Failed to direct link to U0\n");
+			break;
+		}
+	}
+}
+
+static void nvudc_clear_u1_u2_timeout(struct nv_udc_s *nvudc)
+{
+	u32 reg_portpm;
+
+	/* we clear U1/U2 timeout value regardless of whether u1_enable or
+	 * u2_enable is true */
+	reg_portpm = ioread32(nvudc->mmio_reg_base + PORTPM);
+	reg_portpm &= ~PORTPM_U1TIMEOUT(-1);
+	reg_portpm &= ~PORTPM_U2TIMEOUT(-1);
+	iowrite32(reg_portpm, nvudc->mmio_reg_base + PORTPM);
+}
+
+static void nvudc_reschedule_babble_work(struct work_struct *work)
+{
+	struct nv_udc_s *nvudc =
+		container_of(work, struct nv_udc_s, reschedule_babble_work);
+	struct nv_babble_req *req, *next_req;
+	unsigned long flags;
+	u32 u_temp;
+	unsigned long ep_doorbell;
+
+	ep_doorbell = 0;
+
+	/* nothing to do */
+	spin_lock_irqsave(&nvudc->lock, flags);
+	if (list_empty(&nvudc->babble_req_list) || nvudc->babble_off) {
+		spin_unlock_irqrestore(&nvudc->lock, flags);
+		return;
+	}
+
+	if (!nvudc->babble_count) {
+		nvudc_clear_u1_u2_timeout(nvudc);
+		nvudc_examine_PLS_U0(nvudc);
+		t210_receiver_detector(nvudc->ss_port, false);
+		t210_clamp_en_early(nvudc->ss_port, true);
+	}
+
+	list_for_each_entry_safe(req, next_req, &nvudc->babble_req_list, list) {
+		if (!req->udc_req_ptr->babble) {
+			nvudc->babble_count++;
+
+			/* only ring doorbells once on each endpoint */
+			if (!__test_and_set_bit(req->udc_ep_ptr->DCI,
+						&ep_doorbell)) {
+				ep_doorbell &= BIT(req->udc_ep_ptr->DCI);
+				u_temp = req->udc_ep_ptr->DCI;
+				u_temp = DB_TARGET(u_temp);
+				if (usb_endpoint_xfer_bulk(
+						req->udc_ep_ptr->desc) &&
+					req->udc_ep_ptr->comp_desc &&
+					usb_ss_max_streams(
+						req->udc_ep_ptr->comp_desc))
+					u_temp |= DB_STREAMID(
+						req->udc_req_ptr->
+							usb_req.stream_id);
+
+				dev_dbg(nvudc->dev,
+					"DOORBELL = 0x%x, ep:%p, req:%p\n",
+					u_temp, req->udc_ep_ptr,
+					req->udc_req_ptr);
+				iowrite32(u_temp, nvudc->mmio_reg_base + DB);
+			}
+			req->udc_req_ptr->babble = true;
+		}
+		req->udc_ep_ptr->pending_babble--;
+		list_del_init(&req->list);
+		kfree(req);
+	}
+	spin_unlock_irqrestore(&nvudc->lock, flags);
+	dev_dbg(nvudc->dev, "%s: scheduled transfer count = %d\n", __func__,
+		nvudc->babble_count);
+}
+
+static void nvudc_clear_babble_transfer_queue(struct nv_udc_s *nvudc)
+{
+	struct nv_babble_req *req, *next_req;
+
+	if (list_empty(&nvudc->babble_req_list))
+		return;
+
+	list_for_each_entry_safe(req, next_req, &nvudc->babble_req_list, list) {
+		list_del_init(&req->list);
+		kfree(req);
+	}
+	list_del_init(&nvudc->babble_req_list);
+}
+
+#ifdef QUEUE_BABBLE_TRANSFER
+/* must hold nvudc->lock */
+static void nvudc_queue_babble_transfer(struct nv_udc_s *nvudc,
+		struct nv_udc_ep *udc_ep_ptr,
+		struct nv_udc_request *udc_req_ptr)
+{
+	struct nv_babble_req *req;
+
+	req = kzalloc(sizeof(struct nv_babble_req), GFP_ATOMIC);
+
+	req->udc_ep_ptr = udc_ep_ptr;
+	req->udc_req_ptr = udc_req_ptr;
+	list_add_tail(&req->list, &nvudc->babble_req_list);
+
+	/* hold off any doorbells on this endpoint */
+	req->udc_ep_ptr->pending_babble++;
+
+	dev_dbg(nvudc->dev, "%s: ep:%p req:%p\n", __func__, udc_ep_ptr,
+		udc_req_ptr);
+}
+#endif
+
+#endif
+
 /* must hold nvudc->lock */
 static inline void vbus_detected(struct nv_udc_s *nvudc)
 {
@@ -494,11 +638,17 @@ static void tegra_xudc_ucd_work(struct work_struct *work)
 
 		pm_runtime_get_sync(nvudc->dev);
 		spin_lock_irqsave(&nvudc->lock, flags);
+#ifdef NV_DISABLE_RCV_DET
+		nvudc->babble_off = false;
+#endif
 		vbus_detected(nvudc);
 		nvudc->extcon_event_processing = false;
 		spin_unlock_irqrestore(&nvudc->lock, flags);
 	} else {
 		cancel_delayed_work(&nvudc->non_std_charger_work);
+#ifdef NV_DISABLE_RCV_DET
+		cancel_work_sync(&nvudc->reschedule_babble_work);
+#endif
 		nvudc->current_ma = 0;
 		if (nvudc->ucd != NULL) {
 			tegra_ucd_set_charger_type(nvudc->ucd,
@@ -507,6 +657,19 @@ static void tegra_xudc_ucd_work(struct work_struct *work)
 		}
 
 		spin_lock_irqsave(&nvudc->lock, flags);
+#ifdef NV_DISABLE_RCV_DET
+		nvudc->babble_off = true;
+		t210_receiver_detector(nvudc->ss_port, true);
+		t210_clamp_en_early(nvudc->ss_port, false);
+		nvudc->babble_count = 0;
+		nvudc_clear_babble_transfer_queue(nvudc);
+
+		/* allow 12ms timeout for state transition from Recovery
+		 * to Inactive before we clear VBUS override */
+		spin_unlock_irqrestore(&nvudc->lock, flags);
+		usleep_range(12000, 13000);
+		spin_lock_irqsave(&nvudc->lock, flags);
+#endif
 		vbus_not_detected(nvudc);
 		nvudc->extcon_event_processing = false;
 		pm_runtime_put_autosuspend(nvudc->dev);
@@ -992,6 +1155,25 @@ static int nvudc_ep_enable(struct usb_ep *ep,
 	return 0;
 }
 
+static void nvudc_handle_babble_completion(struct nv_udc_s *nvudc,
+	struct nv_udc_ep *udc_ep_ptr, struct nv_udc_request *udc_req_ptr,
+	int status)
+{
+#ifdef NV_DISABLE_RCV_DET
+	if (udc_req_ptr && udc_req_ptr->babble) {
+		udc_req_ptr->babble = false;
+		dev_dbg(nvudc->dev,
+			"completion status = %d (ep:%p, req:%p)\n",
+			status, udc_ep_ptr, udc_req_ptr);
+		if (nvudc->babble_count == 0)
+			return;
+		/* no pending transfer */
+		if (--nvudc->babble_count == 0)
+			t210_clamp_en_early(nvudc->ss_port, false);
+	}
+#endif
+}
+
 /* Completes request.  Calls gadget completion handler
  * caller must have acquired spin lock.
  */
@@ -1016,6 +1198,7 @@ static void req_done(struct nv_udc_ep *udc_ep,
 		udc_req->mapped = 0;
 	}
 
+	nvudc_handle_babble_completion(nvudc, udc_ep, udc_req, status);
 	if (udc_req->usb_req.complete) {
 		spin_unlock(&nvudc->lock);
 		udc_req->usb_req.complete(&udc_ep->usb_ep, &udc_req->usb_req);
@@ -1146,6 +1329,9 @@ static int nvudc_ep_disable(struct usb_ep *_ep)
 
 		/*        nvudc_power_gate(); */
 	}
+#ifdef NV_DISABLE_RCV_DET
+	udc_ep->pending_babble = 0;
+#endif
 	spin_unlock_irqrestore(&nvudc->lock, flags);
 	msg_exit(nvudc->dev);
 	return 0;
@@ -1503,21 +1689,29 @@ int nvudc_queue_trbs(struct nv_udc_ep *udc_ep_ptr,
 				TRB_TYPE_XFER_DATA_ISOCH, short_pkt, chain_bit,
 				intr_on_compl, 0, 0, 1, 0, 0, 1);
 		} else {
-			u8 pcs = udc_ep_ptr->pcs;
+			unsigned stream_id = 0;
+			enum TRB_TYPE_E trb_type = TRB_TYPE_XFER_NORMAL;
+			u64 len = buff_len_temp;
+
 			if (udc_ep_ptr->comp_desc
 				&& usb_ss_max_streams(udc_ep_ptr->comp_desc)) {
-				setup_trb(nvudc, enq_pt, usb_req, buff_len_temp,
-					trb_buf_addr, td_size-1,
-					pcs, TRB_TYPE_XFER_STREAM, short_pkt,
-					chain_bit, intr_on_compl, 0, 0, 0, 0,
-					udc_req_ptr->usb_req.stream_id, 0);
-			} else {
-				setup_trb(nvudc, enq_pt, usb_req, buff_len_temp,
-					trb_buf_addr, td_size-1,
-					pcs, TRB_TYPE_XFER_NORMAL, short_pkt,
-					chain_bit, intr_on_compl, 0, 0, 0, 0, 0,
-					0);
-		}
+				stream_id = udc_req_ptr->usb_req.stream_id;
+				trb_type = TRB_TYPE_XFER_STREAM;
+			}
+#ifdef NV_DISABLE_RCV_DET
+			if (i == 0 && udc_req_ptr->trigger_babble) {
+				usb_req->length = 1;
+				len = 1;
+				udc_req_ptr->first_trb_len = buff_len_temp;
+				udc_req_ptr->chain_bit = chain_bit;
+				chain_bit = 0;
+			}
+#endif
+			setup_trb(nvudc, enq_pt, usb_req, len,
+				trb_buf_addr, td_size-1,
+				udc_ep_ptr->pcs, trb_type, short_pkt,
+				chain_bit, intr_on_compl, 0, 0, 0, 0,
+				stream_id, 0);
 		}
 		trb_buf_addr += buff_len_temp;
 		td_size--;
@@ -1587,7 +1781,7 @@ int nvudc_queue_ctrl(struct nv_udc_ep *udc_ep_ptr,
 		/* For control endpoint, we can handle one setup request at a
 		 time. so if there are TD pending in the transfer ring.
 		 wait for the sequence number error event. Then put the new
-		 request to tranfer ring */
+		 request to transfer ring */
 		if (enq_pt == dq_pt) {
 			u32 u_temp = 0, i;
 			bool need_zlp = false;
@@ -1735,6 +1929,10 @@ int nvudc_build_td(struct nv_udc_ep *udc_ep_ptr,
 		status = nvudc_queue_trbs(udc_ep_ptr, udc_req_ptr, 0,
 				NVUDC_BULK_EP_TD_RING_SIZE,
 				num_trbs_needed, buffer_length);
+#ifdef NV_DISABLE_RCV_DET
+		if (udc_ep_ptr->pending_babble > 0)
+			return status;
+#endif
 		u_temp = udc_ep_ptr->DCI;
 		u_temp = DB_TARGET(u_temp);
 		if (udc_ep_ptr->comp_desc &&
@@ -1752,6 +1950,10 @@ int nvudc_build_td(struct nv_udc_ep *udc_ep_ptr,
 		status = nvudc_queue_trbs(udc_ep_ptr, udc_req_ptr, 0,
 				NVUDC_INT_EP_TD_RING_SIZE,
 				num_trbs_needed, buffer_length);
+#ifdef NV_DISABLE_RCV_DET
+		if (udc_ep_ptr->pending_babble > 0)
+			return status;
+#endif
 		u_temp = udc_ep_ptr->DCI;
 		u_temp = DB_TARGET(u_temp);
 		msg_dbg(nvudc->dev, "DOORBELL = 0x%x\n", u_temp);
@@ -1770,6 +1972,13 @@ void clear_req_container(struct nv_udc_request *udc_req_ptr)
 	udc_req_ptr->last_trb = NULL;
 	udc_req_ptr->short_pkt = 0;
 	udc_req_ptr->need_zlp = false;
+#ifdef NV_DISABLE_RCV_DET
+	udc_req_ptr->trigger_babble = false;
+	udc_req_ptr->babble = false;
+	udc_req_ptr->first_trb_len = 0;
+	udc_req_ptr->actual_len = 0;
+	udc_req_ptr->chain_bit = 0;
+#endif
 }
 
 static int
@@ -1847,12 +2056,27 @@ nvudc_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 					udc_req_ptr->usb_req.length,
 					usb_endpoint_dir_in(udc_ep_ptr->desc)
 					? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+		if (dma_mapping_error(nvudc->gadget.dev.parent,
+					udc_req_ptr->usb_req.dma)) {
+			dev_err(nvudc->dev, "%s: failed to map buffer\n",
+					__func__);
+			return -EFAULT;
+		}
 		udc_req_ptr->mapped = 1;
 	}
 
 	udc_req_ptr->usb_req.status = -EINPROGRESS;
 	udc_req_ptr->usb_req.actual = 0;
 
+#ifdef NV_DISABLE_RCV_DET
+	if (nvudc->gadget.speed == USB_SPEED_SUPER &&
+		usb_endpoint_dir_out(udc_ep_ptr->desc) &&
+		!usb_endpoint_xfer_control(udc_ep_ptr->desc) &&
+		_req->length >= NV_REQ_LEN_THRESHOLD) {
+		udc_req_ptr->actual_len = _req->length;
+		udc_req_ptr->trigger_babble = true;
+	}
+#endif
 	/* If the transfer ring for this particular end point is full,
 	 * then simply queue the request and return
 	 */
@@ -1869,7 +2093,11 @@ nvudc_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 	}
 	spin_unlock_irqrestore(&nvudc->lock, flags);
 
+#ifdef NV_DISABLE_RCV_DET
+	if (!status && (udc_req_ptr->actual_len >= BOOST_TRIGGER_SIZE))
+#else
 	if (!status && (_req->length >= BOOST_TRIGGER_SIZE))
+#endif
 		tegra_xudc_boost_cpu_freq(nvudc);
 
 	msg_exit(nvudc->dev);
@@ -1893,7 +2121,7 @@ void queue_pending_trbs(struct nv_udc_ep *nvudc_ep_ptr)
 
 		if (nvudc_ep_ptr->tran_ring_full == true)
 			break;
-		}
+	}
 	msg_exit(nvudc->dev);
 }
 
@@ -2032,6 +2260,7 @@ nvudc_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 		spin_unlock_irqrestore(&nvudc->lock, flags);
 		return -EINVAL;
 	}
+
 	/* Request hasn't been queued to transfer ring yet
 	* dequeue it from sw queue only
 	*/
@@ -2446,7 +2675,20 @@ static int nvudc_gadget_pullup(struct usb_gadget *gadget, int is_on)
 	msg_dbg(nvudc->dev, "pullup is_on = %x", is_on);
 
 	pm_runtime_get_sync(nvudc->dev);
+#ifdef NV_DISABLE_RCV_DET
+	if (!is_on)
+		cancel_work_sync(&nvudc->reschedule_babble_work);
+#endif
 	spin_lock_irqsave(&nvudc->lock, flags);
+
+#ifdef NV_DISABLE_RCV_DET
+	if (!is_on) {
+		t210_receiver_detector(nvudc->ss_port, true);
+		t210_clamp_en_early(nvudc->ss_port, false);
+		nvudc->babble_count = 0;
+		nvudc_clear_babble_transfer_queue(nvudc);
+	}
+#endif
 	temp = ioread32(nvudc->mmio_reg_base + CTRL);
 	if (is_on != nvudc->pullup) {
 		if (is_on)
@@ -2776,7 +3018,8 @@ void handle_cmpl_code_success(struct nv_udc_s *nvudc, struct event_trb_s *event,
 	}
 }
 
-void update_dequeue_pt(struct event_trb_s *event, struct nv_udc_ep *udc_ep)
+void update_dequeue_pt(struct event_trb_s *event, struct nv_udc_ep *udc_ep,
+		       bool increment)
 {
 	u32 deq_pt_lo = event->trb_pointer_lo;
 	u32 deq_pt_hi = event->trb_pointer_hi;
@@ -2784,7 +3027,8 @@ void update_dequeue_pt(struct event_trb_s *event, struct nv_udc_ep *udc_ep)
 	struct transfer_trb_s *deq_pt;
 
 	deq_pt = tran_trb_dma_to_virt(udc_ep, dq_pt_addr);
-	deq_pt++;
+	if (increment)
+		deq_pt++;
 
 	if (XHCI_GETF(TRB_TYPE, deq_pt->trb_dword3) == TRB_TYPE_LINK)
 		deq_pt = udc_ep->tran_ring_ptr;
@@ -2848,21 +3092,33 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 	u16 comp_code;
 	struct nv_udc_request *udc_req_ptr;
 	bool trbs_dequeued = false;
+	struct transfer_trb_s *p_trb;
+	u64 trb_pt;
 
 	msg_entry(nvudc->dev);
 	if (!udc_ep_ptr->tran_ring_ptr || XHCI_GETF(EP_CX_EP_STATE,
 				p_ep_cx->ep_dw0) == EP_STATE_DISABLED)
 		return -ENODEV;
 
-	update_dequeue_pt(event, udc_ep_ptr);
+	trb_pt = (u64)event->trb_pointer_lo +
+		((u64)(event->trb_pointer_hi) << 32);
+	p_trb = tran_trb_dma_to_virt(udc_ep_ptr, trb_pt);
+	udc_req_ptr = list_entry(udc_ep_ptr->queue.next,
+				struct nv_udc_request, queue);
+	comp_code = XHCI_GETF(EVE_TRB_COMPL_CODE, event->eve_trb_dword2);
+
+#ifdef NV_DISABLE_RCV_DET
+	if (comp_code == CMPL_CODE_BABBLE_DETECTED_ERR)
+		update_dequeue_pt(event, udc_ep_ptr, false);
+	else
+#endif
+		update_dequeue_pt(event, udc_ep_ptr, true);
 
 	if (is_request_dequeued(nvudc, udc_ep_ptr, event)) {
 		trbs_dequeued = true;
 		dev_dbg(nvudc->dev, "WARNING: Drop the transfer event\n");
 		goto queue_more_trbs;
 	}
-
-	comp_code = XHCI_GETF(EVE_TRB_COMPL_CODE, event->eve_trb_dword2);
 
 	switch (comp_code) {
 	case CMPL_CODE_SUCCESS:
@@ -2909,15 +3165,13 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 
 			trb_transfer_length = XHCI_GETF(EVE_TRB_TRAN_LEN,
 						event->eve_trb_dword2);
-			udc_req_ptr = list_entry(udc_ep_ptr->queue.next,
-						struct nv_udc_request, queue);
 
 			udc_req_ptr->usb_req.actual =
 				udc_req_ptr->usb_req.length -
 				trb_transfer_length;
 			msg_dbg(nvudc->dev, "Actual Data transfered = 0x%x\n",
 					udc_req_ptr->usb_req.actual);
-				req_done(udc_ep_ptr, udc_req_ptr, 0);
+			req_done(udc_ep_ptr, udc_req_ptr, 0);
 		} else
 			msg_dbg(nvudc->dev, "ep dir in\n");
 		trbs_dequeued = true;
@@ -2990,10 +3244,13 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 			iowrite32(u_temp, nvudc->mmio_reg_base + DB);
 			msg_dbg(nvudc->dev, "DOORBELL STREAM = 0x%x\n", u_temp);
 		}
-			break;
+		break;
 	}
 	case CMPL_CODE_BABBLE_DETECTED_ERR:
 	{
+#if defined(NV_DISABLE_RCV_DET) && !defined(QUEUE_BABBLE_TRANSFER)
+		u32 u_temp;
+#endif
 		/* Race condition
 		* When HW detects babble condition it generates a babble event
 		* and flow controls the request from host, if at that time SW
@@ -3007,6 +3264,63 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 		poll_ep_stopped(nvudc->dev, "cmpl_babble", NV_BIT(ep_index));
 		iowrite32(NV_BIT(ep_index), nvudc->mmio_reg_base + EP_STOPPED);
 
+#ifdef NV_DISABLE_RCV_DET
+		/* only for SS INT/Bulk out ep */
+		if (udc_req_ptr && nvudc->gadget.speed == USB_SPEED_SUPER &&
+			usb_endpoint_dir_out(udc_ep_ptr->desc) &&
+			!usb_endpoint_xfer_control(udc_ep_ptr->desc)) {
+			udc_req_ptr->trigger_babble = false;
+			dev_dbg(nvudc->dev,
+				"babble (req:%p, trb:%p) actual req len=%d, actual trb len=%d\n",
+				udc_req_ptr, p_trb, udc_req_ptr->actual_len,
+				udc_req_ptr->first_trb_len);
+
+			/* reprogram */
+			XHCI_SETF_VAR(TRB_TRANSFER_LEN, p_trb->trb_dword2,
+					udc_req_ptr->first_trb_len);
+			XHCI_SETF_VAR(TRB_CHAIN_BIT, p_trb->trb_dword3,
+					udc_req_ptr->chain_bit);
+			udc_req_ptr->usb_req.length = udc_req_ptr->actual_len;
+
+#ifdef QUEUE_BABBLE_TRANSFER
+			if (udc_req_ptr->babble) {
+				udc_req_ptr->babble = false;
+				nvudc->babble_count--;
+			}
+			nvudc_queue_babble_transfer(nvudc,
+					udc_ep_ptr, udc_req_ptr);
+#else
+			if (!nvudc->babble_count && !nvudc->babble_off) {
+				nvudc_clear_u1_u2_timeout(nvudc);
+				nvudc_examine_PLS_U0(nvudc);
+				t210_receiver_detector(nvudc->ss_port, false);
+				t210_clamp_en_early(nvudc->ss_port, true);
+			}
+
+			/* ring doorbell */
+			u_temp = udc_ep_ptr->DCI;
+			u_temp = DB_TARGET(u_temp);
+			if (usb_endpoint_xfer_bulk(udc_ep_ptr->desc) &&
+				udc_ep_ptr->comp_desc &&
+				usb_ss_max_streams(udc_ep_ptr->comp_desc))
+				u_temp |= DB_STREAMID(
+					udc_req_ptr->usb_req.stream_id);
+
+			/* wait HW stops processing this ep (bit == 0) */
+			poll_ep_thread_active(nvudc->dev, "babble err",
+					NV_BIT(udc_ep_ptr->DCI));
+			dev_dbg(nvudc->dev, "DOORBELL = 0x%x\n", u_temp);
+			iowrite32(u_temp, nvudc->mmio_reg_base + DB);
+
+			if (!udc_req_ptr->babble) {
+				udc_req_ptr->babble = true;
+				nvudc->babble_count++;
+			}
+#endif
+			/* not halting this EP */
+			break;
+		}
+#endif
 		msg_dbg(nvudc->dev, "comp_babble_err\n");
 		/* FALL THROUGH to halt endpoint */
 	}
@@ -3019,7 +3333,10 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 	case CMPL_CODE_USB_TRANS_ERR:
 	case CMPL_CODE_TRB_ERR:
 	{
-		msg_info(nvudc->dev, "comp_code = 0x%x\n", comp_code);
+		dev_info(nvudc->dev,
+				"comp_code = 0x%x, trb:%p, req:%p, ep:%p\n",
+				comp_code, p_trb, udc_req_ptr, udc_ep_ptr);
+		dev_info(nvudc->dev, "EPDCI = 0x%x\n", udc_ep_ptr->DCI);
 		set_ep_halt(nvudc, ep_index, "cmpl code error");
 		break;
 	}
@@ -3034,8 +3351,6 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 
 		/* skip seqnum err event until last one arrives. */
 		if (udc_ep_ptr->deq_pt == udc_ep_ptr->enq_pt) {
-			udc_req_ptr = list_entry(udc_ep_ptr->queue.next,
-						struct nv_udc_request, queue);
 			if (udc_req_ptr)
 				req_done(udc_ep_ptr, udc_req_ptr, -EINVAL);
 
@@ -3067,9 +3382,6 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 		/* stop transfer event for disconnect. */
 		msg_dbg(nvudc->dev, "CMPL_CODE_STOPPED\n");
 		msg_dbg(nvudc->dev, "EPDCI = 0x%x\n", udc_ep_ptr->DCI);
-		udc_req_ptr = list_entry(udc_ep_ptr->queue.next,
-				struct nv_udc_request,
-				queue);
 		if (udc_req_ptr)
 			req_done(udc_ep_ptr, udc_req_ptr, -ECONNREFUSED);
 
@@ -3081,6 +3393,15 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 	}
 
 queue_more_trbs:
+#ifdef NV_DISABLE_RCV_DET
+	if (udc_req_ptr && udc_req_ptr->trigger_babble)
+		udc_req_ptr->trigger_babble = false;
+
+	if (comp_code != CMPL_CODE_BABBLE_DETECTED_ERR)
+		nvudc_handle_babble_completion(nvudc, udc_ep_ptr, udc_req_ptr,
+					       comp_code);
+#endif
+
 	/* If there are some trbs dequeued by HW and the ring
 	 * was full before, then schedule any pending TRB's
 	 */
@@ -3174,7 +3495,10 @@ bool setfeaturesrequest(struct nv_udc_s *nvudc, u8 RequestType, u8 bRequest, u16
 			}
 
 			iowrite32(u_temp, nvudc->mmio_reg_base + PORTPM);
-			msg_dbg(nvudc->dev, "PORTPM = 0x%x", u_temp);
+			msg_dbg(nvudc->dev, "%s_feat U%s_Enable: PORTPM = 0x%x",
+				set_feat ? "set" : "clear",
+				value == USB_DEVICE_U1_ENABLE ? "1" : "2",
+				u_temp);
 			break;
 
 		}
@@ -3714,6 +4038,8 @@ void nvudc_reset(struct nv_udc_s *nvudc)
 		EP_CX_DEQ_CYC_STATE, p_ep_cx->ep_dw2, udc_ep_ptr->pcs);
 	p_ep_cx->ep_dw3 = upper_32_bits(dqptaddr);
 
+	udc_ep_ptr->deq_pt = udc_ep_ptr->enq_pt;
+
 	/* reload EP0 */
 	iowrite32(1, nvudc->mmio_reg_base + EP_RELOAD);
 	poll_reload(nvudc->dev, "nvudc_reset()", 1);
@@ -4066,6 +4392,9 @@ bool nvudc_handle_port_status(struct nv_udc_s *nvudc)
 				spin_lock(&nvudc->lock);
 			}
 		} else if ((u_temp2 & PORTSC_PLS_MASK) == XDEV_INACTIVE) {
+#ifdef NV_DISABLE_RCV_DET
+			t210_receiver_detector(nvudc->ss_port, true);
+#endif
 			schedule_delayed_work(&nvudc->plc_reset_war_work,
 				msecs_to_jiffies(TOGGLE_VBUS_WAIT_MS));
 			nvudc->wait_for_csc = 1;
@@ -4200,6 +4529,11 @@ static irqreturn_t nvudc_irq(int irq, void *_udc)
 	iowrite32(u_temp, nvudc->mmio_reg_base + ST);
 
 	process_event_ring(nvudc);
+
+#ifdef NV_DISABLE_RCV_DET
+	if (!list_empty(&nvudc->babble_req_list) && !nvudc->babble_off)
+		schedule_work(&nvudc->reschedule_babble_work);
+#endif
 
 	/* update dequeue pointer */
 	erdp = event_trb_virt_to_dma(nvudc, nvudc->evt_dq_pt);
@@ -4342,7 +4676,7 @@ static int nvudc_gadget_start(struct usb_gadget *gadget,
 		otg_set_peripheral(nvudc->phy->otg, &nvudc->gadget);
 	}
 
-	pm_runtime_put_sync(nvudc->dev);
+	pm_runtime_put(nvudc->dev);
 	msg_exit(nvudc->dev);
 	return 0;
 err_unbind:
@@ -4364,9 +4698,14 @@ static int nvudc_gadget_stop(struct usb_gadget *gadget,
 
 	msg_entry(nvudc->dev);
 
-	if (!driver || driver != nvudc->driver || !driver->unbind)
+	if (driver && (driver != nvudc->driver || !driver->unbind))
 		return -EINVAL;
 
+	pm_runtime_get_sync(nvudc->dev);
+
+#ifdef NV_DISABLE_RCV_DET
+	cancel_work_sync(&nvudc->reschedule_babble_work);
+#endif
 	spin_lock_irqsave(&nvudc->lock, flags);
 	u_temp = ioread32(nvudc->mmio_reg_base + CTRL);
 	u_temp &= ~CTRL_IE;
@@ -4391,6 +4730,8 @@ static int nvudc_gadget_stop(struct usb_gadget *gadget,
 	}
 
 	device_remove_file(nvudc->dev, &dev_attr_debug);
+	pm_runtime_put(nvudc->dev);
+
 	return 0;
 }
 
@@ -4490,6 +4831,8 @@ u32 reset_data_struct(struct nv_udc_s *nvudc)
 
 	msg_entry(nvudc->dev);
 	u_temp = ioread32(nvudc->mmio_reg_base + CTRL);
+
+	iowrite32(PORTSC_CHANGE_MASK, nvudc->mmio_reg_base + PORTSC);
 
 	retval = init_hw_event_ring(nvudc);
 	if (retval)
@@ -5730,6 +6073,10 @@ static int tegra_xudc_plat_probe(struct platform_device *pdev)
 
 	INIT_WORK(&nvudc->ucd_work, tegra_xudc_ucd_work);
 	INIT_WORK(&nvudc->current_work, tegra_xudc_current_work);
+#ifdef NV_DISABLE_RCV_DET
+	INIT_WORK(&nvudc->reschedule_babble_work, nvudc_reschedule_babble_work);
+	INIT_LIST_HEAD(&nvudc->babble_req_list);
+#endif
 	INIT_DELAYED_WORK(&nvudc->non_std_charger_work,
 					tegra_xudc_non_std_charger_work);
 	INIT_DELAYED_WORK(&nvudc->port_reset_war_work,
@@ -5875,6 +6222,8 @@ static int tegra_xudc_plat_probe(struct platform_device *pdev)
 	tegra_pd_add_device(&pdev->dev);
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 2000);
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_mark_last_busy(nvudc->dev);
 	pm_runtime_enable(&pdev->dev);
 
 	nvudc->is_suspended = false;
@@ -5929,6 +6278,9 @@ static int __exit tegra_xudc_plat_remove(struct platform_device *pdev)
 		tegra_usb_release_ucd(nvudc->ucd);
 		cancel_work_sync(&nvudc->ucd_work);
 		cancel_work_sync(&nvudc->current_work);
+#ifdef NV_DISABLE_RCV_DET
+		cancel_work_sync(&nvudc->reschedule_babble_work);
+#endif
 		cancel_delayed_work(&nvudc->non_std_charger_work);
 		cancel_delayed_work(&nvudc->port_reset_war_work);
 		cancel_delayed_work(&nvudc->plc_reset_war_work);
