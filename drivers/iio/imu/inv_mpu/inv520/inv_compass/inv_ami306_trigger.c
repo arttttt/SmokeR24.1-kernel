@@ -60,7 +60,6 @@ int inv_ami306_probe_trigger(struct iio_dev *indio_dev)
 	}
 	/* select default trigger */
 	st->trig->dev.parent = &st->i2c->dev;
-	st->trig->private_data = indio_dev;
 	st->trig->ops = &inv_ami306_trigger_ops;
 	ret = iio_trigger_register(st->trig);
 
