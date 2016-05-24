@@ -181,12 +181,9 @@ static int __gk20a_channel_syncpt_incr(struct gk20a_channel_sync *s,
 	if (wfi_cmd)
 		incr_cmd_size += 2;
 
-	gk20a_channel_alloc_priv_cmdbuf(c, incr_cmd_size, &incr_cmd);
-	if (incr_cmd == NULL) {
-		gk20a_err(dev_from_gk20a(c->g),
-				"not enough priv cmd buffer space");
-		return -EAGAIN;
-	}
+	err = gk20a_channel_alloc_priv_cmdbuf(c, incr_cmd_size, &incr_cmd);
+	if (err)
+		return err;
 
 	/* WAR for hw bug 1491360: syncpt needs to be incremented twice */
 

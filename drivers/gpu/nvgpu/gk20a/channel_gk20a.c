@@ -1228,7 +1228,7 @@ int gk20a_channel_alloc_priv_cmdbuf(struct channel_gk20a *c, u32 orig_size,
 	free_count = (q->size - (q->put - q->get) - 1) % q->size;
 
 	if (size > free_count)
-		return -EAGAIN;
+		return -ENOSPC;
 
 	e = kzalloc(sizeof(struct priv_cmd_entry), GFP_KERNEL);
 	if (!e) {
@@ -1794,8 +1794,7 @@ int gk20a_submit_channel_gpfifo(struct channel_gk20a *c,
 	}
 
 	if (err) {
-		gk20a_err(d, "timeout waiting for gpfifo space");
-		err = -EAGAIN;
+		err = -ENOSPC;
 		goto clean_up;
 	}
 
@@ -1993,7 +1992,7 @@ int gk20a_submit_channel_gpfifo(struct channel_gk20a *c,
 	return err;
 
 clean_up:
-	gk20a_err(d, "fail");
+	gk20a_dbg_fn("fail");
 	free_priv_cmdbuf(c, wait_cmd);
 	free_priv_cmdbuf(c, incr_cmd);
 	gk20a_fence_put(pre_fence);
