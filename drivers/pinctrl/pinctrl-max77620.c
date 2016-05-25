@@ -1,7 +1,7 @@
 /*
  * MAX77620 pin control driver.
  *
- * Copyright (c) 2014, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Author: Chaitanya Bandi <bandik@nvidia.com>
  *
@@ -411,11 +411,10 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 		if ((pin < MAX77620_GPIO1) || (pin > MAX77620_GPIO3))
 			return -EINVAL;
 
-		if (param_val == FPS_SRC_DEF)
-			return 0;
-
 		addr = MAX77620_REG_FPS_GPIO1 + pin - 1;
 		if (param == MAX77620_FPS_SOURCE) {
+			if (param_val == FPS_SRC_DEF)
+				return 0;
 			mask = MAX77620_FPS_SRC_MASK;
 			shift = MAX77620_FPS_SRC_SHIFT;
 		} else if (param == MAX77620_FPS_POWER_ON_PERIOD) {
