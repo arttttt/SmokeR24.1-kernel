@@ -1348,7 +1348,7 @@ static void nvhdcp_fallback_worker(struct work_struct *work)
 static void nvhdcp_downstream_worker(struct work_struct *work)
 {
 	struct tegra_nvhdcp *nvhdcp =
-		container_of(to_delayed_work(work), struct tegra_nvhdcp, work);
+		container_of(to_delayed_work(work), struct tegra_nvhdcp, hdcp1x_work);
 	struct tegra_hdmi *hdmi = nvhdcp->hdmi;
 	struct tegra_dc *dc = tegra_dc_hdmi_get_dc(hdmi);
 	int e;
@@ -1553,7 +1553,7 @@ failure:
 		nvhdcp_err("nvhdcp failure - renegotiating in 1 second\n");
 		if (!nvhdcp_is_plugged(nvhdcp))
 			goto lost_hdmi;
-		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->work,
+		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->hdcp1x_work,
 						msecs_to_jiffies(1000));
 	}
 
@@ -1667,7 +1667,7 @@ exit:
 static void nvhdcp2_downstream_worker(struct work_struct *work)
 {
 	struct tegra_nvhdcp *nvhdcp =
-		container_of(to_delayed_work(work), struct tegra_nvhdcp, work);
+		container_of(to_delayed_work(work), struct tegra_nvhdcp, hdcp22_work);
 	struct tegra_hdmi *hdmi = nvhdcp->hdmi;
 	struct tegra_dc *dc = tegra_dc_hdmi_get_dc(hdmi);
 	int e;
@@ -1775,7 +1775,7 @@ failure:
 		nvhdcp_err("nvhdcp failure - renegotiating in 1 second\n");
 		if (!nvhdcp_is_plugged(nvhdcp))
 			goto lost_hdmi;
-		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->work,
+		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->hdcp22_work,
 						msecs_to_jiffies(1000));
 	}
 
@@ -1812,18 +1812,20 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 					HDCP1X_EESS_END;
 				nvhdcp_sor_writel(nvhdcp->hdmi, val,
 							HDMI_VSYNC_WINDOW);
-				INIT_DELAYED_WORK(&nvhdcp->work,
-					nvhdcp_downstream_worker);
 				nvhdcp->hdcp22 = HDCP1X_PROTOCOL;
+				queue_delayed_work(nvhdcp->downstream_wq,
+					&nvhdcp->hdcp1x_work,
+					msecs_to_jiffies(100));
 			} else {
 				val = HDCP_EESS_ENABLE<<31|
 					HDCP22_EESS_START<<16|
 					HDCP22_EESS_END;
 				nvhdcp_sor_writel(nvhdcp->hdmi, val,
 							HDMI_VSYNC_WINDOW);
-				INIT_DELAYED_WORK(&nvhdcp->work,
-					nvhdcp2_downstream_worker);
 				nvhdcp->hdcp22 = HDCP22_PROTOCOL;
+				queue_delayed_work(nvhdcp->downstream_wq,
+					&nvhdcp->hdcp22_work,
+					msecs_to_jiffies(100));
 			}
 		} else {
 			val = HDCP_EESS_ENABLE<<31|
@@ -1831,12 +1833,11 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 				HDCP1X_EESS_END;
 			nvhdcp_sor_writel(nvhdcp->hdmi, val,
 							HDMI_VSYNC_WINDOW);
-			INIT_DELAYED_WORK(&nvhdcp->work,
-				nvhdcp_downstream_worker);
 			nvhdcp->hdcp22 = HDCP1X_PROTOCOL;
+			queue_delayed_work(nvhdcp->downstream_wq,
+				&nvhdcp->hdcp1x_work,
+				msecs_to_jiffies(100));
 		}
-		queue_delayed_work(nvhdcp->downstream_wq, &nvhdcp->work,
-						msecs_to_jiffies(100));
 	}
 	return 0;
 }
@@ -1848,7 +1849,8 @@ static int tegra_nvhdcp_off(struct tegra_nvhdcp *nvhdcp)
 	nvhdcp_set_plugged(nvhdcp, false);
 	mutex_unlock(&nvhdcp->lock);
 	wake_up_interruptible(&wq_worker);
-	cancel_delayed_work_sync(&nvhdcp->work);
+	cancel_delayed_work_sync(&nvhdcp->hdcp1x_work);
+	cancel_delayed_work_sync(&nvhdcp->hdcp22_work);
 	return 0;
 }
 
@@ -2089,6 +2091,8 @@ struct tegra_nvhdcp *tegra_nvhdcp_create(struct tegra_hdmi *hdmi,
 	nvhdcp->fallback_wq = create_singlethread_workqueue(nvhdcp->name);
 
 	INIT_DELAYED_WORK(&nvhdcp->fallback_work, nvhdcp_fallback_worker);
+	INIT_DELAYED_WORK(&nvhdcp->hdcp1x_work, nvhdcp_downstream_worker);
+	INIT_DELAYED_WORK(&nvhdcp->hdcp22_work, nvhdcp2_downstream_worker);
 
 	nvhdcp->miscdev.minor = MISC_DYNAMIC_MINOR;
 	nvhdcp->miscdev.name = nvhdcp->name;

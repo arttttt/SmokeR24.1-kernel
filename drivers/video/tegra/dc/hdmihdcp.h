@@ -41,7 +41,8 @@ enum tegra_nvhdcp_state {
 };
 
 struct tegra_nvhdcp {
-	struct delayed_work		work;
+	struct delayed_work		hdcp1x_work;
+	struct delayed_work		hdcp22_work;
 	struct tegra_hdmi		*hdmi;
 	struct workqueue_struct		*downstream_wq;
 	struct mutex			lock;
