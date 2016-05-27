@@ -1037,7 +1037,7 @@ static int __init tegra210_disable_boot_partitions(void)
 		if (tegra210_pg_partition_info[i].disable_after_boot &&
 			(i != TEGRA_POWERGATE_GPU)) {
 			pr_info("    %s\n", tegra210_pg_partition_info[i].name);
-			tegra_powergate_partition_with_clk_off(i);
+			tegra_powergate_partition(i);
 		}
 
 	return 0;
