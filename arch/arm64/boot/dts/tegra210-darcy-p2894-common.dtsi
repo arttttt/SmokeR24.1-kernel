@@ -141,13 +141,11 @@
 		nvidia,charging-supported;
 		#extcon-cells = <1>;
 		status = "disabled";
-		dt-override-status-odm-data = <0x01000000 0x00000000>;
 	};
 
         otg@7d000000 {
 		#extcon-cells = <1>;
 		status = "disabled";
-		dt-override-status-odm-data = <0x01000000 0x00000000>;
 	};
 
 	/* Put common control config here */
@@ -171,15 +169,13 @@
 	xudc@700d0000 {
 		nvidia,common_padctl = <&xusb_pad_ctl>;
 		#extcon-cells = <1>;
-		status = "disabled";
-		dt-override-status-odm-data = <0x01000000 0x01000000>;
+		status = "okay";
 	};
 
 	xotg {
 		nvidia,common_padctl = <&xusb_pad_ctl>;
 		#extcon-cells = <1>;
-		status = "disabled";
-		dt-override-status-odm-data = <0x01000000 0x01000000>;
+		status = "okay";
 	};
 
 	chosen {
