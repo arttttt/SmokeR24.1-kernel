@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -28,7 +28,7 @@
 #include "common.h"
 
 #define VI_BYPASS_CAM_DRV_NAME				"vi-bypass"
-#define VI_BYPASS_CAM_CARD_NAME				"vi-bypass"
+#define VI_BYPASS_CAM_CARD_NAME				"vi-output"
 #define VI_BYPASS_CAM_VERSION				KERNEL_VERSION(0, 0, 5)
 
 struct vi_bypass_camera_clk {
