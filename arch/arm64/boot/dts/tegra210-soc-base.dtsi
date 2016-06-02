@@ -497,7 +497,7 @@
 		status = "disabled";
         };
 
-	xotg: xotg {
+	xotg {
 		compatible = "nvidia,tegra210-xotg";
 		interrupts = <0 49 0x04
 			      0 20 0x04>;
@@ -1497,15 +1497,7 @@
 		status = "disabled";
 	};
 
-	usb_cd: usb_cd@7009f000 {
-		compatible = "nvidia,tegra210-usb-cd";
-		reg = <0x0 0x7009f000 0x0 0x1000>;
-		#extcon-cells = <1>;
-		status = "disabled";
-		dt-override-status-odm-data = <0x1000000 0x1000000>;
-	};
-
-	xudc: xudc@700d0000 {
+	xudc@700d0000 {
 		compatible = "nvidia,tegra210-xudc";
 		reg = <0x0 0x700d0000 0x0 0x8000>,
 			<0x0 0x700d8000 0x0 0x1000>,
