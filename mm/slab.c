@@ -636,7 +636,11 @@ static DEFINE_PER_CPU(struct delayed_work, slab_reap_work);
 
 static inline struct array_cache *cpu_cache_get(struct kmem_cache *cachep)
 {
-	return cachep->array[smp_processor_id()];
+	struct array_cache *cpu_cache = NULL;
+	int cpu = get_cpu();
+	cpu_cache = cachep->array[cpu];
+	put_cpu();
+	return cpu_cache;
 }
 
 static size_t slab_mgmt_size(size_t nr_objs, size_t align)
