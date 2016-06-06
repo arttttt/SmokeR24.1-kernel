@@ -64,9 +64,16 @@
 		};
 
 		fragement@4 {
-			odm-data = "enable-tegra-udc";
+			odm-data = "enable-utmi1-snps";
 			override@0 {
 				target = <&udc>;
+				_overlay_ {
+					status = "okay";
+				};
+			};
+
+			override@1 {
+				target = <&otg>;
 				_overlay_ {
 					status = "okay";
 				};
@@ -74,11 +81,59 @@
 		};
 
 		fragement@5 {
-			odm-data = "enable-tegra-otg";
+			odm-data = "enable-utmi1-xusb";
 			override@0 {
-				target = <&otg>;
+				target = <&psy_extcon>;
 				_overlay_ {
 					status = "okay";
+					extcon-cables = <&usb_cd 1 &usb_cd 2 &usb_cd 3
+						&usb_cd 4 &usb_cd 5 &usb_cd 6
+						&usb_cd 7 &usb_cd 8 &usb_cd 9>;
+					extcon-cable-names = "usb-charger", "ta-charger", "maxim-charger",
+						"qc2-charger", "downstream-charger", "slow-charger",
+						"apple-500ma", "apple-1a", "apple-2a";
+				};
+			};
+
+			override@1 {
+				target = <&usb_cd>;
+				_overlay_ {
+					status = "okay";
+				};
+			};
+
+			override@2 {
+				target = <&xudc>;
+				_overlay_ {
+					status = "okay";
+				};
+			};
+
+			override@3 {
+				target = <&xotg>;
+				_overlay_ {
+					status = "okay";
+				};
+			};
+
+			override@4 {
+				target = <&udc>;
+				_overlay_ {
+					status = "disabled";
+				};
+			};
+
+			override@5 {
+				target = <&otg>;
+				_overlay_ {
+					status = "disabled";
+				};
+			};
+
+			override@6 {
+				target = <&extcon_cable_xlate>;
+				_overlay_ {
+					cable-insert-delay = <1>;
 				};
 			};
 		};

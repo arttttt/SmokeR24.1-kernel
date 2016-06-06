@@ -613,18 +613,18 @@
 		};
 	};
 
-        psy_extcon {
-                compatible = "power-supply-extcon";
-                extcon-cables = <&udc 1 &udc 2 &udc 3
-                                &udc 4 &udc 5 &udc 6
-                                &udc 7 &udc 8 &udc 9
-                                &udc 10 &udc 11 &udc 12 &udc 13 &otg 0 &otg 1>;
-                extcon-cable-names = "usb-charger", "ta-charger", "maxim-charger",
-                                "qc2-charger", "downstream-charger","fast-charger",
-                                "slow-charger", "apple-500ma", "apple-1a",
-                                "apple-2a", "ACA NV-Charger", "ACA RID-B", "ACA RID-C", "y-cable", "ACA RID-A";
-                                status = "okay";
-        };
+	psy_extcon: psy_extcon {
+		compatible = "power-supply-extcon";
+		extcon-cables = <&udc 1 &udc 2 &udc 3
+					&udc 4 &udc 5 &udc 6
+					&udc 7 &udc 8 &udc 9
+					&udc 10 &udc 11 &udc 12 &udc 13 &otg 0 &otg 1>;
+		extcon-cable-names = "usb-charger", "ta-charger", "maxim-charger",
+					"qc2-charger", "downstream-charger","fast-charger",
+					"slow-charger", "apple-500ma", "apple-1a",
+					"apple-2a", "ACA NV-Charger", "ACA RID-B", "ACA RID-C", "y-cable", "ACA RID-A";
+		status = "okay";
+	};
 
 	adsp_audio {
 		compr-ops = <1>;
@@ -751,6 +751,10 @@
 		};
 	};
 
+	usb_cd@7009f000 {
+		nvidia,dcp-current-limit-ma = <1500>;
+	};
+
 	udc@7d000000 {
 		nvidia,port-otg;
 		nvidia,charging-supported;
@@ -766,7 +770,7 @@
 		#extcon-cells = <1>;
 	};
 
-        otg@7d000000 {
+	otg@7d000000 {
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,id-detection-type = <1>;
 		nvidia,enable-y-cable-detection;
@@ -775,7 +779,30 @@
 		extcon-cables = <&extcon_cable_xlate 0 &extcon_cable_xlate 1 &extcon_cable_xlate 2 &extcon_cable_xlate 3 &extcon_cable_xlate 4 &extcon_cable_xlate 5 &extcon_cable_xlate 6>;
 		extcon-cable-names = "vbus", "id", "aca-nv", "y-cable", "aca-ra", "aca-rb", "aca-rc";
 		#extcon-cells = <1>;
-        };
+	};
+
+	/* Put common control config here */
+	xusb_pad_ctl: xusb_padctl {
+		status = "disabled";
+		nvidia,ss_portmap = <0x7770>;
+		nvidia,lane_owner = <0xFFFF>; /* Use 0xF to disable lane assign */
+	};
+
+	xudc@700d0000 {
+		nvidia,common_padctl = <&xusb_pad_ctl>;
+		extcon-cables = <&extcon_cable_xlate 0>;
+		extcon-cable-names = "vbus";
+		#extcon-cells = <1>;
+		status = "disabled";
+	};
+
+	xotg {
+		extcon-cables = <&extcon_cable_xlate 1>;
+		extcon-cable-names = "id";
+		#extcon-cells = <1>;
+		nvidia,common_padctl = <&xusb_pad_ctl>;
+		status = "disabled";
+	};
 
 	sdhci@700b0600 {
 		uhs-mask = <0x00>;
