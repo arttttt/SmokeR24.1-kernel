@@ -1,0 +1,64 @@
+/*
+ * arch/arm64/boot/dts/tegra210-darcy-p2894-0150-a04-00.dts
+ *
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ *
+ */
+
+#include "tegra210-darcy-p2894-common.dtsi"
+#include "tegra210-platforms/tegra210-darcy-pinmux-p2894-0000-a00.dtsi"
+#include "tegra210-platforms/tegra210-darcy-extcon-p2894-0000-a00.dtsi"
+#include "tegra210-platforms/tegra210-darcy-emc-p2894-0150-a00.dtsi"
+#include "tegra210-platforms/tegra210-darcy-pcie.dtsi"
+#include "tegra210-platforms/tegra210-darcy-prods.dtsi"
+
+/ {
+	model = "darcy";
+	compatible = "nvidia,foster-e", "nvidia,tegra210", "nvidia,darcy";
+	nvidia,dtsfilename = __FILE__;
+	nvidia,fastboot-usb-pid = <0xb442>;
+
+	firmware {
+		android {
+			compatible = "android,firmware";
+			hardware = "darcy";
+		};
+	};
+
+	rollback-protection {
+		status = "okay";
+	};
+
+        thermal-zones {
+                AO-therm {
+                        status = "okay";
+                };
+        };
+
+        tegra-aotag {
+                status = "okay";
+        };
+
+	bcmdhd_wlan {
+		fw_path = "/system/vendor/firmware/fw_bcmdhd.bin";
+		nv_path = "/system/etc/nvram_darcy_a00.txt";
+		tuned_nv_path = "/system/etc/nvram_darcy_a00.txt";
+	};
+
+	chosen {
+		nvidia,tegra-darcy-sku;
+	};
+};
