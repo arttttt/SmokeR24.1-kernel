@@ -167,12 +167,6 @@
 					status = "disabled";
 				};
 			};
-			override@20 {
-				target = <&default_cam1>;
-				_overlay_ {
-					status = "disabled";
-				};
-			};
 		};
 
 		/* E3322 camera board */
@@ -440,12 +434,6 @@
 					status = "disabled";
 				};
 			};
-			override@34 {
-				target = <&default_cam1>;
-				_overlay_ {
-					status = "disabled";
-				};
-			};
 		};
 
 		/* E3333 camera board */
@@ -709,12 +697,6 @@
 			/* Disable E3326 camera board */
 			override@33 {
 				target = <&e3326_cam0>;
-				_overlay_ {
-					status = "disabled";
-				};
-			};
-			override@34 {
-				target = <&default_cam1>;
 				_overlay_ {
 					status = "disabled";
 				};

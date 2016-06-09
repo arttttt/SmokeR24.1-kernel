@@ -79,9 +79,6 @@
 			};
 		};
 		i2c@546c0000 {
-			default_cam1: tc358840@1f {
-				status = "disabled";
-			};
 			e3326_cam0: ov5693_c@36 {
 				status = "okay";
 			};

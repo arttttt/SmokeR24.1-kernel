@@ -244,17 +244,6 @@
 					proc-device-tree = "/proc/device-tree/host1x/i2c@546c0000/imx274_a@1a";
 				};
 			};
-			module1 {
-				badge = "front_TC358A";
-				position = "front";
-				orientation = "0";
-				drivernode0 {
-					/* Declare PCL support driver (classically known as guid)  */
-					pcl_id = "v4l2_sensor";
-					/* Declare the device-tree hierarchy to driver instance */
-					proc-device-tree = "/proc/device-tree/host1x/i2c@546c0000/tc358840@1f";
-				};
-			};
 		};
 	};
 };
