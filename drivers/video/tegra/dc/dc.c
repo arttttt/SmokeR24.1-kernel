@@ -2388,6 +2388,11 @@ static void _tegra_dc_update_cmu(struct tegra_dc *dc, struct tegra_dc_cmu *cmu)
 
 void _tegra_dc_cmu_enable(struct tegra_dc *dc, bool cmu_enable)
 {
+	/* If cmu_enable matches with the existing cmu state,
+	 * do not perform an update else it breaks seamless
+	 */
+	if (dc->cmu_enabled == cmu_enable)
+		return;
 	dc->cmu_enabled = cmu_enable;
 	_tegra_dc_update_cmu(dc, tegra_dc_get_cmu(dc));
 	tegra_dc_set_color_control(dc);
