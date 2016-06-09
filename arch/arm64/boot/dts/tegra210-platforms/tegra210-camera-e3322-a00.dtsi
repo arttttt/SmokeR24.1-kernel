@@ -89,6 +89,11 @@
 						iovdd-reg = "dovdd";
 						devnode = "video0";
 
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // IMX219_MODE_3280X2464
 							mclk_khz = "12000";
 							num_lanes = "2";
@@ -142,6 +147,11 @@
 						dvdd-reg = "vdig";
 						iovdd-reg = "dovdd";
 						devnode = "video1";
+
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
 
 						mode0 { // IMX219_MODE_3280X2464
 							mclk_khz = "12000";
@@ -197,6 +207,11 @@
 						iovdd-reg = "dovdd";
 						devnode = "video2";
 
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // IMX219_MODE_3280X2464
 							mclk_khz = "12000";
 							num_lanes = "2";
@@ -250,6 +265,11 @@
 						dvdd-reg = "vdig";
 						iovdd-reg = "dovdd";
 						devnode = "video3";
+
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
 
 						mode0 { // IMX219_MODE_3280X2464
 							mclk_khz = "12000";
@@ -305,6 +325,11 @@
 						iovdd-reg = "dovdd";
 						devnode = "video4";
 
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // IMX219_MODE_3280X2464
 							mclk_khz = "12000";
 							num_lanes = "2";
@@ -358,6 +383,11 @@
 						dvdd-reg = "vdig";
 						iovdd-reg = "dovdd";
 						devnode = "video5";
+
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
 
 						mode0 { // IMX219_MODE_3280X2464
 							mclk_khz = "12000";

@@ -92,6 +92,11 @@
 						devnode = "video0";
 						physical_w = "3.674";
 						physical_h = "2.738";
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // OV5693_MODE_2592X1944
 							mclk_khz = "24000";
 							num_lanes = "2";
@@ -212,6 +217,11 @@
 						devnode = "video1";
 						physical_w = "3.674";
 						physical_h = "2.738";
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // OV5693_MODE_2592X1944
 							mclk_khz = "24000";
 							num_lanes = "2";
@@ -332,6 +342,11 @@
 						devnode = "video2";
 						physical_w = "3.674";
 						physical_h = "2.738";
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // OV5693_MODE_2592X1944
 							mclk_khz = "24000";
 							num_lanes = "2";
@@ -452,6 +467,11 @@
 						devnode = "video3";
 						physical_w = "3.674";
 						physical_h = "2.738";
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // OV5693_MODE_2592X1944
 							mclk_khz = "24000";
 							num_lanes = "2";
@@ -572,6 +592,11 @@
 						devnode = "video4";
 						physical_w = "3.674";
 						physical_h = "2.738";
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // OV5693_MODE_2592X1944
 							mclk_khz = "24000";
 							num_lanes = "2";
@@ -692,6 +717,11 @@
 						devnode = "video5";
 						physical_w = "3.674";
 						physical_h = "2.738";
+						/* Defines number of frames to be dropped by driver internally after applying */
+						/* sensor crop settings. Some sensors send corrupt frames after applying */
+						/* crop co-ordinates */
+						post_crop_frame_drop = "0";
+
 						mode0 { // OV5693_MODE_2592X1944
 							mclk_khz = "24000";
 							num_lanes = "2";
