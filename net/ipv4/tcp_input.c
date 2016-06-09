@@ -3083,6 +3083,7 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 	long seq_rtt_us = -1L;
 	struct sk_buff *skb;
 	u32 pkts_acked = 0;
+	u32 last_in_flight = 0;
 	bool rtt_update;
 	int flag = 0;
 
@@ -3118,6 +3119,7 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 				first_ackt = last_ackt;
 
 			if (!(sacked & TCPCB_SACKED_ACKED)) {
+				last_in_flight = TCP_SKB_CB(skb)->tx.in_flight;
 				reord = min(pkts_acked, reord);
 				if (!after(scb->end_seq, tp->high_seq))
 					flag |= FLAG_ORIG_SACK_ACKED;
@@ -3199,8 +3201,8 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 
 		if (ca_ops->pkts_acked) {
 			struct ack_sample sample = { .pkts_acked = pkts_acked,
-						     .rtt_us = ca_rtt_us };
-
+						     .rtt_us = ca_rtt_us,
+						     .in_flight = last_in_flight };
 			ca_ops->pkts_acked(sk, &sample);
 		}
 

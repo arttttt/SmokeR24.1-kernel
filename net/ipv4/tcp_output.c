@@ -872,8 +872,11 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	int err;
 
 	BUG_ON(!skb || !tcp_skb_pcount(skb));
+	tp = tcp_sk(sk);
 
 	skb_mstamp_get(&skb->skb_mstamp);
+	TCP_SKB_CB(skb)->tx.in_flight = TCP_SKB_CB(skb)->end_seq
+		- tp->snd_una;
 
 	if (likely(clone_it)) {
 		const struct sk_buff *fclone = skb + 1;
@@ -892,7 +895,6 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	}
 
 	inet = inet_sk(sk);
-	tp = tcp_sk(sk);
 	tcb = TCP_SKB_CB(skb);
 	memset(&opts, 0, sizeof(opts));
 
