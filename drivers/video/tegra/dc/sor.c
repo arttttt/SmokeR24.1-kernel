@@ -300,8 +300,12 @@ static int sor_crc_show(struct seq_file *s, void *unused)
 	u32 reg_val;
 	int i = 0;
 
+	if (!tegra_dc_is_powered(dc))
+		return 0;
+
 	tegra_dc_io_start(sor->dc);
 	tegra_sor_clk_enable(sor);
+	mutex_lock(&dc->lock);
 
 	reg_val = tegra_sor_readl(sor, NV_SOR_CRC_CNTRL);
 	reg_val &= NV_SOR_CRC_CNTRL_ARM_CRC_ENABLE_DEFAULT_MASK;
@@ -321,15 +325,14 @@ static int sor_crc_show(struct seq_file *s, void *unused)
 				"NV_SOR[%d]_CRCA_VALID_TRUE timeout\n", i);
 			goto exit;
 		}
-		mutex_lock(&dc->lock);
 		reg_val = tegra_sor_readl(sor, NV_SOR_CRCB);
-		mutex_unlock(&dc->lock);
 		seq_printf(s, "NV_SOR[%x]_CRCB = 0x%08x\n",
 			sor->dc->ctrl_num, reg_val);
 		i++;
 	} while (i < sor->portnum);
 
 exit:
+	mutex_unlock(&dc->lock);
 	tegra_sor_clk_disable(sor);
 	tegra_dc_io_end(sor->dc);
 
