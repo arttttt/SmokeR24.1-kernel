@@ -330,32 +330,6 @@ void gk20a_debug_dump(struct platform_device *pdev)
 		g->ops.debug.show_dump(g, &o);
 }
 
-void gk20a_debug_dump_device(struct platform_device *pdev)
-{
-	struct gk20a_debug_output o = {
-		.fn = gk20a_debug_write_printk
-	};
-	struct gk20a *g;
-
-	/* In pre-silicon we don't need full spew on stuck syncpoint */
-	if (!tegra_platform_is_silicon())
-		return;
-
-	/* Dump the first device if no info is provided */
-	if (!pdev) {
-		if (!gk20a_device)
-			return;
-
-		pdev = gk20a_device;
-	}
-
-	g = gk20a_get_platform(pdev)->g;
-	/* HAL only initialized after 1st power-on */
-	if (g->ops.debug.show_dump)
-		g->ops.debug.show_dump(g, &o);
-}
-EXPORT_SYMBOL(gk20a_debug_dump_device);
-
 static int gk20a_debug_show(struct seq_file *s, void *unused)
 {
 	struct platform_device *pdev = s->private;
