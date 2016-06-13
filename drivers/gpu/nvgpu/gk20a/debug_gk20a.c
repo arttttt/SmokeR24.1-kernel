@@ -167,15 +167,9 @@ void gk20a_debug_show_dump(struct gk20a *g, struct gk20a_debug_output *o)
 {
 	struct fifo_gk20a *f = &g->fifo;
 	u32 chid;
-	int i, err;
+	int i;
 
 	struct ch_state **ch_state;
-
-	err = gk20a_busy(g->dev);
-	if (err) {
-		gk20a_debug_output(o, "failed to power on gpu: %d\n", err);
-		return;
-	}
 
 	for (i = 0; i < fifo_pbdma_status__size_1_v(); i++) {
 		u32 status = gk20a_readl(g, fifo_pbdma_status_r(i));
@@ -229,7 +223,7 @@ void gk20a_debug_show_dump(struct gk20a *g, struct gk20a_debug_output *o)
 				 * f->num_channels, GFP_KERNEL);
 	if (!ch_state) {
 		gk20a_debug_output(o, "cannot alloc memory for channels\n");
-		goto done;
+		return;
 	}
 
 	for (chid = 0; chid < f->num_channels; chid++) {
@@ -266,8 +260,6 @@ void gk20a_debug_show_dump(struct gk20a *g, struct gk20a_debug_output *o)
 		}
 	}
 	kfree(ch_state);
-done:
-	gk20a_idle(g->dev);
 }
 
 static int gk20a_gr_dump_regs(struct platform_device *pdev,
@@ -275,17 +267,8 @@ static int gk20a_gr_dump_regs(struct platform_device *pdev,
 {
 	struct gk20a_platform *platform = gk20a_get_platform(pdev);
 	struct gk20a *g = platform->g;
-	int err;
-
-	err = gk20a_busy(g->dev);
-	if (err) {
-		gk20a_err(&pdev->dev, "failed to power on gpu: %d\n", err);
-		return -EINVAL;
-	}
 
 	gr_gk20a_elpg_protected_call(g, g->ops.gr.dump_gr_regs(g, o));
-
-	gk20a_idle(g->dev);
 
 	return 0;
 }
@@ -308,8 +291,17 @@ static int gk20a_gr_debug_show(struct seq_file *s, void *unused)
 		.fn = gk20a_debug_write_to_seqfile,
 		.ctx = s,
 	};
+	int err;
+
+	err = gk20a_busy(pdev);
+	if (err) {
+		gk20a_err(&pdev->dev, "failed to power on gpu: %d", err);
+		return -EINVAL;
+	}
 
 	gk20a_gr_dump_regs(pdev, &o);
+
+	gk20a_idle(pdev);
 
 	return 0;
 }
@@ -338,11 +330,21 @@ static int gk20a_debug_show(struct seq_file *s, void *unused)
 		.ctx = s,
 	};
 	struct gk20a *g;
+	int err;
 
 	g = gk20a_get_platform(pdev)->g;
+
+	err = gk20a_busy(g->dev);
+	if (err) {
+		gk20a_err(&pdev->dev, "failed to power on gpu: %d", err);
+		return -EFAULT;
+	}
+
 	/* HAL only initialized after 1st power-on */
 	if (g->ops.debug.show_dump)
 		g->ops.debug.show_dump(g, &o);
+
+	gk20a_idle(g->dev);
 	return 0;
 }
 
