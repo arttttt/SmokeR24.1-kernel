@@ -904,6 +904,7 @@ static int nvavp_pushbuffer_update(struct nvavp_info *nvavp, u32 phys_addr,
 	u32 wordcount = 0;
 	u32 index, value = -1;
 	int ret = 0;
+	u32 max_index = 0;
 
 	mutex_lock(&nvavp->open_lock);
 	nvavp_runtime_get(nvavp);
@@ -919,7 +920,9 @@ static int nvavp_pushbuffer_update(struct nvavp_info *nvavp, u32 phys_addr,
 	mutex_lock(&channel_info->pushbuffer_lock);
 
 	/* check for pushbuffer wrapping */
-	if (channel_info->pushbuf_index >= channel_info->pushbuf_fence)
+	max_index = channel_info->pushbuf_fence;
+	max_index = ext_ucode_flag ? max_index : max_index - (sizeof(u32) * 4);
+	if (channel_info->pushbuf_index >= max_index)
 		channel_info->pushbuf_index = 0;
 
 	if (!ext_ucode_flag) {
