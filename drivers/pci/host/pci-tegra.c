@@ -2471,7 +2471,7 @@ static void tegra_pcie_enable_ltr_support(void)
 	}
 }
 
-static void tegra_pcie_config_bi_dir_clkreq(struct tegra_pcie *pcie)
+static void tegra_pcie_config_clkreq(struct tegra_pcie *pcie, bool enable)
 {
 	static struct pinctrl_dev *pctl_dev = NULL;
 	unsigned long od_conf, tr_conf;
@@ -2482,19 +2482,56 @@ static void tegra_pcie_config_bi_dir_clkreq(struct tegra_pcie *pcie)
 		pctl_dev = pinctrl_get_dev_from_of_compatible(
 				pinctrl_compatible);
 	if (!pctl_dev) {
-		dev_err(pcie->dev, "invalid tegra clkreq pinctrl\n");
+		dev_err(pcie->dev,
+			"%s(): tegra pincontrol does not found\n", __func__);
 		return;
 	}
-	od_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_OPEN_DRAIN,
-				TEGRA_PIN_ENABLE);
-	tr_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_TRISTATE,
-				TEGRA_PIN_DISABLE);
+	if (enable) {
+		od_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_OPEN_DRAIN,
+					TEGRA_PIN_ENABLE);
+		tr_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_TRISTATE,
+					TEGRA_PIN_DISABLE);
+	} else {
+		od_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_OPEN_DRAIN,
+					TEGRA_PIN_DISABLE);
+		tr_conf = TEGRA_PINCONF_PACK(TEGRA_PINCONF_PARAM_TRISTATE,
+					TEGRA_PIN_ENABLE);
+	}
+	if (enable) {
+		/* Make CLKREQ# bi-directional if L1PM SS are enabled */
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l0_clkreq, tr_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l0_clkreq, od_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l1_clkreq, tr_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l1_clkreq, od_conf);
+	} else {
+		struct pci_dev *pdev = NULL;
+		u16 val = 0;
 
-	/* Make CLKREQ# bi-directional only if L1SS are enabled */
-	pinctrl_set_config_for_group_name(pctl_dev, pin_pex_l0_clkreq, tr_conf);
-	pinctrl_set_config_for_group_name(pctl_dev, pin_pex_l0_clkreq, od_conf);
-	pinctrl_set_config_for_group_name(pctl_dev, pin_pex_l1_clkreq, tr_conf);
-	pinctrl_set_config_for_group_name(pctl_dev, pin_pex_l1_clkreq, od_conf);
+		/* Make CLKREQ# input only if L1PM SS is disabled later */
+		/* also disable ASPM L1 momentarily before doing this */
+		for_each_pci_dev(pdev) {
+			pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &val);
+			val &= ~PCI_EXP_LNKCTL_ASPM_L1;
+			pcie_capability_write_word(pdev, PCI_EXP_LNKCTL, val);
+		}
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l0_clkreq, tr_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l0_clkreq, od_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l1_clkreq, tr_conf);
+		pinctrl_set_config_for_group_name(pctl_dev,
+				pin_pex_l1_clkreq, od_conf);
+		for_each_pci_dev(pdev) {
+			pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &val);
+			val |= PCI_EXP_LNKCTL_ASPM_L1;
+			pcie_capability_write_word(pdev, PCI_EXP_LNKCTL, val);
+		}
+	}
 }
 
 #endif
@@ -2534,7 +2571,7 @@ static void tegra_pcie_enable_aspm(struct tegra_pcie *pcie)
 			break;
 	}
 	if (config_l1ss) {
-		tegra_pcie_config_bi_dir_clkreq(pcie);
+		tegra_pcie_config_clkreq(pcie, true);
 		tegra_pcie_config_l1ss_tpwr_on();
 		tegra_pcie_config_l1ss_cm_rtime();
 		tegra_pcie_config_l1ss_l12_thtime();
