@@ -884,6 +884,8 @@ int nvtouch_ioctl_do_update(struct file *filp, unsigned int cmd,
 			sizeof(struct nvtouch_userspace_dta_info);
 		memcpy(&g_state_dta.ioctl_dta.data,
 		       params->unpacked_data, NVTOUCH_SENSOR_DATA_RESERVED);
+		memcpy(&g_state_dta.ioctl_dta.detected_events,
+		       &params->vendor_events, sizeof(struct nvtouch_events));
 
 		info.left_pixels = g_state_dta.authorized_win_device.left;
 		info.top_pixels = g_state_dta.authorized_win_device.top;
