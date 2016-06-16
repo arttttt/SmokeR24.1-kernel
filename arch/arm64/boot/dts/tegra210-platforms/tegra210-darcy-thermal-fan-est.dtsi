@@ -24,9 +24,9 @@
 	thermal-fan-est {
 		compatible = "thermal-fan-est";
 		shared_data = <&thermal_fan_est_shared_data>;
-		active_trip_temps = <0 58000 65000 78000 135000
+		active_trip_temps = <0 63000 65000 79000 135000
 				140000 150000 160000 170000 180000>;
-		active_hysteresis = <0 23000 6000 10000 0
+		active_hysteresis = <0 30000 1000 10000 0
 				0 0 0 0 0>;
 	};
 };
