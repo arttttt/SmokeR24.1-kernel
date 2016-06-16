@@ -40,4 +40,8 @@
 			gpio-output-high = <TEGRA_GPIO(E, 5)>;
 		};
 	};
+
+	modem {
+		nvidia,num-temp-sensors = <0>;
+	};
 };
