@@ -469,7 +469,7 @@ int tsec_dp_hdcp_revocation_check(struct hdcp_context_t *hdcp_context)
 }
 
 int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context,
-					unsigned char *cmac)
+		unsigned char *cmac, unsigned int *tsec_address)
 {
 	int err = 0;
 	u16 rxinfo;
@@ -493,6 +493,7 @@ int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context,
 	memcpy(verify_vprime_param.vprime,
 		hdcp_context->msg.vprime,
 		HDCP_SIZE_VPRIME_2X_8/2);
+	verify_vprime_param.tsec_gsc_address = *tsec_address;
 	memcpy(verify_vprime_param.srm_cmac, cmac, HDCP_CMAC_SIZE);
 	verify_vprime_param.rxinfo = hdcp_context->msg.rxinfo;
 
@@ -529,7 +530,7 @@ int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context,
 		hdcp_context->cpuvaddr_mthd_buf_aligned,
 		sizeof(struct hdcp_verify_vprime_param));
 	if (verify_vprime_param.ret_code) {
-		hdcp_err("tsec_hdcp_verify_vprime: failed with error %d\n",
+		hdcp_err("tsec_hdcp_verify_vprime: failed with error %x\n",
 			verify_vprime_param.ret_code);
 	}
 	err = verify_vprime_param.ret_code;

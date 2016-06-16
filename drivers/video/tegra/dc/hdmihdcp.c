@@ -90,9 +90,6 @@ static DECLARE_WAIT_QUEUE_HEAD(wq_worker);
 #define HDCP_TSEC_ADDR_OFFSET		22
 #define HDCP_CMD_GEN_CMAC		0xA
 
-#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-static u32 g_session_id;
-#endif
 #ifdef VERBOSE_DEBUG
 #define nvhdcp_vdbg(...)	\
 		pr_debug("nvhdcp: " __VA_ARGS__)
@@ -1052,6 +1049,7 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
 	unsigned char nonce[HDCP_NONCE_SIZE];
 	uint32_t hdcp_uuid[4] = HDCP_SERVICE_UUID;
+	u32 session_id;
 #endif
 
 	err =  tsec_hdcp_readcaps(hdcp_context);
@@ -1125,13 +1123,13 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 	}
 	/* pass the nonce to hdcp TA and get the signature back */
 	err = te_open_trusted_session(hdcp_uuid, sizeof(hdcp_uuid),
-					&g_session_id);
+					&session_id);
 	if (err) {
 		nvhdcp_err("Error opening trusted session\n");
 		goto exit;
 	}
 	memcpy(pkt, nonce, HDCP_NONCE_SIZE);
-	err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, g_session_id,
+	err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, session_id,
 			hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
 	if (err) {
 		nvhdcp_err("Error launching session\n");
@@ -1143,11 +1141,6 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 	(unsigned int *)(pkt + HDCP_TSEC_ADDR_OFFSET));
 	if (err)
 		goto exit;
-#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-	if (g_session_id)
-		te_close_trusted_session(g_session_id, hdcp_uuid,
-					sizeof(hdcp_uuid));
-#endif
 	err = nvhdcp_poll_ready(nvhdcp, 1000);
 	if (err)
 		goto exit;
@@ -1242,31 +1235,18 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 			goto exit;
 		}
 
-		/* pass the nonce to hdcp TA and get the signature back */
-		err = te_open_trusted_session(hdcp_uuid, sizeof(hdcp_uuid),
-					&g_session_id);
-		if (err) {
-			nvhdcp_err("Error opening session\n");
-			goto exit;
-		}
 		memcpy(pkt, nonce, HDCP_NONCE_SIZE);
-		err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, g_session_id,
-		hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
+		err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, session_id,
+				hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
 		if (err) {
 			nvhdcp_err("Error launching session\n");
 			goto exit;
 		}
 #endif
 		err =  tsec_hdcp_verify_vprime(hdcp_context,
-				(pkt + HDCP_CMAC_OFFSET));
+				(pkt + HDCP_CMAC_OFFSET), (unsigned int *)(pkt + HDCP_TSEC_ADDR_OFFSET));
 		if (err)
 			goto exit;
-#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-		if (g_session_id)
-			te_close_trusted_session(g_session_id, hdcp_uuid,
-						sizeof(hdcp_uuid));
-#endif
-		kfree(pkt);
 		hdcp_context->msg.rptr_send_ack_msg_id = ID_SEND_RPTR_ACK;
 		err = nvhdcp_rptr_ack_send(nvhdcp,
 			&hdcp_context->msg.rptr_send_ack_msg_id);
@@ -1324,12 +1304,11 @@ stream_manage_send:
 
 exit:
 	if (err)
-		nvhdcp_err("HDCP authentication failed with err %d\n", err);
+		nvhdcp_err("HDCP authentication failed with err %x\n", err);
 	kfree(pkt);
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-	if (g_session_id)
-		te_close_trusted_session(g_session_id, hdcp_uuid,
-					sizeof(hdcp_uuid));
+	if (session_id)
+		te_close_trusted_session(session_id, hdcp_uuid, sizeof(hdcp_uuid));
 #endif
 	return err;
 }
@@ -1603,6 +1582,7 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
 	char nonce[HDCP_NONCE_SIZE];
 	uint32_t hdcp_uuid[4] = HDCP_SERVICE_UUID;
+	u32 session_id;
 #endif
 
 	nvhdcp_i2c_read16(nvhdcp, HDCP_RX_STATUS, &rx_status);
@@ -1645,13 +1625,13 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 
 		/* pass the nonce to hdcp TA and get the signature back */
 		err = te_open_trusted_session(hdcp_uuid, sizeof(hdcp_uuid),
-						&g_session_id);
+						&session_id);
 		if (err) {
 			nvhdcp_err("Error opening session\n");
 			goto exit;
 		}
 		memcpy(pkt, nonce, HDCP_NONCE_SIZE);
-		err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, g_session_id,
+		err = te_launch_trusted_oper(pkt, HDCP_PKT_SIZE, session_id,
 			hdcp_uuid, HDCP_CMD_GEN_CMAC, sizeof(hdcp_uuid));
 		if (err) {
 			nvhdcp_err("Error launching session\n");
@@ -1659,29 +1639,27 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 		}
 #endif
 		err =  tsec_hdcp_verify_vprime(hdcp_context,
-				(pkt + HDCP_CMAC_OFFSET));
+				(pkt + HDCP_CMAC_OFFSET), (unsigned int *)(pkt + HDCP_TSEC_ADDR_OFFSET));
 		if (err)
 			goto exit;
-#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-		if (g_session_id)
-			te_close_trusted_session(g_session_id, hdcp_uuid,
-						sizeof(hdcp_uuid));
-#endif
-		kfree(pkt);
 		hdcp_context->msg.rptr_send_ack_msg_id = ID_SEND_RPTR_ACK;
 		err = nvhdcp_rptr_ack_send(nvhdcp,
 			&hdcp_context->msg.rptr_send_ack_msg_id);
 		if (err)
 			goto exit;
+		kfree(pkt);
+#if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
+		if (session_id)
+			te_close_trusted_session(session_id, hdcp_uuid, sizeof(hdcp_uuid));
+#endif
 		return 0;
 	} else
 		return rx_status & HDCP_RX_STATUS_MSG_REAUTH_REQ;
 exit:
 	kfree(pkt);
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-	if (g_session_id)
-		te_close_trusted_session(g_session_id, hdcp_uuid,
-					sizeof(hdcp_uuid));
+	if (session_id)
+		te_close_trusted_session(session_id, hdcp_uuid, sizeof(hdcp_uuid));
 #endif
 		return 1;
 }

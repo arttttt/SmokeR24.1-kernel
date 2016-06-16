@@ -1304,7 +1304,7 @@ static int tsec_hdcp_authentication(struct tegra_dc_dp_data *dp,
 		if (err)
 			goto exit;
 
-		err = tsec_hdcp_verify_vprime(hdcp_context, NULL);
+		err = tsec_hdcp_verify_vprime(hdcp_context, NULL, NULL);
 		if (err)
 			goto exit;
 

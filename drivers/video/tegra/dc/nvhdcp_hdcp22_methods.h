@@ -31,7 +31,7 @@ int tsec_hdcp_generate_lc_init(struct hdcp_context_t *hdcp_context);
 int tsec_hdcp_verify_lprime(struct hdcp_context_t *hdcp_context);
 int tsec_hdcp_ske_init(struct hdcp_context_t *hdcp_context);
 int tsec_hdcp_verify_vprime(struct hdcp_context_t *hdcp_context,
-					unsigned char *cmac);
+			unsigned char *cmac, unsigned int *tsec_address);
 int tsec_hdcp_exchange_info(struct hdcp_context_t *hdcp_context,
 		u32 method_flag,
 		u8 *version,
