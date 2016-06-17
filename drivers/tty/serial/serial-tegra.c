@@ -833,10 +833,12 @@ static void do_handle_rx_pio(struct tegra_uart_port *tup)
 	struct tty_port *port = &tup->uport.state->port;
 	int rx_level = 0;
 
+	if (tup->rts_active)
+		set_rts(tup, false);
+
 	if (tup->enable_rx_buffer_throttle) {
 		rx_level = tty_buffer_get_level(port);
-		if (rx_level > 70 && tup->rts_active) {
-			set_rts(tup, false);
+		if (rx_level > 70) {
 			mod_timer(&tup->timer,
 				jiffies + tup->timer_timeout_jiffies);
 		}
@@ -851,6 +853,8 @@ static void do_handle_rx_pio(struct tegra_uart_port *tup)
 	if (tup->enable_rx_buffer_throttle) {
 		if ((rx_level <= 70) && tup->rts_active)
 			set_rts(tup, true);
+	} else if (tup->rts_active) {
+		set_rts(tup, true);
 	}
 }
 
