@@ -186,7 +186,7 @@
 		nvidia,tegra-shield-sku;
 		no-tnid-sn;
 		nvidia,bootloader-xusb-enable;
-		fastboot-instructions = "Press D-pad(Up/Down) to move highlight\nPress Button A to select\nConnect SHIELD Controller using USB cable. Use USB port near HDMI port for the controller and USB port away for PC connection\n";
+		fastboot-instructions = "Press X/Y to move highlight\nPress Button A to select\nConnect SHIELD Controller using USB cable. Use USB port near HDMI port for the controller and USB port away for PC connection\n";
 		nvidia,fastboot_without_usb;
 		verified-boot {
 			ui-timeout-ms {
