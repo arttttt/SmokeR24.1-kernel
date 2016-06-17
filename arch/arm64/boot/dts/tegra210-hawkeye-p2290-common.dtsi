@@ -97,7 +97,7 @@
 		};
 
 		uart_overjack: uart_over_jack {
-			status = "disabled";
+			status = "okay";
 			gpio-output-low = <TEGRA_GPIO(DD, 0)>;
 		};
 	};
@@ -700,6 +700,7 @@
 	};
 
 	udc@7d000000 {
+		status = "okay";
 		nvidia,port-otg;
 		nvidia,charging-supported;
 		nvidia,enable-pmu-vbus-detection;
@@ -715,6 +716,7 @@
 	};
 
 	otg@7d000000 {
+		status = "okay";
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,id-detection-type = <1>;
 		nvidia,enable-y-cable-detection;

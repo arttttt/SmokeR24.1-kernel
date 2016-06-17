@@ -398,7 +398,7 @@
 			#thermal-sensor-cells = <0>;
 
 			battery_charger: charger {
-				status = "disabled";
+				status = "okay";
 				regulator-name = "batt_regulator";
 				regulator-max-microamp = <3000000>;
 				ti,disbale-suspend-during-charging;
@@ -425,7 +425,7 @@
 		};
 
 		battery_gauge: battery-gauge@55 {
-			status = "disabled";
+			status = "okay";
 			compatible = "ti,bq27441";
 			reg = <0x55>;
 			interrupt-parent = <&gpio>;
