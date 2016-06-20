@@ -34,7 +34,7 @@
 		};
 
 		fragement@1 {
-			odm-data = "enable-debug-console";
+			odm-data = "uart-over-jack";
 			override@0 {
 				target = <&uart_overjack>;
 				_overlay_ {
@@ -144,6 +144,50 @@
 				target = <&soft_wdt>;
 				_overlay_ {
 					status = "okay";
+				};
+			};
+		};
+
+		fragement@7 {
+			odm-data = "no-battery";
+			override@0 {
+				target = <&battery_charger>;
+				_overlay_ {
+					status = "disabled";
+				};
+			};
+
+			override@1 {
+				target = <&battery_gauge>;
+				_overlay_ {
+					status = "disabled";
+				};
+			};
+		};
+
+		fragement@8 {
+			odm-data = "disable-uart-over-jack";
+			override@0 {
+				target = <&uart_overjack>;
+				_overlay_ {
+					status = "disabled";
+				};
+			};
+		};
+
+		fragement@9 {
+			odm-data = "disable-utmi1-snps";
+			override@0 {
+				target = <&udc>;
+				_overlay_ {
+					status = "disabled";
+				};
+			};
+
+			override@1 {
+				target = <&otg>;
+				_overlay_ {
+					status = "disabled";
 				};
 			};
 		};
