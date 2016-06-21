@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015 NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2012-2016 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -496,7 +496,7 @@ void te_open_session(struct te_opensession *cmd,
 	       &cmd->dest_uuid,
 	       sizeof(struct te_service_id));
 
-	pr_info("OPEN_CLIENT_SESSION: 0x%x 0x%x 0x%x 0x%x\n",
+	pr_debug("OPEN_CLIENT_SESSION: 0x%x 0x%x 0x%x 0x%x\n",
 		request->dest_uuid[0],
 		request->dest_uuid[1],
 		request->dest_uuid[2],
