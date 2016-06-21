@@ -284,7 +284,6 @@ void nvhost_debug_dump_locked(struct nvhost_master *master, int locked_id)
 		.fn = write_to_printk
 	};
 	show_all_no_fifo(master, &o, locked_id);
-	gk20a_debug_dump_device(NULL);
 }
 
 void nvhost_debug_dump(struct nvhost_master *master)
@@ -293,7 +292,6 @@ void nvhost_debug_dump(struct nvhost_master *master)
 		.fn = write_to_printk
 	};
 	show_all_no_fifo(master, &o, -1);
-	gk20a_debug_dump_device(NULL);
 }
 
 void nvhost_debug_dump_device(struct platform_device *pdev)
