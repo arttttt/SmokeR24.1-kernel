@@ -1009,12 +1009,18 @@ static void print_agic_irq_states(void)
 	}
 }
 
-static void dump_adsp_sys(void)
+void dump_adsp_sys(void)
 {
+	if (!priv.pdev) {
+		pr_err("ADSP Driver is not initialized\n");
+		return;
+	}
+
 	dump_adsp_logs();
 	dump_mailbox_regs();
 	print_agic_irq_states();
 }
+EXPORT_SYMBOL(dump_adsp_sys);
 
 int nvadsp_os_start(void)
 {

@@ -193,6 +193,7 @@ void nvadsp_os_stop(void);
 int __must_check nvadsp_os_suspend(void);
 void nvadsp_register_crash_handler(nvadsp_crash_handler crash_handler,
 			void *arg);
+void dump_adsp_sys(void);
 
 /*
  * ADSP TSC
