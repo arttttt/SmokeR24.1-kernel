@@ -54,7 +54,7 @@ int tegra_cpu_kill(unsigned int cpu)
 			return 1;
 		}
 
-		mdelay(10);
+		msleep(10);
 		pr_debug("Retrying again to check for CPU%d kill\n", cpu);
 	}
 
