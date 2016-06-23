@@ -478,7 +478,7 @@ ssize_t inv_soft_iron_matrix_write(struct file *fp, struct kobject *kobj,
 		return -EINVAL;
 	if (size != SOFT_IRON_MATRIX_SIZE) {
 		pr_err("wrong size for soft iron matrix 0x%08x vs 0x%08x\n",
-						size, SOFT_IRON_MATRIX_SIZE);
+						(int)size, SOFT_IRON_MATRIX_SIZE);
 		return -EINVAL;
 	}
 	n = st->current_compass_matrix;

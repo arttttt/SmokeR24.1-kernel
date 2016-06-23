@@ -27,7 +27,7 @@
 #include <linux/spinlock.h>
 
 #include "inv_mpu_iio.h"
-#include "sysfs.h"
+#include <linux/iio/sysfs.h>
 #include "inv_test/inv_counters.h"
 
 #ifdef CONFIG_DTS_INV_MPU_IIO
@@ -1860,16 +1860,16 @@ int inv_check_chip_type(struct iio_dev *indio_dev, const char *name)
 	result = mem_r(MPU_SOFT_REV_ADDR, 1, &v);
 	if (result)
 		return result;
-	if (v & MPU_SOFT_REV_MASK) {
-		pr_err("incorrect software revision=%x\n", v);
-		return -EINVAL;
-	}
+//	if (v & MPU_SOFT_REV_MASK) {
+//		pr_err("incorrect software revision=%x\n", v);
+//		return -EINVAL;
+//	}
 	//set up the low power mode capability
     if (v & 0x04)
         st->chip_config.lp_en_mode = 1;
     else
         st->chip_config.lp_en_mode = 0;
-    	
+
 	t_ind = 0;
 	memcpy(&inv_attributes[t_ind], inv_raw_attributes,
 					sizeof(inv_raw_attributes));

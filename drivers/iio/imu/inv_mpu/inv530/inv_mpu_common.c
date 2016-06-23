@@ -27,7 +27,7 @@
 #include <linux/spinlock.h>
 
 #include "inv_mpu_iio.h"
-#include "sysfs.h"
+#include <linux/sysfs.h>
 #include "inv_test/inv_counters.h"
 
 /*--- Test parameters defaults --- */

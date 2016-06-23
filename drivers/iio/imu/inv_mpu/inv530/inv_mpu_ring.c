@@ -25,15 +25,15 @@
 #include <linux/poll.h>
 #include <linux/miscdevice.h>
 
-#include "iio.h"
-#include "kfifo_buf.h"
-#include "trigger_consumer.h"
-#include "sysfs.h"
+#include <linux/iio/iio.h>
+#include <linux/iio/kfifo_buf.h>
+#include <linux/iio/trigger_consumer.h>
+#include <linux/iio/sysfs.h>
 
 #include "inv_mpu_iio.h"
 
 static int inv_process_dmp_data(struct inv_mpu_state *st);
-static s8 iden[] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+static char iden[] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 
 static int inv_push_marker_to_buffer(struct inv_mpu_state *st, u16 hdr)
 {
@@ -41,7 +41,7 @@ static int inv_push_marker_to_buffer(struct inv_mpu_state *st, u16 hdr)
 	u8 buf[IIO_BUFFER_BYTES];
 
 	memcpy(buf, &hdr, sizeof(hdr));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 
 	return 0;
 }
@@ -124,12 +124,12 @@ static int inv_push_16bytes_buffer(struct inv_mpu_state *st, u16 hdr,
 
 	memcpy(buf, &hdr, sizeof(hdr));
 	memcpy(buf + 4, &q[0], sizeof(q[0]));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 	for (i = 0; i < 2; i++)
 		memcpy(buf + 4 * i, &q[i + 1], sizeof(q[i]));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 	memcpy(buf, &t, sizeof(t));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 
 	return 0;
 }
@@ -144,12 +144,12 @@ static int inv_push_16bytes_buffer_accuracy(struct inv_mpu_state *st, u16 hdr,
 	memcpy(buf, &hdr, sizeof(hdr));
 	memcpy(buf + 2, &accur, sizeof(accur));
 	memcpy(buf + 4, &q[0], sizeof(q[0]));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 	for (i = 0; i < 2; i++)
 		memcpy(buf + 4 * i, &q[i + 1], sizeof(q[i]));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 	memcpy(buf, &t, sizeof(t));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 
 	return 0;
 }
@@ -164,9 +164,9 @@ static int inv_push_8bytes_buffer(struct inv_mpu_state *st, u16 hdr,
 	memcpy(buf, &hdr, sizeof(hdr));
 	for (i = 0; i < 3; i++)
 		memcpy(&buf[2 + i * 2], &d[i], sizeof(d[i]));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 	memcpy(buf, &t, sizeof(t));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 
 	return 0;
 }
@@ -371,7 +371,7 @@ static int inv_push_accuracy(struct inv_mpu_state *st, int ind, u8 *d)
 	}
 	memcpy(buf, &hdr, sizeof(hdr));
 	memcpy(buf + sizeof(hdr), &accur, sizeof(accur));
-	iio_push_to_buffer(indio_dev->buffer, buf, 0);
+	iio_push_to_buffers(indio_dev, buf);
 
 	return 0;
 }
