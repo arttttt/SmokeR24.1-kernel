@@ -35,6 +35,7 @@ struct inv_local_store {
 	u8 reg_pwr_mgmt_2;
 	u8 reg_lp_config;
 	u8 reg_fifo_cfg;
+	u8 reg_fifo_size_0;
 	u8 reg_delay_enable;
 	u8 reg_delay_time;
 	u8 reg_gyro_smplrt;
@@ -135,6 +136,10 @@ static struct inv_accel_cal_params accel_cal_para[] = {
 	},
 };
 
+static int accel_gyro_rate[] = {5, 6, 7, 8, 9, 10, 11, 12, 13,
+	14, 15, 17, 18, 22, 25, 28, 32, 37, 45,
+	51, 75, 102, 225};
+
 static int inv_out_data_cntl(struct inv_mpu_state *st, u16 wd, bool en)
 {
 	return inv_write_cntl(st, wd, en, DATA_OUT_CTL1);
@@ -171,13 +176,12 @@ static int inv_calc_engine_dur(struct inv_engine_info *ei)
 static int inv_batchmode_calc(struct inv_mpu_state *st)
 {
 	int b, timeout;
-	int i, bps, max_rate, max_ind;
+	int i, bps, max_rate;
 	enum INV_ENGINE eng;
 	int ps, real_rate;
 	int en_num, en_sen, count;
 
 	max_rate = 0;
-	max_ind = -1;
 	bps = 0;
 	ps = 0;
 	en_num = 0;
@@ -187,7 +191,6 @@ static int inv_batchmode_calc(struct inv_mpu_state *st)
 		if (st->sensor[i].on) {
 			if (max_rate < st->sensor[i].rate) {
 				max_rate = st->sensor[i].rate;
-				max_ind = i;
 			}
 			/* get actual rate */
 			real_rate = (MSEC_PER_SEC * NSEC_PER_MSEC) /
@@ -217,7 +220,12 @@ static int inv_batchmode_calc(struct inv_mpu_state *st)
 		} else
 			timeout = st->batch.timeout;
 
-		eng = st->sensor[max_ind].engine_base;
+		if (st->chip_config.gyro_enable)
+			eng = ENGINE_GYRO;
+		else if (st->chip_config.accel_enable)
+			eng = ENGINE_ACCEL;
+		else
+			eng = ENGINE_I2C;
 	} else {
 		if (st->chip_config.step_detector_on ||
 					st->chip_config.step_indicator_on) {
@@ -437,7 +445,7 @@ int inv_reset_fifo(struct iio_dev *indio_dev, bool turn_off)
 
 static int inv_turn_on_engine(struct inv_mpu_state *st)
 {
-	u8 w, v;
+	u8 w;
 	int r;
 
 	r = 0;
@@ -471,22 +479,10 @@ static int inv_turn_on_engine(struct inv_mpu_state *st)
 					BIT_PWR_PRESSURE_STBY);
 		}
 	}
-	inv_plat_read(st, REG_PWR_MGMT_2, 1, &v);
-	if ((BIT_PWR_ALL_OFF == v) &&
-		(BIT_PWR_ALL_OFF != w) &&
-		(!st->chip_config.slave_enable)) {
-		r = inv_plat_single_write(st, REG_PWR_MGMT_2,
-						BIT_PWR_GYRO_STBY |
-						BIT_PWR_PRESSURE_STBY);
-		if (r)
-			return r;
-	}
-	if (!st->chip_config.dmp_on) {
-		r = inv_plat_single_write(st, REG_PWR_MGMT_2,
-						BIT_PWR_PRESSURE_STBY);
-		if (r)
-			return r;
-	}
+	r = inv_plat_single_write(st, REG_PWR_MGMT_2, w);
+	if (r)
+		return r;
+
 	if (st->chip_config.gyro_enable)
 		msleep(GYRO_ENGINE_UP_TIME);
 
@@ -727,13 +723,12 @@ static int inv_set_rate(struct inv_mpu_state *st)
 static int inv_set_fifo_size(struct inv_mpu_state *st)
 {
 	int result;
-	u8 size, cfg, ind;
+	u8 cfg, ind;
 
 	result = 0;
 	if (st->chip_config.dmp_on) {
 		/* use one FIFO in DMP mode */
-		cfg = BIT_MULTI_FIFO_CFG;
-		size = BIT_GYRO_FIFO_SIZE_1024;
+		cfg = BIT_SINGLE_FIFO_CFG;
 	} else {
 		ind = 0;
 		if (st->sensor[SENSOR_GYRO].on)
@@ -742,24 +737,16 @@ static int inv_set_fifo_size(struct inv_mpu_state *st)
 			ind++;
 		if (st->sensor[SENSOR_COMPASS].on)
 			ind++;
-		if (ind > 1) {
+		if (ind > 1)
 			cfg = BIT_MULTI_FIFO_CFG;
-			size = (BIT_GYRO_FIFO_SIZE_1024 |
-					BIT_ACCEL_FIFO_SIZE_1024
-					| BIT_FIFO_3_SIZE_64);
-		} else {
+		else
 			cfg = BIT_SINGLE_FIFO_CFG;
-			size = BIT_FIFO_SIZE_1024;
-		}
 	}
-	if (cfg != local.reg_fifo_cfg) {
-		result = inv_plat_single_write(st, REG_FIFO_CFG, cfg);
-		if (result)
-			return result;
-		local.reg_fifo_cfg = cfg;
-	}
+	result = inv_plat_single_write(st, REG_FIFO_CFG, cfg);
+	if (result)
+		return result;
 
-	return result;
+	return 0;
 }
 
 /*
@@ -895,10 +882,17 @@ static int inv_set_ICM20628_secondary(struct inv_mpu_state *st)
 	}
 	if (mst_odr_config < MIN_MST_ODR_CONFIG)
 		mst_odr_config = MIN_MST_ODR_CONFIG;
+	if (compass_rate) {
+		if (mst_odr_config > MAX_MST_NON_COMPASS_ODR_CONFIG)
+			mst_odr_config = MAX_MST_NON_COMPASS_ODR_CONFIG;
+	}
 
 	base = BASE_SAMPLE_RATE / (1 << mst_odr_config);
-	st->eng_info[ENGINE_I2C].running_rate = base;
-	st->eng_info[ENGINE_I2C].divider = (1 << mst_odr_config);
+	if ((!st->chip_config.gyro_enable) &&
+			(!st->chip_config.accel_enable)) {
+		st->eng_info[ENGINE_I2C].running_rate = base;
+		st->eng_info[ENGINE_I2C].divider = (1 << mst_odr_config);
+	}
 	inv_calc_engine_dur(&st->eng_info[ENGINE_I2C]);
 
 	d = 0;
@@ -976,6 +970,10 @@ static int inv_set_wom(struct inv_mpu_state *st)
 			return result;
 		local.wom_on = st->chip_config.wom_on;
 	}
+
+	inv_write_2bytes(st, 0x8a, st->chip_config.gyro_enable |
+			(st->chip_config.accel_enable << 1) |
+			(st->chip_config.slave_enable << 3));
 
 	return 0;
 }
@@ -1138,11 +1136,25 @@ static int inv_setup_dmp(struct inv_mpu_state *st)
 
 	return result;
 }
+
+static int inv_get_accel_gyro_rate(int compass_rate)
+{
+	int i;
+
+	i = 0;
+	while ((i < ARRAY_SIZE(accel_gyro_rate)) &&
+			compass_rate > accel_gyro_rate[i])
+		i++;
+
+	return accel_gyro_rate[i];
+}
+
 static int inv_determine_engine(struct inv_mpu_state *st)
 {
 	int i;
 	bool a_en, g_en, c_en, p_en, data_on, ped_on;
 	int compass_rate, pressure_rate, nineq_rate, accel_rate, gyro_rate;
+	u32 base_time;
 
 #define NINEQ_MIN_COMPASS_RATE 35
 #define GEOMAG_MIN_COMPASS_RATE    70
@@ -1268,7 +1280,7 @@ static int inv_determine_engine(struct inv_mpu_state *st)
 			accel_rate = st->sensor[SENSOR_ACCEL].rate;
 		}
 	}
-	if (a_en) {
+	if (a_en | g_en) {
 		gyro_rate = max(gyro_rate, PEDOMETER_FREQ);
         accel_rate = max(accel_rate, PEDOMETER_FREQ);
     }
@@ -1276,6 +1288,26 @@ static int inv_determine_engine(struct inv_mpu_state *st)
 		gyro_rate = max(gyro_rate, st->sensor[SENSOR_GYRO].rate);
 	if (st->sensor[SENSOR_CALIB_GYRO].on)
 		gyro_rate = max(gyro_rate, st->sensor[SENSOR_CALIB_GYRO].rate);
+
+	if (g_en) {
+		if (a_en)
+			gyro_rate = max(gyro_rate, accel_rate);
+		if (c_en || p_en) {
+			if (gyro_rate < compass_rate)
+				gyro_rate =
+					inv_get_accel_gyro_rate(compass_rate);
+		}
+		accel_rate = gyro_rate;
+		compass_rate = gyro_rate;
+	} else if (a_en) {
+		if (c_en || p_en) {
+			if (accel_rate < compass_rate)
+				accel_rate =
+					inv_get_accel_gyro_rate(compass_rate);
+		}
+		compass_rate = accel_rate;
+		gyro_rate = accel_rate;
+	}
 
 	st->eng_info[ENGINE_GYRO].running_rate = gyro_rate;
 	st->eng_info[ENGINE_ACCEL].running_rate = accel_rate;
@@ -1290,6 +1322,16 @@ static int inv_determine_engine(struct inv_mpu_state *st)
 				(BASE_SAMPLE_RATE / MPU_DEFAULT_DMP_FREQ) *
 				(MPU_DEFAULT_DMP_FREQ /
 				st->eng_info[ENGINE_ACCEL].running_rate);
+	st->eng_info[ENGINE_I2C].divider =
+				(BASE_SAMPLE_RATE / MPU_DEFAULT_DMP_FREQ) *
+				(MPU_DEFAULT_DMP_FREQ /
+				st->eng_info[ENGINE_ACCEL].running_rate);
+
+	base_time = NSEC_PER_SEC;
+
+	st->eng_info[ENGINE_GYRO].base_time = base_time;
+	st->eng_info[ENGINE_ACCEL].base_time = base_time;
+	st->eng_info[ENGINE_I2C].base_time = base_time;
 
 	inv_calc_engine_dur(&st->eng_info[ENGINE_GYRO]);
 	inv_calc_engine_dur(&st->eng_info[ENGINE_ACCEL]);
@@ -1312,13 +1354,15 @@ static int inv_determine_engine(struct inv_mpu_state *st)
 		st->chip_config.slave_enable = 1;
 	else
 		st->chip_config.slave_enable = 0;
-
 	if (a_en) {
-		st->gyro_cal_enable = 1;
 		st->accel_cal_enable = 1;
 	} else {
-		st->gyro_cal_enable = 0;
 		st->accel_cal_enable = 0;
+	}
+	if (g_en) {
+		st->gyro_cal_enable = 1;
+	} else {
+		st->gyro_cal_enable = 0;
 	}
 	if (c_en)
 		st->compass_cal_enable = 1;

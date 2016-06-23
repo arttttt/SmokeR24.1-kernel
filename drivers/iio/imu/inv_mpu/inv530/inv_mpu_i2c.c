@@ -437,9 +437,10 @@ static int inv_mpu_resume(struct device *dev)
 	} else {
 		inv_switch_power_in_lp(st, true);
 	}
+	st->suspend_state = false;
 	mutex_unlock(&indio_dev->mlock);
+	inv_read_fifo(0, (void *)st);
 	/* add code according to different request End */
-	mutex_unlock(&st->suspend_resume_lock);
 
 	return 0;
 }
@@ -460,6 +461,8 @@ static int inv_mpu_suspend(struct device *dev)
 
 	/* add code according to different request Start */
 	pr_debug("%s inv_mpu_suspend\n", st->hw->name);
+	mutex_lock(&indio_dev->mlock);
+	st->suspend_state = true;
 
 	if (st->chip_config.dmp_on) {
 		if (st->batch.on) {
@@ -472,11 +475,9 @@ static int inv_mpu_suspend(struct device *dev)
 		/* in non DMP case, just turn off the power */
 		inv_set_power(st, false);
 	}
+	mutex_unlock(&indio_dev->mlock);
+
 	/* add code according to different request End */
-	st->suspend_state = true;
-	msleep(100);
-	mutex_lock(&st->suspend_resume_lock);
-	st->suspend_state = false;
 
 	return 0;
 }

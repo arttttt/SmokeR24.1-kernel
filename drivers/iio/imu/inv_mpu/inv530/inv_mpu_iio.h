@@ -19,6 +19,7 @@
 #include <linux/miscdevice.h>
 #include <linux/spinlock.h>
 #include <linux/mpu.h>
+#include <linux/interrupt.h>
 
 #include "iio.h"
 #include "buffer.h"
@@ -242,6 +243,7 @@
 #define DMP_OFFSET               0x90
 #define DMP_IMAGE_SIZE           (7021 + DMP_OFFSET)
 #define MIN_MST_ODR_CONFIG       4
+#define MAX_MST_NON_COMPASS_ODR_CONFIG 7
 #define THREE_AXES               3
 #define NINE_ELEM                (THREE_AXES * THREE_AXES)
 #define MPU_TEMP_SHIFT           16
@@ -824,7 +826,6 @@ enum MPU_IIO_ATTR_ADDR {
 	ATTR_DMP_PED_INT_THRESH,
 	ATTR_DMP_PED_ON,
 	ATTR_DMP_SMD_ENABLE,
-	ATTR_DMP_SMD_TIMER_THLD,
 	ATTR_DMP_PEDOMETER_STEPS,
 	ATTR_DMP_PEDOMETER_TIME,
 	ATTR_DMP_PEDOMETER_COUNTER,
@@ -969,6 +970,10 @@ int inv_plat_read(struct inv_mpu_state *st, u8 reg, int len, u8 *data);
 
 int inv_set_dmp(struct inv_mpu_state *st);
 int inv_set_secondary(struct inv_mpu_state *st);
+
+irqreturn_t inv_read_fifo(int irq, void *dev_id);
+int inv_set_accel_fsr_V3(struct inv_mpu_state *st);
+int inv_set_accel_scale2_V3(struct inv_mpu_state *st);
 
 #define mem_w(a, b, c) \
 	mpu_memory_write(st, st->i2c_addr, a, b, c)

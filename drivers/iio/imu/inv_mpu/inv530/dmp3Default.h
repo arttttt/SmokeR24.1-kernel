@@ -78,6 +78,7 @@
 #define ACCEL_COVARIANCE		(101 * 16 + 8)
 #define ACCEL_ALPHA_VAR			(91 * 16)
 #define ACCEL_A_VAR				(92 * 16)
+#define ACCEL_CAL_INIT			(94 * 16 + 2)
 
 #define CPASS_BIAS_X            (126 * 16 +  4)
 #define CPASS_BIAS_Y            (126 * 16 +  8)
@@ -88,10 +89,23 @@
 #define CPASS_COVARIANCE		(115 * 16)
 #define CPASS_COVARIANCE_CUR	(118 * 16 +  8)
 #define CPASS_REF_MAG_3D		(122 * 16)
+#define CPASS_CAL_INIT			(114 * 16)
+#define CPASS_EST_FIRST_BIAS	(113 * 16)
+#define MAG_DISTURB_STATE		(113 * 16 + 2)
+#define CPASS_VAR_COUNT			(112 * 16 + 6)
+#define CPASS_COUNT_7			( 87 * 16 + 2)
+#define CPASS_MAX_INNO			(124 * 16)
+#define CPASS_BIAS_OFFSET		(113 * 16 + 4)
+#define CPASS_CUR_BIAS_OFFSET	(114 * 16 + 4)
+#define CPASS_PRE_SENSOR_DATA	( 87 * 16 + 4)
 #define CPASS_TIME_BUFFER		(112 * 16 + 14)
 #define CPASS_RADIUS_3D_THRESH_ANOMALY	(112 * 16 + 8)
 
 #define CPASS_STATUS_CHK		(25 * 16 + 12)
+
+#define MAGN_THR_9X				(35 * 16 +  8)
+#define MAGN_LPF_THR_9X			(32 * 16 + 12)
+#define QFB_THR_9X				(70 * 16 + 12)
 
 #define DMPRATE_CNTR			(18 * 16 + 4)
 
@@ -112,10 +126,14 @@
 #define PEDSTD_DECI				(58 * 16)
 #define PEDSTD_SB2				(60 * 16 + 14)
 #define STPDET_TIMESTAMP		(18 * 16 +  8)
-#define PEDSTD_DRIVE_STATE		(43 * 16 + 10)
+#define PEDSTD_DRIVE_STATE		(18 * 16)
 #define PED_RATE				(58 * 16 +  4)
 
-#define SMD_TIMER_THLD			(26 * 16)
+#define SMD_E1_THLD				(75 * 16 +  8)
+#define SMD_CNTR_TH             (74 * 16 +  8)
+#define SMD_CNTR_LO_TH          (74 * 16 + 12)
+#define SMD_LOW_ENERGY_TIMER_TH (76 * 16 +  8)
+#define SMD_E1_COUNTER_TH       (76 * 16 + 12)
 
 
 // Wake on Motion
@@ -127,7 +145,9 @@
 #define TILT_ENABLE             (68 * 16 + 12)
 #define BAC_STATE               (147 * 16)
 
-#define ACC_SCALE				(30 * 16)
+// Accel FSR
+#define ACC_SCALE               (30 * 16 + 0)
+#define ACC_SCALE2              (79 * 16 + 4)
 
 #define ACCEL_MASK		0x80
 #define GYRO_MASK		0x40
@@ -136,6 +156,7 @@
 #define QUAT6_MASK		0x08
 #define QUAT9_MASK		0x04
 #define PQUAT6_MASK		0x02
+#define FOOTER_MASK		0x01
 #define PRESSURE_MASK	0x80
 #define GYRO_CALIBR_MASK	0x40
 #define CPASS_CALIBR_MASK	0x20
@@ -150,6 +171,7 @@
 #define QUAT6_SET		0x0800
 #define QUAT9_SET		0x0400
 #define PQUAT6_SET		0x0200
+#define FOOTER_SET		0x0100
 #define PRESSURE_SET	0x0080
 #define GYRO_CALIBR_SET	0x0040
 #define CPASS_CALIBR_SET 0x0020
@@ -180,7 +202,7 @@
 #define NINE_AXIS_EN        0x40
 
 #define HEADER_SZ		2
-#define ACCEL_DATA_SZ	12
+#define ACCEL_DATA_SZ	6
 #define GYRO_DATA_SZ	6
 #define CPASS_DATA_SZ	6
 #define ALS_DATA_SZ		8
@@ -191,6 +213,7 @@
 #define GYRO_CALIBR_DATA_SZ		12
 #define CPASS_CALIBR_DATA_SZ	12
 #define PED_STEPDET_TIMESTAMP_SZ	4
+#define FOOTER_SZ		2
 
 #define HEADER2_SZ			2
 #define ACCEL_ACCURACY_SZ	2

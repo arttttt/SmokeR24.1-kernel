@@ -245,7 +245,7 @@ static int inv_push_sensor(struct inv_mpu_state *st, int ind, u64 t, u8 *d)
 
 	switch (ind) {
 	case SENSOR_ACCEL:
-		inv_convert_and_push_16bytes(st, hdr, d, t, iden);
+		inv_convert_and_push_8bytes(st, hdr, d, t, iden);
 		break;
 	case SENSOR_GYRO:
 		inv_convert_and_push_8bytes(st, hdr, d, t, iden);
@@ -945,10 +945,11 @@ irqreturn_t inv_read_fifo(int irq, void *dev_id)
 
 #define NON_DMP_MIN_RUN_TIME (10 * NSEC_PER_MSEC)
 
-	if (st->suspend_state)
-		return IRQ_HANDLED;
-	mutex_lock(&st->suspend_resume_lock);
 	mutex_lock(&indio_dev->mlock);
+	if (st->suspend_state) {
+		mutex_unlock(&indio_dev->mlock);
+		return IRQ_HANDLED;
+	}
 
 	if (st->chip_config.dmp_on) {
 		st->last_run_time = get_time_ns();
@@ -980,7 +981,6 @@ irqreturn_t inv_read_fifo(int irq, void *dev_id)
 end_read_fifo:
 	inv_switch_power_in_lp(st, false);
 	mutex_unlock(&indio_dev->mlock);
-	mutex_unlock(&st->suspend_resume_lock);
 
 	return IRQ_HANDLED;
 
@@ -989,7 +989,6 @@ err_reset_fifo:
 	inv_reset_fifo(indio_dev, true);
 	inv_switch_power_in_lp(st, false);
 	mutex_unlock(&indio_dev->mlock);
-	mutex_unlock(&st->suspend_resume_lock);
 
 	return IRQ_HANDLED;
 

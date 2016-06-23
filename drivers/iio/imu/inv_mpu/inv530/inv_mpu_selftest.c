@@ -67,6 +67,7 @@
 struct recover_regs {
 	/* Bank#0 */
 	u8 fifo_cfg;			/* REG_FIFO_CFG */
+	u8 fifo_size_0;			/* REG_FIFO_SIZE_0 */
 	u8 user_ctrl;			/* REG_USER_CTRL */
 	u8 lp_config;			/* REG_LP_CONFIG */
 	u8 int_enable;			/* REG_INT_ENABLE */
@@ -126,6 +127,7 @@ static const u16 mpu_st_tb[256] = {
 static void inv_show_saved_setting(struct inv_mpu_state *st)
 {
 	pr_debug(" REG_FIFO_CFG : 0x%02X\n", saved_regs.fifo_cfg);
+	pr_debug(" REG_FIFO_SIZE_0 : 0x%02X\n", saved_regs.fifo_size_0);
 	pr_debug(" REG_USER_CTRL : 0x%02X\n", saved_regs.user_ctrl);
 	pr_debug(" REG_LP_CONFIG : 0x%02X\n", saved_regs.lp_config);
 	pr_debug(" REG_INT_ENABLE : 0x%02X\n", saved_regs.int_enable);
@@ -153,6 +155,9 @@ static int inv_save_setting(struct inv_mpu_state *st)
 		return result;
 
 	result = inv_plat_read(st, REG_FIFO_CFG, 1, &saved_regs.fifo_cfg);
+	if (result)
+		return result;
+	result = inv_plat_read(st, REG_FIFO_SIZE_0, 1, &saved_regs.fifo_size_0);
 	if (result)
 		return result;
 	result = inv_plat_read(st, REG_USER_CTRL, 1, &saved_regs.user_ctrl);

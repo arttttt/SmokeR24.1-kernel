@@ -31,7 +31,7 @@
 #include "inv_test/inv_counters.h"
 
 /* DMP defines */
-#define FIRMWARE_CRC           0xfef1270d
+#define FIRMWARE_CRC           0xda126847
 #define FIRMWARE_CRC_1         0x24e5ed7e
 
 int inv_get_pedometer_steps(struct inv_mpu_state *st, int *ped)
@@ -70,6 +70,67 @@ int inv_read_pedometer_counter(struct inv_mpu_state *st)
 	}
 
 	return 0;
+}
+
+
+/*
+input param: fsr for accel parts
+1: 1g. 2: 2g. 4: 4g. 8: 8g. 16: 16g. 32: 32g.
+
+The goal is to set 1g data to 2^25, 2g data to 2^26, etc.
+
+For 2g parts, raw accel data is 1g = 2^14, 2g = 2^15.
+DMP takes raw accel data and shifts by 16 bits, so this scale means to shift by -5 bits.
+In Q-30 math, >> 5 equals multiply by 2^25 = 33554432.
+
+For 8g parts, raw accel data is 4g = 2^14, 8g = 2^15.
+DMP takes raw accel data and shifts by 16 bits, so this scale means to shift by -3 bits.
+In Q-30 math, >> 3 equals multiply by 2^27 = 134217728.
+*/
+int inv_set_accel_fsr_V3(struct inv_mpu_state *st)
+{
+	u32 scale;
+
+	switch (st->chip_config.accel_fs) {
+		case 0: //2g
+			scale =  33554432;  // 2^25
+			break;
+		case 1: //4g
+			scale =  67108864;  // 2^26
+			break;
+		case 2: //8g
+			scale = 134217728;  // 2^27
+			break;
+		case 3: //16g
+			scale = 268435456;  // 2^28
+			break;
+		default:
+			return -EINVAL;
+	}
+	return write_be32_to_mem(st, scale, ACC_SCALE); 
+}
+
+int inv_set_accel_scale2_V3(struct inv_mpu_state *st)
+{
+	u32 scale;
+
+	switch (st->chip_config.accel_fs) {
+		case 0: //2g
+			scale =  524288;  // 2^19
+			break;
+		case 1: //4g
+			scale =  262144;  // 2^18
+			break;
+		case 2: //8g
+			scale = 131072;  // 2^17
+			break;
+		case 3: //16g
+			scale = 65536;  // 2^16
+			break;
+		default:
+			return -EINVAL;
+	}
+	return write_be32_to_mem(st, scale, ACC_SCALE2); 
 }
 
 static int inv_load_firmware(struct inv_mpu_state *st)
@@ -236,6 +297,14 @@ static int inv_setup_dmp_firmware(struct inv_mpu_state *st)
 		pr_err("dmp loading eror:inv_write_gyro_sf\n");
 		return result;
 	}
+
+	result = inv_set_accel_fsr_V3(st);
+	if (result)
+		return result;
+	result = inv_set_accel_scale2_V3(st);
+	if (result)
+		return result;
+
 	if (st->chip_config.has_compass) {
 		result = inv_compass_dmp_cal(st);
 		if (result)

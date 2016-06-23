@@ -278,7 +278,7 @@ int inv_parse_readonly_secondary(struct device *dev, struct mpu_platform_data *p
 int invensense_mpu_parse_dt(struct device *dev, struct mpu_platform_data *pdata)
 {
 	int rc;
-	pr_info("%s: 15066 47", __func__);
+	pr_info("%s: 15667 52", __func__);
 	pr_info("%s: Invensense MPU parse_dt started.\n", __func__);
 
 	rc = inv_parse_orientation_matrix(dev, pdata->orientation);

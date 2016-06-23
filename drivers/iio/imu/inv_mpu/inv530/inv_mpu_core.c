@@ -132,7 +132,6 @@ static int inv_set_gyro_sf(struct inv_mpu_state *st)
 static int inv_set_accel_sf(struct inv_mpu_state *st)
 {
 	int result;
-	int scale[] = {33554432, 67108864, 134217728, 268435456};
 
 	result = inv_set_bank(st, BANK_SEL_2);
 	if (result)
@@ -146,8 +145,12 @@ static int inv_set_accel_sf(struct inv_mpu_state *st)
 	if (result)
 		return result;
 
-	result = write_be32_to_mem(st,
-			scale[st->chip_config.accel_fs], ACC_SCALE);
+	result = inv_set_accel_fsr_V3(st);
+	if (result)
+		return result;
+	result = inv_set_accel_scale2_V3(st);
+	if (result)
+		return result;
 
 	return result;
 }
@@ -616,14 +619,6 @@ static ssize_t _misc_attr_store(struct device *dev,
 		st->ped.int_thresh = data;
 
 		return 0;
-	case ATTR_DMP_SMD_TIMER_THLD:
-		if (data < 0)
-			return -EINVAL;
-		result = write_be32_to_mem(st, data, SMD_TIMER_THLD);
-		if (result)
-			return result;
-		st->smd.timer_thresh = data;
-		return 0;
 	default:
 		return -EINVAL;
 	}
@@ -1090,8 +1085,6 @@ static ssize_t inv_attr_show(struct device *dev,
 		return sprintf(buf, "%d\n", st->ped.int_thresh);
 	case ATTR_DMP_SMD_ENABLE:
 		return sprintf(buf, "%d\n", st->smd.on);
-	case ATTR_DMP_SMD_TIMER_THLD:
-		return sprintf(buf, "%d\n", st->smd.timer_thresh);
 	case ATTR_DMP_LOW_POWER_GYRO_ON:
 		return sprintf(buf, "%d\n", st->chip_config.low_power_gyro_on);
 	case ATTR_DEBUG_DATA_COLLECTION_MODE:
@@ -1625,8 +1618,6 @@ static IIO_DEVICE_ATTR(in_step_indicator_enable, S_IRUGO | S_IWUGO,
 
 static IIO_DEVICE_ATTR(event_smd_enable, S_IRUGO | S_IWUGO,
 	inv_attr_show, inv_basic_attr_store, ATTR_DMP_SMD_ENABLE);
-static IIO_DEVICE_ATTR(params_smd_timer_thresh, S_IRUGO | S_IWUGO,
-	inv_attr_show, inv_misc_attr_store, ATTR_DMP_SMD_TIMER_THLD);
 
 static IIO_DEVICE_ATTR(params_pedometer_int_on, S_IRUGO | S_IWUGO,
 	inv_attr_show, inv_misc_attr_store, ATTR_DMP_PED_INT_ON);
@@ -1742,7 +1733,6 @@ static const struct attribute *inv_pedometer_attributes[] = {
 static const struct attribute *inv_smd_attributes[] = {
 	&dev_attr_poll_smd.attr,
 	&iio_dev_attr_event_smd_enable.dev_attr.attr,
-	&iio_dev_attr_params_smd_timer_thresh.dev_attr.attr,
 };
 
 static const struct attribute *inv_pressure_attributes[] = {
