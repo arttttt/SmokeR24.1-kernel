@@ -399,6 +399,19 @@ int tty_buffer_get_level(struct tty_port *port)
 }
 EXPORT_SYMBOL(tty_buffer_get_level);
 
+int tty_buffer_get_count(struct tty_port *port)
+{
+	struct tty_bufhead *buf = &port->buf;
+	unsigned long flags;
+	int count;
+
+	spin_lock_irqsave(&buf->lock, flags);
+	count = buf->current_data_count;
+	spin_unlock_irqrestore(&buf->lock, flags);
+	return count;
+}
+EXPORT_SYMBOL(tty_buffer_get_count);
+
 /**
  *	tty_schedule_flip	-	push characters to ldisc
  *	@port: tty port to push from
