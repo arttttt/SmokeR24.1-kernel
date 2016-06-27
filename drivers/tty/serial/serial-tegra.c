@@ -150,6 +150,7 @@ struct tegra_uart_port {
 	bool                enable_rx_buffer_throttle;
 	struct tegra_baud_tolerance		*baud_tolerance;
 	int					n_adjustable_baud_rates;
+	struct dentry *debugfs;
 };
 
 static void tegra_uart_start_next_tx(struct tegra_uart_port *tup);
@@ -1578,6 +1579,66 @@ static struct of_device_id tegra_uart_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, tegra_uart_of_match);
 
+#ifdef CONFIG_DEBUG_FS
+static int tegra_uart_debug_show(struct seq_file *s, void *unused)
+{
+	struct tegra_uart_port *tup = s->private;
+	struct uart_port *u = &tup->uport;
+	struct tty_port *port = &tup->uport.state->port;
+	unsigned long flags;
+	int count,ldisc_count;
+
+	spin_lock_irqsave(&u->lock, flags);
+	count = tty_buffer_get_count(port);
+	ldisc_count = n_tty_buffer_get_count(port->itty);
+	seq_printf(s, "%d:%d\n", count,ldisc_count);
+	spin_unlock_irqrestore(&u->lock, flags);
+
+	return 0;
+}
+
+static int tegra_uart_debug_open(struct inode *inode, struct file *f)
+{
+	return single_open(f, tegra_uart_debug_show, inode->i_private);
+}
+
+static const struct file_operations tegra_uart_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = tegra_uart_debug_open,
+	.release = single_release,
+	.read = seq_read,
+	.llseek = seq_lseek,
+};
+
+static void tegra_uart_debugfs_init(struct tegra_uart_port *tup)
+{
+	struct dentry *retval;
+
+	tup->debugfs = debugfs_create_dir(dev_name(tup->uport.dev), NULL);
+	if (IS_ERR_OR_NULL(tup->debugfs))
+		goto clean;
+
+	retval = debugfs_create_file("tty_buffer_count", S_IRUGO | S_IWUSR,
+			tup->debugfs, (void *)tup,
+			&tegra_uart_debug_fops);
+	if (IS_ERR_OR_NULL(retval))
+		goto clean;
+
+	return;
+clean:
+	dev_warn(tup->uport.dev, "Failed to create debugfs!\n");
+	debugfs_remove_recursive(tup->debugfs);
+}
+
+static void tegra_uart_debugfs_deinit(struct tegra_uart_port *tup)
+{
+	debugfs_remove_recursive(tup->debugfs);
+}
+#else
+static void tegra_uart_debugfs_init(struct tegra_uart_port *tup) {}
+static void tegra_uart_debugfs_deinit(struct tegra_uart_port *tup) {}
+#endif
+
 static int tegra_uart_probe(struct platform_device *pdev)
 {
 	struct tegra_uart_port *tup;
@@ -1655,6 +1716,9 @@ board_file:
 				(unsigned long)tup);
 		tup->timer_timeout_jiffies = msecs_to_jiffies(10);
 	}
+
+	tegra_uart_debugfs_init(tup);
+
 	return ret;
 }
 
@@ -1663,6 +1727,7 @@ static int tegra_uart_remove(struct platform_device *pdev)
 	struct tegra_uart_port *tup = platform_get_drvdata(pdev);
 	struct uart_port *u = &tup->uport;
 
+	tegra_uart_debugfs_deinit(tup);
 	uart_remove_one_port(&tegra_uart_driver, u);
 	return 0;
 }

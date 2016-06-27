@@ -1369,6 +1369,12 @@ handle_newline:
 	put_tty_queue(c, ldata);
 }
 
+int n_tty_buffer_get_count(struct tty_struct *tty)
+{
+	struct n_tty_data *ldata = tty->disc_data;
+	return ldata->read_cnt;
+ }
+ EXPORT_SYMBOL(n_tty_buffer_get_count);
 
 /**
  *	n_tty_write_wakeup	-	asynchronous I/O notifier

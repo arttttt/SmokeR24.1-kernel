@@ -37,5 +37,6 @@ extern int tty_insert_flip_string_lock(struct tty_port *port,
 		const unsigned char *chars, size_t size);
 extern int tty_buffer_get_level(struct tty_port *port);
 extern int tty_buffer_get_count(struct tty_port *port);
+extern int n_tty_buffer_get_count(struct tty_struct *tty);
 
 #endif /* _LINUX_TTY_FLIP_H */
