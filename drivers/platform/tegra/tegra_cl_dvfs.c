@@ -159,6 +159,8 @@
 
 #define CL_DVFS_OUTPUT_LUT		0x200
 
+#define CL_DVFS_APERTURE		0x400
+
 #define IS_I2C_OFFS(offs)		\
 	((((offs) >= CL_DVFS_I2C_CFG) && ((offs) <= CL_DVFS_INTR_EN)) || \
 	((offs) >= CL_DVFS_I2C_CNTRL))
@@ -3650,6 +3652,9 @@ static ssize_t cl_register_write(struct file *file,
 	strim(buf);
 
 	if (sscanf(buf, "[0x%x] = 0x%x", &offs, &val) != 2)
+		return -1;
+
+	if (offs >= CL_DVFS_APERTURE)
 		return -1;
 
 	clk_enable(cld->soc_clk);
