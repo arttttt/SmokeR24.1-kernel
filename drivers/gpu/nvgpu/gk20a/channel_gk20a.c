@@ -1,7 +1,7 @@
 /*
  * GK20A Graphics channel
  *
- * Copyright (c) 2011-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -406,6 +406,8 @@ void gk20a_channel_abort(struct channel_gk20a *ch, bool channel_preempt)
 
 	if (channel_preempt)
 		gk20a_fifo_preempt(ch->g, ch);
+
+	gk20a_channel_cancel_job_clean_up(ch, true);
 
 	/* ensure no fences are pending */
 	mutex_lock(&ch->sync_lock);
