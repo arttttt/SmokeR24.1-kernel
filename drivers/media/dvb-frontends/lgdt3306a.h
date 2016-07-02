@@ -19,8 +19,11 @@
 #define _LGDT3306A_H_
 
 #include <linux/i2c.h>
+#include <linux/i2c-mux.h>
 #include "dvb_frontend.h"
 
+#define LG3306_TUNERI2C_ON  0x00
+#define LG3306_TUNERI2C_OFF 0x80
 
 enum lgdt3306a_mpeg_mode {
 	LGDT3306A_MPEG_PARALLEL = 0,
@@ -40,6 +43,18 @@ enum lgdt3306a_tp_valid_polarity {
 struct lgdt3306a_config {
 	u8 i2c_addr;
 
+	/*
+	 * frontend
+	 * returned by driver
+	 */
+	struct dvb_frontend **fe;
+
+	/*
+	 * tuner I2C adapter
+	 * returned by driver
+	 */
+	struct i2c_adapter **i2c_adapter;
+
 	/* user defined IF frequency in KHz */
 	u16 qam_if_khz;
 	u16 vsb_if_khz;
@@ -56,6 +71,8 @@ struct lgdt3306a_config {
 
 	/* demod clock freq in MHz; 24 or 25 supported */
 	int  xtalMHz;
+
+	int has_tuner_i2c_adapter;
 };
 
 #if IS_ENABLED(CONFIG_DVB_LGDT3306A)
