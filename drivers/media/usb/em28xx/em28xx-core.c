@@ -249,6 +249,24 @@ int em28xx_write_reg_bits(struct em28xx *dev, u16 reg, u8 val,
 EXPORT_SYMBOL_GPL(em28xx_write_reg_bits);
 
 /*
+ * em28xx_toggle_reg_bits()
+ * toggles/inverts the bits (specified by bitmask) of a register
+ */
+static int em28xx_toggle_reg_bits(struct em28xx *dev, u16 reg, u8 bitmask)
+{
+	int oldval;
+	u8 newval;
+
+	oldval = em28xx_read_reg(dev, reg);
+	if (oldval < 0)
+		return oldval;
+
+	newval = (~oldval & bitmask) | (oldval & ~bitmask);
+
+	return em28xx_write_reg(dev, reg, newval);
+}
+
+/*
  * em28xx_is_ac97_ready()
  * Checks if ac97 is ready
  */
@@ -631,18 +649,32 @@ int em28xx_capture_start(struct em28xx *dev, int start)
 	    dev->chip_id == CHIP_ID_EM2884 ||
 	    dev->chip_id == CHIP_ID_EM28174) {
 		/* The Transport Stream Enable Register moved in em2874 */
-		if (!start) {
+		if (dev->board.has_dual_ts) {
+			if (start) {
+				rc = em28xx_write_reg_bits(dev, EM2874_R5F_TS_ENABLE,
+							   (EM2874_TS1_CAPTURE_ENABLE | EM2874_TS2_CAPTURE_ENABLE),
+							   (EM2874_TS1_CAPTURE_ENABLE | EM2874_TS2_CAPTURE_ENABLE));
+			} else {
+				if (dev->ts == PRIMARY_TS)
+					rc = em28xx_toggle_reg_bits(dev, EM2874_R5F_TS_ENABLE, EM2874_TS1_CAPTURE_ENABLE);
+				else
+					rc = em28xx_toggle_reg_bits(dev, EM2874_R5F_TS_ENABLE, EM2874_TS2_CAPTURE_ENABLE);
+			}
+			return rc;
+		} else {
+			if (!start) {
+				rc = em28xx_write_reg_bits(dev, EM2874_R5F_TS_ENABLE,
+							   0x00,
+							   EM2874_TS1_CAPTURE_ENABLE);
+				return rc;
+			}
+
+			/* Enable Transport Stream */
 			rc = em28xx_write_reg_bits(dev, EM2874_R5F_TS_ENABLE,
-						   0x00,
+						   EM2874_TS1_CAPTURE_ENABLE,
 						   EM2874_TS1_CAPTURE_ENABLE);
 			return rc;
 		}
-
-		/* Enable Transport Stream */
-		rc = em28xx_write_reg_bits(dev, EM2874_R5F_TS_ENABLE,
-					   EM2874_TS1_CAPTURE_ENABLE,
-					   EM2874_TS1_CAPTURE_ENABLE);
-		return rc;
 	}
 
 
@@ -1293,6 +1325,8 @@ int em28xx_register_extension(struct em28xx_ops *ops)
 	list_add_tail(&ops->next, &em28xx_extension_devlist);
 	list_for_each_entry(dev, &em28xx_devlist, devlist) {
 		ops->init(dev);
+		if (dev->dev_next != NULL)
+			ops->init(dev->dev_next);
 	}
 	mutex_unlock(&em28xx_devlist_mutex);
 	printk(KERN_INFO "Em28xx: Initialized (%s) extension\n", ops->name);
@@ -1307,6 +1341,8 @@ void em28xx_unregister_extension(struct em28xx_ops *ops)
 	mutex_lock(&em28xx_devlist_mutex);
 	list_for_each_entry(dev, &em28xx_devlist, devlist) {
 		ops->fini(dev);
+		if (dev->dev_next != NULL)
+			ops->fini(dev->dev_next);
 	}
 	list_del(&ops->next);
 	mutex_unlock(&em28xx_devlist_mutex);
@@ -1323,6 +1359,8 @@ void em28xx_init_extension(struct em28xx *dev)
 	list_for_each_entry(ops, &em28xx_extension_devlist, next) {
 		if (ops->init)
 			ops->init(dev);
+		if (dev->dev_next != NULL)
+			ops->init(dev->dev_next);
 	}
 	mutex_unlock(&em28xx_devlist_mutex);
 }
@@ -1335,6 +1373,8 @@ void em28xx_close_extension(struct em28xx *dev)
 	list_for_each_entry(ops, &em28xx_extension_devlist, next) {
 		if (ops->fini)
 			ops->fini(dev);
+		if (dev->dev_next != NULL)
+			ops->fini(dev->dev_next);
 	}
 	list_del(&dev->devlist);
 	mutex_unlock(&em28xx_devlist_mutex);
