@@ -69,6 +69,7 @@ struct cx231xx_dvb {
 	struct dmx_frontend fe_hw;
 	struct dmx_frontend fe_mem;
 	struct dvb_net net;
+	struct i2c_client *i2c_client_tuner;
 	int    power_on;
 };
 
@@ -181,11 +182,6 @@ static struct lgdt3306a_config hauppauge_955q_lgdt3306a_config = {
 	.tpclk_edge         = LGDT3306A_TPCLK_RISING_EDGE,
 	.tpvalid_polarity   = LGDT3306A_TP_VALID_HIGH,
 	.xtalMHz            = 25,
-};
-
-static struct si2157_config si2157_config = {
-	.i2c_addr           = 0x60,
-	.inversion			= true,
 };
 
 static inline void print_err_status(struct cx231xx *dev, int packet, int status)
@@ -608,11 +604,18 @@ fail_adapter:
 
 static void unregister_dvb(struct cx231xx_dvb *dvb)
 {
+	struct i2c_client *client;
 	dvb_net_release(&dvb->net);
 	dvb->demux.dmx.remove_frontend(&dvb->demux.dmx, &dvb->fe_mem);
 	dvb->demux.dmx.remove_frontend(&dvb->demux.dmx, &dvb->fe_hw);
 	dvb_dmxdev_release(&dvb->dmxdev);
 	dvb_dmx_release(&dvb->demux);
+	client = dvb->i2c_client_tuner;
+	/* remove I2C tuner */
+	if (client) {
+		module_put(client->dev.driver->owner);
+		i2c_unregister_device(client);
+	}
 	dvb_unregister_frontend(dvb->frontend);
 	dvb_frontend_detach(dvb->frontend);
 	dvb_unregister_adapter(&dvb->adapter);
@@ -769,7 +772,11 @@ static int dvb_init(struct cx231xx *dev)
 			   &hcw_tda18271_config);
 		break;
 
-	case CX231XX_BOARD_HAUPPAUGE_955Q:
+	case CX231XX_BOARD_HAUPPAUGE_955Q: {
+
+		struct i2c_client *client;
+		struct i2c_board_info info;
+		struct si2157_config si2157_config;
 
 		printk(KERN_INFO "%s: looking for tuner / demod on i2c bus: %d\n",
 		       __func__, i2c_adapter_id(&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap));
@@ -788,11 +795,38 @@ static int dvb_init(struct cx231xx *dev)
 		/* define general-purpose callback pointer */
 		dvb->frontend->callback = cx231xx_tuner_callback;
 
-		dvb_attach(si2157_attach, dev->dvb->frontend,
-			   &dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
-			   &si2157_config);
-		break;
+		/* attach tuner */
+		memset(&info, 0, sizeof(info));
+		memset(&si2157_config, 0, sizeof(si2157_config));
+		si2157_config.fe = dev->dvb->frontend;
+		si2157_config.if_port = 1;
+		si2157_config.inversion = true;
+		strlcpy(info.type, "si2157", I2C_NAME_SIZE);
+		info.addr = 0x60;
+		info.platform_data = &si2157_config;
+		request_module("si2157");
 
+		client = i2c_new_device(
+			&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
+			&info);
+		if (client == NULL || client->dev.driver == NULL) {
+			dvb_frontend_detach(dev->dvb->frontend);
+			result = -ENODEV;
+			goto out_free;
+		}
+
+		if (!try_module_get(client->dev.driver->owner)) {
+			i2c_unregister_device(client);
+			dvb_frontend_detach(dev->dvb->frontend);
+			result = -ENODEV;
+			goto out_free;
+		}
+
+		dev->cx231xx_reset_analog_tuner = NULL;
+
+		dev->dvb->i2c_client_tuner = client;
+		break;
+	}
 	case CX231XX_BOARD_PV_PLAYTV_USB_HYBRID:
 	case CX231XX_BOARD_KWORLD_UB430_USB_HYBRID:
 
