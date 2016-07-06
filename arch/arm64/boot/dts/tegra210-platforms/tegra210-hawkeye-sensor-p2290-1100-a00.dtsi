@@ -29,6 +29,7 @@
 			accelerometer_matrix = [00 01 00 ff 00 00 00 00 01];
 			gyroscope_matrix = [00 01 00 ff 00 00 00 00 01];
 			gyroscope_delay_us_max = <100000>;
+			accelerometer_delay_us_max = <100000>;
 		};
 
 		ak8963@0d {
