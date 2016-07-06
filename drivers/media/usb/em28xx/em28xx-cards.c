@@ -2225,9 +2225,13 @@ struct usb_device_id em28xx_id_table[] = {
 			.driver_info = EM2884_BOARD_PCTV_510E },
 	{ USB_DEVICE(0x2013, 0x0251),
 			.driver_info = EM2884_BOARD_PCTV_520E },
-	{ USB_DEVICE(0x2040, 0x0265),
+	{ USB_DEVICE(0x2040, 0x0265), /* ISOC */
 			.driver_info = EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_DVB },
-	{ USB_DEVICE(0x2040, 0x026D),
+	{ USB_DEVICE(0x2040, 0x8265), /* BULK */
+			.driver_info = EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_DVB },
+	{ USB_DEVICE(0x2040, 0x026D), /* ISOC */
+			.driver_info = EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_ATSC },
+	{ USB_DEVICE(0x2040, 0x826D), /* BULK */
 			.driver_info = EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_ATSC },
 	{ },
 };
