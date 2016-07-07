@@ -1033,15 +1033,21 @@ static void tegra_hdmi_config(struct tegra_hdmi *hdmi)
 #endif
 	u32 hblank, max_ac, rekey;
 	unsigned long val;
+	bool rgb_limited;
 	u32 dispclk_div_8_2;
 
 	if (tegra_platform_is_linsim())
 		return;
 
+	rgb_limited = (dc->mode.vmode & FB_VMODE_LIMITED_RANGE) &&
+		      !(dc->mode.vmode & FB_VMODE_YUV_MASK);
+
 	tegra_sor_write_field(sor, NV_SOR_INPUT_CONTROL,
 			NV_SOR_INPUT_CONTROL_ARM_VIDEO_RANGE_LIMITED |
 			NV_SOR_INPUT_CONTROL_HDMI_SRC_SELECT_DISPLAYB,
-			NV_SOR_INPUT_CONTROL_ARM_VIDEO_RANGE_FULL |
+			(rgb_limited ?
+			NV_SOR_INPUT_CONTROL_ARM_VIDEO_RANGE_LIMITED :
+			NV_SOR_INPUT_CONTROL_ARM_VIDEO_RANGE_FULL) |
 			NV_SOR_INPUT_CONTROL_HDMI_SRC_SELECT_DISPLAYB);
 
 	dispclk_div_8_2 = clk_get_rate(hdmi->sor->sor_clk) / 1000000 * 4;
