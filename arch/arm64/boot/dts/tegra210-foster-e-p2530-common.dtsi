@@ -189,6 +189,8 @@
 
 	chosen {
 		nvidia,tegra-shield-sku;
+		nvidia,bootloader-xusb-enable;
+		nvidia,bootloader-vbus-enable=<0x3>;
         };
 
 	gpio-ir-receiver {
