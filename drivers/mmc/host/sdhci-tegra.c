@@ -5288,6 +5288,7 @@ static struct sdhci_pltfm_data sdhci_tegra21_pdata = {
 		   SDHCI_QUIRK2_USE_64BIT_ADDR |
 		   SDHCI_QUIRK2_NON_STD_TUN_CARD_CLOCK |
 		   SDHCI_QUIRK2_NON_STD_RTPM |
+		   SDHCI_QUIRK2_SEL_SDR104_UHS_MODE_IN_SDR50 |
 		   SDHCI_QUIRK2_SUPPORT_64BIT_DMA,
 	.ops  = &tegra_sdhci_ops,
 };

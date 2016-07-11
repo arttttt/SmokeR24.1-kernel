@@ -2,7 +2,7 @@
  *  linux/include/linux/mmc/sdhci.h - Secure Digital Host Controller Interface
  *
  *  Copyright (C) 2005-2008 Pierre Ossman, All Rights Reserved.
- *  Copyright (c) 2013-2015, NVIDIA CORPORATION. All Rights Reserved.
+ *  Copyright (c) 2013-2016, NVIDIA CORPORATION. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -162,6 +162,7 @@ struct sdhci_host {
 #define SDHCI_QUIRK2_PERIODIC_CALIBRATION		(1<<16)
 /*Controller skips tuning if it is already done*/
 #define SDHCI_QUIRK2_SKIP_TUNING			(1<<17)
+#define SDHCI_QUIRK2_SEL_SDR104_UHS_MODE_IN_SDR50	(1<<18)
 
 	unsigned int  acmd12_ctrl;
 	unsigned int  ier;
