@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/sor.c
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -1742,14 +1742,12 @@ void tegra_sor_stop_dc(struct tegra_dc_sor_data *sor)
 	tegra_dc_put(dc);
 }
 
-void tegra_dc_sor_pre_detach(struct tegra_dc_sor_data *sor)
+void tegra_dc_sor_sleep(struct tegra_dc_sor_data *sor)
 {
 	struct tegra_dc *dc = sor->dc;
 
-	if (sor->sor_state != SOR_ATTACHED)
+	if (sor->sor_state == SOR_SLEEP)
 		return;
-
-	tegra_dc_get(dc);
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 	/* Sleep mode */
@@ -1781,6 +1779,20 @@ void tegra_dc_sor_pre_detach(struct tegra_dc_sor_data *sor)
 		dev_err(&dc->ndev->dev,
 			"dc timeout waiting for OPMOD = SLEEP\n");
 	}
+	sor->sor_state = SOR_SLEEP;
+
+}
+
+void tegra_dc_sor_pre_detach(struct tegra_dc_sor_data *sor)
+{
+	struct tegra_dc *dc = sor->dc;
+
+	if (sor->sor_state != SOR_ATTACHED)
+		return;
+
+	tegra_dc_get(dc);
+
+	tegra_dc_sor_sleep(sor);
 
 	sor->sor_state = SOR_DETACHING;
 	tegra_dc_put(dc);

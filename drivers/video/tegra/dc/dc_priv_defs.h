@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Google, Inc.
  * Author: Erik Gilling <konkers@android.com>
  *
- * Copyright (c) 2010-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2010-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -135,6 +135,8 @@ struct tegra_dc_out_ops {
 	/* Configure controller to receive hotplug events */
 	int (*hotplug_init)(struct tegra_dc *dc);
 	int (*set_hdr)(struct tegra_dc *dc);
+	/* shutdown the serial interface */
+	void (*shutdown_interface)(struct tegra_dc *dc);
 };
 
 struct tegra_dc_shift_clk_div {
@@ -184,6 +186,7 @@ struct tegra_dc {
 	bool				enabled;
 	bool				suspended;
 	bool				blanked;
+	bool				shutdown;
 
 	/* Some of the setup code could reset display even if
 	 * DC is already by bootloader.  This one-time mark is

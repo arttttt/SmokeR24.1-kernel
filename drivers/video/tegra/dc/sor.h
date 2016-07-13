@@ -2,7 +2,7 @@
 /*
  * drivers/video/tegra/dc/sor.h
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -110,6 +110,7 @@ struct tegra_dc_sor_data {
 		SOR_ATTACHED = 1,
 		SOR_DETACHING,
 		SOR_DETACHED,
+		SOR_SLEEP,
 	} sor_state;
 
 	u8	clk_type;
@@ -137,6 +138,7 @@ void tegra_dc_sor_enable_dp(struct tegra_dc_sor_data *sor);
 void tegra_dc_sor_attach(struct tegra_dc_sor_data *sor);
 void tegra_dc_sor_detach(struct tegra_dc_sor_data *sor);
 void tegra_dc_sor_pre_detach(struct tegra_dc_sor_data *sor);
+void tegra_dc_sor_sleep(struct tegra_dc_sor_data *sor);
 void tegra_dc_sor_enable_lvds(struct tegra_dc_sor_data *sor,
 	bool balanced, bool conforming);
 void tegra_dc_sor_disable(struct tegra_dc_sor_data *sor, bool is_lvds);

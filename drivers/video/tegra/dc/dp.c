@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/dp.c
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -2723,6 +2723,15 @@ static bool tegra_dp_hpd_op_edid_read_prepare(void *drv_data)
 	return true;
 }
 
+static void tegra_dc_dp_sor_sleep(struct tegra_dc *dc)
+{
+	struct tegra_dc_dp_data *dp = tegra_dc_get_outdata(dc);
+
+	if (dp->sor->sor_state == SOR_ATTACHED)
+		tegra_dc_sor_sleep(dp->sor);
+}
+
+
 static struct tegra_hpd_ops hpd_ops = {
 	.edid_read = tegra_dp_hpd_op_edid_read,
 	.edid_ready = tegra_dp_hpd_op_edid_ready,
@@ -2745,4 +2754,5 @@ struct tegra_dc_out_ops tegra_dc_dp_ops = {
 	.suspend = tegra_dc_dp_suspend,
 	.resume = tegra_dc_dp_resume,
 	.hotplug_init = tegra_dc_dp_hotplug_init,
+	.shutdown_interface = tegra_dc_dp_sor_sleep,
 };
