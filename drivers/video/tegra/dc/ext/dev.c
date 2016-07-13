@@ -752,6 +752,8 @@ static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 			list_del(&data->timestamp_node);
 		mutex_unlock(&ext_win->queue_lock);
 
+		/* protect cur_handle from concurrent use */
+		mutex_lock(&ext_win->unpin_dma_lock);
 		if (skip_flip)
 			old_handle = flip_win->handle[TEGRA_DC_Y];
 		else
@@ -770,6 +772,13 @@ static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 
 				unpin_handles[nr_unpin++] = old_handle;
 			}
+			/* before unpin, zero out the cur_handle */
+			if (skip_flip)
+				memset(flip_win->handle, 0,
+						sizeof(flip_win->handle));
+			else
+				memset(ext_win->cur_handle, 0,
+						sizeof(ext_win->cur_handle));
 		}
 
 #ifdef CONFIG_TEGRA_CSC
@@ -789,6 +798,8 @@ static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 
 		if (!skip_flip)
 			tegra_dc_ext_set_windowattr(ext, win, &data->win[i]);
+
+		mutex_unlock(&ext_win->unpin_dma_lock);
 
 		if (flip_win->attr.swap_interval && !no_vsync)
 			wait_for_vblank = true;
@@ -1107,6 +1118,8 @@ static void tegra_dc_ext_unpin_window(struct tegra_dc_ext_win *win)
 	struct tegra_dc_dmabuf *unpin_handles[TEGRA_DC_NUM_PLANES];
 	int nr_unpin = 0;
 
+	/* protect cur_handle from concurrent use */
+	mutex_lock(&win->unpin_dma_lock);
 	if (win->cur_handle[TEGRA_DC_Y]) {
 		int j;
 		for (j = 0; j < TEGRA_DC_NUM_PLANES; j++) {
@@ -1115,6 +1128,7 @@ static void tegra_dc_ext_unpin_window(struct tegra_dc_ext_win *win)
 		}
 		memset(win->cur_handle, 0, sizeof(win->cur_handle));
 	}
+	mutex_unlock(&win->unpin_dma_lock);
 
 	tegra_dc_ext_unpin_handles(unpin_handles, nr_unpin);
 }
@@ -2550,6 +2564,7 @@ static int tegra_dc_ext_setup_windows(struct tegra_dc_ext *ext)
 
 		mutex_init(&win->lock);
 		mutex_init(&win->queue_lock);
+		mutex_init(&win->unpin_dma_lock);
 		INIT_LIST_HEAD(&win->timestamp_queue);
 	}
 

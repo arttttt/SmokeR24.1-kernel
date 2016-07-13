@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/ext/tegra_dc_ext_priv.h
  *
- * Copyright (c) 2011-2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2011-2016, NVIDIA CORPORATION, All rights reserved.
  *
  * Author: Robert Morell <rmorell@nvidia.com>
  *
@@ -68,6 +68,8 @@ struct tegra_dc_ext_win {
 	atomic_t		nr_pending_flips;
 
 	struct mutex		queue_lock;
+
+	struct mutex		unpin_dma_lock;
 
 	struct list_head	timestamp_queue;
 
