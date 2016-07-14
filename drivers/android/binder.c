@@ -1292,7 +1292,7 @@ static void binder_transaction_buffer_release(struct binder_proc *proc,
 			struct binder_ref *ref = binder_get_ref(proc, fp->handle);
 
 			if (ref == NULL) {
-				pr_err("transaction release %d bad handle %d\n",
+				pr_warn("transaction release %d bad handle %d\n",
 				 debug_id, fp->handle);
 				break;
 			}
