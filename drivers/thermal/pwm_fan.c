@@ -100,7 +100,9 @@ static void fan_update_target_pwm(struct fan_dev_data *fan_data, int val)
 				 * started on a different processor.
 				 * Therefore, flush workqueue to be
 				 * certain of canceling the work. */
+				mutex_unlock(&fan_data->fan_state_lock);
 				flush_workqueue(fan_data->workqueue);
+				mutex_lock(&fan_data->fan_state_lock);
 			}
 			queue_delayed_work(fan_data->workqueue,
 					&fan_data->fan_ramp_work,
