@@ -3083,7 +3083,8 @@ static void _tegra_dc_vsync_disable(struct tegra_dc *dc)
 void tegra_dc_vsync_disable(struct tegra_dc *dc)
 {
 	mutex_lock(&dc->lock);
-	_tegra_dc_vsync_disable(dc);
+	if (dc->enabled)
+		_tegra_dc_vsync_disable(dc);
 	mutex_unlock(&dc->lock);
 }
 
