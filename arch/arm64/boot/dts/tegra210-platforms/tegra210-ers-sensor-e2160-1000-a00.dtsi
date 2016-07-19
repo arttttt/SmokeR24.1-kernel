@@ -33,7 +33,6 @@
 			compatible = "ak,ak89xx";
 			reg = <0x0d>;
 			magnetic_field_matrix = [ff 00 00 00 ff 00 00 00 01];
- 			magnetic_field_delay_us_min = <16666>;
 		};
 
 		bmp280@77 {

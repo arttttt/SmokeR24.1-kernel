@@ -33,7 +33,6 @@
 			compatible = "ak,ak89xx";
 			reg = <0x0c>;
 			magnetic_field_matrix = [01 00 00 00 ff 00 00 00 ff];
-			magnetic_field_delay_us_min = <16666>;
 		};
 
 		jsa1127@39 {
