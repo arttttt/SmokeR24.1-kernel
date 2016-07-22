@@ -1,7 +1,7 @@
 /*
  * bq2419x-charger.c -- BQ24190/BQ24192/BQ24192i/BQ24193 Charger driver
  *
- * Copyright (c) 2013-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
  * Author: Syed Rafiuddin <srafiuddin@nvidia.com>
@@ -964,11 +964,27 @@ static int bq2419x_fault_clear_sts(struct bq2419x_chip *bq2419x,
 static int bq2419x_extcon_cable_update(struct bq2419x_chip *bq2419x,
 							unsigned int val)
 {
-	if ((val & BQ2419x_VBUS_PG_STAT) == BQ2419x_PG_VBUS_USB) {
+	bool cable_state = false;
+
+	if (bq2419x->battery_presense) {
+		/*using VBUS_STAT bits to detect VBUS in battery powered device */
+		if ((val & BQ2419x_VBUS_STAT) == BQ2419x_VBUS_USB)
+			cable_state = true;
+		else if ((val & BQ2419x_VBUS_STAT) == BQ2419x_VBUS_UNKNOWN)
+			cable_state = false;
+	} else {
+		/*using PG_STAT bit to detect VBUS in self powered device */
+		if ((val & BQ2419x_VBUS_PG_STAT) == BQ2419x_PG_VBUS_USB)
+			cable_state = true;
+		else if ((val & BQ2419x_VBUS_PG_STAT) == BQ2419x_VBUS_UNKNOWN)
+			cable_state = false;
+	}
+
+	if (cable_state) {
 		extcon_set_cable_state(&bq2419x->edev,
 						bq2419x_extcon_cable[0], true);
 		dev_info(bq2419x->dev, "USB is connected\n");
-	} else if ((val & BQ2419x_VBUS_PG_STAT) == BQ2419x_VBUS_UNKNOWN) {
+	} else {
 		extcon_set_cable_state(&bq2419x->edev,
 						bq2419x_extcon_cable[0], false);
 		dev_info(bq2419x->dev, "USB is disconnected\n");
