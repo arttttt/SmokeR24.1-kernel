@@ -87,6 +87,10 @@
 		default-drv-type = <1>;
 	};
 
+	sdhci@700b0200 {
+		nvidia,is-sdio;
+	};
+
 	ahub {
 		i2s@702d1100 {
 			pinctrl-names = "dap_active", "dap_inactive";

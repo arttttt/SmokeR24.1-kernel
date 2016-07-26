@@ -53,6 +53,7 @@ in HS400 mode.
 - nvidia,disable-auto-cal: This flag when set will disable auto calibration
 - nvidia,en-io-trim-volt: Enable IO trimmer voltage
 - nvidia,is-emmc: Enable this flag for eMMC devices
+- nvidia,is-sdio: Enable this flag for SDIO devices
 - nvidia,sd-device: Enable this flag for SD devices
 - nvidia,enable-ext-loopback: flag when set, enables external loopback
 - nvidia,limit-vddio-max-volt: enable this flag for sdmmc1/3 if it has Vddio 3.3v support.
