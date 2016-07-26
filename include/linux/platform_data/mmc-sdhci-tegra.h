@@ -2,7 +2,7 @@
  * Copyright (C) 2009 Palm, Inc.
  * Author: Yvonne Yip <y@palm.com>
  *
- * Copyright (c) 2013-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -94,6 +94,7 @@ struct tegra_sdhci_platform_data {
 	unsigned int auto_cal_step;
 	bool en_io_trim_volt;
 	bool is_emmc;
+	bool is_sdio;
 	bool limit_vddio_max_volt;
 	bool enb_ext_loopback;
 	bool enable_hs533_mode;

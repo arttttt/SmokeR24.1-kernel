@@ -53,6 +53,7 @@ struct data_stat {
 #endif
 
 struct sdhci_host {
+	bool is_sdio;
 	/* Data set by hardware interface driver */
 	const char *hw_name;	/* Hardware bus name */
 #ifdef CONFIG_DEBUG_FS

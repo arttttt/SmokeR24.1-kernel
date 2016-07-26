@@ -64,6 +64,10 @@
 #define SDHCI_TEGRA_DBG(stuff...)	do {} while (0)
 #endif
 
+#define SDIO_LOW_FREQ	500000 /* value above 400K chosen */
+#define SDIO_FIXED_FREQ	204000000 /* fixed SDIO clock of 204MHz desired */
+#define PLLP_ACTUAL_CLK_163_2_MHZ	163200000 /* SDIO 163.2MHz */
+
 #define SDHCI_VNDR_CLK_CTRL				0x100
 #define SDHCI_VNDR_CLK_CTRL_SDMMC_CLK			0x1
 #define SDHCI_VNDR_CLK_CTRL_PADPIPE_CLKEN_OVERRIDE	0x8
@@ -1801,6 +1805,12 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 	tegra_sdhci_clock_set_parent(sdhci, clk_rate);
 	clk_set_rate(pltfm_host->clk, clk_rate);
 	sdhci->max_clk = clk_get_rate(pltfm_host->clk);
+	/* log SDIO frequency if 163.2MHz */
+	if (sdhci->is_sdio &&
+		(sdhci->max_clk == PLLP_ACTUAL_CLK_163_2_MHZ))
+		printk_once("%s %s line=%d: clk rate requested=%d, actual=%d\n",
+			mmc_hostname(sdhci->mmc), __func__, __LINE__,
+			clk_rate, sdhci->max_clk);
 
 #ifdef CONFIG_MMC_FREQ_SCALING
 	/* Set the tap delay if tuning is done and dfs is enabled */
@@ -1855,6 +1865,9 @@ static void tegra_sdhci_set_clock(struct sdhci_host *sdhci, unsigned int clock)
 				vendor_trim_clear_sel_vreg(sdhci, true);
 			}
 		}
+		/* fix SDIO clock at 204MHz based on DT */
+		if (sdhci->is_sdio && (clock > SDIO_LOW_FREQ))
+			clock = SDIO_FIXED_FREQ;
 		tegra_sdhci_set_clk_rate(sdhci, clock);
 
 		if (tegra_host->emc_clk && (!tegra_host->is_sdmmc_emc_clk_on)) {
@@ -5446,6 +5459,7 @@ static struct tegra_sdhci_platform_data *sdhci_tegra_dt_parse_pdata(
 	plat->en_io_trim_volt = of_property_read_bool(np,
 			"nvidia,en-io-trim-volt");
 	plat->is_emmc = of_property_read_bool(np, "nvidia,is-emmc");
+	plat->is_sdio = of_property_read_bool(np, "nvidia,is-sdio");
 	plat->is_sd_device = of_property_read_bool(np, "nvidia,sd-device");
 	plat->en_strobe =
 		of_property_read_bool(np, "nvidia,enable-strobe-mode");
@@ -5743,6 +5757,8 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 			mmc_hostname(host->mmc));
 		plat->rtpm_type = RTPM_TYPE_DELAY_CG;
 	}
+	/* update sdio member in sdhci from plat */
+	host->is_sdio = plat->is_sdio;
 
 	/* sdio delayed clock gate quirk in sdhci_host used */
 	if (IS_RTPM_DELAY_CG(plat->rtpm_type))

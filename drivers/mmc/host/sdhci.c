@@ -4401,6 +4401,9 @@ out_dma_alloc:
 			mmc->f_min = host->max_clk / SDHCI_MAX_DIV_SPEC_300;
 	} else
 		mmc->f_min = host->max_clk / SDHCI_MAX_DIV_SPEC_200;
+	if (host->is_sdio)
+		printk_once("%s f_min=%d f_max=%d\n", mmc_hostname(mmc),
+			mmc->f_min, mmc->f_max);
 
 	host->timeout_clk =
 		(caps[0] & SDHCI_TIMEOUT_CLK_MASK) >> SDHCI_TIMEOUT_CLK_SHIFT;

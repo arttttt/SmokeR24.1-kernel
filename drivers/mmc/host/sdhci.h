@@ -21,6 +21,8 @@
 
 #include <linux/mmc/sdhci.h>
 
+#define SDIO_HOSTNAME "mmc1"
+
 /*
  * Controller registers
  */
