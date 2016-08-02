@@ -1581,14 +1581,28 @@ static int set_dmic_clk(struct snd_soc_dapm_widget *w,
 	struct snd_soc_codec *codec = w->codec;
 	struct rt5659_priv *rt5659 = snd_soc_codec_get_drvdata(codec);
 	int div[] = { 2, 3, 4, 6, 8, 12 }, idx =
-		-EINVAL, i, rate, red, bound, temp;
+		-EINVAL, i, rate, red, bound, temp, osr_rate;
 
 	pr_debug("%s\n", __FUNCTION__);
 
+	switch (snd_soc_read(codec, RT5659_ADDA_CLK_1) & RT5659_ADC_OSR_MASK) {
+	case RT5659_ADC_OSR_64:
+		osr_rate = 2;
+		break;
+
+	case RT5659_ADC_OSR_32:
+		osr_rate = 4;
+		break;
+
+	default:
+		osr_rate = 1;
+		break;
+	}
+
 	rate = rt5659->lrck[RT5659_AIF1] << 8;
-	red = 3000000 * 12;
+	red = 3000000 * 12 * osr_rate;
 	for (i = 0; i < ARRAY_SIZE(div); i++) {
-		bound = div[i] * 3000000;
+		bound = div[i] * 3000000 * osr_rate;
 		if (rate > bound)
 			continue;
 		temp = bound - rate;
@@ -3356,15 +3370,18 @@ static int rt5659_hw_params(struct snd_pcm_substream *substream,
 	switch (rt5659->lrck[dai->id]) {
 	case 192000:
 		snd_soc_update_bits(codec, RT5659_ADDA_CLK_1,
-			RT5659_DAC_OSR_MASK, RT5659_DAC_OSR_32);
+			RT5659_DAC_OSR_MASK | RT5659_ADC_OSR_MASK,
+			RT5659_DAC_OSR_32 | RT5659_ADC_OSR_32);
 		break;
 	case 96000:
 		snd_soc_update_bits(codec, RT5659_ADDA_CLK_1,
-			RT5659_DAC_OSR_MASK, RT5659_DAC_OSR_64);
+			RT5659_DAC_OSR_MASK | RT5659_ADC_OSR_MASK,
+			RT5659_DAC_OSR_64 | RT5659_ADC_OSR_64);
 		break;
 	default:
 		snd_soc_update_bits(codec, RT5659_ADDA_CLK_1,
-			RT5659_DAC_OSR_MASK, RT5659_DAC_OSR_128);
+			RT5659_DAC_OSR_MASK | RT5659_ADC_OSR_MASK,
+			RT5659_DAC_OSR_128 | RT5659_ADC_OSR_128);
 		break;
 	}
 
