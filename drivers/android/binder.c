@@ -1670,6 +1670,7 @@ static void binder_transaction(struct binder_proc *proc,
 		case BINDER_TYPE_WEAK_HANDLE: {
 			struct binder_ref *ref = binder_get_ref(proc, fp->handle,
 						fp->type == BINDER_TYPE_HANDLE);
+
 			if (ref == NULL) {
 				binder_user_error("%d:%d got transaction with invalid handle, %d\n",
 						proc->pid,
