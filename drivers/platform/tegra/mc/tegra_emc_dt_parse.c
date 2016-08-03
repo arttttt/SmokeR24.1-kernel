@@ -40,8 +40,11 @@ static struct device_node *tegra_emc_ramcode_devnode(
 	for_each_child_of_node(np, iter) {
 		if (of_property_read_u32(iter, "nvidia,ram-code", &reg))
 			continue;
-		if (reg == tegra_get_bct_strapping())
+		if (reg == tegra_get_bct_strapping()) {
+			pr_info("tegra: emc: found emc tables with ram code value: %u.\n",
+					reg);
 			return of_node_get(iter);
+		}
 	}
 
 	return NULL;
@@ -330,6 +333,7 @@ void *tegra_emc_dt_parse_pdata(struct platform_device *pdev)
 	}
 
 	if (of_find_property(np, "nvidia,use-ram-code", NULL)) {
+		pr_info("tegra: emc: use ram code to select emc table.\n");
 		tnp = tegra_emc_ramcode_devnode(np);
 
 		if (!tnp) {
