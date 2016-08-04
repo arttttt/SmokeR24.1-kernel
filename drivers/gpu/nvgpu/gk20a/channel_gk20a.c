@@ -2503,7 +2503,7 @@ long gk20a_channel_ioctl(struct file *filp,
 {
 	struct channel_gk20a *ch = filp->private_data;
 	struct platform_device *dev = ch->g->dev;
-	u8 buf[NVGPU_IOCTL_CHANNEL_MAX_ARG_SIZE];
+	u8 buf[NVGPU_IOCTL_CHANNEL_MAX_ARG_SIZE] = {0};
 	int err = 0;
 
 	gk20a_dbg_fn("start %d", _IOC_NR(cmd));
