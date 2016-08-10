@@ -2745,7 +2745,7 @@ int proc_cpuset_show(struct seq_file *m, struct pid_namespace *ns,
 out_free:
 	kfree(buf);
 out:
-	return retval;
+	return 0;
 }
 #endif /* CONFIG_PROC_PID_CPUSET */
 
