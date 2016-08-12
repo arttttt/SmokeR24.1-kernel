@@ -354,6 +354,8 @@
 
 /* SATA Port Registers*/
 #define PXSSTS						0X28
+#define T_AHCI_PORT_PXSSTS_IPM_MASK			(0xF00)
+#define T_AHCI_PORT_PXSSTS_IPM_SHIFT			(8)
 
 #define TEGRA_AHCI_READ_LOG_EXT_NOENTRY			0x80
 
@@ -370,11 +372,11 @@ enum {
 	AHCI_PCI_BAR = 5,
 };
 
-enum port_runtime_status {
-	PORT_RUNTIME_ACTIVE = 1,
-	PORT_RUNTIME_PARTIAL = 2,
-	PORT_RUNTIME_SLUMBER = 6,
-	PORT_RUNTIME_DEVSLP = 8,
+enum tegra_ahci_port_runtime_status {
+	TEGRA_AHCI_PORT_RUNTIME_ACTIVE	= 1,
+	TEGRA_AHCI_PORT_RUNTIME_PARTIAL	= 2,
+	TEGRA_AHCI_PORT_RUNTIME_SLUMBER	= 6,
+	TEGRA_AHCI_PORT_RUNTIME_DEVSLP	= 8,
 };
 
 enum port_idle_status {
@@ -446,6 +448,7 @@ struct tegra_ahci_host_priv {
 	void __iomem		*base_list[6];
 	struct sata_pad_cntrl	pad_val;
 	bool 			dtContainsPadval;
+	bool			skip_rtpm;
 	u8 fifo_depth;
 };
 
@@ -949,8 +952,6 @@ static void tegra_first_level_clk_gate(void)
 	g_tegra_hpriv->clk_state = CLK_OFF;
 }
 
-#if defined(CONFIG_TEGRA_SATA_IDLE_POWERGATE) && \
-	!defined(CONFIG_TEGRA_AHCI_CONTEXT_RESTORE)
 static int tegra_first_level_clk_ungate(void)
 {
 	int ret = 0;
@@ -996,7 +997,6 @@ clk_sata_enb_error:
 	pr_err("%s: unable to enable %s clock\n", __func__, err_clk_name);
 	return -ENODEV;
 }
-#endif
 
 static int tegra_request_pexp_gpio(struct tegra_ahci_host_priv *tegra_hpriv)
 {
@@ -1895,13 +1895,25 @@ static int tegra_ahci_resume(struct platform_device *pdev)
 static int tegra_ahci_port_suspend(struct ata_port *ap, pm_message_t mesg)
 {
 	struct ata_host *host = ap->host;
+	struct ahci_host_priv *hpriv = ap->host->private_data;
 	struct tegra_ahci_host_priv *tegra_hpriv = host->private_data;
 	struct ata_link *link;
 	struct ata_device *dev;
 	int ret = 0;
 	u32 port_status = 0;
 	int enter_slumber_timeout = 50;
+	enum tegra_ahci_port_runtime_status lpm_state;
 	int i;
+
+	lpm_state = TEGRA_AHCI_PORT_RUNTIME_ACTIVE;
+	tegra_hpriv->skip_rtpm = false;
+
+	if (!ata_dev_enabled(ap->link.device))
+		goto skip;
+
+	port_status = tegra_ahci_get_port_status();
+	port_status = (port_status & T_AHCI_PORT_PXSSTS_IPM_MASK) >>
+					T_AHCI_PORT_PXSSTS_IPM_SHIFT;
 
 	ata_for_each_link(link, ap, PMP_FIRST) {
 		if (link->flags & ATA_LFLAG_NO_LPM) {
@@ -1913,24 +1925,39 @@ static int tegra_ahci_port_suspend(struct ata_port *ap, pm_message_t mesg)
 			bool dipm = ata_id_has_dipm(dev->id) &&
 				(!(link->ap->flags & ATA_FLAG_NO_DIPM));
 
+			if (ap->target_lpm_policy == ATA_LPM_MIN_POWER) {
+				if ((hpriv->cap2 & HOST_CAP2_SDS) &&
+				(hpriv->cap2 & HOST_CAP2_SADM) &&
+				(link->device->flags & ATA_DFLAG_DEVSLP))
+					lpm_state =
+						TEGRA_AHCI_PORT_RUNTIME_DEVSLP;
+				else
+					lpm_state =
+						TEGRA_AHCI_PORT_RUNTIME_SLUMBER;
+			} else if (ap->target_lpm_policy == ATA_LPM_MED_POWER) {
+				lpm_state = TEGRA_AHCI_PORT_RUNTIME_PARTIAL;
+			}
+
+
 			if (hipm || dipm) {
 				for (i = 0; i < enter_slumber_timeout; i++) {
 					port_status =
 						tegra_ahci_get_port_status();
 					port_status =
 						(port_status & 0xF00) >> 8;
-					if (port_status < PORT_RUNTIME_SLUMBER)
+					if (port_status < lpm_state)
 						mdelay(10);
 					else
 						break;
 				}
 
-				if (port_status < PORT_RUNTIME_SLUMBER) {
+				if (port_status < lpm_state) {
 					ata_link_err(link,
 						"Link didn't enter LPM\n");
-					return -EBUSY;
-				} else {
-					port_status = 0;
+					if (ap->pm_mesg.event & PM_EVENT_AUTO)
+						ret = -EBUSY;
+				} else if (port_status !=
+						TEGRA_AHCI_PORT_RUNTIME_ACTIVE) {
 					ata_link_info(link,
 							"Link entered LPM\n");
 				}
@@ -1941,7 +1968,17 @@ static int tegra_ahci_port_suspend(struct ata_port *ap, pm_message_t mesg)
 		}
 	}
 
-	ret = ahci_ops.port_suspend(ap, mesg);
+	if (lpm_state == TEGRA_AHCI_PORT_RUNTIME_ACTIVE ||
+		port_status == TEGRA_AHCI_PORT_RUNTIME_ACTIVE) {
+		if (ap->pm_mesg.event & PM_EVENT_AUTO) {
+			tegra_hpriv->skip_rtpm = true;
+			return 0;
+		}
+	}
+skip:
+	if (!ret && !(ap->pflags & ATA_PFLAG_SUSPENDED)) {
+		ret = ahci_ops.port_suspend(ap, mesg);
+	}
 
 	if (ret == 0) {
 		pm_runtime_mark_last_busy(&tegra_hpriv->pdev->dev);
@@ -1949,7 +1986,6 @@ static int tegra_ahci_port_suspend(struct ata_port *ap, pm_message_t mesg)
 	}
 
 	return ret;
-
 }
 
 static int tegra_ahci_port_resume(struct ata_port *ap)
@@ -1960,6 +1996,17 @@ static int tegra_ahci_port_resume(struct ata_port *ap)
 	struct scsi_device *sdev = NULL;
 
 	int ret = 0;
+
+	if (tegra_hpriv->skip_rtpm) {
+		tegra_hpriv->skip_rtpm = false;
+		if (ap->pm_mesg.event & PM_EVENT_AUTO) {
+			ata_for_each_link(link, ap, HOST_FIRST) {
+				link->eh_info.action &= ~ATA_EH_RESET;
+			}
+			ata_eh_thaw_port(ap);
+			return 0;
+		}
+	}
 
 	ret = pm_runtime_get_sync(&tegra_hpriv->pdev->dev);
 	if (ret < 0) {
@@ -2647,7 +2694,8 @@ static bool tegra_ahci_power_gate(struct ata_host *host)
 #else
 	partition_id = TEGRA_POWERGATE_SATA;
 #endif
-	status = tegra_powergate_partition_with_clk_off(partition_id);
+	tegra_first_level_clk_gate();
+	status = tegra_powergate_partition(partition_id);
 	if (status) {
 		dev_err(host->dev, "** failed to turn-off SATA (0x%x) **\n",
 				   status);
@@ -2679,7 +2727,11 @@ static bool tegra_ahci_power_un_gate(struct ata_host *host)
 #else
 	powergate_id = TEGRA_POWERGATE_SATA;
 #endif
-	status = tegra_unpowergate_partition_with_clk_on(powergate_id);
+	if (tegra_first_level_clk_ungate() < 0) {
+		dev_err(host->dev, "%s: clk ungate failed\n", __func__);
+		return false;
+	}
+	status = tegra_unpowergate_partition(powergate_id);
 	if (status) {
 		dev_err(host->dev, "** failed to turn-on SATA (0x%x) **\n",
 				   status);
