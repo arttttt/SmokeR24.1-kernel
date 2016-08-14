@@ -3939,6 +3939,35 @@ static int tegra_xhci_request_irq(struct platform_device *pdev,
 	return 0;
 }
 
+static void get_rootport_name(struct xhci_hcd *xhci, int port_id, char *name,
+				int size)
+{
+	struct usb_hcd *hcd;
+	int i, num;
+	__le32 __iomem **ports;
+	__le32 __iomem *addr;
+	u32 portsc;
+
+	portsc = xhci_read_portsc(xhci, port_id);
+	if (DEV_SUPERSPEED(portsc)) {
+		hcd = xhci->shared_hcd;
+		ports = xhci->usb3_ports;
+		num = xhci->num_usb3_ports;
+	} else {
+		hcd = xhci->main_hcd;
+		ports = xhci->usb2_ports;
+		num = xhci->num_usb2_ports;
+	}
+
+	addr = &xhci->op_regs->port_status_base + NUM_PORT_REGS * port_id;
+	for (i = 0; i < num; i++) {
+		if (ports[i] == addr)
+			break;
+	}
+
+	snprintf(name, size, "%d-%d", hcd->self.busnum, i + 1);
+}
+
 #ifdef CONFIG_PM
 static int tegra_xhci_bus_suspend(struct usb_hcd *hcd)
 {
@@ -3950,7 +3979,6 @@ static int tegra_xhci_bus_suspend(struct usb_hcd *hcd)
 	int num_ports = HCS_MAX_PORTS(xhci->hcs_params1);
 	u32 usbcmd;
 	int i;
-	u32 portsc;
 
 	mutex_lock(&tegra->sync_lock);
 
@@ -3986,17 +4014,52 @@ static int tegra_xhci_bus_suspend(struct usb_hcd *hcd)
 	usbcmd = xhci_readl(xhci, &xhci->op_regs->command);
 	usbcmd &= ~CMD_EIE;
 	xhci_writel(xhci, usbcmd, &xhci->op_regs->command);
+
 	for (i = 0; i < num_ports; i++) {
+		struct device *dev;
+		bool is_busy = true;
+		char devname[16];
+		u32 portsc;
+
 		portsc = xhci_read_portsc(xhci, i);
-		if ((portsc & PORT_PE) && (portsc & PORT_PLS_MASK) != XDEV_U3) {
+
+		if (!(portsc & PORT_PE))
+			continue;
+
+		if ((portsc & PORT_PLS_MASK) == XDEV_U3)
+			continue;
+
+		dev = &tegra->pdev->dev;
+		get_rootport_name(xhci, i, devname, sizeof(devname));
+#if defined(CONFIG_ARCH_TEGRA_21x_SOC)
+		if (DEV_SUPERSPEED(portsc)) {
+			unsigned long end = jiffies + msecs_to_jiffies(200);
+			while (time_before(jiffies, end)) {
+				if ((portsc & PORT_PLS_MASK) == XDEV_RESUME)
+					break;
+				spin_unlock_irqrestore(&xhci->lock, flags);
+				msleep(20);
+				spin_lock_irqsave(&xhci->lock, flags);
+				portsc = xhci_read_portsc(xhci, i);
+				if ((portsc & PORT_PLS_MASK) == XDEV_U3) {
+					dev_info(dev, "%s is suspended\n",
+						devname);
+					is_busy = false;
+					break;
+				}
+			}
+		}
+#endif
+		if (is_busy) {
 			usbcmd = xhci_readl(xhci, &xhci->op_regs->command);
 			usbcmd |= CMD_EIE;
 			xhci_writel(xhci, usbcmd, &xhci->op_regs->command);
 
 			spin_unlock_irqrestore(&xhci->lock, flags);
 
-			xhci_info(xhci, "%s: port not in suspended state\n",
-				__func__);
+			dev_info(dev, "%s is not suspended: %08x\n", devname,
+				portsc);
+
 			err = -EBUSY;
 			goto xhci_bus_suspend_failed;
 		}
