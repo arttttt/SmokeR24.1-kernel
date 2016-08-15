@@ -3021,7 +3021,7 @@ static ssize_t mtf_test_write(struct file *file, const char __user *buf,
 	char *data_buf = NULL;
 	long testcase;
 
-	data_buf = kzalloc(count, GFP_KERNEL);
+	data_buf = kzalloc(count+1, GFP_KERNEL);
 	if (data_buf == NULL)
 		return -ENOMEM;
 
@@ -3029,7 +3029,6 @@ static ssize_t mtf_test_write(struct file *file, const char __user *buf,
 		kfree(data_buf);
 		return -EFAULT;
 	}
-	data_buf[strlen(data_buf) - 1] = '\0';
 	if (mmc_test_extract_parameters(data_buf)) {
 		mmc_test_usage(sf);
 		kfree(data_buf);
