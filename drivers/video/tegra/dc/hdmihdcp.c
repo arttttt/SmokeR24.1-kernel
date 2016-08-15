@@ -50,6 +50,9 @@
 
 static DECLARE_WAIT_QUEUE_HEAD(wq_worker);
 
+/* Print no more than 5 messages every minute */
+static DEFINE_RATELIMIT_STATE(ratelimit, 60*HZ, 5);
+
 /* for 0x40 Bcaps */
 #define BCAPS_REPEATER (1 << 6)
 #define BCAPS_READY (1 << 5)
@@ -103,7 +106,8 @@ static DECLARE_WAIT_QUEUE_HEAD(wq_worker);
 #define nvhdcp_debug(...)	\
 		pr_debug("nvhdcp: " __VA_ARGS__)
 #define nvhdcp_err(...)	\
-		pr_err("nvhdcp: Error: " __VA_ARGS__)
+		if (__ratelimit(&ratelimit)) \
+			pr_err("nvhdcp: Error: " __VA_ARGS__)
 #define nvhdcp_info(...)	\
 		pr_info("nvhdcp: " __VA_ARGS__)
 

@@ -245,6 +245,8 @@ struct tegra_i2c_dev {
 	struct notifier_block pm_nb;
 	struct tegra_prod_list *prod_list;
 	bool is_multimaster_mode;
+	bool print_ratelimit_enabled;
+	struct ratelimit_state print_count_per_min;
 };
 
 static void dvc_writel(struct tegra_i2c_dev *i2c_dev, u32 val, unsigned long reg)
@@ -1266,6 +1268,10 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 		return 0;
 
 	/* Prints errors */
+	if (i2c_dev->print_ratelimit_enabled)
+		if (!__ratelimit(&i2c_dev->print_count_per_min))
+			goto skip_error_print;
+
 	if (i2c_dev->msg_err & I2C_ERR_UNKNOWN_INTERRUPT)
 		dev_warn(i2c_dev->dev, "unknown interrupt Add 0x%02x\n",
 				i2c_dev->msg_add);
@@ -1282,6 +1288,7 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 		dev_warn(i2c_dev->dev, "unexpected status to add 0x%x\n",
 				i2c_dev->msg_add);
 
+skip_error_print:
 	if ((i2c_dev->chipdata->timeout_irq_occurs_before_bus_inactive) &&
 		(i2c_dev->msg_err == I2C_ERR_NO_ACK)) {
 		/*
@@ -1485,6 +1492,10 @@ static struct tegra_i2c_platform_data *parse_i2c_tegra_dt(
 
 	if (!of_property_read_u32(np, "clock-frequency", &prop))
 		pdata->bus_clk_rate = prop;
+
+	if (!of_property_read_u32_array(np, "print-rate-limit",
+					pdata->print_rate, 2))
+		pdata->print_ratelimit_enabled = true;
 
 	pdata->is_clkon_always = of_property_read_bool(np,
 					"nvidia,clock-always-on");
@@ -1792,6 +1803,12 @@ skip_pinctrl:
 	i2c_dev->hs_master_code = pdata->hs_master_code;
 	i2c_dev->bit_banging_xfer_after_shutdown =
 			pdata->bit_banging_xfer_after_shutdown;
+	if (pdata->print_ratelimit_enabled) {
+		i2c_dev->print_ratelimit_enabled =
+			pdata->print_ratelimit_enabled;
+		ratelimit_state_init(&i2c_dev->print_count_per_min, pdata->print_rate[0],
+					pdata->print_rate[1]);
+	}
 	init_completion(&i2c_dev->msg_complete);
 
 	spin_lock_init(&i2c_dev->fifo_lock);

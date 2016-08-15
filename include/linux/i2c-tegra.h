@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Google, Inc.
  * Author: Colin Cross <ccross@android.com>
  *
- * Copyright (C) 2010-2011 NVIDIA Corporation
+ * Copyright (C) 2010-2011, 2016 NVIDIA Corporation
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -35,6 +35,8 @@ struct tegra_i2c_platform_data {
 	bool bit_banging_xfer_after_shutdown;
 	bool is_interruptable_xfer;
 	bool is_multimaster_mode;
+	bool print_ratelimit_enabled;
+	u32 print_rate[2];
 };
 
 struct tegra_i2c_slave_platform_data {
