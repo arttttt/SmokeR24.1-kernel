@@ -1099,6 +1099,16 @@ static inline struct cg_proto *parent_cg_proto(struct proto *proto,
 }
 #endif
 
+static inline int sk_under_cgroup_hierarchy(struct sock *sk,
+                                           struct cgroup *ancestor)
+{
+#ifdef CONFIG_SOCK_CGROUP_DATA
+       return cgroup_is_descendant(sock_cgroup_ptr(&sk->sk_cgrp_data),
+                                   ancestor);
+#else
+       return -ENOTSUPP;
+#endif
+}
 
 static inline bool sk_has_memory_pressure(const struct sock *sk)
 {
