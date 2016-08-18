@@ -1,7 +1,7 @@
 /*
  * drivers/misc/tegra-profiler/comm.c
  *
- * Copyright (c) 2013-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -562,6 +562,7 @@ device_ioctl(struct file *file,
 		break;
 
 	case IOCTL_GET_CAP:
+		memset(&cap, 0, sizeof(cap));
 		comm_ctx.control->get_capabilities(&cap);
 		if (copy_to_user((void __user *)ioctl_param, &cap,
 				 sizeof(struct quadd_comm_cap))) {
@@ -600,6 +601,8 @@ device_ioctl(struct file *file,
 		break;
 
 	case IOCTL_GET_VERSION:
+		memset(&versions, 0, sizeof(versions));
+
 		strcpy((char *)versions.branch, QUADD_MODULE_BRANCH);
 		strcpy((char *)versions.version, QUADD_MODULE_VERSION);
 
