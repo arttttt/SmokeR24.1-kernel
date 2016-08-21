@@ -1,7 +1,7 @@
 /* The industrial I/O core
  *
  * Copyright (c) 2008 Jonathan Cameron
- * Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -82,6 +82,14 @@ const char * const iio_chan_type_name_spec[] = {
 	[IIO_GESTURE_WAKE] = "gesturewake",
 	[IIO_GESTURE_GLANCE] = "gestureglance",
 	[IIO_GESTURE_PICKUP] = "gesturepickup",
+	[IIO_GESTURE_WRIST_TILT] = "gesturewristtilt",
+	[IIO_DEVICE_ORIENTATION] = "dev_orientation",
+	[IIO_POSE_6DOF] = "pose6dof",
+	[IIO_STATIONARY_DETECT] = "stationary_detect",
+	[IIO_MOTION_DETECT] = "motion_detect",
+	[IIO_HEART_BEAT] = "heartbeat",
+	[IIO_DYNAMIC_SENSOR_META] = "dsm",
+	[IIO_ADDITIONAL_INFO] = "info",
 	[IIO_GENERIC] = "generic_sensor",
 };
 EXPORT_SYMBOL(iio_chan_type_name_spec);
@@ -90,6 +98,7 @@ static const char * const iio_modifier_names[] = {
 	[IIO_MOD_X] = "x",
 	[IIO_MOD_Y] = "y",
 	[IIO_MOD_Z] = "z",
+	[IIO_MOD_W] = "w",
 	[IIO_MOD_COS] = "cos",
 	[IIO_MOD_ROOT_SUM_SQUARED_X_Y] = "sqrt(x^2+y^2)",
 	[IIO_MOD_SUM_SQUARED_X_Y_Z] = "x^2+y^2+z^2",
@@ -1154,9 +1163,13 @@ EXPORT_SYMBOL(iio_device_register);
 void iio_device_unregister(struct iio_dev *indio_dev)
 {
 	mutex_lock(&indio_dev->info_exist_lock);
+	if (indio_dev->multi_link && indio_dev->link_name) {
+		sysfs_delete_link(&indio_dev->dev.parent->kobj,
+				  &indio_dev->dev.kobj, indio_dev->link_name);
+		kfree(indio_dev->link_name);
+	}
 	indio_dev->info = NULL;
 	mutex_unlock(&indio_dev->info_exist_lock);
-	kfree(indio_dev->link_name);
 	device_del(&indio_dev->dev);
 }
 EXPORT_SYMBOL(iio_device_unregister);
