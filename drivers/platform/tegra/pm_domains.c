@@ -359,7 +359,9 @@ static int tegra_ape_power_on(struct generic_pm_domain *genpd)
 	 */
 	clk_disable_unprepare(ape_pd->clk[ADSP_CLK]);
 
+#if defined(CONFIG_TEGRA_APE_AGIC) && defined(CONFIG_CPU_PM)
 	tegra_agic_restore_registers();
+#endif
 
 	list_for_each_entry(pdd, &genpd->dev_list, list_node)
 		TEGRA_PD_DEV_CALLBACK(resume, pdd->dev);
@@ -387,7 +389,9 @@ static int tegra_ape_power_off(struct generic_pm_domain *genpd)
 	list_for_each_entry(pdd, &genpd->dev_list, list_node)
 		TEGRA_PD_DEV_CALLBACK(suspend, pdd->dev);
 
+#if defined(CONFIG_TEGRA_APE_AGIC) && defined(CONFIG_CPU_PM)
 	tegra_agic_save_registers();
+#endif
 
 	ape_pd = to_tegra_pd(genpd);
 
