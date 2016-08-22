@@ -1932,7 +1932,7 @@ static void tegra_dc_hdmi_setup_avi_infoframe(struct tegra_dc *dc, bool dvi)
 	memset(&avi, 0x0, sizeof(avi));
 
 	/* Indicate active format info is valid. */
-	avi.a = 1;
+	avi.a = HDMI_AVI_ACTIVE_FORMAT_INVALID;
 	avi.r = HDMI_AVI_R_SAME;
 
 #if !defined(CONFIG_TEGRA_DC_BLENDER_GEN2)

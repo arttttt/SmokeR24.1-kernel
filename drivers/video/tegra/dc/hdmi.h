@@ -105,6 +105,9 @@ struct hdmi_avi_infoframe {
 #define HDMI_AVI_R_16_9_CENTER		0xa
 #define HDMI_AVI_R_14_9_CENTER		0xb
 
+#define HDMI_AVI_ACTIVE_FORMAT_INVALID	0x0
+#define HDMI_AVI_ACTIVE_FORMAT_VALID	0x1
+
 /* all fields little endian */
 struct hdmi_audio_infoframe {
 	/* PB0 */
