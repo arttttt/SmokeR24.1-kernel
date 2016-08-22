@@ -733,6 +733,9 @@ struct sdhci_tegra {
 	ktime_t timestamp;
 };
 
+/* Module Params declarations */
+static unsigned int en_boot_part_access;
+
 static unsigned int boot_volt_req_refcount;
 static DEFINE_MUTEX(tuning_mutex);
 
@@ -6066,7 +6069,8 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 	host->mmc->caps |= MMC_CAP_WAIT_WHILE_BUSY;
 
 	/* disable access to boot partitions */
-	host->mmc->caps2 |= MMC_CAP2_BOOTPART_NOACC;
+	if (!en_boot_part_access)
+		host->mmc->caps2 |= MMC_CAP2_BOOTPART_NOACC;
 
 	if (soc_data->nvquirks & NVQUIRK_ENABLE_HS200)
 		host->mmc->caps2 |= MMC_CAP2_HS200;
@@ -6271,7 +6275,10 @@ static struct platform_driver sdhci_tegra_driver = {
 };
 
 module_platform_driver(sdhci_tegra_driver);
+module_param(en_boot_part_access, uint, 0444);
 
 MODULE_DESCRIPTION("SDHCI driver for Tegra");
 MODULE_AUTHOR("Google, Inc.");
 MODULE_LICENSE("GPL v2");
+
+MODULE_PARM_DESC(en_boot_part_access, "Allow boot partitions access on device.");
