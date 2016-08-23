@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * this program is free software; you can redistribute it and/or modify
  * it under the terms of the gnu general public license as published by
@@ -24,11 +24,11 @@
 
 /* private_key4 */
 #define DEVKEY_START_OFFSET			0x2A
-#define DEVKEY_START_BIT			12
+#define DEVKEY_START_BIT			20
 
 /* arm_debug_dis */
 #define JTAG_START_OFFSET		0x0
-#define JTAG_START_BIT			3
+#define JTAG_START_BIT			12
 
 /* security_mode */
 #define ODM_PROD_START_OFFSET		0x0
@@ -39,8 +39,8 @@
 #define SB_DEVCFG_START_BIT		20
 
 /* reserved_sw[2:0] */
-#define SB_DEVSEL_START_OFFSET		0x2C
-#define SB_DEVSEL_START_BIT		28
+#define SB_DEVSEL_START_OFFSET		0x2E
+#define SB_DEVSEL_START_BIT		4
 
 /* private_key0 -> private_key3 (SBK) */
 #define SBK_START_OFFSET	0x22
@@ -48,8 +48,8 @@
 
 /* reserved_sw[7:4] */
 #define SW_RESERVED_START_OFFSET	0x2E
-#define SW_RESERVED_START_BIT		4
-#define SW_RESERVED_SIZE_BITS		12
+#define SW_RESERVED_START_BIT		8
+#define SW_RESERVED_SIZE_BITS		8
 
 /* reserved_sw[3] */
 #define IGNORE_DEVSEL_START_OFFSET	0x2E
