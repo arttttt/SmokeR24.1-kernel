@@ -108,6 +108,13 @@ static void hdmi_state_machine_set_state_l(int target_state, int resched_time)
 	if (work_state.hdmi->dc->vedid && resched_time > 0)
 		resched_time = 0;
 
+	/* If fb for corresponding dc is not ready yet, do not proceed */
+	if ((work_state.hdmi->dc->fb == NULL)) {
+		pr_err("fb not yet ready, skip scheduling work and return\n");
+		rt_mutex_unlock(&work_lock);
+		return;
+	}
+
 	/* If the pending_hpd_evt flag is already set, don't bother to
 	 * reschedule the state machine worker.  We should be able to assert
 	 * that there is a worker callback already scheduled, and that it is
@@ -304,8 +311,9 @@ static void handle_check_edid_l(struct tegra_dc_hdmi_data *hdmi)
 	tegra_adf_process_hotplug_connected(hdmi->dc->adf, &specs);
 #endif
 #ifdef CONFIG_TEGRA_DC_EXTENSIONS
-	tegra_fb_update_monspecs(hdmi->dc->fb, &specs,
-		tegra_dc_hdmi_mode_filter);
+	if (hdmi->dc->fb)
+		tegra_fb_update_monspecs(hdmi->dc->fb, &specs,
+			tegra_dc_hdmi_mode_filter);
 #endif
 #ifdef CONFIG_SWITCH
 	state = tegra_edid_audio_supported(hdmi->edid) ? 1 : 0;
