@@ -484,4 +484,9 @@
 			};
 		};
 	};
+
+	nvs_dsm {
+		compatible = "nvidia,nvs_dsm";
+		status = "okay";
+	};
 };

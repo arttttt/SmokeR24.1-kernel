@@ -474,4 +474,9 @@
 	serial@70006300 {
 		dma-names = "tx";
 	};
+
+	nvs_dsm {
+		compatible = "nvidia,nvs_dsm";
+		status = "okay";
+	};
 };
