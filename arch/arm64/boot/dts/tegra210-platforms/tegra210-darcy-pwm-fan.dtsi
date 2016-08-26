@@ -18,6 +18,13 @@
 		compatible = "pwm-fan";
 
 		shared_data = <&pwm_fan_shared_data>;
-		active_pwm = <0 65 110 160 200 240 245 250 252 255>;
+		active_pwm = <0 16640 28160 40960 51200 61440 62720 64000 64512 65535>;
+	};
+
+	pwm_fan_shared_data: pfsd {
+		active_rru = <10240 512 256 256 256 256 256 256 256 256>;
+		active_rrd = <10240 512 256 256 256 256 256 256 256 256>;
+		pwm_period = <65536>;
+		active_pwm_max = <65536>;
 	};
 };
