@@ -78,8 +78,6 @@ static ssize_t show_xhci_stats(struct device *dev,
 
 	if (tegra != NULL) {
 		xhci = tegra->xhci;
-		ret += snprintf(&buf[ret], PAGE_SIZE - ret, "version:%u\n",
-			xhci->xhci_ereport.version);
 		ret += snprintf(&buf[ret], PAGE_SIZE - ret, "comp_tx_err:%u\n",
 			xhci->xhci_ereport.comp_tx_err);
 		ret += snprintf(&buf[ret], PAGE_SIZE - ret,
