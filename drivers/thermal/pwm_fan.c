@@ -419,6 +419,11 @@ static int pwm_fan_set_cur_state(struct thermal_cooling_device *cdev,
 		return 0;
 	}
 
+	if (cur_state >= fan_data->active_steps) {
+		mutex_unlock(&fan_data->fan_state_lock);
+		return -EINVAL;
+	}
+
 	fan_data->next_state = cur_state;
 
 	if (fan_data->next_state <= 0)
