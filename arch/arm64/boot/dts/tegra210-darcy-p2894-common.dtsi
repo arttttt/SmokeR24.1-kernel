@@ -437,6 +437,21 @@
 				custom_locale_rev = <982>;
 			};
 			CC34 {
+				iso_abbrev = "SG";
+				custom_locale = "US";
+				custom_locale_rev = <921>;
+			};
+			CC35 {
+				iso_abbrev = "HK";
+				custom_locale = "DE";
+				custom_locale_rev = <987>;
+			};
+			CC36 {
+				iso_abbrev = "NZ";
+				custom_locale = "AU";
+				custom_locale_rev = <964>;
+			};
+			CC37 {
 				iso_abbrev = "AP";
 				custom_locale = "XY";
 				custom_locale_rev = <14>;
