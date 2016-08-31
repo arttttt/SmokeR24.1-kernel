@@ -2186,10 +2186,6 @@ static void sdhci_do_set_ios(struct sdhci_host *host, struct mmc_ios *ios)
 				ctrl_2 |= SDHCI_CTRL_UHS_SDR12;
 			else if (ios->timing == MMC_TIMING_UHS_SDR25)
 				ctrl_2 |= SDHCI_CTRL_UHS_SDR25;
-			else if ((ios->timing == MMC_TIMING_UHS_SDR50) &&
-				(host->quirks2 &
-				 SDHCI_QUIRK2_SEL_SDR104_UHS_MODE_IN_SDR50))
-				ctrl_2 |= SDHCI_CTRL_UHS_SDR104;
 			else if (ios->timing == MMC_TIMING_UHS_SDR50)
 				ctrl_2 |= SDHCI_CTRL_UHS_SDR50;
 			else if (ios->timing == MMC_TIMING_UHS_SDR104)
