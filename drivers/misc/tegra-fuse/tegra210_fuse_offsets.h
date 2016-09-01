@@ -159,6 +159,79 @@ struct fuse_chip_option_override_regs {
 };
 static struct fuse_chip_option_override_regs fuse_override_regs[FUSE_TOT_WORDS];
 
+unsigned long long tegra_chip_uid(void)
+{
+
+	u64 uid = 0ull;
+	u32 reg;
+	u32 cid;
+	u32 vendor;
+	u32 fab;
+	u32 lot;
+	u32 wafer;
+	u32 x;
+	u32 y;
+	u32 i;
+
+	/* This used to be so much easier in prior chips. Unfortunately, there
+	   is no one-stop shopping for the unique id anymore. It must be
+	   constructed from various bits of information burned into the fuses
+	   during the manufacturing process. The 64-bit unique id is formed
+	   by concatenating several bit fields. The notation used for the
+	   various fields is <fieldname:size_in_bits> with the UID composed
+	   thusly:
+
+	   <CID:4><VENDOR:4><FAB:6><LOT:26><WAFER:6><X:9><Y:9>
+
+	   Where:
+
+		Field    Bits  Position Data
+		-------  ----  -------- ----------------------------------------
+		CID        4     60     Chip id
+		VENDOR     4     56     Vendor code
+		FAB        6     50     FAB code
+		LOT       26     24     Lot code (5-digit base-36-coded-decimal,
+					re-encoded to 26 bits binary)
+		WAFER      6     18     Wafer id
+		X          9      9     Wafer X-coordinate
+		Y          9      0     Wafer Y-coordinate
+		-------  ----
+		Total     64
+	*/
+
+	/* chip id is 5 for tegra 210 */
+	cid = 5;
+
+	vendor = tegra_fuse_readl(FUSE_VENDOR_CODE) & FUSE_VENDOR_CODE_MASK;
+	fab = tegra_fuse_readl(FUSE_FAB_CODE) & FUSE_FAB_CODE_MASK;
+
+	/* Lot code must be re-encoded from a 5 digit base-36 'BCD' number
+	   to a binary number. */
+	lot = 0;
+	reg = tegra_fuse_readl(FUSE_LOT_CODE_0) << 2;
+
+	for (i = 0; i < 5; ++i) {
+		u32 digit = (reg & 0xFC000000) >> 26;
+		BUG_ON(digit >= 36);
+		lot *= 36;
+		lot += digit;
+		reg <<= 6;
+	}
+
+	wafer = tegra_fuse_readl(FUSE_WAFER_ID) & FUSE_WAFER_ID_MASK;
+	x = tegra_fuse_readl(FUSE_X_COORDINATE) & FUSE_X_COORDINATE_MASK;
+	y = tegra_fuse_readl(FUSE_Y_COORDINATE) & FUSE_Y_COORDINATE_MASK;
+
+	uid = ((unsigned long long)cid  << 60ull)
+	    | ((unsigned long long)vendor << 56ull)
+	    | ((unsigned long long)fab << 50ull)
+	    | ((unsigned long long)lot << 24ull)
+	    | ((unsigned long long)wafer << 18ull)
+	    | ((unsigned long long)x << 9ull)
+	    | ((unsigned long long)y << 0ull);
+	return uid;
+}
+
 static u32 calc_parity(u32 *data, u32 size)
 {
 	u32  parity_word, i;
