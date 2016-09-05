@@ -30,7 +30,7 @@ struct mutex suspend_lock;
 
 struct workqueue_struct *logger_wqueue;
 struct log_buffer {
-	char tmstmp[40];
+	char tmstmp[TIMESTAMPSIZE];
 	char *buf;
 	char *info;
 	int event;
@@ -90,6 +90,7 @@ int write_log(int event, const char *buf, const char *info)
 	struct log_node *temp;
 	int buf_len = 0;
 	int info_len = 0;
+	int time_len = 0;
 	struct timespec ts;
 	static int list1_size;
 	static int list2_size;
@@ -125,6 +126,7 @@ int write_log(int event, const char *buf, const char *info)
 			pr_err("write_log: temp memory allocation failed");
 			return -1;
 		}
+		memset(temp, 0, sizeof(struct log_node));
 
 		temp->log = kmalloc(sizeof(struct log_buffer), GFP_ATOMIC);
 		if (temp->log == NULL) {
@@ -132,7 +134,7 @@ int write_log(int event, const char *buf, const char *info)
 			kfree(temp);
 			return -1;
 		}
-		memset(temp, "\0", sizeof(temp));
+
 		buf_len = strlen(buf) + 1;
 		temp->log->buf = kmalloc(buf_len, GFP_ATOMIC);
 		if (temp->log->buf == NULL) {
@@ -146,7 +148,8 @@ int write_log(int event, const char *buf, const char *info)
 
 		do_gettimeofday(&now);
 		time_to_tm(now.tv_sec, -sys_tz.tz_minuteswest * 60, &date_time);
-		sprintf(temp->log->tmstmp, "[%.2d-%.2d %.2d:%.2d:%.2d.%u]",
+		time_len = sprintf(temp->log->tmstmp,
+					"[%.2d-%.2d %.2d:%.2d:%.2d.%u]",
 					date_time.tm_mon+1,
 					date_time.tm_mday,
 					date_time.tm_hour,
@@ -156,7 +159,8 @@ int write_log(int event, const char *buf, const char *info)
 		if (info != NULL) {
 			info_len = strlen(info) + 1;
 			temp->log->info = kmalloc(info_len, GFP_ATOMIC);
-			strncpy(temp->log->info, info, info_len);
+			if (temp->log->info != NULL)
+				strncpy(temp->log->info, info, info_len);
 		} else {
 			temp->log->info = NULL;
 		}
@@ -165,10 +169,10 @@ int write_log(int event, const char *buf, const char *info)
 	/* whichever list is not busy, dump data in that list */
 		if (1 == atomic_read(&list1_val)) {
 			list_add_tail(&(temp->list), &(list1));
-			list1_size += buf_len + info_len;
+			list1_size += time_len + buf_len + info_len;
 		} else if (1 == atomic_read(&list2_val)) {
 			list_add_tail(&(temp->list), &(list2));
-			list2_size += buf_len + info_len;
+			list2_size += time_len + buf_len + info_len;
 		} else {
 		/* send data directly over netlink because both lists are busy*/
 			pr_err("Message dropped due to busy queues");
