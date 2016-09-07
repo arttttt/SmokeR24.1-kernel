@@ -78,8 +78,11 @@ static inline void switch_new_context(struct mm_struct *mm)
 static inline void check_and_switch_context(struct mm_struct *mm,
 					    struct task_struct *tsk)
 {
-	/* unneeded switch to ASID0 */
-	/* cpu_set_reserved_ttbr0(); */
+	/*
+	 * Required during context switch to avoid speculative page table
+	 * walking with the wrong TTBR.
+	 */
+	cpu_set_reserved_ttbr0();
 
 	if (!((mm->context.id ^ cpu_last_asid) >> MAX_ASID_BITS))
 		/*
