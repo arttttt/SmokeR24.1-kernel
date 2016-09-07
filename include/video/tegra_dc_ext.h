@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2016, NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2011-2017, NVIDIA Corporation. All rights reserved.
  *
  * Author: Robert Morell <rmorell@nvidia.com>
  * Some code based on fbdev extensions written by:
@@ -83,6 +83,7 @@
 #define TEGRA_DC_EXT_BLEND_NONE		0
 #define TEGRA_DC_EXT_BLEND_PREMULT	1
 #define TEGRA_DC_EXT_BLEND_COVERAGE	2
+#define TEGRA_DC_EXT_BLEND_ADD		3
 
 #define TEGRA_DC_EXT_FLIP_FLAG_INVERT_H		(1 << 0)
 #define TEGRA_DC_EXT_FLIP_FLAG_INVERT_V		(1 << 1)

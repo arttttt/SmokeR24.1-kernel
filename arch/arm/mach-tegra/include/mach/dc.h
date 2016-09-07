@@ -932,10 +932,14 @@ struct tegra_dc_win {
 #define TEGRA_WIN_FLAG_SCAN_COLUMN	(1 << 9)
 #define TEGRA_WIN_FLAG_INTERLACE	(1 << 10)
 #define TEGRA_WIN_FLAG_FB		(1 << 11)
+#define TEGRA_WIN_FLAG_BLEND_ADD	(1 << 12)
+
 #define TEGRA_WIN_FLAG_INVALID		(1 << 31) /* window does not exist. */
 
 #define TEGRA_WIN_BLEND_FLAGS_MASK \
-	(TEGRA_WIN_FLAG_BLEND_PREMULT | TEGRA_WIN_FLAG_BLEND_COVERAGE)
+	(TEGRA_WIN_FLAG_BLEND_PREMULT |  \
+	 TEGRA_WIN_FLAG_BLEND_COVERAGE | \
+	 TEGRA_WIN_FLAG_BLEND_ADD)
 
 /* Note: These are the actual values written to the DC_WIN_COLOR_DEPTH register
  * and may change in new tegra architectures.
