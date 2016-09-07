@@ -8,7 +8,7 @@
  *  Copyright (c) 2004 Takashi Iwai <tiwai@suse.de>
  *                     PeiSen Hou <pshou@realtek.com.tw>
  *
- *   Copyright (C) 2013-2015 NVIDIA Corporation. All rights reserved.
+ *   Copyright (C) 2013-2016 NVIDIA Corporation. All rights reserved.
  *
  *  This program is free software; you can redistribute it and/or modify it
  *  under the terms of the GNU General Public License as published by the Free
@@ -1861,6 +1861,16 @@ static void azx_stream_reset(struct azx *chip, struct azx_dev *azx_dev)
 	*azx_dev->posbuf = 0;
 }
 
+static void azx_stream_reset_all(struct azx *chip)
+{
+	int i;
+
+	if (chip->azx_dev) {
+		for (i = 0; i < chip->num_streams; i++)
+			azx_stream_reset(chip, &chip->azx_dev[i]);
+	}
+}
+
 /*
  * set up the SD for streaming
  */
@@ -3387,6 +3397,7 @@ static int azx_halt(struct notifier_block *nb, unsigned long event, void *buf)
 #endif
 
 	snd_hda_bus_reboot_notify(chip->bus);
+	azx_stream_reset_all(chip);
 	azx_stop_chip(chip);
 
 #if defined(CONFIG_SND_HDA_PLATFORM_DRIVER)
