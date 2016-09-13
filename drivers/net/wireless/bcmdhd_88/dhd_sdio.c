@@ -70,6 +70,10 @@
 #include "nvram_params.h"
 #endif /* TEGRA_REGION_BASED_NVRAM */
 
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+#include "dhd_custom_sysfs_tegra.h"
+#endif
+
 bool dhd_mp_halting(dhd_pub_t *dhdp);
 extern void bcmsdh_waitfor_iodrain(void *sdh);
 extern void bcmsdh_reject_ioreqs(void *sdh, bool reject);
@@ -2230,7 +2234,14 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 		        (bus->ext_loop ? SDPCM_TEST_CHANNEL : SDPCM_DATA_CHANNEL), TRUE, FALSE);
 #endif
 		if (ret)
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		{
+			TEGRA_SYSFS_HISTOGRAM_STAT_INC(sdio_tx_err);
+#endif
 			bus->dhd->tx_errors++;
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		}
+#endif
 		else
 			bus->dhd->dstats.tx_bytes += datalen;
 
@@ -2355,7 +2366,14 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 		}
 
 		if (ret)
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		{
+			TEGRA_SYSFS_HISTOGRAM_STAT_INC(sdio_tx_err);
+#endif
 			bus->dhd->tx_errors++;
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		}
+#endif
 		else
 			bus->dhd->dstats.tx_bytes += datalen;
 

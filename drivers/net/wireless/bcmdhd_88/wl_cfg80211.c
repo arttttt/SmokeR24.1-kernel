@@ -1337,6 +1337,9 @@ wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,
 
 				WL_ERR((" virtual interface(%s) is "
 					"created net attach done\n", wl->p2p->vir_ifname));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+				TEGRA_SYSFS_HISTOGRAM_STAT_INC(ago_start);
+#endif
 				if (mode == WL_MODE_AP)
 					wl_set_drv_status(wl, CONNECTED, _ndev);
 				if (type == NL80211_IFTYPE_P2P_CLIENT)
@@ -3527,6 +3530,12 @@ wl_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 	s32 err = 0;
 	u8 *curbssid;
 	WL_ERR(("Reason %d\n", reason_code));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+	if (bcmdhd_stat.rssi < -67)
+		TEGRA_SYSFS_HISTOGRAM_STAT_INC(disconnect_rssi_low);
+	else
+		TEGRA_SYSFS_HISTOGRAM_STAT_INC(disconnect_rssi_high);
+#endif
 	RETURN_EIO_IF_NOT_UP(wl);
 	act = *(bool *) wl_read_prof(wl, dev, WL_PROF_ACT);
 	curbssid = wl_read_prof(wl, dev, WL_PROF_BSSID);
@@ -7428,6 +7437,11 @@ wl_notify_connect_status(struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
 					"event : %d, reason=%d from " MACDBG "\n",
 					ndev->name, event, ntoh32(e->reason),
 					MAC2STRDBG((u8*)(&e->addr)));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+				if (ntoh32(e->reason) == 15) {
+					TEGRA_SYSFS_HISTOGRAM_STAT_INC(connect_fail_reason_15);
+				}
+#endif
 				if (memcmp(curbssid, &e->addr, ETHER_ADDR_LEN) != 0) {
 					WL_ERR(("BSSID of event is not the connected BSSID"
 						"(ignore it) cur: " MACDBG " event: " MACDBG"\n",
@@ -7852,6 +7866,25 @@ wl_bss_connect_done(struct wl_priv *wl, struct net_device *ndev,
 			WL_INFO(("Report connect result - connection succeeded\n"));
 		else
 			WL_ERR(("Report connect result - connection failed\n"));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		if (completed) {
+			TEGRA_SYSFS_HISTOGRAM_STAT_INC(connect_success);
+			if ((wl->channel >= 1) && (wl->channel <= 14)) {
+				TEGRA_SYSFS_HISTOGRAM_STAT_INC
+					(connect_on_2g_channel);
+			} else if (wl->channel > 14) {
+				TEGRA_SYSFS_HISTOGRAM_STAT_INC
+					(connect_on_5g_channel);
+			}
+			tegra_sysfs_histogram_stat_set_channel(wl->channel);
+			if (bcmdhd_stat.channel_stat)
+				TEGRA_SYSFS_HISTOGRAM_STAT_INC
+					(channel_stat->connect_count);
+		} else {
+			TEGRA_SYSFS_HISTOGRAM_STAT_INC(connect_fail);
+			tegra_sysfs_histogram_stat_set_channel(-1);
+		}
+#endif
 	}
 	return err;
 }

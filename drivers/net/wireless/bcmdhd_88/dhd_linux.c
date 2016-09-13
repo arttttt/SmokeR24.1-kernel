@@ -5253,6 +5253,9 @@ dhd_module_init(void)
 		}
 		DHD_ERROR(("\nfailed to power up wifi chip, retry again (%d left) **\n\n",
 			retry+1));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		TEGRA_SYSFS_HISTOGRAM_STAT_INC(wifi_on_retry);
+#endif
 		dhd_bus_unreg_sdio_notify();
 #if defined(CONFIG_WIFI_CONTROL_FUNC)
 		wl_android_wifictrl_func_del();
@@ -5264,8 +5267,14 @@ dhd_module_init(void)
 	if (!chip_up) {
 		DHD_ERROR(("\nfailed to power up wifi chip, max retry reached, exits **\n\n"));
 		error = -ENODEV;
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		TEGRA_SYSFS_HISTOGRAM_STAT_INC(wifi_on_fail);
+#endif
 		goto fail_0;
 	}
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+	TEGRA_SYSFS_HISTOGRAM_STAT_INC(wifi_on_success);
+#endif
 #else
 	dhd_customer_gpio_wlan_ctrl(WLAN_POWER_ON);
 #if defined(CONFIG_WIFI_CONTROL_FUNC)
@@ -6266,6 +6275,9 @@ static void dhd_hang_process(struct work_struct *work)
 int dhd_os_send_hang_message(dhd_pub_t *dhdp)
 {
 	int ret = 0;
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+	TEGRA_SYSFS_HISTOGRAM_STAT_INC(hang);
+#endif
 	if (dhdp) {
 		if (!dhdp->hang_was_sent) {
 			dhdp->hang_was_sent = 1;

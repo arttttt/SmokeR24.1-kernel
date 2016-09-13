@@ -713,11 +713,17 @@ int wl_android_wifi_on(struct net_device *dev)
 				break;
 			DHD_ERROR(("\nfailed to power up wifi chip, retry again (%d left) **\n\n",
 				retry+1));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			TEGRA_SYSFS_HISTOGRAM_STAT_INC(wifi_on_retry);
+#endif
 			dhd_customer_gpio_wlan_ctrl(WLAN_RESET_OFF);
 			OSL_SLEEP(500 * (POWERUP_MAX_RETRY - retry + 1));
 		} while (retry-- >= 0);
 		if (ret != 0) {
 			DHD_ERROR(("\nfailed to power up wifi chip, max retry reached **\n\n"));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			TEGRA_SYSFS_HISTOGRAM_STAT_INC(wifi_on_fail);
+#endif
 			goto exit;
 		}
 		ret = dhd_dev_reset(dev, FALSE);
@@ -727,6 +733,9 @@ int wl_android_wifi_on(struct net_device *dev)
 				ret = -EFAULT;
 		}
 		g_wifi_on = TRUE;
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		TEGRA_SYSFS_HISTOGRAM_STAT_INC(wifi_on_success);
+#endif
 	}
 
 exit:
