@@ -997,15 +997,19 @@ static int ov5693_otp_setup(struct ov5693 *priv)
 					i,
 					OV5693_OTP_BANK_START_ADDR,
 					OV5693_OTP_BANK_SIZE);
-		if (err)
-			return -ENODEV;
+		if (err) {
+			dev_err(&priv->i2c_client->dev,
+				"could not read otp bank\n");
+			goto ret;
+		}
 	}
 
 	ctrl = v4l2_ctrl_find(&priv->ctrl_handler, V4L2_CID_OTP_DATA);
 	if (!ctrl) {
 		dev_err(&priv->i2c_client->dev,
 			"could not find device ctrl.\n");
-		return -EINVAL;
+		err = -EINVAL;
+		goto ret;
 	}
 
 	for (i = 0; i < OV5693_OTP_SIZE; i++)
@@ -1013,11 +1017,10 @@ static int ov5693_otp_setup(struct ov5693 *priv)
 			otp_buf[i]);
 	ctrl->cur.string = ctrl->string;
 
-	err = camera_common_s_power(priv->subdev, false);
-	if (err)
-		return -ENODEV;
+ret:
+	camera_common_s_power(priv->subdev, false);
 
-	return 0;
+	return err;
 }
 
 static int ov5693_fuse_id_setup(struct ov5693 *priv)
@@ -1036,14 +1039,18 @@ static int ov5693_fuse_id_setup(struct ov5693 *priv)
 				OV5693_FUSE_ID_OTP_BANK,
 				OV5693_FUSE_ID_OTP_START_ADDR,
 				OV5693_FUSE_ID_SIZE);
-	if (err)
-		return -ENODEV;
+	if (err) {
+		dev_err(&priv->i2c_client->dev,
+			"could not read otp bank\n");
+		goto ret;
+	}
 
 	ctrl = v4l2_ctrl_find(&priv->ctrl_handler, V4L2_CID_FUSE_ID);
 	if (!ctrl) {
 		dev_err(&priv->i2c_client->dev,
 			"could not find device ctrl.\n");
-		return -EINVAL;
+		err = -EINVAL;
+		goto ret;
 	}
 
 	for (i = 0; i < OV5693_FUSE_ID_SIZE; i++)
@@ -1051,11 +1058,10 @@ static int ov5693_fuse_id_setup(struct ov5693 *priv)
 			fuse_id[i]);
 	ctrl->cur.string = ctrl->string;
 
-	err = camera_common_s_power(priv->subdev, false);
-	if (err)
-		return -ENODEV;
+ret:
+	camera_common_s_power(priv->subdev, false);
 
-	return 0;
+	return err;
 }
 
 static int ov5693_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
