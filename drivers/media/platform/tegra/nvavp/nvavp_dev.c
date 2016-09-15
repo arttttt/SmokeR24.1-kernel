@@ -1595,6 +1595,7 @@ static int nvavp_pushbuffer_submit_ioctl(struct file *filp, unsigned int cmd,
 	if (hdr.num_relocs > NVAVP_MAX_RELOCATION_COUNT) {
 		dev_err(&nvavp->nvhost_dev->dev,
 			"invalid num_relocs %d\n", hdr.num_relocs);
+			mutex_unlock(&nvavp->submit_lock);
 		return -EINVAL;
 	}
 
