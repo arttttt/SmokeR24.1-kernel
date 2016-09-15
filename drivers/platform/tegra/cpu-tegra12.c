@@ -39,6 +39,8 @@
 static struct cpufreq_frequency_table freq_table[CPU_FREQ_TABLE_MAX_SIZE];
 static struct tegra_cpufreq_table_data freq_table_data;
 
+static DEFINE_MUTEX(scaling_data_lock);
+
 #ifndef CONFIG_ARCH_TEGRA_13x_SOC
 struct tegra_cpufreq_table_data *tegra_cpufreq_table_get(void)
 {
@@ -250,6 +252,120 @@ unsigned long tegra_emc_to_cpu_ratio(unsigned long cpu_rate)
 		return 0;		/* emc min */
 }
 
+static struct device_node *of_get_scaling_node(const char *name)
+{
+	struct device_node *scaling_np = NULL;
+	struct device_node *np =
+		of_find_compatible_node(NULL, NULL, "nvidia,tegra124-cpufreq");
+
+	if (!np || !of_device_is_available(np)) {
+		pr_debug("%s: Tegra124 cpufreq node is not found\n", __func__);
+		of_node_put(np);
+		return NULL;
+	}
+
+	scaling_np = of_get_child_by_name(np, name);
+	of_node_put(np);
+	if (!scaling_np || !of_device_is_available(scaling_np)) {
+		pr_debug("%s: %s for cpufreq is not found\n", __func__, name);
+		of_node_put(scaling_np);
+		return NULL;
+	}
+	return scaling_np;
+}
+
+/*
+ * Vote on memory bus frequency based on cpu frequency.
+ * input cpu rate is in kHz
+ * output emc rate is in Hz
+ */
+static unsigned long emc_max_rate;
+static u32 *emc_cpu_table;
+static int cpu_emc_table_src = CPU_EMC_TABLE_SRC_DT;
+static int emc_cpu_table_size;
+
+static u32 *cpufreq_emc_table_get(int *table_size)
+{
+	int freqs_num;
+	u32 *freqs = NULL;
+	struct device_node *np = NULL;
+	const char *propname = "emc-cpu-limit-table";
+
+	/* Find cpufreq node */
+	np = of_get_scaling_node("emc-scaling-data");
+	if (!np){
+		return ERR_PTR(-ENODATA);
+	}
+
+	/* Read frequency table */
+	if (!of_find_property(np, propname, &freqs_num)) {
+		pr_err("%s: %s is not found\n", __func__, propname);
+		goto out;
+	}
+
+	/* must have even entries */
+	if (!freqs_num || (freqs_num % (sizeof(*freqs) * 2))) {
+		pr_err("%s: invalid %s size %d\n", __func__, propname,
+				freqs_num);
+		goto out;
+	}
+
+	freqs = kzalloc(freqs_num, GFP_KERNEL);
+	if (!freqs) {
+		pr_err("%s: failed to allocate limit table\n", __func__);
+		goto out;
+	}
+
+	freqs_num /= sizeof(*freqs);
+	if (of_property_read_u32_array(np, propname, freqs, freqs_num)) {
+		pr_err("%s: failed to read %s\n", __func__, propname);
+		goto out;
+	}
+
+	of_node_put(np);
+	*table_size = freqs_num;
+	return freqs;
+
+out:
+	kfree(freqs);
+	of_node_put(np);
+	return ERR_PTR(-ENODATA);
+}
+
+static unsigned long dt_emc_cpu_limit(unsigned long cpu_rate,
+		unsigned long emc_max_rate)
+{
+	int i;
+
+	for (i = 0; i < emc_cpu_table_size; i += 2) {
+		if (cpu_rate < emc_cpu_table[i])
+			break;
+	}
+
+	if (i)
+		return min(emc_max_rate, emc_cpu_table[i-1] * 1000UL);
+	return 0;
+}
+
+static unsigned long default_emc_cpu_limit(unsigned long cpu_rate,
+		unsigned long emc_max_rate)
+{
+	/* Vote on memory bus frequency based on cpu frequency;
+	   cpu rate is in kHz, emc rate is in Hz */
+	if (cpu_rate >= 1300000)
+		return emc_max_rate;    /* cpu >= 1.3GHz, emc max */
+	else if (cpu_rate >= 975000)
+		return 550000000;   /* cpu >= 975 MHz, emc 550 MHz */
+	else if (cpu_rate >= 725000)
+		return  350000000;  /* cpu >= 725 MHz, emc 350 MHz */
+	else if (cpu_rate >= 500000)
+		return  150000000;  /* cpu >= 500 MHz, emc 150 MHz */
+	else if (cpu_rate >= 275000)
+		return  50000000;   /* cpu >= 275 MHz, emc 50 MHz */
+	else
+		return 0;       /* emc min */
+}
+
 #ifdef CONFIG_ARCH_TEGRA_13x_SOC
 /* EMC/CPU frequency operational requirement limit */
 unsigned long tegra_emc_cpu_limit(unsigned long cpu_rate)
@@ -276,6 +392,34 @@ unsigned long tegra_emc_cpu_limit(unsigned long cpu_rate)
 	last_emc_rate = emc_rate;
 	return emc_rate;
 }
+#else
+unsigned long tegra_emc_cpu_limit(unsigned long cpu_rate)
+{
+	static unsigned long emc_rate;
+
+	if (emc_max_rate == 0) {
+		struct clk *emc = tegra_get_clock_by_name("emc");
+		if (!emc)
+			return -ENODEV;
+		emc_max_rate = clk_round_rate(emc, ULONG_MAX);
+	}
+
+	mutex_lock(&scaling_data_lock);
+	if (!emc_cpu_table)
+		emc_cpu_table =
+			cpufreq_emc_table_get(&emc_cpu_table_size);
+
+	if ((cpu_emc_table_src == CPU_EMC_TABLE_SRC_DEFAULT) ||
+			IS_ERR(emc_cpu_table))
+		emc_rate =
+			default_emc_cpu_limit(cpu_rate, emc_max_rate);
+	else
+		emc_rate = dt_emc_cpu_limit(cpu_rate, emc_max_rate);
+
+	mutex_unlock(&scaling_data_lock);
+
+	return emc_rate;
+}
 #endif
 
 int tegra_update_mselect_rate(unsigned long cpu_rate)
@@ -296,4 +440,19 @@ int tegra_update_mselect_rate(unsigned long cpu_rate)
 	mselect_rate = DIV_ROUND_UP(cpu_rate, 2) * 1000;
 	mselect_rate = min(mselect_rate, 102000000UL);
 	return clk_set_rate(mselect, mselect_rate);
+}
+
+int set_cpu_emc_limit_table_source(int table_src)
+{
+	if (table_src != CPU_EMC_TABLE_SRC_DT &&
+			table_src != CPU_EMC_TABLE_SRC_DEFAULT)
+		return -1;
+	cpu_emc_table_src = table_src;
+
+	return 0;
+}
+
+int get_cpu_emc_limit_table_source(void)
+{
+	return cpu_emc_table_src;
 }

@@ -20,6 +20,7 @@
 
 #include "tegra124-soc-shield.dtsi"
 #include "tegra124-platforms/tegra124-modem-common.dtsi"
+#include "tegra124-platforms/tegra124-tn8-cpufreq.dtsi"
 
 / {
 	serial@70006000 {

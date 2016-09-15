@@ -73,7 +73,7 @@ static inline int tegra_update_mselect_rate(unsigned long cpu_rate)
 #else
 int tegra_update_mselect_rate(unsigned long cpu_rate);
 #endif
-#if defined(CONFIG_ARCH_TEGRA_13x_SOC) || defined(CONFIG_ARCH_TEGRA_21x_SOC)
+#if defined(CONFIG_ARCH_TEGRA_13x_SOC) || defined(CONFIG_ARCH_TEGRA_21x_SOC) || defined(CONFIG_ARCH_TEGRA_12x_SOC)
 unsigned long tegra_emc_cpu_limit(unsigned long cpu_rate);
 int set_cpu_emc_limit_table_source(int table_source);
 int get_cpu_emc_limit_table_source(void);
