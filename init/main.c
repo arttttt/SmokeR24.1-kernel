@@ -556,6 +556,14 @@ asmlinkage void __init start_kernel(void)
 		local_irq_disable();
 	idr_init_cache();
 	perf_event_init();
+
+	/*
+	 * Allow workqueue creation and work item queueing/cancelling
+	 * early.  Work item execution depends on kthreads and starts after
+	 * workqueue_init().
+	 */
+	workqueue_init_early();
+
 	rcu_init();
 	tick_nohz_init();
 	radix_tree_init();
@@ -893,6 +901,8 @@ static noinline void __init kernel_init_freeable(void)
 	cad_pid = task_pid(current);
 
 	smp_prepare_cpus(setup_max_cpus);
+
+	workqueue_init();
 
 	do_pre_smp_initcalls();
 	lockup_detector_init();

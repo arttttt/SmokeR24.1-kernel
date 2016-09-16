@@ -390,6 +390,8 @@ static inline struct workqueue_struct * __deprecated __system_nrt_freezable_wq(v
 #define system_nrt_wq			__system_nrt_wq()
 #define system_nrt_freezable_wq		__system_nrt_freezable_wq()
 
+extern bool wq_online;
+
 extern struct workqueue_struct *
 __alloc_workqueue_key(const char *fmt, unsigned int flags, int max_active,
 	struct lock_class_key *key, const char *lock_name, ...) __printf(1, 6);
@@ -599,7 +601,7 @@ static inline bool schedule_delayed_work(struct delayed_work *dwork,
  */
 static inline bool keventd_up(void)
 {
-	return system_wq != NULL;
+	return wq_online;
 }
 
 /*
@@ -650,5 +652,8 @@ int workqueue_sysfs_register(struct workqueue_struct *wq);
 static inline int workqueue_sysfs_register(struct workqueue_struct *wq)
 { return 0; }
 #endif	/* CONFIG_SYSFS */
+
+int __init workqueue_init_early(void);
+int __init workqueue_init(void);
 
 #endif
