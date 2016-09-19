@@ -432,8 +432,18 @@ struct sk_buff {
 	};
 	__u32			priority;
 	kmemcheck_bitfield_begin(flags1);
-	__u8			local_df:1,
-				cloned:1,
+
+/* if you move cloned around you also must adapt those constants */
+#ifdef __BIG_ENDIAN_BITFIELD
+#define CLONED_MASK    (1 << 7)
+#else
+#define CLONED_MASK    1
+#endif
+#define CLONED_OFFSET()                offsetof(struct sk_buff, __cloned_offset)
+
+        __u8                    __cloned_offset[0];
+	__u8			cloned:1,
+				ignore_df:1,
 				ip_summed:2,
 				nohdr:1,
 				nfctinfo:3;
