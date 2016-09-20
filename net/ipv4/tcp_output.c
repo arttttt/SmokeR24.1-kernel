@@ -875,6 +875,8 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	TCP_SKB_CB(skb)->tx.in_flight = TCP_SKB_CB(skb)->end_seq
 		- tp->snd_una;
 
+        tcp_rate_skb_sent(sk, skb);
+
 	if (likely(clone_it)) {
 		const struct sk_buff *fclone = skb + 1;
 
@@ -1168,6 +1170,9 @@ int tcp_fragment(struct sock *sk, struct sk_buff *skb, u32 len,
 	/* Fix up tso_factor for both original and new SKB.  */
 	tcp_set_skb_tso_segs(sk, skb, mss_now);
 	tcp_set_skb_tso_segs(sk, buff, mss_now);
+
+	/* Update delivered info for the new segment */
+	TCP_SKB_CB(buff)->tx = TCP_SKB_CB(skb)->tx;
 
 	/* If this packet has been sent out already, we must
 	 * adjust the various packet counters.
