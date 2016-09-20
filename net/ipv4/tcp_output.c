@@ -1451,6 +1451,17 @@ static u32 tcp_tso_autosize(const struct sock *sk, unsigned int mss_now)
 	return min_t(u32, segs, sk->sk_gso_max_segs);
 }
 
+/* Return the number of segments we want in the skb we are transmitting.
+ * See if congestion control module wants to decide; otherwise, autosize.
+ */
+static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)
+{
+	const struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;
+	u32 tso_segs = ca_ops->tso_segs_goal ? ca_ops->tso_segs_goal(sk) : 0;
+
+	return tso_segs ? : tcp_tso_autosize(sk, mss_now);
+}
+
 /* Returns the portion of skb which can be sent right away without
  * introducing MSS oddities to segment boundaries. In rare cases where
  * mss_now != mss_cache, we will request caller to create a small skb
@@ -1913,7 +1924,7 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
 		}
 	}
 
-	max_segs = tcp_tso_autosize(sk, mss_now);
+	max_segs = tcp_tso_segs(sk, mss_now);
 	while ((skb = tcp_send_head(sk))) {
 		unsigned int limit;
 
