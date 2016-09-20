@@ -86,9 +86,11 @@
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 #include "dhd_custom_sysfs_tegra.h"
 #include "dhd_custom_sysfs_tegra_scan.h"
+#include "dhd_custom_sysfs_tegra_stat.h"
 
 #define RX_CAPTURE(skb)\
 	{\
+		TEGRA_SYSFS_HISTOGRAM_WAKE_CNT_INC(skb);\
 		tegra_sysfs_histogram_tcpdump_rx(skb, __func__, __LINE__);\
 	}\
 
@@ -5211,6 +5213,10 @@ dhd_module_init(void)
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
 	wl_android_init();
+
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+	rf_test_params_init();
+#endif
 
 #if defined(DHDTHREAD)
 	/* Sanity check on the module parameters */

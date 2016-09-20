@@ -34,6 +34,10 @@
 #include <dngl_stats.h>
 #include <dhd.h>
 
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+#include "dhd_custom_sysfs_tegra_stat.h"
+#endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
+
 #ifdef TEGRA_REGION_BASED_NVRAM
 #include "nvram_params.h"
 #endif
@@ -300,6 +304,10 @@ int wldev_get_rssi(
 	error = wldev_ioctl(dev, WLC_GET_RSSI, &scb_val, sizeof(scb_val_t), 0);
 	if (unlikely(error))
 		return error;
+
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+	TEGRA_SYSFS_HISTOGRAM_DRIVER_STAT_INC(aggr_num_rssi_ioctl);
+#endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
 
 	*prssi = dtoh32(scb_val.val);
 	return error;

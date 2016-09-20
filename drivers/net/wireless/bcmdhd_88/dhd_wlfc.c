@@ -42,7 +42,9 @@
 #include <dhd_wlfc.h>
 #endif
 
-
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+#include "dhd_custom_sysfs_tegra_stat.h"
+#endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
 
 
 #define BUS_RETRIES 1	/* # of retries before aborting a bus tx operation */
@@ -1384,6 +1386,9 @@ dhd_wlfc_commit_packets(void* state, f_commitpkt_t fcommit, void* commit_ctx, vo
 		}
 		else {
 			/* en-queue the packets to respective queue. */
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			TEGRA_SYSFS_HISTOGRAM_DRIVER_STAT_INC(aggr_bus_credit_unavail);
+#endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
 			rc = _dhd_wlfc_enque_delayq(ctx, pktbuf, ac);
 		}
 	}

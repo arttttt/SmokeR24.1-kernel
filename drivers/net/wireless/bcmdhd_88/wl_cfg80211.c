@@ -76,6 +76,7 @@
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 #include "dhd_custom_sysfs_tegra.h"
 #include "dhd_custom_sysfs_tegra_scan.h"
+#include "dhd_custom_sysfs_tegra_stat.h"
 #endif
 
 
@@ -2506,6 +2507,7 @@ wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 			WIFI_SCAN_DEBUG("%s: substituted wifi scan policy"
 				" with %d rule(s)\n",
 				__func__, status);
+			TEGRA_SYSFS_HISTOGRAM_SCAN_CNT_INC(wl);
 			return (0);
 		} else if (status < 0) {
 			WIFI_SCAN_DEBUG("%s: wifi scan policy active\n",
@@ -3531,7 +3533,7 @@ wl_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 	u8 *curbssid;
 	WL_ERR(("Reason %d\n", reason_code));
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
-	if (bcmdhd_stat.rssi < -67)
+	if (bcmdhd_stat.gen_stat.rssi < -67)
 		TEGRA_SYSFS_HISTOGRAM_STAT_INC(disconnect_rssi_low);
 	else
 		TEGRA_SYSFS_HISTOGRAM_STAT_INC(disconnect_rssi_high);
@@ -4107,6 +4109,9 @@ wl_cfg80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 			WL_ERR(("Could not get rssi (%d)\n", err));
 			goto get_station_err;
 		}
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+		TEGRA_SYSFS_HISTOGRAM_DRIVER_STAT_INC(aggr_num_rssi_ioctl);
+#endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
 		rssi = wl_rssi_offset(dtoh32(scb_val.val));
 		sinfo->filled |= STATION_INFO_SIGNAL;
 		sinfo->signal = rssi;
@@ -7877,7 +7882,7 @@ wl_bss_connect_done(struct wl_priv *wl, struct net_device *ndev,
 					(connect_on_5g_channel);
 			}
 			tegra_sysfs_histogram_stat_set_channel(wl->channel);
-			if (bcmdhd_stat.channel_stat)
+			if (bcmdhd_stat.gen_stat.channel_stat)
 				TEGRA_SYSFS_HISTOGRAM_STAT_INC
 					(channel_stat->connect_count);
 		} else {

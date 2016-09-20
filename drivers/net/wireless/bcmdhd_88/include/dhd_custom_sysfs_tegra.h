@@ -3,7 +3,7 @@
  *
  * NVIDIA Tegra Sysfs for BCMDHD driver
  *
- * Copyright (C) 2014 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2014-2016 NVIDIA Corporation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -39,6 +39,18 @@
 #include <net/inet_sock.h>
 #include <linux/seq_file.h>
 #include <net/tcp.h>
+
+#ifndef UNUSED_PARAMETER
+#define UNUSED_PARAMETER(x) (void)(x)
+#endif
+
+#define ETHER_TYPE_BRCM_REV	0x6c88
+#define TCPDUMP_TAG_FREE	'?'
+#define TCPDUMP_TAG_RX  	'<'
+#define TCPDUMP_TAG_TX  	'>'
+#define TCPDUMP_TAG_TIME	'@'
+#define TCPDUMP_TAG_STAT	'&'
+#define TCPDUMP_TAG_PWR 	'P'
 
 /* initialization */
 
@@ -102,6 +114,28 @@ tegra_sysfs_histogram_rssi_store(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count);
 
+/* RF testing */
+
+#define NUM_RF_TEST_PARAMS 3
+typedef struct {
+	char *var;
+	atomic_t cur_val;
+} rf_test_params_t;
+
+ssize_t
+tegra_sysfs_rf_test_state_show(struct device *dev,
+	struct device_attribute *attr,
+	char *buf);
+
+ssize_t
+tegra_sysfs_rf_test_state_store(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count);
+
+void tegra_sysfs_rf_test_enable(void);
+void tegra_sysfs_rf_test_disable(void);
+void rf_test_params_init(void);
+
 /* scan histogram */
 
 #define TEGRA_SYSFS_HISTOGRAM_SCAN_REQUEST(netdev, request, request_size)\
@@ -143,71 +177,6 @@ tegra_debugfs_histogram_scan_write(struct file *filp,
 	const char __user *buff, size_t count, loff_t *offp);
 
 /* stat histogram */
-
-#define TEGRA_SYSFS_HISTOGRAM_STAT_INC(var)\
-	(\
-		(\
-		wifi_stat_debug\
-		? pr_info("wifi stat: %s(%d): increment variable " #var "\n",\
-			__func__, __LINE__)\
-		: ((void) 0)\
-		),\
-		((bcmdhd_stat).var)++\
-	)\
-
-#define TEGRA_SYSFS_HISTOGRAM_STAT_SET(var, value)\
-	(\
-		(\
-		wifi_stat_debug\
-		? pr_info("wifi stat: %s(%d): set variable " #var "\n",\
-			__func__, __LINE__)\
-		: ((void) 0)\
-		),\
-		(bcmdhd_stat).var = value\
-	)\
-
-extern int wifi_stat_debug;
-
-struct tegra_sysfs_histogram_stat {
-	/* time period of statistics */
-	ktime_t start_time;
-	ktime_t end_time;
-	/* power up failure statistics */
-	unsigned long wifi_on_success;
-	unsigned long wifi_on_retry;
-	unsigned long wifi_on_fail;
-	/* connection statistics */
-	unsigned long connect_success;
-	unsigned long connect_fail;
-	unsigned long connect_fail_reason_15;
-	unsigned long disconnect_rssi_low;
-	unsigned long disconnect_rssi_high;
-	/* firmware statistics */
-	unsigned long fw_tx_err;
-	unsigned long fw_tx_retry;
-	unsigned long fw_rx_err;
-	/* hang statistics */
-	unsigned long hang;
-	/* AGO statistics */
-	unsigned long ago_start;
-	/* channel statistics */
-	unsigned long connect_on_2g_channel;
-	unsigned long connect_on_5g_channel;
-	struct {
-		int channel;
-		unsigned long connect_count;
-		unsigned long rssi_low;
-		unsigned long rssi_high;
-	} channel_stat_list[40], *channel_stat;
-	/* bus statistics */
-	unsigned long sdio_tx_err;
-	/* last rssi value */
-	int rssi;
-	unsigned long rssi_low;
-	unsigned long rssi_high;
-};
-
-extern struct tegra_sysfs_histogram_stat bcmdhd_stat;
 
 void
 tegra_sysfs_histogram_stat_set_channel(int channel);

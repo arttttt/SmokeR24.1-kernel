@@ -3,7 +3,7 @@
  *
  * NVIDIA Tegra Sysfs for BCMDHD driver
  *
- * Copyright (C) 2014 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2014-2016 NVIDIA Corporation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -19,6 +19,7 @@
 #include <linux/system-wakeup.h>
 #include "dhd_custom_sysfs_tegra.h"
 #include "dhd_custom_sysfs_tegra_scan.h"
+#include "dhd_custom_sysfs_tegra_stat.h"
 
 
 int lp0_logs_enable = 1;
@@ -28,6 +29,8 @@ const char string_resume[] = "resume called";
 const char string_dpc_pkt[] = "dpc called";
 const char dummy_inf[] = "dummy:";
 int bcmdhd_irq_number;
+
+extern int bcmdhd_resume_trigger;
 
 static DEVICE_ATTR(ping, S_IRUGO | S_IWUGO,
 	tegra_sysfs_histogram_ping_show,
@@ -63,6 +66,22 @@ static struct attribute_group tegra_sysfs_group_histogram = {
 	.attrs = tegra_sysfs_entries_histogram,
 };
 
+/* RF test attributes */
+static DEVICE_ATTR(state, S_IRUGO | S_IWUGO,
+	tegra_sysfs_rf_test_state_show,
+	tegra_sysfs_rf_test_state_store);
+
+static struct attribute *tegra_sysfs_entries_rf_test[] = {
+	&dev_attr_state.attr,
+	NULL,
+};
+
+static struct attribute_group tegra_sysfs_group_rf_test = {
+	.name = "rf_test",
+	.attrs = tegra_sysfs_entries_rf_test,
+};
+/* End RF test attributes */
+
 static struct dentry *tegra_debugfs_root;
 
 static struct file_operations tegra_debugfs_histogram_scan_fops = {
@@ -78,7 +97,7 @@ static struct file_operations tegra_debugfs_histogram_tcpdump_fops = {
 int
 tegra_sysfs_register(struct device *dev)
 {
-	int err;
+	int err = 0;
 
 	pr_info("%s\n", __func__);
 
@@ -87,7 +106,13 @@ tegra_sysfs_register(struct device *dev)
 	if (err) {
 		pr_err("%s: failed to create tegra sysfs group %s\n",
 			__func__, tegra_sysfs_group_histogram.name);
-		return err;
+		goto exit;
+	}
+	err = sysfs_create_group(&dev->kobj, &tegra_sysfs_group_rf_test);
+	if (err) {
+		pr_err("%s: failed to create tegra sysfs group %s\n",
+			__func__, tegra_sysfs_group_rf_test.name);
+		goto cleanup;
 	}
 
 	/* create debugfs */
@@ -109,8 +134,12 @@ tegra_sysfs_register(struct device *dev)
 	tegra_sysfs_histogram_stat_work_start();
 	tegra_sysfs_histogram_tcpdump_work_start();
 #endif
+	goto exit;
 
-	return 0;
+cleanup:
+	sysfs_remove_group(&dev->kobj, &tegra_sysfs_group_histogram);
+exit:
+	return err;
 }
 
 void
@@ -132,11 +161,11 @@ tegra_sysfs_unregister(struct device *dev)
 	}
 
 	/* remove sysfs */
+	sysfs_remove_group(&dev->kobj, &tegra_sysfs_group_rf_test);
 	sysfs_remove_group(&dev->kobj, &tegra_sysfs_group_histogram);
-
 }
 
-static int tegra_sysfs_wifi_on;
+int tegra_sysfs_wifi_on;
 
 void
 tegra_sysfs_on(void)
@@ -163,6 +192,7 @@ tegra_sysfs_off(void)
 {
 	pr_info("%s\n", __func__);
 
+	tegra_sysfs_rf_test_disable();
 	tegra_sysfs_wifi_on = 0;
 
 	/* suspend (stop) sysfs work */
@@ -216,8 +246,10 @@ tegra_sysfs_resume_capture(void)
 	if (lp0_logs_enable) {
 		if (get_wakeup_reason_irq() != bcmdhd_irq_number)
 			return;
+		if (!bcmdhd_resume_trigger)
+			bcmdhd_resume_trigger = 1;
 		tcpdump_pkt_save('w', dummy_inf,
-			__func__, __LINE__, string_resume,
+			__func__, __LINE__, (unsigned char *) string_resume,
 			sizeof(string_resume), 0);
 	}
 }
@@ -227,7 +259,7 @@ tegra_sysfs_suspend_capture(void)
 {
 	if (lp0_logs_enable)
 		tcpdump_pkt_save('w', dummy_inf,
-		__func__, __LINE__, string_suspend,
+		__func__, __LINE__, (unsigned char *) string_suspend,
 		sizeof(string_suspend), 0);
 }
 void
@@ -235,7 +267,7 @@ tegra_sysfs_control_pkt(int number)
 {
 	if (lp0_logs_enable)
 		tcpdump_pkt_save('w', dummy_inf,
-		__func__, number, string_ctrl_pkt,
+		__func__, number, (unsigned char *) string_ctrl_pkt,
 		sizeof(string_ctrl_pkt), 0);
 }
 void
@@ -243,6 +275,6 @@ tegra_sysfs_dpc_pkt(void)
 {
 	if (lp0_logs_enable)
 		tcpdump_pkt_save('w', dummy_inf,
-		__func__, __LINE__, string_dpc_pkt,
+		__func__, __LINE__, (unsigned char *) string_dpc_pkt,
 		sizeof(string_dpc_pkt), 0);
 }

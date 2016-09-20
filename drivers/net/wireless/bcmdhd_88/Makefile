@@ -131,6 +131,7 @@ ifneq ($(CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA),)
   DHDOFILES += dhd_custom_sysfs_tegra_stat.o
   DHDOFILES += dhd_custom_sysfs_tegra_tcpdump.o
   DHDOFILES += dhd_custom_sysfs_tegra_netstat.o
+  DHDOFILES += dhd_custom_sysfs_tegra_rf_test.o
 endif
 
 ifneq ($(CONFIG_BCMDHD88_TEGRA_REGION_BASED_NVRAM),)
