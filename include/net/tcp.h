@@ -531,6 +531,8 @@ static inline __u32 cookie_v6_init_sequence(struct sock *sk,
 #endif
 /* tcp_output.c */
 
+extern u32 tcp_tso_autosize(const struct sock *sk, unsigned int mss_now,
+		     int min_tso_segs);
 extern void __tcp_push_pending_frames(struct sock *sk, unsigned int cur_mss,
 				      int nonagle);
 extern bool tcp_may_send_now(struct sock *sk);
