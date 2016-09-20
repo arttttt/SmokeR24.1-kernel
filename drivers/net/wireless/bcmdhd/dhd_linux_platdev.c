@@ -56,6 +56,7 @@
 #include <linux/mmc/sdhci.h>
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 #include "dhd_custom_sysfs_tegra.h"
+#include "dhd_custom_sysfs_tegra_stat.h"
 #endif
 
 #if !defined(CONFIG_WIFI_CONTROL_FUNC)
