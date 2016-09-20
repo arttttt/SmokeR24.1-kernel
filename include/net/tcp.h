@@ -666,7 +666,7 @@ static inline u32 tcp_rto_min_us(struct sock *sk)
 /* Minimum RTT in usec. ~0 means not available. */
 static inline u32 tcp_min_rtt(const struct tcp_sock *tp)
 {
-	return tp->rtt_min[0].rtt;
+	return minmax_get(&tp->rtt_min);
 }
 
 /* Compute the actual receive window we are currently advertising.
