@@ -1052,7 +1052,7 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
 	unsigned char nonce[HDCP_NONCE_SIZE];
 	uint32_t hdcp_uuid[4] = HDCP_SERVICE_UUID;
-	u32 session_id;
+	u32 session_id = 0;
 #endif
 
 	err =  tsec_hdcp_readcaps(hdcp_context);
@@ -1310,8 +1310,10 @@ exit:
 		nvhdcp_err("HDCP authentication failed with err %x\n", err);
 	kfree(pkt);
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-	if (session_id)
+	if (session_id) {
 		te_close_trusted_session(session_id, hdcp_uuid, sizeof(hdcp_uuid));
+		session_id = 0;
+	}
 #endif
 	return err;
 }
@@ -1586,7 +1588,7 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
 	char nonce[HDCP_NONCE_SIZE];
 	uint32_t hdcp_uuid[4] = HDCP_SERVICE_UUID;
-	u32 session_id;
+	u32 session_id = 0;
 #endif
 
 	nvhdcp_i2c_read16(nvhdcp, HDCP_RX_STATUS, &rx_status);
@@ -1653,8 +1655,10 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 			goto exit;
 		kfree(pkt);
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-		if (session_id)
+		if (session_id) {
 			te_close_trusted_session(session_id, hdcp_uuid, sizeof(hdcp_uuid));
+			session_id = 0;
+		}
 #endif
 		return 0;
 	} else
@@ -1662,8 +1666,10 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 exit:
 	kfree(pkt);
 #if defined(CONFIG_TRUSTED_LITTLE_KERNEL)
-	if (session_id)
+	if (session_id) {
 		te_close_trusted_session(session_id, hdcp_uuid, sizeof(hdcp_uuid));
+		session_id = 0;
+	}
 #endif
 		return 1;
 }
