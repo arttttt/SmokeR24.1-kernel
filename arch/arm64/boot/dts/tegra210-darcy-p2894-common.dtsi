@@ -270,6 +270,8 @@
 	};
 
 	bcmdhd_wlan {
+		sdhci-host = <&sdmmc2>;
+		pwr-retry-cnt = <5>;
 		country_code_map {
 			CC1 {
 				iso_abbrev = "XV";

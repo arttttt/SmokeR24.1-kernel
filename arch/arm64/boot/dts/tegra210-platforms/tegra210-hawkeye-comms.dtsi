@@ -18,7 +18,7 @@
 		mac-address-file = "/mnt/factory/wifi/wifi_mac.txt";
 		fw_path = "/system/vendor/firmware/fw_bcmdhd.bin";
 		nv_path = "/system/etc/nvram_hawkeye_4354.txt";
-		sdhci-host = <&sdhci1>;
+		sdhci-host = <&sdmmc2>;
 		pwr-retry-cnt = <5>;
 		country_code_map {
 			CC1 {
