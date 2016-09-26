@@ -9,7 +9,7 @@
  *
  *  Davide Libenzi <davidel@xmailserver.org>
  *
- * Copyright (c) 2013-2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  */
 
@@ -969,7 +969,8 @@ static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
  * mechanism. It is called by the stored file descriptors when they
  * have events to report.
  */
-int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *key)
+static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync,
+			    void *key)
 {
 	int pwake = 0;
 	unsigned long flags;
@@ -1066,7 +1067,6 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 
 	if (epi->nwait >= 0 && (pwq = kmem_cache_alloc(pwq_cache, GFP_KERNEL))) {
 		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
-		pwq->wait.private = get_thread_process(current);
 		pwq->whead = whead;
 		pwq->base = epi;
 		add_wait_queue(whead, &pwq->wait);
@@ -1290,9 +1290,6 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	spin_lock(&tfile->f_lock);
 	list_add_tail(&epi->fllink, &tfile->f_ep_links);
 	spin_unlock(&tfile->f_lock);
-	if (tfile->f_path.dentry->d_inode->i_private == NULL)
-		tfile->f_path.dentry->d_inode->i_private =
-			get_thread_process(current);
 
 	/*
 	 * Add the current item to the RB tree. All RB tree operations are
@@ -1732,34 +1729,6 @@ static void clear_tfile_check_list(void)
 		list_del_init(&file->f_tfile_llink);
 	}
 	INIT_LIST_HEAD(&tfile_check_list);
-}
-
-struct task_struct *get_epoll_file_task(struct file *file)
-{
-	struct list_head *lh;
-	struct epitem *epi = NULL;
-	struct eppoll_entry *pwq = NULL;
-	struct task_struct *task = NULL;
-	wait_queue_t *wq = NULL;
-
-	lh = &file->f_ep_links;
-	if (!list_empty(lh)) {
-		lh = lh->next;
-		epi = list_entry(lh, struct epitem, fllink);
-		lh = &epi->pwqlist;
-		if (!list_empty(lh)) {
-			lh = lh->next;
-			pwq = list_entry(lh, struct eppoll_entry, llink);
-			lh = &pwq->whead->task_list;
-			if (!list_empty(lh)) {
-				lh = lh->next;
-				wq = list_entry(lh, wait_queue_t, task_list);
-				task = wq->private;
-			}
-		}
-	}
-
-	return task;
 }
 
 /*

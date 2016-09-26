@@ -37,7 +37,7 @@
  *		as published by the Free Software Foundation; either version
  *		2 of the License, or (at your option) any later version.
  *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  */
 #ifndef _SOCK_H
 #define _SOCK_H
@@ -1599,8 +1599,6 @@ extern int compat_sock_common_setsockopt(struct socket *sock, int level,
 		int optname, char __user *optval, unsigned int optlen);
 
 extern void sk_common_release(struct sock *sk);
-
-extern char *sk_get_waiting_task_cmdline(struct sock *sk, char *cmdline);
 
 /*
  *	Default socket callbacks and setup code

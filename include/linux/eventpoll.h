@@ -9,7 +9,7 @@
  *
  *  Davide Libenzi <davidel@xmailserver.org>
  *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  */
 #ifndef _LINUX_EVENTPOLL_H
@@ -62,9 +62,6 @@ static inline void eventpoll_release(struct file *file)
 	 */
 	eventpoll_release_file(file);
 }
-
-int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *key);
-struct task_struct *get_epoll_file_task(struct file *file);
 
 #else
 

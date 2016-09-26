@@ -46,7 +46,8 @@
  *  Paul Mundt <paul.mundt@nokia.com>:
  *  Overall revision about smaps.
  *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
+ *
  */
 
 #include <asm/uaccess.h>
@@ -200,11 +201,6 @@ static int proc_root_link(struct dentry *dentry, struct path *path)
 		put_task_struct(task);
 	}
 	return result;
-}
-
-struct mm_struct *mm_for_maps(struct task_struct *task)
-{
-	return mm_access(task, PTRACE_MODE_READ);
 }
 
 static int proc_pid_cmdline(struct task_struct *task, char *buffer)

@@ -49,7 +49,7 @@
  *	Alexey Kuznetsov		allow both IPv4 and IPv6 sockets to bind
  *					a single port at the same time.
  *
- * Copyright (c) 2013-2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  */
 
 #define pr_fmt(fmt) "TCP: " fmt
@@ -2669,7 +2669,6 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i, int *len)
 	__u16 destp = ntohs(inet->inet_dport);
 	__u16 srcp = ntohs(inet->inet_sport);
 	int rx_queue;
-	char cmdline[128] = {'\0'};
 
 	if (icsk->icsk_pending == ICSK_TIME_RETRANS ||
 	    icsk->icsk_pending == ICSK_TIME_EARLY_RETRANS ||
@@ -2696,7 +2695,7 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i, int *len)
 		rx_queue = max_t(int, tp->rcv_nxt - tp->copied_seq, 0);
 
 	seq_printf(f, "%4d: %08X:%04X %08X:%04X %02X %08X:%08X %02X:%08lX "
-		"%08X %5d %8d %lu %d %pK %lu %lu %u %u %d %s%n",
+		"%08X %5d %8d %lu %d %pK %lu %lu %u %u %d%n",
 		i, src, srcp, dest, destp, sk->sk_state,
 		tp->write_seq - tp->snd_una,
 		rx_queue,
@@ -2714,7 +2713,6 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i, int *len)
 		sk->sk_state == TCP_LISTEN ?
 		    (fastopenq ? fastopenq->max_qlen : 0) :
 		    (tcp_in_initial_slowstart(tp) ? -1 : tp->snd_ssthresh),
-		sk_get_waiting_task_cmdline(sk, cmdline),
 		len);
 }
 
@@ -2746,10 +2744,9 @@ static int tcp4_seq_show(struct seq_file *seq, void *v)
 
 	if (v == SEQ_START_TOKEN) {
 		seq_printf(seq, "%-*s\n", TMPSZ - 1,
-			"  sl  local_address rem_address   st tx_queue "
-			"rx_queue tr tm->when retrnsmt   uid  timeout "
-			"inode "
-			"cmdline");
+			   "  sl  local_address rem_address   st tx_queue "
+			   "rx_queue tr tm->when retrnsmt   uid  timeout "
+			   "inode");
 		goto out;
 	}
 	st = seq->private;
@@ -2766,7 +2763,7 @@ static int tcp4_seq_show(struct seq_file *seq, void *v)
 		get_timewait4_sock(v, seq, st->num, &len);
 		break;
 	}
-	seq_printf(seq, "\n");
+	seq_printf(seq, "%*s\n", TMPSZ - 1 - len, "");
 out:
 	return 0;
 }
