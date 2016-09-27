@@ -620,7 +620,7 @@ struct dentry *debugfs_rename(struct dentry *old_dir, struct dentry *old_dentry,
 	old_name = fsnotify_oldname_init(old_dentry->d_name.name);
 
 	error = simple_rename(old_dir->d_inode, old_dentry, new_dir->d_inode,
-		dentry);
+		dentry, 0);
 	if (error) {
 		fsnotify_oldname_free(old_name);
 		goto exit;
