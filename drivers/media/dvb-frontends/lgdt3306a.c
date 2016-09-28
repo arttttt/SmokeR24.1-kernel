@@ -1737,7 +1737,8 @@ static int lgdt3306a_get_tune_settings(struct dvb_frontend *fe,
 static int lgdt3306a_search(struct dvb_frontend *fe)
 {
 	fe_status_t status = 0;
-	int i, ret;
+	int i = 0, ret;
+	unsigned long timeout;
 
 	/* set frontend */
 	ret = lgdt3306a_set_parameters(fe);
@@ -1745,8 +1746,9 @@ static int lgdt3306a_search(struct dvb_frontend *fe)
 		goto error;
 
 	/* wait frontend lock */
-	for (i = 20; i > 0; i--) {
-		dbg_info(": loop=%d\n", i);
+	timeout = jiffies + msecs_to_jiffies(1000);
+	while (!time_after(jiffies, timeout)) {
+		dbg_info(": loop=%d\n", ++i);
 		msleep(50);
 		ret = lgdt3306a_read_status(fe, &status);
 		if (ret)
