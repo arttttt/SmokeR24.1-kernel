@@ -583,10 +583,6 @@ static void ipi_cpu_stop(unsigned int cpu)
 	local_fiq_disable();
 	local_irq_disable();
 
-#ifdef CONFIG_HOTPLUG_CPU
-	platform_cpu_kill(cpu);
-#endif
-
 	while (1)
 		cpu_relax();
 }
@@ -713,13 +709,12 @@ void smp_send_reschedule(int cpu)
 void smp_send_stop(void)
 {
 	unsigned long timeout;
+	struct cpumask mask;
 
-	if (num_online_cpus() > 1) {
-		struct cpumask mask;
-		cpumask_copy(&mask, cpu_online_mask);
-		cpumask_clear_cpu(smp_processor_id(), &mask);
+	cpumask_copy(&mask, cpu_online_mask);
+	cpumask_clear_cpu(smp_processor_id(), &mask);
+	if (!cpumask_empty(&mask))
 		smp_cross_call(&mask, IPI_CPU_STOP);
-	}
 
 	/* Wait up to one second for other CPUs to stop */
 	timeout = USEC_PER_SEC;
