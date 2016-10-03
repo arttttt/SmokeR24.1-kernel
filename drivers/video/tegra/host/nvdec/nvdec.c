@@ -311,6 +311,18 @@ int nvhost_nvdec_finalize_poweron(struct platform_device *dev)
 		dev_err(&dev->dev, "boot failed due to timeout");
 		return err;
 	}
+
+	if (IS_ENABLED(CONFIG_NVDEC_BOOTLOADER)) {
+		u32 debuginfo = host1x_readl(dev, nvdec_debuginfo_r());
+
+		/* Must be zero for successful boot */
+		if (debuginfo) {
+			dev_err(&dev->dev, "boot failed, debuginfo=%x",
+					   debuginfo);
+			return -ETIMEDOUT;
+		}
+	}
+
 	dev_dbg(&dev->dev, "nvdec_boot: success\n");
 
 #ifdef CONFIG_TRUSTED_LITTLE_KERNEL
