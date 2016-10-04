@@ -2,7 +2,7 @@
  * f_fs.c -- user mode file system API for USB composite function controllers
  *
  * Copyright (C) 2010 Samsung Electronics
- * Copyright (c) 2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Michal Nazarewicz <mina86@mina86.com>
  *
@@ -1849,25 +1849,51 @@ static int __ffs_data_got_descs(struct ffs_data *ffs,
 				char *const _data, size_t len)
 {
 	unsigned fs_count, hs_count, ss_count = 0;
-	int fs_len, hs_len, ss_len, ret = -EINVAL;
+	int fs_len, hs_len, ss_len, ver, ret = -EINVAL;
 	char *data = _data;
 
 	ENTER();
 
-	if (unlikely(get_unaligned_le32(data) != FUNCTIONFS_DESCRIPTORS_MAGIC ||
-		     get_unaligned_le32(data + 4) != len))
+	if (get_unaligned_le32(data + 4) != len)
 		goto error;
-	fs_count = get_unaligned_le32(data +  8);
-	hs_count = get_unaligned_le32(data + 12);
 
-	if (!fs_count && !hs_count)
-		goto einval;
+	ver = get_unaligned_le32(data);
 
-	ffs->raw_descs_length = len;
-	ffs->raw_descs = _data;
+	switch (ver) {
+	case FUNCTIONFS_DESCRIPTORS_MAGIC:
 
-	data += 16;
-	len  -= 16;
+		fs_count = get_unaligned_le32(data +  8);
+		hs_count = get_unaligned_le32(data + 12);
+
+		if (!fs_count && !hs_count)
+			goto einval;
+
+		ffs->raw_descs_length = len;
+		ffs->raw_descs = _data;
+
+		data += 16;
+		len  -= 16;
+
+		break;
+	case FUNCTIONFS_DESCRIPTORS_MAGIC_V2:
+
+		fs_count = get_unaligned_le32(data + 12);
+		hs_count = get_unaligned_le32(data + 16);
+		ss_count = get_unaligned_le32(data + 20);
+
+		if (!fs_count && !hs_count && !ss_count)
+			goto einval;
+
+		ffs->raw_descs_length = len;
+		ffs->raw_descs = _data;
+
+		data += 28;
+		len  -= 28;
+
+		break;
+	default:
+		goto error;
+	}
 
 	if (likely(fs_count)) {
 		fs_len = ffs_do_descs(fs_count, data, len,
@@ -1903,8 +1929,9 @@ static int __ffs_data_got_descs(struct ffs_data *ffs,
 		hs_len = 0;
 	}
 
-	if (len >= 8) {
-		if (get_unaligned_le32(data) != FUNCTIONFS_SS_DESC_MAGIC)
+	if (ver == FUNCTIONFS_DESCRIPTORS_MAGIC && len >= 8) {
+		if (get_unaligned_le32(data) !=
+				FUNCTIONFS_SS_DESC_MAGIC)
 			goto einval;
 
 		ss_count = get_unaligned_le32(data + 4);
@@ -1912,7 +1939,7 @@ static int __ffs_data_got_descs(struct ffs_data *ffs,
 		len -= 8;
 	}
 
-	if (ss_count) {
+	if (likely(ss_count)) {
 		ss_len = ffs_do_descs(ss_count, data, len,
 				   __ffs_data_do_entity, ffs);
 		if (unlikely(ss_len < 0)) {
@@ -1928,11 +1955,6 @@ static int __ffs_data_got_descs(struct ffs_data *ffs,
 		ss_len = 0;
 		ret = 0;
 	}
-
-
-	if (unlikely(len != ret))
-		goto einval;
-
 	return 0;
 
 einval:
