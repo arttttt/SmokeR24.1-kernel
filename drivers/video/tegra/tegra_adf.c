@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2013 Google, Inc.
- * Copyright (c) 2014, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * modified from drivers/video/tegra/dc/{mode.c,ext/dev.c}
  *
@@ -1027,7 +1027,7 @@ static int tegra_adf_intf_blank(struct adf_interface *intf, u8 state)
 		break;
 
 	case DRM_MODE_DPMS_STANDBY:
-		tegra_dc_blank(adf_info->dc, BLANK_ALL);
+		tegra_dc_blank_wins(adf_info->dc, BLANK_ALL);
 		break;
 
 	case DRM_MODE_DPMS_SUSPEND:

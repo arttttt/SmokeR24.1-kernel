@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/ext/dev.c
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * Author: Robert Morell <rmorell@nvidia.com>
  * Some code based on fbdev extensions written by:
@@ -284,7 +284,7 @@ int tegra_dc_ext_disable(struct tegra_dc_ext *ext)
 				windows |= BIT(i);
 		}
 
-		tegra_dc_blank(ext->dc, windows);
+		tegra_dc_blank_wins(ext->dc, windows);
 		for_each_set_bit(i, &windows, DC_N_WINDOWS) {
 			tegra_dc_ext_unpin_window(&ext->win[i]);
 		}
@@ -1833,7 +1833,7 @@ static long tegra_dc_ioctl(struct file *filp, unsigned int cmd,
 	case TEGRA_DC_EXT_PUT_WINDOW:
 		ret = tegra_dc_ext_put_window(user, arg);
 		if (!ret) {
-			ret = tegra_dc_blank(user->ext->dc, BIT(arg));
+			ret = tegra_dc_blank_wins(user->ext->dc, BIT(arg));
 			if (ret < 0)
 				return ret;
 			tegra_dc_ext_unpin_window(&user->ext->win[arg]);
@@ -2523,7 +2523,7 @@ static int tegra_dc_release(struct inode *inode, struct file *filp)
 	}
 
 	if (ext->dc->enabled) {
-		tegra_dc_blank(ext->dc, windows);
+		tegra_dc_blank_wins(ext->dc, windows);
 		for_each_set_bit(i, &windows, DC_N_WINDOWS) {
 			tegra_dc_ext_unpin_window(&ext->win[i]);
 			tegra_dc_disable_window(ext->dc, i);

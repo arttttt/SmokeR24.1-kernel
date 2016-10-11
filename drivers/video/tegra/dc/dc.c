@@ -4414,7 +4414,7 @@ bool tegra_dc_stats_get(struct tegra_dc *dc)
 }
 
 /* blank selected windows by disabling them */
-int tegra_dc_blank(struct tegra_dc *dc, unsigned windows)
+int tegra_dc_blank_wins(struct tegra_dc *dc, unsigned windows)
 {
 	struct tegra_dc_win *dcwins[DC_N_WINDOWS];
 	struct tegra_dc_win blank_win;
@@ -4474,13 +4474,6 @@ int tegra_dc_blank(struct tegra_dc *dc, unsigned windows)
 		dcwins[nr_win++]->flags &= ~TEGRA_WIN_FLAG_ENABLED;
 	}
 
-	if (dc->shutdown) {
-		if ((dc->out->type == TEGRA_DC_OUT_HDMI) ||
-			(dc->out->type == TEGRA_DC_OUT_DP))
-			if (dc->out_ops && dc->out_ops->shutdown_interface)
-				dc->out_ops->shutdown_interface(dc);
-	}
-
 	/* Skip update for linsim */
 	if (!tegra_platform_is_linsim()) {
 		tegra_dc_update_windows(dcwins, nr_win, NULL, true);
@@ -4500,6 +4493,7 @@ int tegra_dc_blank(struct tegra_dc *dc, unsigned windows)
 		}
 		tegra_dc_disable_window(dc, i);
 	}
+
 	return ret;
 }
 
@@ -4538,15 +4532,24 @@ void tegra_dc_disable(struct tegra_dc *dc)
 
 static void tegra_dc_disable_irq_ops(struct tegra_dc *dc, bool from_irq)
 {
+	bool blank_windows = true;
+
 	if (WARN_ON(!dc || !dc->out || !dc->out_ops))
 		return;
 
+	if (dc->shutdown) {
+		if ((dc->out->type == TEGRA_DC_OUT_HDMI) ||
+		    (dc->out->type == TEGRA_DC_OUT_DP))
+			if (dc->out_ops && dc->out_ops->shutdown_interface)
+				dc->out_ops->shutdown_interface(dc);
+	}
+
 #ifdef CONFIG_TEGRA_DC_EXTENSIONS
-	if (!tegra_dc_ext_disable(dc->ext))
-		tegra_dc_blank(dc, BLANK_ALL);
-#else
-	tegra_dc_blank(dc, BLANK_ALL);
+	blank_windows = !tegra_dc_ext_disable(dc->ext);
 #endif
+
+	if (blank_windows)
+		tegra_dc_blank_wins(dc, BLANK_ALL);
 
 	/* it's important that new underflow work isn't scheduled before the
 	 * lock is acquired. */

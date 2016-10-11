@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/dsi.c
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -4154,12 +4154,12 @@ static void tegra_dsi_send_dc_frames(struct tegra_dc *dc,
 	 * Send frames in Continuous or One-shot mode.
 	 */
 	if (dc->out->flags & TEGRA_DC_OUT_ONE_SHOT_MODE) {
-		/* FIX ME: tegra_dc_blank() implicitly takes lock */
+		/* FIX ME: tegra_dc_blank_wins() implicitly takes lock */
 		int flag = mutex_is_locked(&dc->lock);
 		if (flag)
 			mutex_unlock(&dc->lock);
 		while (no_of_frames--)
-			tegra_dc_blank(dc, BLANK_ALL);
+			tegra_dc_blank_wins(dc, BLANK_ALL);
 		if (flag)
 			mutex_lock(&dc->lock);
 	} else
