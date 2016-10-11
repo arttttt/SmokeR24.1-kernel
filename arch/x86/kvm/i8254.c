@@ -271,7 +271,7 @@ void __kvm_migrate_pit_timer(struct kvm_vcpu *vcpu)
 static void destroy_pit_timer(struct kvm_pit *pit)
 {
 	hrtimer_cancel(&pit->pit_state.timer);
-	flush_kthread_work(&pit->expired);
+	kthread_flush_work(&pit->expired);
 }
 
 static void pit_do_work(struct kthread_work *work)
@@ -321,7 +321,7 @@ static enum hrtimer_restart pit_timer_fn(struct hrtimer *data)
 	if (ps->reinject)
 		atomic_inc(&ps->pending);
 
-	queue_kthread_work(&pt->worker, &pt->expired);
+	kthread_queue_work(&pt->worker, &pt->expired);
 
 	if (ps->is_periodic) {
 		hrtimer_add_expires_ns(&ps->timer, ps->period);
