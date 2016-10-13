@@ -76,7 +76,7 @@
 #define		PD_ZI		BIT(29)
 
 #define	XUSB_PADCTL_USB2_BATTERY_CHRG_TDCD_DBNC_TIMER_0	0x280
-#define		IDCD_DBNC(x)   (((x) & 0x3ff) << 0)
+#define		TDCD_DBNC(x)   (((x) & 0x7ff) << 0)
 
 static void tegra21x_usb_charger_filters(void __iomem *base, bool en)
 {
@@ -241,8 +241,8 @@ static int tegra21x_pad_power_on(struct tegra_usb_cd *ucd)
 	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL0);
 
 	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_TDCD_DBNC_TIMER_0);
-	val &= ~IDCD_DBNC(~0);
-	val |= IDCD_DBNC(0xa);
+	val &= ~TDCD_DBNC(~0);
+	val |= TDCD_DBNC(0xa);
 	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_TDCD_DBNC_TIMER_0);
 
 	/* Set DP/DN Pull up/down to zero by default */
@@ -277,6 +277,10 @@ static int tegra21x_pad_power_off(struct tegra_usb_cd *ucd)
 
 	tegra_pd2_deasserted(0);
 
+	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL0);
+	val |= PD_CHG;
+	writel(val, base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL0);
+
 	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL1);
 	val &= ~(USBOP_RPD_OVRD | USBOP_RPU_OVRD |
 		USBON_RPD_OVRD | USBON_RPU_OVRD);
@@ -301,10 +305,10 @@ static void tegra21x_usb_vbus_pad_protection(struct tegra_usb_cd *ucd,
 				ucd->current_limit_ma <= 899)
 			val |= VBUS_VREG_LEV(0x0);
 		else if (ucd->current_limit_ma >= 900 &&
-				ucd->current_limit_ma >= 1499)
+				ucd->current_limit_ma <= 1499)
 			val |= VBUS_VREG_LEV(0x1);
 		else if (ucd->current_limit_ma >= 1500 &&
-				ucd->current_limit_ma >= 1999)
+				ucd->current_limit_ma <= 1999)
 			val |= VBUS_VREG_LEV(0x2);
 		else if (ucd->current_limit_ma >= 2000)
 			val |= VBUS_VREG_LEV(0x3);
