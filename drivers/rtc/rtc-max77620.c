@@ -1,7 +1,7 @@
 /*
  * Max77620 RTC driver
  *
- * Copyright (C) 2014 NVIDIA CORPORATION. All rights reserved.
+ * Copyright (C) 2014-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -57,6 +57,9 @@
 #define RTC_YEAR_MAX			99
 
 #define ONOFF_WK_ALARM1_MASK		(1 << 2)
+#define ONOFF_WK_ALARM2_MASK		(1 << 1)
+
+#define MAX77620_RTC_DELAY		msecs_to_jiffies(2000)
 
 enum {
 	RTC_SEC,
@@ -74,9 +77,12 @@ struct max77620_rtc {
 	struct device *dev;
 
 	struct mutex io_lock;
+	struct delayed_work work;
 	int irq;
 	u8 irq_mask;
 	bool disable_time_display_in_suspend;
+	bool shutdown;
+	bool enable_rtc2alarm_wakeup;
 };
 
 static inline struct device *_to_parent(struct max77620_rtc *rtc)
@@ -256,6 +262,11 @@ static inline int max77620_rtc_do_irq(struct max77620_rtc *rtc)
 		dev_err(rtc->dev, "rtc_irq: Failed to get rtc irq status\n");
 		return ret;
 	}
+
+	if (!(rtc->irq_mask & MAX77620_RTCA2_MASK) &&
+			(irq_status & MAX77620_RTCA2_MASK))
+		dev_info(rtc->dev, "rtc_do_irq: irq_mask=0x%02x, irq_status=0x%02x\n",
+			rtc->irq_mask, irq_status);
 
 	dev_dbg(rtc->dev, "rtc_do_irq: irq_mask=0x%02x, irq_status=0x%02x\n",
 		rtc->irq_mask, irq_status);
@@ -458,6 +469,56 @@ static const struct rtc_class_ops max77620_rtc_ops = {
 	.alarm_irq_enable = max77620_rtc_alarm_irq_enable,
 };
 
+static void max77620_rtc_alarm2_work(struct work_struct *work)
+{
+	struct max77620_rtc *rtc;
+	struct rtc_wkalrm alrm;
+	u8 buf[RTC_NR];
+	unsigned long curnt_time;
+	int ret;
+
+	rtc = container_of(work, struct max77620_rtc, work.work);
+	if (!rtc || rtc->shutdown)
+		return;
+
+	ret = max77620_rtc_irq_unmask(rtc, MAX77620_RTCA2_MASK |
+					MAX77620_RTC_RTC1S_MASK);
+	if (ret < 0) {
+		dev_err(rtc->dev, "RTCA2 irq enable failed\n");
+		goto sched_work;
+	}
+
+	ret = max77620_rtc_read_time(rtc->dev, &alrm.time);
+	if (ret < 0) {
+		dev_err(rtc->dev, "rtc read time failed:%d\n", ret);
+		goto sched_work;
+	}
+
+	rtc_tm_to_time(&alrm.time, &curnt_time);
+	curnt_time += 9;
+	rtc_time_to_tm(curnt_time, &alrm.time);
+
+	ret = max77620_rtc_tm_to_reg(rtc, buf, &alrm.time, 1);
+	if (ret < 0) {
+		dev_err(rtc->dev,
+			"Failed to convert time into register format\n");
+		goto sched_work;
+	}
+
+	dev_dbg(rtc->dev,
+		"buf: %d 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+		buf[RTC_SEC], buf[RTC_MIN], buf[RTC_HOUR], buf[RTC_WEEKDAY],
+		buf[RTC_MONTH], buf[RTC_YEAR], buf[RTC_MONTHDAY]);
+
+	ret = max77620_rtc_write(rtc, MAX77620_REG_RTCSECA2,
+				buf, sizeof(buf), 1);
+	if (ret < 0)
+		dev_err(rtc->dev, "Failed to write rtc alarm2 time\n");
+
+sched_work:
+	schedule_delayed_work(&rtc->work, MAX77620_RTC_DELAY);
+}
+
 static int max77620_rtc_preinit(struct max77620_rtc *rtc)
 {
 	struct device *parent = _to_parent(rtc);
@@ -485,8 +546,10 @@ static int max77620_rtc_preinit(struct max77620_rtc *rtc)
 
 	/* It should be disabled alarm wakeup to wakeup from sleep
 	 * by EN1 input signal */
+	/* wake up on alarm2 from sleep by EN1 input signal */
 	ret = max77620_reg_update(parent, MAX77620_PWR_SLAVE,
-		MAX77620_REG_ONOFFCNFG2, ONOFF_WK_ALARM1_MASK, 0);
+			MAX77620_REG_ONOFFCNFG2, ONOFF_WK_ALARM1_MASK |
+			ONOFF_WK_ALARM2_MASK, 0 | ONOFF_WK_ALARM2_MASK);
 	if (ret < 0) {
 		dev_err(rtc->dev, "preinit: Failed to set onoff cfg2\n");
 		return ret;
@@ -550,9 +613,13 @@ static int max77620_rtc_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, rtc);
 	rtc->dev = &pdev->dev;
 	mutex_init(&rtc->io_lock);
+	rtc->shutdown =  false;
 
 	rtc->disable_time_display_in_suspend = of_property_read_bool(np,
 				"maxim,disable-time-print-suspend-resume");
+
+	rtc->enable_rtc2alarm_wakeup = of_property_read_bool(np,
+				"maxim,enable-rtc2-alarm-wakeup");
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &max77620_rtc_attr_group);
 	if (ret < 0) {
@@ -587,6 +654,11 @@ static int max77620_rtc_probe(struct platform_device *pdev)
 		goto fail_preinit;
 	}
 
+	if (rtc->enable_rtc2alarm_wakeup) {
+		INIT_DELAYED_WORK(&rtc->work, max77620_rtc_alarm2_work);
+		schedule_delayed_work(&rtc->work, 0);
+	}
+
 	device_init_wakeup(rtc->dev, 1);
 	enable_irq_wake(rtc->irq);
 
@@ -601,14 +673,52 @@ static int max77620_rtc_remove(struct platform_device *pdev)
 {
 	struct max77620_rtc *rtc = dev_get_drvdata(&pdev->dev);
 
+	if (rtc->enable_rtc2alarm_wakeup)
+		cancel_delayed_work_sync(&rtc->work);
 	mutex_destroy(&rtc->io_lock);
 	return 0;
+}
+
+static void max77620_rtc_shutdown(struct platform_device *pdev)
+{
+	struct max77620_rtc *rtc = dev_get_drvdata(&pdev->dev);
+	int ret;
+	u8 buf[RTC_NR];
+
+	if (!rtc)
+		goto mutex_exit;
+
+	mutex_lock(&rtc->io_lock);
+	rtc->shutdown = true;
+	mutex_unlock(&rtc->io_lock);
+
+	if (!rtc->enable_rtc2alarm_wakeup)
+		goto mutex_exit;
+
+	cancel_delayed_work_sync(&rtc->work);
+
+	memset(buf, 0, sizeof(buf));
+	ret = max77620_rtc_write(rtc, MAX77620_REG_RTCSECA2,
+					buf, sizeof(buf), 1);
+	if (ret < 0)
+		dev_err(rtc->dev, "Failed to write rtc alarm2 time\n");
+
+	ret = max77620_rtc_irq_mask(rtc, MAX77620_RTCA2_MASK |
+					MAX77620_RTC_RTC1S_MASK);
+	if (ret < 0)
+		dev_err(rtc->dev, "RTCA2M, RTC1SM irq Mask failed\n");
+
+mutex_exit:
+	mutex_destroy(&rtc->io_lock);
 }
 
 #ifdef CONFIG_PM_SLEEP
 static int max77620_rtc_suspend(struct device *dev)
 {
 	struct max77620_rtc *max77620_rtc = dev_get_drvdata(dev);
+
+	if (max77620_rtc->enable_rtc2alarm_wakeup)
+		cancel_delayed_work_sync(&max77620_rtc->work);
 
 	if (device_may_wakeup(dev)) {
 		int ret;
@@ -633,6 +743,9 @@ static int max77620_rtc_suspend(struct device *dev)
 static int max77620_rtc_resume(struct device *dev)
 {
 	struct max77620_rtc *max77620_rtc = dev_get_drvdata(dev);
+
+	if (max77620_rtc->enable_rtc2alarm_wakeup)
+		schedule_delayed_work(&max77620_rtc->work, MAX77620_RTC_DELAY);
 
 	if (device_may_wakeup(dev)) {
 		struct rtc_time tm;
@@ -660,6 +773,7 @@ static const struct dev_pm_ops max77620_rtc_pm_ops = {
 
 static struct platform_driver max77620_rtc_driver = {
 	.probe = max77620_rtc_probe,
+	.shutdown	= max77620_rtc_shutdown,
 	.remove = max77620_rtc_remove,
 	.driver = {
 			.name = "max77620-rtc",

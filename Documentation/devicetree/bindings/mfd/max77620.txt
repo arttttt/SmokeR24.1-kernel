@@ -70,6 +70,9 @@ Optional properties:
 		in suspend and resume in RTC driver. This will reduce the
 		suspend/resume delay as RTC register read is 16ms delay by
 		HW.
+	- maxim,enable-rtc2-alarm-wakeup: enable rtc alarm2 and rtc periodic
+		second timer interrupt, to wake up device if rtc2 timer expired,
+		wake up on alarm2 from sleep by EN1 input signal.
 
 Pinmux and GPIO:
 ===============
