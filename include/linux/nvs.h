@@ -411,7 +411,10 @@ struct nvs_fn_if {
 
 extern const char * const nvs_float_significances[];
 
+struct nvs_fn_if *nvs_auto(void);
+struct nvs_fn_if *nvs_relay(void);
 struct nvs_fn_if *nvs_iio(void);
+struct nvs_fn_if *nvs_input(void);
 int nvs_of_dt(const struct device_node *np, struct sensor_cfg *cfg,
 	      const char *dev_name);
 int nvs_vreg_dis(struct device *dev, struct regulator_bulk_data *vreg);
@@ -426,6 +429,8 @@ int nvs_vregs_init(struct device *dev, struct regulator_bulk_data *vregs,
 		   unsigned int vregs_n, char **vregs_name);
 int nvs_vregs_sts(struct regulator_bulk_data *vregs, unsigned int vregs_n);
 s64 nvs_timestamp(void);
-int nvs_dsm_push(int dev_id, bool connect, int snsr_id, unsigned char *uuid);
+int nvs_dsm_relay(int dev_id, bool connect, int snsr_id, unsigned char *uuid);
+int nvs_dsm_iio(int dev_id, bool connect, int snsr_id, unsigned char *uuid);
+int nvs_dsm_input(int dev_id, bool connect, int snsr_id, unsigned char *uuid);
 
 #endif /* _NVS_H_ */

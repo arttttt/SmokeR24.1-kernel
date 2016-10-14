@@ -82,7 +82,7 @@
 #include <linux/iio/trigger.h>
 #include <linux/nvs.h>
 
-#define NVS_IIO_DRIVER_VERSION		(216)
+#define NVS_IIO_DRIVER_VERSION		(218)
 
 enum NVS_ATTR {
 	NVS_ATTR_ENABLE,
@@ -190,6 +190,7 @@ struct nvs_state {
 	unsigned int dbg;
 	unsigned int fn_dev_sts;
 	unsigned int fn_dev_errs;
+	unsigned int snsr_type;
 	long dbg_data_lock;
 	s64 ts_diff;
 	s64 ts;
@@ -567,8 +568,6 @@ static ssize_t nvs_dbg_data(struct iio_dev *indio_dev, char *buf)
 				t += snprintf(buf + t, PAGE_SIZE - t, "%llu ",
 					      data);
 			}
-		} else {
-			t += snprintf(buf + t, PAGE_SIZE - t, "ERR ");
 		}
 	}
 	t += snprintf(buf + t, PAGE_SIZE - t, "ts=%lld  ts_diff=%lld\n",
@@ -684,7 +683,7 @@ static int nvs_buf_push(struct iio_dev *indio_dev, unsigned char *data, s64 ts)
 			}
 			if (*st->fn_dev->sts & NVS_STS_SPEW_BUF) {
 				for (i = 0; i < bytes; i++)
-					dev_info(st->dev, "%s buf[%u]=%x\n",
+					dev_info(st->dev, "%s buf[%u]=%X\n",
 						 st->cfg->name, i, st->buf[i]);
 				dev_info(st->dev, "%s ts=%lld  diff=%lld\n",
 					 st->cfg->name, ts, st->ts_diff);
@@ -830,10 +829,9 @@ static ssize_t nvs_attr_store(struct device *dev,
 				break;
 			}
 		}
-		if (new == sizeof(matrix)) {
+		if (new == sizeof(matrix))
 			memcpy(st->cfg->matrix, matrix,
 			       sizeof(st->cfg->matrix));
-		}
 		break;
 
 	default:
@@ -1621,11 +1619,11 @@ static int nvs_chan(struct iio_dev *indio_dev)
 	} else {
 		/* no st->cfg->name - use st->cfg->snsr_id to specify device */
 		if (ch_type_i >= ARRAY_SIZE(nvs_iio_ch_tbl))
-			return -ENODEV;
-
+			ch_type_i = 0;
 		st->cfg->name = nvs_iio_ch_tbl[ch_type_i].snsr_name;
 	}
 
+	st->snsr_type = ch_type_i;
 	i = st->cfg->ch_n;
 	i++; /* timestamp */
 	if (st->cfg->snsr_data_n && st->cfg->ch_n) {
@@ -1790,8 +1788,8 @@ static int nvs_remove(void *handle)
 
 	st = iio_priv(indio_dev);
 	if (st->cfg->flags & SENSOR_FLAG_DYNAMIC_SENSOR)
-		/* st->cfg->snsr_id may have changed so we don't include it */
-		nvs_dsm_push(indio_dev->id, false, -1, st->cfg->uuid);
+		nvs_dsm_iio(indio_dev->id, false, st->snsr_type,
+			    st->cfg->uuid);
 	if (indio_dev->dev.devt)
 		iio_device_unregister(indio_dev);
 	if (st->trig != NULL) {
@@ -1879,7 +1877,6 @@ static int nvs_init(struct iio_dev *indio_dev, struct nvs_state *st)
 
 	indio_dev->trig = st->trig;
 	indio_dev->modes |= INDIO_BUFFER_TRIGGERED;
-	indio_dev->multi_link = true;
 	ret = iio_device_register(indio_dev);
 	if (ret) {
 		dev_err(st->dev, "%s iio_device_register ERR\n", __func__);
@@ -1896,7 +1893,7 @@ static int nvs_probe(void **handle, void *dev_client, struct device *dev,
 	struct nvs_state *st;
 	int ret;
 
-	dev_info(dev, "%s\n", __func__);
+	dev_info(dev, "%s (iio)\n", __func__);
 	if (!snsr_cfg)
 		return -ENODEV;
 
@@ -1910,7 +1907,7 @@ static int nvs_probe(void **handle, void *dev_client, struct device *dev,
 		return -ENODEV;
 	}
 
-	indio_dev = iio_device_alloc(sizeof(*st));
+	indio_dev = nvs_device_alloc(sizeof(*st), true);
 	if (indio_dev == NULL) {
 		dev_err(dev, "%s iio_device_alloc ERR\n", __func__);
 		return -ENOMEM;
@@ -1943,10 +1940,10 @@ static int nvs_probe(void **handle, void *dev_client, struct device *dev,
 	} else {
 		*handle = indio_dev;
 		if (st->cfg->flags & SENSOR_FLAG_DYNAMIC_SENSOR)
-			nvs_dsm_push(indio_dev->id, true, st->cfg->snsr_id,
-				     st->cfg->uuid);
+			nvs_dsm_iio(indio_dev->id, true, st->snsr_type,
+				    st->cfg->uuid);
 	}
-	dev_info(st->dev, "%s %s done\n", __func__, st->cfg->name);
+	dev_info(st->dev, "%s (iio) %s done\n", __func__, st->cfg->name);
 	return ret;
 }
 

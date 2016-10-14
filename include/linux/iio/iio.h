@@ -426,8 +426,8 @@ struct iio_dev {
 	struct dentry			*debugfs_dentry;
 	unsigned			cached_reg_addr;
 #endif
-	bool				multi_link;
-	char				*link_name;
+	char				link_name[16];
+	struct device_type		dev_type;
 };
 
 /**
@@ -528,6 +528,7 @@ static inline void *iio_device_get_drvdata(struct iio_dev *indio_dev)
  * @sizeof_priv: 	Space to allocate for private structure.
  **/
 struct iio_dev *iio_device_alloc(int sizeof_priv);
+struct iio_dev *nvs_device_alloc(int sizeof_priv, bool multi_link);
 
 static inline void *iio_priv(const struct iio_dev *indio_dev)
 {
