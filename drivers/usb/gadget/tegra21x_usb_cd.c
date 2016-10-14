@@ -100,6 +100,7 @@ static bool tegra21x_usb_dcd_detect(struct tegra_usb_cd *ucd)
 	bool ret = false;
 	DBG(ucd->dev, "Begin");
 
+	DBG(ucd->dev, "DCD enabling OP_I_SRC_EN");
 	/* Turn on IDP_SRC */
 	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL0);
 	val |= OP_I_SRC_EN;
@@ -113,7 +114,7 @@ static bool tegra21x_usb_dcd_detect(struct tegra_usb_cd *ucd)
 	/* Wait for TDCD_DBNC */
 	usleep_range(10000, 120000);
 
-	while (dcd_timeout_ms < 900) {
+	while (dcd_timeout_ms < 400) {
 		val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL0);
 		if (val & DCD_DETECTED) {
 			DBG(ucd->dev, "DCD successful took %d ms\n",
@@ -124,8 +125,11 @@ static bool tegra21x_usb_dcd_detect(struct tegra_usb_cd *ucd)
 		usleep_range(20000, 22000);
 		dcd_timeout_ms += 22;
 	}
+	if (!ret)
+		pr_info("%s:%d DCD timeout %d ms\n", __func__, __LINE__, dcd_timeout_ms);
 
 	/* Turn off IP_SRC, clear DCD DETECTED*/
+	DBG(ucd->dev, "DCD disabling OP_I_SRC_EN");
 	val = readl(base + XUSB_PADCTL_USB2_BATTERY_CHRG_OTGPAD0_CTL0);
 	val &= ~(OP_I_SRC_EN);
 	val |= DCD_DETECTED;
