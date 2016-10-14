@@ -736,7 +736,7 @@
 
 	xudc@700d0000 {
 		nvidia,common_padctl = <&xusb_pad_ctl>;
-		extcon-cables = <&extcon_cable_xlate 0>;
+		extcon-cables = <&bq2419x 0>;
 		extcon-cable-names = "vbus";
 		#extcon-cells = <1>;
 		status = "disabled";
