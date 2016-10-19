@@ -2,6 +2,12 @@
 # Makefile for the linux kernel.
 #
 
+# If instrumentation of this dir is enabled, boot hangs during first second.
+# Probably could be more selective here, but note that files related to irqs,
+# boot, dumpstack/stacktrace, etc are either non-interesting or can lead to
+# non-deterministic coverage.
+KCOV_INSTRUMENT		:= n
+
 extra-y                := head_$(BITS).o head$(BITS).o head.o vmlinux.lds
 
 CPPFLAGS_vmlinux.lds += -U$(UTS_MACHINE)
