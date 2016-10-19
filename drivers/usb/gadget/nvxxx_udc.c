@@ -3026,7 +3026,15 @@ void update_dequeue_pt(struct event_trb_s *event, struct nv_udc_ep *udc_ep,
 	u64 dq_pt_addr = (u64)deq_pt_lo + ((u64)deq_pt_hi << 32);
 	struct transfer_trb_s *deq_pt;
 
+	/* Some events carry no TRB pointer, should not
+	 * update dequeue pointer in these cases, such as
+	 * Ring Underrun/Overrun events.
+	 */
+	if (!dq_pt_addr)
+		return;
+
 	deq_pt = tran_trb_dma_to_virt(udc_ep, dq_pt_addr);
+
 	if (increment)
 		deq_pt++;
 
