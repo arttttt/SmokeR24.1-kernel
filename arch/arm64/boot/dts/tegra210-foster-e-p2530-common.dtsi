@@ -39,7 +39,7 @@
 #include <dt-bindings/iio/meter/ina3221x.h>
 #include "tegra210-platforms/tegra210-sysedp.dtsi"
 #include "tegra210-platforms/tegra210-audio.dtsi"
-#include "tegra210-platforms/tegra210-loki-e-cpufreq.dtsi"
+#include "tegra210-platforms/tegra210-foster-cpufreq.dtsi"
 
 / {
 	host1x {
