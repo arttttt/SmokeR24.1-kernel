@@ -352,16 +352,24 @@ static unsigned long default_emc_cpu_limit(unsigned long cpu_rate,
 {
 	/* Vote on memory bus frequency based on cpu frequency;
 	   cpu rate is in kHz, emc rate is in Hz */
-	if (cpu_rate >= 1300000)
-		return emc_max_rate;    /* cpu >= 1.3GHz, emc max */
-	else if (cpu_rate >= 975000)
-		return 550000000;   /* cpu >= 975 MHz, emc 550 MHz */
-	else if (cpu_rate >= 725000)
-		return  350000000;  /* cpu >= 725 MHz, emc 350 MHz */
-	else if (cpu_rate >= 500000)
-		return  150000000;  /* cpu >= 500 MHz, emc 150 MHz */
-	else if (cpu_rate >= 275000)
-		return  50000000;   /* cpu >= 275 MHz, emc 50 MHz */
+	if (cpu_rate >= 1734000)
+		return emc_max_rate;    /* cpu >= 1.734GHz, emc max */
+	else if (cpu_rate >= 1326000)
+		return 792000000;   /* cpu >= 1.362GHz, emc 792 MHz */
+	else if (cpu_rate >= 1224000)
+		return 600000000;   /* cpu >= 1.224GHz, emc 600 MHz */
+	else if (cpu_rate >= 1044000)
+		return 528000000;   /* cpu >= 1.044GHz, emc 528 MHz */
+	else if (cpu_rate >= 960000)
+		return 396000000;   /* cpu >= 960 MHz, emc 396 MHz */
+	else if (cpu_rate >= 828000)
+		return 300000000;  /* cpu >= 828 MHz, emc 300 MHz */
+	else if (cpu_rate >= 696000)
+		return 204000000;  /* cpu >= 696 MHz, emc 204 MHz */
+	else if (cpu_rate >= 564000)
+		return 102000000;   /* cpu >= 564 MHz, emc 102 MHz */
+	else if (cpu_rate >= 312000)
+		return 50000000;   /* cpu >= 312 MHz, emc 50 MHz */
 	else
 		return 0;       /* emc min */
 }
