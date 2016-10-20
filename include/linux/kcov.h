@@ -18,6 +18,12 @@ enum kcov_mode {
 	 * Covered PCs are collected in a per-task buffer.
 	 */
 	KCOV_MODE_TRACE = 1,
+	/*
+	 * AFL-style collection.
+	 * Covered branches are hashed and collected in a fixed size buffer
+	 * (see AFL documentation for more information).
+	 */
+	KCOV_MODE_AFL = 2,
 };
 
 #else

@@ -5,6 +5,7 @@
 #include <linux/types.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/hash.h>
 #include <linux/mm.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
@@ -34,6 +35,19 @@ struct kcov {
 	enum kcov_mode		mode;
 	/* Size of arena (in long's for KCOV_MODE_TRACE). */
 	unsigned		size;
+
+	union {
+		/* For KCOV_MODE_AFL */
+		struct {
+			/* (number of bytes) - 1, where number of
+			 * bytes must be a power of 2. */
+			unsigned int		mask;
+
+			/* Previous PC (for KCOV_MODE_AFL). */
+			unsigned int		prev_location;
+		};
+	};
+
 	/* Coverage buffer shared with user space. */
 	void			*area;
 	/* Task for which we collect coverage, or NULL. */
@@ -76,6 +90,19 @@ void notrace __sanitizer_cov_trace_pc(void)
 			area[pos] = _RET_IP_;
 			WRITE_ONCE(area[0], pos);
 		}
+	} else if (mode == KCOV_MODE_AFL) {
+		struct kcov *kcov;
+		unsigned char *area;
+		unsigned long location = _RET_IP_;
+
+		/* See above */
+		barrier();
+
+		kcov = t->kcov;
+		area = kcov->area;
+
+		++area[(kcov->prev_location ^ location) & kcov->mask];
+		kcov->prev_location = hash_long(location, BITS_PER_LONG);
 	}
 }
 EXPORT_SYMBOL(__sanitizer_cov_trace_pc);
@@ -199,6 +226,23 @@ static int kcov_ioctl_locked(struct kcov *kcov, unsigned int cmd,
 			return -EINVAL;
 		kcov->size = size;
 		kcov->mode = KCOV_MODE_TRACE;
+		return 0;
+	case KCOV_INIT_AFL:
+		if (kcov->mode != KCOV_MODE_DISABLED)
+			return -EBUSY;
+
+		/*
+		 * AFL mode needs a fixed-size area that is a power of 2.
+		 */
+		size = arg;
+		if (size < 2 || size > INT_MAX / sizeof(unsigned long))
+			return -EINVAL;
+		if (!is_power_of_2(size))
+			return -EINVAL;
+		kcov->size = size;
+		kcov->mask = (size * sizeof(unsigned long)) - 1;
+		kcov->prev_location = hash_long(0, BITS_PER_LONG);
+		kcov->mode = KCOV_MODE_AFL;
 		return 0;
 	case KCOV_ENABLE:
 		/*
