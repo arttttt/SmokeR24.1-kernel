@@ -538,7 +538,7 @@ static int nvhost_ioctl_channel_submit(struct nvhost_channel_userctx *ctx,
 	if (num_cmdbufs < 0)
 		return -EINVAL;
 
-	if ((num_syncpt_incrs < 0) || (num_syncpt_incrs >
+	if ((num_syncpt_incrs < 1) || (num_syncpt_incrs >
 		     nvhost_syncpt_nb_pts(&nvhost_get_host(ctx->pdev)->syncpt)))
 		return -EINVAL;
 
