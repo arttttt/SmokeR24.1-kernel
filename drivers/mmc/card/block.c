@@ -2819,6 +2819,12 @@ static const struct mmc_fixup blk_fixups[] = {
 		  MMC_QUIRK_INAND_CMD38),
 	MMC_FIXUP("SEM32G", CID_MANFID_SANDISK, 0x100, add_quirk,
 		  MMC_QUIRK_INAND_CMD38),
+	MMC_FIXUP("SDW16G", CID_MANFID_ANY, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
+	MMC_FIXUP("SDW32G", CID_MANFID_ANY, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
+	MMC_FIXUP("SDW64G", CID_MANFID_ANY, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
 
 	/*
 	 * Some MMC cards experience performance degradation with CMD23
