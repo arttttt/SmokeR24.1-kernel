@@ -3084,13 +3084,29 @@ bool is_request_dequeued(struct nv_udc_s *nvudc, struct nv_udc_ep *udc_ep,
 	return status;
 }
 
+/*
+ * Determine if the given TRB is in the range [first trb, last trb] for the
+ * given request.
+ */
+static bool trb_in_request(struct nv_udc_request *req,
+			struct transfer_trb_s *trb)
+{
+	if (trb >= req->first_trb && (trb <= req->last_trb ||
+				      req->last_trb < req->first_trb))
+		return true;
+	if (trb < req->first_trb && trb <= req->last_trb &&
+	    req->last_trb < req->first_trb)
+		return true;
+	return false;
+}
+
 int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 {
 	u8 ep_index = XHCI_GETF(EVE_TRB_ENDPOINT_ID, event->eve_trb_dword3);
 	struct nv_udc_ep *udc_ep_ptr = &nvudc->udc_ep[ep_index];
 	struct ep_cx_s *p_ep_cx = nvudc->p_epcx + ep_index;
 	u16 comp_code;
-	struct nv_udc_request *udc_req_ptr;
+	struct nv_udc_request *udc_req_ptr = NULL;
 	bool trbs_dequeued = false;
 	struct transfer_trb_s *p_trb;
 	u64 trb_pt;
@@ -3103,8 +3119,14 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 	trb_pt = (u64)event->trb_pointer_lo +
 		((u64)(event->trb_pointer_hi) << 32);
 	p_trb = tran_trb_dma_to_virt(udc_ep_ptr, trb_pt);
-	udc_req_ptr = list_entry(udc_ep_ptr->queue.next,
-				struct nv_udc_request, queue);
+
+	if (p_trb) {
+		udc_req_ptr = list_first_entry_or_null(&(udc_ep_ptr->queue),
+						struct nv_udc_request, queue);
+		if (udc_req_ptr && !trb_in_request(udc_req_ptr, p_trb))
+			udc_req_ptr = NULL;
+	}
+
 	comp_code = XHCI_GETF(EVE_TRB_COMPL_CODE, event->eve_trb_dword2);
 
 #ifdef NV_DISABLE_RCV_DET
@@ -3165,6 +3187,13 @@ int nvudc_handle_exfer_event(struct nv_udc_s *nvudc, struct event_trb_s *event)
 
 			trb_transfer_length = XHCI_GETF(EVE_TRB_TRAN_LEN,
 						event->eve_trb_dword2);
+
+			/* For coverity check, it shouldn't enter here */
+			if (unlikely(!udc_req_ptr)) {
+				dev_err(nvudc->dev, "%s short pkt event without valid request\n",
+						__func__);
+				break;
+			}
 
 			udc_req_ptr->usb_req.actual =
 				udc_req_ptr->usb_req.length -
