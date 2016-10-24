@@ -94,6 +94,11 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_event {
 	/* data portion follows */
 } BWL_POST_PACKED_STRUCT bcm_event_t;
 
+typedef union bcm_event_msg_u {
+	wl_event_msg_t	event;
+	/* add new event here */
+} bcm_event_msg_u_t;
+
 #define BCM_MSG_LEN	(sizeof(bcm_event_t) - sizeof(bcmeth_hdr_t) - sizeof(struct ether_header))
 
 /* Event messages */
@@ -233,6 +238,9 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_event {
 #define WLC_E_CCX_S69_RESP_RX	129
 #define WLC_E_LAST			130	/* highest val + 1 for range checking */
 
+/* validate if the event is proper and if valid copy event header to event */
+extern int is_wlc_event_frame(void *pktdata, uint pktlen, uint16 exp_usr_subtype,
+	bcm_event_msg_u_t *out_event);
 
 /* Table of event name strings for UIs and debugging dumps */
 typedef struct {
