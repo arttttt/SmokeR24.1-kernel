@@ -26,6 +26,7 @@ bool enable_file_logging;
 struct list_head list1;
 struct list_head list2;
 bool select_list;
+bool driver_active;
 
 struct workqueue_struct *logger_wqueue;
 struct log_buffer {
@@ -61,7 +62,8 @@ void write_log_init()
 		goto netlink_fail;
 
 	dhd_log_netlink_send_msg(0, 0, 0, NULL, 0);
-	enable_file_logging = true;
+	enable_file_logging = false;
+	driver_active = true;
 	select_list = true;
 	return;
 
@@ -93,7 +95,7 @@ int write_log(int event, const char *buf, const char *info)
 	struct tm date_time;
 	static int count = 0;
 
-	if (!enable_file_logging) {
+	if (!enable_file_logging || !driver_active) {
 		return -1;
 	}
 
@@ -268,7 +270,7 @@ void write_log_file(const char *log)
 
 void nvlogger_suspend_work()
 {
-	enable_file_logging = false;
+	driver_active = false;
 	pr_info("nvlogger_suspend_work\n");
 	cancel_work_sync(&enqueue_work);
 }
@@ -276,7 +278,7 @@ void nvlogger_suspend_work()
 void nvlogger_resume_work()
 {
 	pr_info("nvlogger_resume_work\n");
-	enable_file_logging = true;
+	driver_active = true;
 }
 
 #define NETLINK_CARBON     29
