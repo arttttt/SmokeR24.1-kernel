@@ -697,7 +697,9 @@ static void tegra_hdmi_hpd_worker(struct work_struct *work)
 					goto fail;
 				} else {
 					dev_info(&hdmi->dc->ndev->dev, "hdmi: EDID change after HPD bounce, resetting\n");
-					hdmi->plug_state = TEGRA_HDMI_MONITOR_DISABLE;
+					if (hdmi->dc->out->hotplug_state !=
+						TEGRA_HPD_STATE_FORCE_ASSERT)
+						hdmi->plug_state = TEGRA_HDMI_MONITOR_DISABLE;
 				}
 			}
 			break;
