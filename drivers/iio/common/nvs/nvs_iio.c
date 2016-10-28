@@ -1790,11 +1790,12 @@ static int nvs_remove(void *handle)
 	if (st->cfg->flags & SENSOR_FLAG_DYNAMIC_SENSOR)
 		nvs_dsm_iio(indio_dev->id, false, st->snsr_type,
 			    st->cfg->uuid);
-	if (indio_dev->dev.devt)
-		iio_device_unregister(indio_dev);
+	iio_device_unregister(indio_dev);
 	if (st->trig != NULL) {
 		iio_trigger_unregister(st->trig);
 		iio_trigger_free(st->trig);
+		st->trig = NULL;
+		indio_dev->trig = NULL;
 	}
 	if (indio_dev->buffer != NULL) {
 		iio_buffer_unregister(indio_dev);
