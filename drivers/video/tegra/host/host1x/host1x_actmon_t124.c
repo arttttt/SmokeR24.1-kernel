@@ -171,8 +171,8 @@ static int host1x_actmon_init(struct host1x_actmon *actmon)
 			actmon->usecs_per_sample = 80;
 			actmon->k = 4;
 		} else {
-			actmon->usecs_per_sample = 10;
-			actmon->k = 1;
+			actmon->usecs_per_sample = 20;
+			actmon->k = 5;
 		}
 	}
 
