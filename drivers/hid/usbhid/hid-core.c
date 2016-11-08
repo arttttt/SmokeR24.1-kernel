@@ -1243,6 +1243,8 @@ static int usbhid_start(struct hid_device *hid)
 #endif
 		/* Disabling the auto-suspend for all Hid devices  */
 		usb_disable_autosuspend(dev);
+
+	usb_get_dev(dev);
 	return 0;
 
 fail:
@@ -1259,6 +1261,7 @@ fail:
 static void usbhid_stop(struct hid_device *hid)
 {
 	struct usbhid_device *usbhid = hid->driver_data;
+	struct usb_device *udev = hid_to_usb_dev(hid);
 
 	if (WARN_ON(!usbhid))
 		return;
@@ -1285,7 +1288,8 @@ static void usbhid_stop(struct hid_device *hid)
 	usbhid->urbctrl = NULL;
 	usbhid->urbout = NULL;
 
-	hid_free_buffers(hid_to_usb_dev(hid), hid);
+	hid_free_buffers(udev, hid);
+	usb_put_dev(udev);
 }
 
 static int usbhid_power(struct hid_device *hid, int lvl)
