@@ -355,6 +355,15 @@ menuconfig GCC_PLUGINS
 
 	  See Documentation/gcc-plugins.txt for details.
 
+config GCC_PLUGIN_SANCOV
+	bool
+	depends on GCC_PLUGINS
+	help
+	  This plugin inserts a __sanitizer_cov_trace_pc() call at the start of
+	  basic blocks. It supports all gcc versions with plugin support (from
+	  gcc-4.5 on). It is based on the commit "Add fuzzing coverage support"
+	  by Dmitry Vyukov <dvyukov@google.com>.
+
 config HAVE_CONTEXT_TRACKING
 	bool
 	help
