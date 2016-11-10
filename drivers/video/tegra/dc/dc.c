@@ -3797,14 +3797,13 @@ static irqreturn_t tegra_dc_irq(int irq, void *ptr)
 
 	if (status & FRAME_END_INT)
 		dc->dbg_fe_count++;
-		if (dc->disp_active_dirty) {
-			tegra_dc_writel(dc, dc->mode.h_active |
-				(dc->mode.v_active << 16), DC_DISP_DISP_ACTIVE);
-			tegra_dc_writel(dc,
-				GENERAL_ACT_REQ, DC_CMD_STATE_CONTROL);
-
-			dc->disp_active_dirty = false;
-		}
+	if (dc->disp_active_dirty) {
+		tegra_dc_writel(dc, dc->mode.h_active |
+			(dc->mode.v_active << 16), DC_DISP_DISP_ACTIVE);
+		tegra_dc_writel(dc,
+			GENERAL_ACT_REQ, DC_CMD_STATE_CONTROL);
+		dc->disp_active_dirty = false;
+	}
 
 	tegra_dc_put(dc);
 	mutex_unlock(&dc->lock);

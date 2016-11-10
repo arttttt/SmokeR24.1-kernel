@@ -1188,7 +1188,7 @@ static void xotg_work(struct work_struct *work)
 			xotg_suspend_host(xotg, XDEV_DISABLED);
 			xotg_set_reverse_id(xotg, false);
 			xotg_suspend_host(xotg, XDEV_RXDETECT);
-			if (!xotg_enable_gadget(xotg, 1) == 1) {
+			if ((!xotg_enable_gadget(xotg, 1)) == 1) {
 				xotg_err(xotg->dev,
 				"xotg_enable_gadget(xotg, 1) failed\n");
 			}
@@ -1395,7 +1395,7 @@ static void xotg_work(struct work_struct *work)
 			 * rxdetect. either suspend the gadget driver or
 			 * set the device port to disabled
 			 */
-			if (!xotg_enable_gadget(xotg, 0) == 1) {
+			if ((!xotg_enable_gadget(xotg, 0)) == 1) {
 				/* should not happen */
 				xotg_dbg(xotg->dev,
 				"xotg_enable_gadget(xotg, 0) failed\n");
@@ -1569,7 +1569,7 @@ static void xotg_work(struct work_struct *work)
 				USB2_VBUS_ID_0_VBUS_OVERRIDE,
 				USB2_VBUS_ID_0_VBUS_OVERRIDE);
 
-			if (!xotg_enable_gadget(xotg, 1) == 1) {
+			if ((!xotg_enable_gadget(xotg, 1)) == 1) {
 				xotg_err(xotg->dev,
 				"xotg_enable_gadget(xotg, 1) failed\n");
 			}

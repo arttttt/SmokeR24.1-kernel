@@ -845,7 +845,7 @@ max17042_parse_dt(struct device *dev)
 	if (!ret)
 		config_data->fullcapnom = pval;
 
-		ret = of_property_read_u16(np, "maxim,lavg-empty", &pval);
+	ret = of_property_read_u16(np, "maxim,lavg-empty", &pval);
 	if (!ret)
 		config_data->lavg_empty = pval;
 
