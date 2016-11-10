@@ -596,7 +596,7 @@ ifdef CONFIG_GCC_PLUGINS
 endif
 	@:
 
-include scripts/Makefile.gcc-plugins
+include $(srctree)/scripts/Makefile.gcc-plugins
 
 ifdef CONFIG_READABLE_ASM
 # Disable optimizations that make assembler listings hard to read.

@@ -1,4 +1,5 @@
 GCOV_PROFILE := n
+KCOV_INSTRUMENT := n
 
 # List of files in the vdso, has to be asm only for now
 
