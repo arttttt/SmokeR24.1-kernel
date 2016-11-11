@@ -98,7 +98,7 @@
 #define FUSE_SPARE_BIT			0x380
 
 #define TEGRA_FUSE_SUPPLY		"dummy"
-#define PGM_TIME_US		12
+#define PGM_TIME_US			5
 
 #define FUSE_SIZE_IN_BITS			(6 *  1024)
 #define FUSE_PATCH_START_ADDRESS	((FUSE_SIZE_IN_BITS - 32)/32)

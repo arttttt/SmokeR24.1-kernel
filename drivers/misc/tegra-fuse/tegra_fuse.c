@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 Google, Inc.
- * Copyright (c) 2012-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2012-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author:
  *	Colin Cross <ccross@android.com>
@@ -766,18 +766,7 @@ static void fuse_cmd_write(u32 value, u32 addr)
 	reg |= FUSE_WRITE;
 	tegra_fuse_writel(reg, FUSE_CTRL);
 	wait_for_idle();
-}
-
-static void fuse_cmd_sense(void)
-{
-	u32 reg;
-
-	wait_for_idle();
-	reg = tegra_fuse_readl(FUSE_CTRL);
-	reg &= ~FUSE_CMD_MASK;
-	reg |= FUSE_SENSE;
-	tegra_fuse_writel(reg, FUSE_CTRL);
-	wait_for_idle();
+	fuse_cmd_read(addr);
 }
 
 static void get_fuse(enum fuse_io_param io_param, u32 *out)
@@ -838,7 +827,6 @@ static int tegra_fuse_read(struct device *dev,
 	mutex_lock(&fuse_lock);
 
 	clk_enable(clk_fuse);
-	fuse_cmd_sense();
 
 	if (io_param == SBK_DEVKEY_STATUS) {
 		*data = 0;
@@ -943,8 +931,6 @@ static void fuse_program_array(struct device *dev, int pgm_cycles)
 	u32 *data = tmp_fuse_pgm_data, addr = 0, *mask = fuse_pgm_mask;
 	int i = 0;
 
-	fuse_cmd_sense();
-
 	/* get the first 2 fuse bytes */
 	fuse_val[0] = fuse_cmd_read(0);
 	fuse_val[1] = fuse_cmd_read(1);
@@ -971,12 +957,6 @@ static void fuse_program_array(struct device *dev, int pgm_cycles)
 	fuse_cmd_write(fuse_val[1], 1);
 
 	fuse_power_disable();
-
-	/*
-	 * this will allow programming of other fuses
-	 * and the reading of the existing fuse values
-	 */
-	fuse_cmd_sense();
 
 	/* Clear out all bits that have already been burned or masked out */
 	memcpy(data, fuse_pgm_data, sizeof(fuse_pgm_data));
@@ -1005,9 +985,6 @@ static void fuse_program_array(struct device *dev, int pgm_cycles)
 
 		if (i < 2) {
 			wait_for_idle();
-			fuse_power_disable();
-			fuse_cmd_sense();
-			fuse_power_enable();
 		}
 	}
 
