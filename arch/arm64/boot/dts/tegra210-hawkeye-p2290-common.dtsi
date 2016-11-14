@@ -72,6 +72,9 @@
 		bootloader-orientation-support;
 		no-tnid-sn;
 		nvidia,fastboot_without_usb;
+		verified-boot {
+			poweroff-on-red-state;
+		};
 	};
 
 	firmware {
