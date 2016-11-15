@@ -268,6 +268,9 @@ void *__nvmap_mmap(struct nvmap_handle *h)
 	if (!h)
 		return NULL;
 
+	if (!h->alloc)
+		return NULL;
+
 	nvmap_kmaps_inc(h);
 	prot = nvmap_pgprot(h, PG_PROT_KERNEL);
 
