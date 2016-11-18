@@ -712,6 +712,16 @@ config THRUSTMASTER_FF
 	  a THRUSTMASTER Dual Trigger 3-in-1 or a THRUSTMASTER Ferrari GT
 	  Rumble Force or Force Feedback Wheel.
 
+config HID_VALVE
+	tristate "Valve Steam controller"
+	depends on USB_HID
+	---help---
+	Say Y here if you have a Valve Steam controller.
+	Both wired connection and wireless (via USB dongle) are supported.
+	Supported devices:
+
+	   - Valve Steam Controller
+
 config HID_WACOM
 	tristate "Wacom Bluetooth devices support"
 	depends on HID
