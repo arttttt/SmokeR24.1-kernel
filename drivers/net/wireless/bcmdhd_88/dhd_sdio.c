@@ -5331,6 +5331,9 @@ dhdsdio_rxglom(dhd_bus_t *bus, uint8 rxseq)
 	return num;
 }
 
+extern unsigned long dpc_sleep_cnt;
+extern atomic_t dpc_bound;
+extern atomic_t dpc_frame_time;
 
 /* Return TRUE if there may be more frames to read */
 static uint
@@ -5358,6 +5361,7 @@ dhdsdio_readframes(dhd_bus_t *bus, uint maxframes, bool *finished)
 	uchar reorder_info_buf[WLHOST_REORDERDATA_TOTLEN];
 	uint reorder_info_len;
 	uint pkt_count;
+	ktime_t start_time, cur_time;
 
 #if defined(DHD_DEBUG) || defined(SDTEST)
 	bool sdtest = FALSE;	/* To limit message spew from test mode */
@@ -5386,10 +5390,16 @@ dhdsdio_readframes(dhd_bus_t *bus, uint maxframes, bool *finished)
 	/* Not finished unless we encounter no more frames indication */
 	*finished = FALSE;
 
-
+	start_time = ktime_get();
 	for (rxseq = bus->rx_seq, rxleft = maxframes;
 	     !bus->rxskip && rxleft && bus->dhd->busstate != DHD_BUS_DOWN;
 	     rxseq++, rxleft--) {
+		cur_time = ktime_get();
+		if (ktime_to_ms(ktime_sub(cur_time, start_time))
+				> atomic_read(&dpc_bound)) {
+			++dpc_sleep_cnt;
+			osl_sleep(atomic_read(&dpc_frame_time) - atomic_read(&dpc_bound));
+		}
 
 #ifdef DHDTHREAD
 		/* tx more to improve rx performance */
