@@ -6,7 +6,7 @@
  *  Copyright (c) 2005 Michael Haboustak <mike-@cinci.rr.com> for Concept2, Inc
  *  Copyright (c) 2007-2008 Oliver Neukum
  *  Copyright (c) 2006-2010 Jiri Kosina
- *  Copyright (c) 2013-2014, NVIDIA CORPORATION.  All rights reserved.
+ *  Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  */
 
 /*
@@ -151,20 +151,6 @@ static void hid_reset(struct work_struct *work)
 	case -ENODEV:
 	case -EINTR:
 		break;
-	}
-}
-
-/* Workqueue routine to execute disconnect bottom half for the case that
- * disconnect happens during hid_reset() */
-static void usbhid_disconnect_bh(struct work_struct *work)
-{
-	struct usbhid_device *usbhid =
-		container_of(work, struct usbhid_device, disconnect_bh_work);
-
-	if (test_bit(HID_DISCONNECTED, &usbhid->iofl)) {
-		if (usbhid->hid)
-			hid_destroy_device(usbhid->hid);
-		kfree(usbhid);
 	}
 }
 
@@ -1431,7 +1417,6 @@ static int usbhid_probe(struct usb_interface *intf, const struct usb_device_id *
 
 	init_waitqueue_head(&usbhid->wait);
 	INIT_WORK(&usbhid->reset_work, hid_reset);
-	INIT_WORK(&usbhid->disconnect_bh_work, usbhid_disconnect_bh);
 	setup_timer(&usbhid->io_retry, hid_retry_timeout, (unsigned long) hid);
 	spin_lock_init(&usbhid->lock);
 
@@ -1465,15 +1450,8 @@ static void usbhid_disconnect(struct usb_interface *intf)
 	set_bit(HID_DISCONNECTED, &usbhid->iofl);
 	spin_unlock_irq(&usbhid->lock);
 
-	/* If device is disconnected during reset, schedule a bottom half for
-	 * cleaning up later in order to avoid a lockup happens in
-	 * usbhid_close()->hid_cancel_delayed_stuff(). */
-	if (test_bit(HID_RESET_PENDING, &usbhid->iofl))
-		schedule_work(&usbhid->disconnect_bh_work);
-	else {
-		hid_destroy_device(hid);
-		kfree(usbhid);
-	}
+	hid_destroy_device(hid);
+	kfree(usbhid);
 }
 
 static void hid_cancel_delayed_stuff(struct usbhid_device *usbhid)

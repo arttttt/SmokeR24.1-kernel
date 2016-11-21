@@ -91,7 +91,6 @@ struct usbhid_device {
 	unsigned long stop_retry;                                       /* Time to give up, in jiffies */
 	unsigned int retry_delay;                                       /* Delay length in ms */
 	struct work_struct reset_work;                                  /* Task context for resets */
-	struct work_struct disconnect_bh_work;                          /* Task context for disconnect bottom half */
 	wait_queue_head_t wait;						/* For sleeping */
 	int ledcount;							/* counting the number of active leds */
 
