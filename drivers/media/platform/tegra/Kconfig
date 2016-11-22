@@ -97,15 +97,6 @@ config VIDEO_IMX132
         ---help---
           This is a driver for the IMX132 camera sensor
 
-config VIDEO_IMX208
-        tristate "IMX208 camera sensor support"
-        depends on I2C && ARCH_TEGRA
-        ---help---
-	  This is a driver for the IMX208
-	  camera sensor for use with the tegra isp.
-	  This sensor has a maximum of 2MP
-	  resolution.
-
 config VIDEO_OV9772
         tristate "OV9772 camera sensor support"
         depends on I2C && ARCH_TEGRA
