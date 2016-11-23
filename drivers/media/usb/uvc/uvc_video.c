@@ -1346,6 +1346,7 @@ static void uvc_free_urbs(struct uvc_streaming *stream)
 	kfree(stream->urb_dma);
 
 	stream->urb = NULL;
+	stream->urb_num = 0;
 	stream->urb_buffer = NULL;
 	stream->urb_dma = NULL;
 }
