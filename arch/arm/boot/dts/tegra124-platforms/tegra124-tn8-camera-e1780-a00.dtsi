@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * arch/arm/boot/dts/tegra124-platforms/tegra124-tn8-camera-e1780-a00.dtsi
+ */
+
 #include <dt-bindings/media/camera.h>
 
 / {
@@ -102,15 +117,6 @@
 				};
 			};
 			module8: module8@modules {
-				compatible = "sensor,front";
-				badge_info = "e1633_front_F215T1";
-
-				sensor {
-					profile = <&imx208_1>;
-					platformdata = "ardbeg_imx208_pdata";
-				};
-			};
-			module9: module9@modules {
 				compatible = "sensor,rear";
 				badge_info = "e1633_rear_A815P2";
 
@@ -526,44 +532,6 @@
 					CAMERA_END
 					>;
 			};
-			imx208_1: imx208@2_0037 {
-				index = <11>;
-				chipname = "pcl_IMX208";
-				type = "sensor";
-				guid = "s_IMX208";
-				position = <1>;
-				bustype = "i2c";
-				busnum = <2>;
-				addr = <0x37>;
-				datalen = <2>;
-				pinmuxgrp = <0xFFFF>;
-				gpios = <3>;
-				regulators = "vana", "vif", "vdig";
-				clocks = "mclk2";
-				drivername = "imx208";
-				detect = <0x0002 0x0000 0xFFFF 0x0208>;
-				devid = <0x0208>;
-				poweron = <
-					CAMERA_IND_CLK_SET(10000)
-					CAMERA_GPIO_CLR(219)
-					CAMERA_REGULATOR_ON(0)
-					CAMERA_REGULATOR_ON(1)
-					CAMERA_REGULATOR_ON(2)
-					CAMERA_WAITMS(10)
-					CAMERA_GPIO_SET(219)
-					CAMERA_WAITMS(20)
-					CAMERA_END
-					>;
-				poweroff = <
-					CAMERA_IND_CLK_CLR
-					CAMERA_GPIO_CLR(219)
-					CAMERA_WAITUS(10)
-					CAMERA_REGULATOR_OFF(2)
-					CAMERA_REGULATOR_OFF(1)
-					CAMERA_REGULATOR_OFF(0)
-					CAMERA_END
-					>;
-			};
 			imx219_1: imx219@2_0010 {
 				index = <12>;
 				chipname = "pcl_IMX219";
@@ -609,4 +577,3 @@
 		};
 	};
 };
-
