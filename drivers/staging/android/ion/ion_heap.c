@@ -271,6 +271,8 @@ static int ion_heap_shrink(struct shrinker *shrinker, struct shrink_control *sc)
 {
 	struct ion_heap *heap = container_of(shrinker, struct ion_heap,
 					     shrinker);
+	if (IS_ERR_OR_NULL(heap))
+		return -EINVAL;
 	int total = 0;
 	int freed = 0;
 	int to_scan = sc->nr_to_scan;
@@ -311,8 +313,9 @@ struct ion_heap *ion_heap_create(struct ion_platform_heap *heap_data)
 
 	switch (heap_data->type) {
 	case ION_HEAP_TYPE_SYSTEM_CONTIG:
-		heap = ion_system_contig_heap_create(heap_data);
-		break;
+		pr_err("%s: Heap type is disabled: %d\n", __func__,
+		       heap_data->type);
+		return ERR_PTR(-EINVAL);
 	case ION_HEAP_TYPE_SYSTEM:
 		heap = ion_system_heap_create(heap_data);
 		break;
@@ -345,12 +348,13 @@ struct ion_heap *ion_heap_create(struct ion_platform_heap *heap_data)
 
 void ion_heap_destroy(struct ion_heap *heap)
 {
-	if (!heap)
+	if (IS_ERR_OR_NULL(heap))
 		return;
 
 	switch (heap->type) {
 	case ION_HEAP_TYPE_SYSTEM_CONTIG:
-		ion_system_contig_heap_destroy(heap);
+		pr_err("%s: Heap type is disabled: %d\n", __func__,
+		       heap->type);
 		break;
 	case ION_HEAP_TYPE_SYSTEM:
 		ion_system_heap_destroy(heap);
