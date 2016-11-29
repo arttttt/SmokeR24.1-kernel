@@ -3,7 +3,7 @@
  *
  * User-space interface to nvmap
  *
- * Copyright (c) 2011-2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2011-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -830,7 +830,7 @@ static void maps_stringify(struct nvmap_client *client,
 			phys_addr_t base = heap_type == NVMAP_HEAP_IOVMM ? 0 :
 					   (handle->carveout->base);
 			seq_printf(s,
-				"%-18s %-18s %8llx %10zuK %8x %6u %16p "
+				"%-18s %-18s %8llx %10zuK %8x %6u %16pK "
 				"%12s %12s ",
 				"", "",
 				(unsigned long long)base, K(handle->size),
