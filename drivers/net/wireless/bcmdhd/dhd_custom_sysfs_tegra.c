@@ -33,6 +33,19 @@ atomic_t tegra_downgrade_ac = ATOMIC_INIT(0);
 
 extern int bcmdhd_resume_trigger;
 
+extern atomic_t pm_disable;
+extern void tegra_sysfs_pm_enable(void);
+extern void tegra_sysfs_pm_disable(void);
+extern ssize_t
+tegra_sysfs_pm_state_store(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count);
+extern ssize_t
+tegra_sysfs_pm_state_show(struct device *dev,
+	struct device_attribute *attr,
+	char *buf);
+
+
 static DEVICE_ATTR(ping, S_IRUGO | S_IWUGO,
 	tegra_sysfs_histogram_ping_show,
 	tegra_sysfs_histogram_ping_store);
@@ -72,8 +85,14 @@ static DEVICE_ATTR(state, S_IRUGO | S_IWUGO,
 	tegra_sysfs_rf_test_state_show,
 	tegra_sysfs_rf_test_state_store);
 
+/* PM test attributes */
+static DEVICE_ATTR(pm, S_IRUGO | S_IWUGO,
+	tegra_sysfs_pm_state_show,
+	tegra_sysfs_pm_state_store);
+
 static struct attribute *tegra_sysfs_entries_rf_test[] = {
 	&dev_attr_state.attr,
+	&dev_attr_pm.attr,
 	NULL,
 };
 
@@ -212,6 +231,10 @@ tegra_sysfs_on(void)
 	tegra_sysfs_histogram_scan_work_start();
 	tegra_sysfs_histogram_stat_work_start();
 	tegra_sysfs_histogram_tcpdump_work_start();
+	if (atomic_read(&pm_disable)) {
+		pr_info("%s disable pm\n", __func__);
+		tegra_sysfs_pm_disable();
+	}
 
 }
 

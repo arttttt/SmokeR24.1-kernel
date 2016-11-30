@@ -361,6 +361,7 @@ dhd_wl_ioctl_cmd(dhd_pub_t *dhd_pub, int cmd, void *arg, int len, uint8 set, int
 extern atomic_t rf_test;
 extern atomic_t cur_power_mode;
 extern rf_test_params_t rf_test_params[NUM_RF_TEST_PARAMS];
+extern atomic_t pm_disable;
 #endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
 
 int
@@ -420,7 +421,7 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 	if (ioc->cmd == WLC_SET_PM && ioc->buf) {
 		uint pm_mode = *(uint *)ioc->buf;
 		if (ioc->set) {
-			if (atomic_read(&rf_test)) {
+			if (atomic_read(&rf_test) || atomic_read(&pm_disable)) {
 				atomic_set(&cur_power_mode, pm_mode);
 				DHD_ERROR(("%s: WLC_SET_PM: %d not allowed\n", __FUNCTION__, pm_mode));
 				return BCME_OK;
