@@ -1,7 +1,7 @@
 /*
  * Color decompression engine support
  *
- * Copyright (c) 2014-2016, NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2014-2017, NVIDIA Corporation.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -1109,9 +1109,7 @@ static int gk20a_cde_load(struct gk20a_cde_ctx *cde_ctx)
 	}
 
 	/* bind the channel to the vm */
-	gk20a_vm_get(&g->mm.pmu.vm);
-	ch->vm = &g->mm.pmu.vm;
-	err = channel_gk20a_commit_va(ch);
+	err = __gk20a_vm_bind_channel(&g->mm.pmu.vm, ch);
 	if (err) {
 		gk20a_warn(&cde_ctx->pdev->dev, "cde: could not bind vm");
 		goto err_commit_va;

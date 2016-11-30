@@ -3,7 +3,7 @@
  *
  * GK20A Semaphores
  *
- * Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -117,7 +117,6 @@ int gk20a_semaphore_pool_map(struct gk20a_semaphore_pool *p,
 		kfree(map);
 		return -ENOMEM;
 	}
-	gk20a_vm_get(vm);
 
 	mutex_lock(&p->maps_mutex);
 	WARN_ON(gk20a_semaphore_pool_find_map_locked(p, vm));
@@ -136,7 +135,6 @@ void gk20a_semaphore_pool_unmap(struct gk20a_semaphore_pool *p,
 	map = gk20a_semaphore_pool_find_map_locked(p, vm);
 	if (map) {
 		gk20a_gmmu_unmap(vm, map->gpu_va, p->size, map->rw_flag);
-		gk20a_vm_put(vm);
 		list_del(&map->list);
 		kfree(map);
 	}

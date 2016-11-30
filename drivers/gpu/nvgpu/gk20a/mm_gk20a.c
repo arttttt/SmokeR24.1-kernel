@@ -1,7 +1,7 @@
 /*
  * GK20A memory management
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -320,7 +320,7 @@ static int gk20a_alloc_comptags(struct gk20a *g,
 	if (err)
 		return err;
 
-	/* 
+	/*
 	 * offset needs to be at the start of a page/cacheline boundary;
 	 * prune the preceding ctaglines that were allocated for alignment.
 	 */
@@ -2968,11 +2968,9 @@ int gk20a_vm_release_share(struct gk20a_as_share *as_share)
 	gk20a_dbg_fn("");
 
 	vm->as_share = NULL;
-
-	/* put as reference to vm */
-	gk20a_vm_put(vm);
-
 	as_share->vm = NULL;
+
+	gk20a_vm_put(vm);
 
 	return 0;
 }
@@ -3126,20 +3124,25 @@ int gk20a_vm_free_space(struct gk20a_as_share *as_share,
 	return err;
 }
 
-int gk20a_vm_bind_channel(struct gk20a_as_share *as_share,
-			  struct channel_gk20a *ch)
+int __gk20a_vm_bind_channel(struct vm_gk20a *vm, struct channel_gk20a *ch)
 {
 	int err = 0;
-	struct vm_gk20a *vm = as_share->vm;
 
 	gk20a_dbg_fn("");
 
+	gk20a_vm_get(vm);
 	ch->vm = vm;
 	err = channel_gk20a_commit_va(ch);
 	if (err)
 		ch->vm = NULL;
 
 	return err;
+}
+
+int gk20a_vm_bind_channel(struct gk20a_as_share *as_share,
+			  struct channel_gk20a *ch)
+{
+	return __gk20a_vm_bind_channel(as_share->vm, ch);
 }
 
 int gk20a_dmabuf_alloc_drvdata(struct dma_buf *dmabuf, struct device *dev)
@@ -3718,4 +3721,3 @@ void gk20a_init_mm(struct gpu_ops *gops)
 	gops->mm.init_pdb = gk20a_mm_init_pdb;
 	gops->mm.init_mm_setup_hw = gk20a_init_mm_setup_hw;
 }
-
