@@ -1040,6 +1040,8 @@ static int iio_chrdev_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = indio_dev;
 
+	iio_device_get(indio_dev);
+
 	return 0;
 }
 
@@ -1051,6 +1053,8 @@ static int iio_chrdev_release(struct inode *inode, struct file *filp)
 	struct iio_dev *indio_dev = container_of(inode->i_cdev,
 						struct iio_dev, chrdev);
 	clear_bit(IIO_BUSY_BIT_POS, &indio_dev->flags);
+	iio_device_put(indio_dev);
+
 	return 0;
 }
 
@@ -1163,6 +1167,9 @@ void iio_device_unregister(struct iio_dev *indio_dev)
 	sysfs_remove_link(&indio_dev->dev.parent->kobj,
 			  indio_dev->dev_type.name);
 	indio_dev->info = NULL;
+
+	iio_buffer_wakeup_poll(indio_dev);
+
 	mutex_unlock(&indio_dev->info_exist_lock);
 	device_del(&indio_dev->dev);
 }
