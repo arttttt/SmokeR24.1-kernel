@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010-2012 Google, Inc.
- * Copyright (C) 2013-2014, NVIDIA Corporation.  All rights reserved.
+ * Copyright (C) 2013-2016, NVIDIA Corporation.  All rights reserved.
  *
  * Author:
  *	Erik Gilling <konkers@google.com>
@@ -19,6 +19,7 @@
 #ifndef __MACH_TEGRA_MC_H
 #define __MACH_TEGRA_MC_H
 
+#include <linux/platform/tegra/tegra_mc.h>
 /* Pull in chip specific MC header - contains the regs for the platform. */
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC)
 #include <linux/platform/tegra/mc-regs-t12x.h>
@@ -171,25 +172,6 @@ void         tegra12_mc_latency_allowance_restore(u32 **pctx);
 void         tegra21_mc_latency_allowance_save(u32 **pctx);
 void         tegra21_mc_latency_allowance_restore(u32 **pctx);
 #endif
-
-/*
- * API for reading carveout info.
- */
-enum carveout_desc {
-	MC_SECURITY_CARVEOUT1 = 0,
-	MC_SECURITY_CARVEOUT2,
-	MC_NR_CARVEOUTS
-};
-
-struct mc_carveout_info {
-	enum carveout_desc desc;
-
-	u64 base;
-	u64 size;
-};
-
-int mc_get_carveout_info(struct mc_carveout_info *inf, int *nr,
-			 enum carveout_desc co);
 
 /* API to get freqency switch latency at given MC freq.
  * freq_khz: Frequncy in KHz.
