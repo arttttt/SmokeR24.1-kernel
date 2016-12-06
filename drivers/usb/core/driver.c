@@ -15,8 +15,6 @@
  *		(usb_device_id matching changes by Adam J. Richter)
  *	(C) Copyright Greg Kroah-Hartman 2002-2003
  *
- * Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
- *
  * NOTE! This is not actually a driver at all, rather this is
  * just a collection of helper routines that implement the
  * matching, probing, releasing, suspending and resuming for
@@ -1747,27 +1745,6 @@ static int autosuspend_check(struct usb_device *udev)
 	return 0;
 }
 
-static int usb_class_is_mass_storage(struct usb_device *udev)
-{
-	struct usb_host_config *config;
-	struct usb_interface *intf;
-	int i;
-
-	config = udev->actconfig;
-
-	if (!config)
-		return 0;
-
-	for (i = 0; i < config->desc.bNumInterfaces; ++i) {
-		intf = config->interface[i];
-		if (intf->cur_altsetting->desc.bInterfaceClass
-					== USB_CLASS_MASS_STORAGE)
-			return 1;
-	}
-
-	return 0;
-}
-
 int usb_runtime_suspend(struct device *dev)
 {
 	struct usb_device	*udev = to_usb_device(dev);
@@ -1806,18 +1783,6 @@ int usb_runtime_resume(struct device *dev)
 	 * and all its interfaces.
 	 */
 	status = usb_resume_both(udev, PMSG_AUTO_RESUME);
-
-	/* Avoid PM error messages for MSD devices disconnected while suspended.
-	 * This will allow rpm_resume() to complete resume of USB device
-	 * with no power.runtime_error being set and would prevent indefinite
-	 * writeback wait on page, if suspended MSD is disonnected in middle of
-	 * data transfer.
-	 */
-	if (status == -ENODEV) {
-		if (usb_class_is_mass_storage(udev))
-			status = 0;
-	}
-
 	return status;
 }
 
