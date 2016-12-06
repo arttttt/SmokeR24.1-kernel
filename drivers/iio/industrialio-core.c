@@ -415,7 +415,17 @@ static ssize_t iio_read_channel_info(struct device *dev,
 	unsigned long long tmp;
 	int val, val2;
 	bool scale_db = false;
-	int ret = indio_dev->info->read_raw(indio_dev, this_attr->c,
+	int ret;
+	unsigned long flags;
+
+	spin_lock_irqsave(&indio_dev->dc_lock, flags);
+	if (test_bit(IIO_DISCONNECTING_BIT_POS, &indio_dev->flags)) {
+		spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+		return 0;
+	}
+	spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+
+	ret = indio_dev->info->read_raw(indio_dev, this_attr->c,
 					    &val, &val2, this_attr->address);
 
 	if (ret < 0)
@@ -520,6 +530,14 @@ static ssize_t iio_write_channel_info(struct device *dev,
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
 	int ret, fract_mult = 100000;
 	int integer, fract;
+	unsigned long flags;
+
+	spin_lock_irqsave(&indio_dev->dc_lock, flags);
+	if (test_bit(IIO_DISCONNECTING_BIT_POS, &indio_dev->flags)) {
+		spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+		return 0;
+	}
+	spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
 
 	/* Assumes decimal - precision based on number of digits */
 	if (!indio_dev->info->write_raw)
@@ -1099,6 +1117,8 @@ int iio_device_register(struct iio_dev *indio_dev)
 	/* configure elements for the chrdev */
 	indio_dev->dev.devt = MKDEV(MAJOR(iio_devt), indio_dev->id);
 
+	spin_lock_init(&indio_dev->dc_lock);
+
 	ret = iio_device_register_debugfs(indio_dev);
 	if (ret) {
 		dev_err(indio_dev->dev.parent,
@@ -1163,7 +1183,14 @@ EXPORT_SYMBOL(iio_device_register);
 
 void iio_device_unregister(struct iio_dev *indio_dev)
 {
+	unsigned long flags;
+
 	mutex_lock(&indio_dev->info_exist_lock);
+
+	spin_lock_irqsave(&indio_dev->dc_lock, flags);
+	set_bit(IIO_DISCONNECTING_BIT_POS, &indio_dev->flags);
+	spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+
 	sysfs_remove_link(&indio_dev->dev.parent->kobj,
 			  indio_dev->dev_type.name);
 	indio_dev->info = NULL;

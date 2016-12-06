@@ -36,6 +36,7 @@ int __iio_add_chan_devattr(const char *postfix,
 
 /* Event interface flags */
 #define IIO_BUSY_BIT_POS 1
+#define IIO_DISCONNECTING_BIT_POS 2
 
 #ifdef CONFIG_IIO_BUFFER
 struct poll_table_struct;

@@ -428,6 +428,7 @@ struct iio_dev {
 #endif
 	char				link_name[16];
 	struct device_type		dev_type;
+	spinlock_t			dc_lock;
 };
 
 /**

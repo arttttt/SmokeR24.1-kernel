@@ -54,7 +54,17 @@ ssize_t iio_buffer_read_first_n_outer(struct file *filp, char __user *buf,
 				      size_t n, loff_t *f_ps)
 {
 	struct iio_dev *indio_dev = filp->private_data;
-	struct iio_buffer *rb = indio_dev->buffer;
+	struct iio_buffer *rb;
+	unsigned long flags;
+
+	spin_lock_irqsave(&indio_dev->dc_lock, flags);
+	if (test_bit(IIO_DISCONNECTING_BIT_POS, &indio_dev->flags)) {
+		spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+		return -ENODEV;
+	}
+	spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+
+	rb = indio_dev->buffer;
 
 	if (!rb || !rb->access->read_first_n)
 		return -EINVAL;
@@ -68,7 +78,17 @@ unsigned int iio_buffer_poll(struct file *filp,
 			     struct poll_table_struct *wait)
 {
 	struct iio_dev *indio_dev = filp->private_data;
-	struct iio_buffer *rb = indio_dev->buffer;
+	struct iio_buffer *rb;
+	unsigned long flags;
+
+	spin_lock_irqsave(&indio_dev->dc_lock, flags);
+	if (test_bit(IIO_DISCONNECTING_BIT_POS, &indio_dev->flags)) {
+		spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+		return POLLERR | POLLHUP;
+	}
+	spin_unlock_irqrestore(&indio_dev->dc_lock, flags);
+
+	rb = indio_dev->buffer;
 
 	if (!indio_dev->info)
 		return POLLERR | POLLHUP;
