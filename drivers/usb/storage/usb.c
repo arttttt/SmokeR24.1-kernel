@@ -13,8 +13,6 @@
  * usb_device_id support by Adam J. Richter (adam@yggdrasil.com):
  *   (c) 2000 Yggdrasil Computing, Inc.
  *
- * Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
- *
  * This driver is based on the 'USB Mass Storage Class' document. This
  * describes in detail the protocol used to communicate with such
  * devices.  Clearly, the designers had SCSI and ATAPI commands in
@@ -1009,9 +1007,6 @@ int usb_stor_probe2(struct us_data *us)
 		dev_dbg(dev, "waiting for device to settle before scanning\n");
 	queue_delayed_work(system_freezable_wq, &us->scan_dwork,
 			delay_use * HZ);
-
-	usb_enable_autosuspend(us->pusb_dev);
-
 	return 0;
 
 	/* We come here if there are any problems */
