@@ -3134,7 +3134,6 @@ int gk20a_vm_bind_channel(struct gk20a_as_share *as_share,
 
 	gk20a_dbg_fn("");
 
-	gk20a_vm_get(vm);
 	ch->vm = vm;
 	err = channel_gk20a_commit_va(ch);
 	if (err)
