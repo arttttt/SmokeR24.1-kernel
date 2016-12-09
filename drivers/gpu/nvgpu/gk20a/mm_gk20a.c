@@ -320,7 +320,7 @@ static int gk20a_alloc_comptags(struct gk20a *g,
 	if (err)
 		return err;
 
-	/*
+	/* 
 	 * offset needs to be at the start of a page/cacheline boundary;
 	 * prune the preceding ctaglines that were allocated for alignment.
 	 */
@@ -3126,9 +3126,11 @@ int gk20a_vm_free_space(struct gk20a_as_share *as_share,
 	return err;
 }
 
-int __gk20a_vm_bind_channel(struct vm_gk20a *vm, struct channel_gk20a *ch)
+int gk20a_vm_bind_channel(struct gk20a_as_share *as_share,
+			  struct channel_gk20a *ch)
 {
 	int err = 0;
+	struct vm_gk20a *vm = as_share->vm;
 
 	gk20a_dbg_fn("");
 
@@ -3139,12 +3141,6 @@ int __gk20a_vm_bind_channel(struct vm_gk20a *vm, struct channel_gk20a *ch)
 		ch->vm = NULL;
 
 	return err;
-}
-
-int gk20a_vm_bind_channel(struct gk20a_as_share *as_share,
-			  struct channel_gk20a *ch)
-{
-	return __gk20a_vm_bind_channel(as_share->vm, ch);
 }
 
 int gk20a_dmabuf_alloc_drvdata(struct dma_buf *dmabuf, struct device *dev)
@@ -3723,3 +3719,4 @@ void gk20a_init_mm(struct gpu_ops *gops)
 	gops->mm.init_pdb = gk20a_mm_init_pdb;
 	gops->mm.init_mm_setup_hw = gk20a_init_mm_setup_hw;
 }
+
