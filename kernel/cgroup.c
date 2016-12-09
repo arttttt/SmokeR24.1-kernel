@@ -2172,9 +2172,6 @@ retry_find_task:
 		 */
 		tcred = __task_cred(tsk);
 		if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
-#ifdef CONFIG_ANDROID
-			!uid_eq(cred->euid, AID_SYSTEM) &&
-#endif
 		    !uid_eq(cred->euid, tcred->uid) &&
 		    !uid_eq(cred->euid, tcred->suid)) {
 			/*
