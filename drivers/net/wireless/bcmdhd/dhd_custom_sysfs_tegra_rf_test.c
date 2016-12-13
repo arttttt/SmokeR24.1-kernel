@@ -108,12 +108,14 @@ tegra_sysfs_pm_disable(void)
 
 	pr_info("%s\n", __func__);
 
-	if(wldev_ioctl(net, WLC_GET_PM, &cur_power_mode, sizeof(cur_power_mode), false)) {
-		pr_err("%s: Failed to get current power mode state\n", __func__);
-	}
+	if (tegra_sysfs_wifi_on) {
+		if (wldev_ioctl(net, WLC_GET_PM, &cur_power_mode,
+				sizeof(cur_power_mode), false))
+			pr_err("%s: Failed to get current power mode state\n", __func__);
 
-	if(wldev_ioctl(net, WLC_SET_PM, &power_mode_off, sizeof(power_mode_off), true)) {
-		pr_err("%s: Failed to set power mode off state\n", __func__);
+		if (wldev_ioctl(net, WLC_SET_PM, &power_mode_off,
+				sizeof(power_mode_off), true))
+			pr_err("%s: Failed to set power mode off state\n", __func__);
 	}
 	atomic_set(&pm_disable, 1);
 }
@@ -129,11 +131,12 @@ tegra_sysfs_pm_enable(void)
 
 	if (atomic_read(&pm_disable)) {
 		atomic_set(&pm_disable, 0);
-
-		if (wldev_ioctl(net, WLC_SET_PM,
-			(void *)&atomic_read(&cur_power_mode),
-			sizeof(cur_power_mode), true)) {
-			pr_err("%s: Failed to restore power mode state\n", __func__);
+		if (tegra_sysfs_wifi_on) {
+			if (wldev_ioctl(net, WLC_SET_PM,
+				(void *)&atomic_read(&cur_power_mode),
+				sizeof(cur_power_mode), true)) {
+				pr_err("%s: Failed to restore power mode state\n", __func__);
+			}
 		}
 	}
 }
@@ -197,13 +200,13 @@ tegra_sysfs_pm_state_store(struct device *dev,
 	const char *buf, size_t count)
 {
 	if (strncmp(buf, "pm_disable", 10) == 0) {
-		if (!atomic_read(&pm_disable) && tegra_sysfs_wifi_on) {
+		if (!atomic_read(&pm_disable)) {
 			tegra_sysfs_pm_disable();
 		} else {
 			pr_info("%s: operation not allowed\n", __func__);
 		}
 	} else if (strncmp(buf, "pm_enable", 9) == 0) {
-		if (atomic_read(&pm_disable) && tegra_sysfs_wifi_on) {
+		if (atomic_read(&pm_disable)) {
 			tegra_sysfs_pm_enable();
 		} else {
 			pr_info("%s: operation not allowed\n", __func__);
