@@ -3,7 +3,7 @@
  *
  * Watchdog timer for Palmas PMIC.
  *
- * Copyright (c) 2013, NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA Corporation. All rights reserved.
  *
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
  *
@@ -45,6 +45,7 @@ struct palmas_wdt {
 	struct device *dev;
 	struct palmas *palmas;
 	int timeout;
+	int org_timeout;
 	int irq;
 	int locked;
 	int watchdog_timer_initial_period;
@@ -138,6 +139,75 @@ static const struct watchdog_ops palmas_wdt_ops = {
 	.set_timeout = palmas_wdt_set_timeout,
 };
 
+static int palmas_wdt_restart(struct watchdog_device *wdt_dev,
+		unsigned int timeout)
+{
+	int ret;
+
+	if (!timeout)
+		return 0;
+
+	ret = palmas_wdt_set_timeout(wdt_dev, timeout);
+	if (!ret)
+		ret = palmas_wdt_start(wdt_dev);
+
+	return ret;
+}
+
+static ssize_t show_wdt_state(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct palmas_wdt *wdt = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%s",
+			(wdt->timeout) ? "enable\n" : "disable\n");
+}
+
+static ssize_t set_wdt_state(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct palmas_wdt *wdt = dev_get_drvdata(dev);
+	int enable;
+	char *p = (char *)buf;
+	char ch = *p;
+	int ret;
+
+	if ((ch == 'e') || (ch == 'E'))
+		enable = 1;
+	else if ((ch == 'd') || (ch == 'D'))
+		enable = 0;
+	else
+		return -EINVAL;
+
+	if (enable && wdt->timeout)
+		return count;
+	if (!enable && !wdt->timeout)
+		return count;
+
+	if (enable)
+		wdt->timeout = wdt->org_timeout;
+	else
+		wdt->timeout = 0;
+
+	if (wdt->org_timeout) {
+		if (wdt->timeout) {
+			ret = palmas_wdt_restart(&wdt->wdt_dev,
+						wdt->timeout);
+		if (ret < 0)
+			dev_err(wdt->dev,
+				"Watchdog not restarted %d\n", ret);
+
+		} else {
+			ret = palmas_wdt_stop(&wdt->wdt_dev);
+			if (ret < 0)
+				dev_err(wdt->dev, "wdt stop failed: %d\n", ret);
+		}
+	}
+	return count;
+}
+
+static DEVICE_ATTR(watchdog_state, 0644, show_wdt_state, set_wdt_state);
+
 static int palmas_wdt_probe(struct platform_device *pdev)
 {
 	struct palmas_platform_data *pdata;
@@ -177,6 +247,7 @@ static int palmas_wdt_probe(struct platform_device *pdev)
 	wdt->dev = &pdev->dev;
 	wdt->palmas = dev_get_drvdata(pdev->dev.parent);
 	wdt->irq = palmas_irq_get_virq(wdt->palmas, PALMAS_WDT_IRQ);
+	wdt->org_timeout = wdt->watchdog_timer_initial_period;
 	wdt_dev = &wdt->wdt_dev;
 
 	wdt_dev->info = &palmas_wdt_info;
@@ -202,6 +273,10 @@ static int palmas_wdt_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "watchdog registration failed: %d\n", ret);
 		return ret;
 	}
+
+	ret = device_create_file(&pdev->dev, &dev_attr_watchdog_state);
+	if (ret < 0)
+		dev_warn(&pdev->dev, "sysfs creation failed: %d\n", ret);
 
 	ret = palmas_read(wdt->palmas, PALMAS_PMU_CONTROL_BASE,
 			PALMAS_WATCHDOG, &regval);
