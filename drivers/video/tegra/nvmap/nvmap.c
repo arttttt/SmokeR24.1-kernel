@@ -3,7 +3,7 @@
  *
  * Memory manager for Tegra GPU
  *
- * Copyright (c) 2009-2014, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2009-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -196,6 +196,8 @@ void *__nvmap_kmap(struct nvmap_handle *h, unsigned int pagenum)
 	if (!h)
 		return NULL;
 
+	if (!h->alloc)
+		goto put_handle;
 	nvmap_kmaps_inc(h);
 	if (pagenum >= h->size >> PAGE_SHIFT)
 		goto out;
@@ -214,6 +216,7 @@ void *__nvmap_kmap(struct nvmap_handle *h, unsigned int pagenum)
 	return (void *)kaddr;
 out:
 	nvmap_kmaps_dec(h);
+put_handle:
 	nvmap_handle_put(h);
 	return NULL;
 }
@@ -224,7 +227,7 @@ void __nvmap_kunmap(struct nvmap_handle *h, unsigned int pagenum,
 	phys_addr_t paddr;
 	struct vm_struct *area = NULL;
 
-	if (!h ||
+	if (!h || !h->alloc ||
 	    WARN_ON(!virt_addr_valid(h)) ||
 	    WARN_ON(!addr))
 		return;
@@ -269,7 +272,7 @@ void *__nvmap_mmap(struct nvmap_handle *h)
 		return NULL;
 
 	if (!h->alloc)
-		return NULL;
+		goto put_handle;
 
 	nvmap_kmaps_inc(h);
 	prot = nvmap_pgprot(h, PG_PROT_KERNEL);
@@ -320,13 +323,14 @@ void *__nvmap_mmap(struct nvmap_handle *h)
 	return p;
 out:
 	nvmap_kmaps_dec(h);
+put_handle:
 	nvmap_handle_put(h);
 	return NULL;
 }
 
 void __nvmap_munmap(struct nvmap_handle *h, void *addr)
 {
-	if (!h ||
+	if (!h || !h->alloc ||
 	    WARN_ON(!virt_addr_valid(h)) ||
 	    WARN_ON(!addr))
 		return;
@@ -379,6 +383,11 @@ struct sg_table *__nvmap_sg_table(struct nvmap_client *client,
 	if (!h)
 		return ERR_PTR(-EINVAL);
 
+	if (!h->alloc) {
+		err = -EINVAL;
+		goto put_handle;
+	}
+
 	npages = PAGE_ALIGN(h->size) >> PAGE_SHIFT;
 	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
 	if (!sgt) {
@@ -408,6 +417,7 @@ struct sg_table *__nvmap_sg_table(struct nvmap_client *client,
 
 err:
 	kfree(sgt);
+put_handle:
 	nvmap_handle_put(h);
 	return ERR_PTR(err);
 }
