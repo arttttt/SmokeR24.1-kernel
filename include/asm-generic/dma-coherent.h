@@ -46,6 +46,8 @@ extern int
 dma_get_coherent_stats(struct device *dev,
 			struct dma_coherent_stats *stats);
 
+bool dma_is_coherent_dev(struct device *dev);
+
 #else
 #define dma_alloc_from_coherent_attr(dev, size, handle, ret, attr) (0)
 #define dma_release_from_coherent_attr(dev, size, vaddr, attr) (0)
@@ -54,6 +56,7 @@ dma_get_coherent_stats(struct device *dev,
 #define dma_mmap_from_coherent(dev, vma, vaddr, order, ret) (0)
 #define dma_declare_coherent_resizable_cma_memory(dev, dma_info) (0)
 #define dma_get_coherent_stats(dev, dma_stats) (0)
+#define dma_is_coherent_dev(dev) (0)
 #endif
 
 #endif
