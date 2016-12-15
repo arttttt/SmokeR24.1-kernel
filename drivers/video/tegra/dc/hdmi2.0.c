@@ -112,7 +112,8 @@ static long tegra_dc_hdmi_setup_clk(struct tegra_dc *dc, struct clk *clk);
 static void tegra_hdmi_scdc_worker(struct work_struct *work);
 static void tegra_hdmi_debugfs_init(struct tegra_hdmi *hdmi);
 static void tegra_hdmi_hdr_worker(struct work_struct *work);
-
+static int tegra_hdmi_v2_x_mon_config(struct tegra_hdmi *hdmi, bool enable);
+static void tegra_hdmi_v2_x_host_config(struct tegra_hdmi *hdmi, bool enable);
 
 static inline bool tegra_hdmi_is_connected(struct tegra_hdmi *hdmi)
 {
@@ -571,6 +572,13 @@ static int tegra_hdmi_controller_disable(struct tegra_hdmi *hdmi)
 	struct tegra_dc *dc = hdmi->dc;
 
 	tegra_dc_get(dc);
+
+	cancel_delayed_work_sync(&hdmi->scdc_work);
+	if (dc->mode.pclk > 340000000) {
+		tegra_hdmi_v2_x_mon_config(hdmi, false);
+		tegra_hdmi_v2_x_host_config(hdmi, false);
+	}
+
 	tegra_nvhdcp_set_plug(hdmi->nvhdcp, 0);
 	tegra_dc_sor_detach(sor);
 	tegra_sor_power_lanes(sor, 4, false);
