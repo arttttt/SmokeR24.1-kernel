@@ -3,7 +3,7 @@
  *
  * User-space interface to nvmap
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -208,6 +208,33 @@ out:
 	return err;
 }
 
+static int nvmap_install_fd(struct nvmap_client *client,
+	struct nvmap_handle *handle, int fd, void __user *arg,
+	void *op, size_t op_size, bool free)
+{
+	int err = 0;
+
+	if (IS_ERR_VALUE(fd)) {
+		err = fd;
+		goto fd_fail;
+	}
+
+	if (copy_to_user(arg, op, op_size)) {
+		err = -EFAULT;
+		goto copy_fail;
+	}
+
+	fd_install(fd, handle->dmabuf->file);
+	return err;
+
+copy_fail:
+	put_unused_fd(fd);
+fd_fail:
+	if (free)
+		nvmap_free_handle(client, handle);
+	return err;
+}
+
 int nvmap_ioctl_getfd(struct file *filp, void __user *arg)
 {
 	struct nvmap_handle *handle;
@@ -223,14 +250,9 @@ int nvmap_ioctl_getfd(struct file *filp, void __user *arg)
 
 	op.fd = nvmap_get_dmabuf_fd(client, handle);
 	nvmap_handle_put(handle);
-	if (op.fd < 0)
-		return op.fd;
 
-	if (copy_to_user(arg, &op, sizeof(op))) {
-		sys_close(op.fd);
-		return -EFAULT;
-	}
-	return 0;
+	return nvmap_install_fd(client, handle,
+				op.fd, arg, &op, sizeof(op), 0);
 }
 
 int nvmap_ioctl_alloc(struct file *filp, void __user *arg)
@@ -339,7 +361,6 @@ int nvmap_ioctl_create(struct file *filp, unsigned int cmd, void __user *arg)
 	struct nvmap_create_handle op;
 	struct nvmap_handle_ref *ref = NULL;
 	struct nvmap_client *client = filp->private_data;
-	int err = 0;
 	int fd = 0;
 
 	if (copy_from_user(&op, arg, sizeof(op)))
@@ -362,19 +383,10 @@ int nvmap_ioctl_create(struct file *filp, unsigned int cmd, void __user *arg)
 		return PTR_ERR(ref);
 
 	fd = nvmap_get_dmabuf_fd(client, ref->handle);
-	if (fd < 0)
-		err = fd;
-
 	op.handle = fd;
 
-	if (copy_to_user(arg, &op, sizeof(op))) {
-		err = -EFAULT;
-		nvmap_free_handle(client, __nvmap_ref_to_handle(ref));
-	}
-
-	if (err && fd > 0)
-		sys_close(fd);
-	return err;
+	return nvmap_install_fd(client, ref->handle, fd,
+				arg, &op, sizeof(op), 1);
 }
 
 int nvmap_ioctl_get_param(struct file *filp, void __user *arg, bool is32)
@@ -784,15 +796,11 @@ int nvmap_ioctl_create_from_ivc(struct file *filp, void __user *arg)
 		return PTR_ERR(ref);
 
 	fd = nvmap_get_dmabuf_fd(client, ref->handle);
-	if (fd < 0)
-		err = fd;
-
 	op.handle = fd;
-
-	if (copy_to_user(arg, &op, sizeof(op))) {
-		nvmap_free_handle_fd(client, fd);
-		return -EFAULT;
-	}
+	err = nvmap_install_fd(client, ref->handle, fd,
+				arg, &op, sizeof(op), 1);
+	if (err)
+		return err;
 
 	ref->handle->peer = peer;
 
