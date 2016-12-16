@@ -67,4 +67,14 @@ config GCOV_FORMAT_AUTODETECT
 	bool
 	default y
 
+config GCOV_ANDROID_TOOLCHAIN
+	bool "Android toolchain is used to build the kernel"
+	default y if ANDROID
+	---help---
+	Android toolchain defines extra fields in gcov_info structure.
+	If you compile the kernel for Android, say Y here
+	If your gcc is without android patches, say N
+	We default it to Y in case of CONFIG_ANDROID is defined, but please
+	verify which toolchain is in use (gcc/coverage.c, build_info)
+
 endmenu

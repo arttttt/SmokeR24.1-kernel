@@ -18,8 +18,26 @@
 #include <linux/vmalloc.h>
 #include "gcov.h"
 
-#if __GNUC__ == 4 && __GNUC_MINOR__ >= 9
+/*
+ * define ANDROID_GCOV if:
+ *    gcc version >= 4.8 and CONFIG_GCOV_ANDROID_TOOLCHAIN is defined
+ * Once android toolchain evolves, more cases to define ANDROID_GCOV
+ * should be added
+ */
+#ifdef CONFIG_GCOV_ANDROID_TOOLCHAIN
+#  if __GNUC__ == 4 && __GNUC_MINOR__ >= 8
+#    define ANDROID_GCOV
+#  endif
+#endif
+
+#if __GNUC__ == 5 && __GNUC_MINOR__ >= 1
+#define GCOV_COUNTERS			10
+#elif __GNUC__ == 4 && __GNUC_MINOR__ >= 9
+#ifdef ANDROID_GCOV
 #define GCOV_COUNTERS			11
+#else
+#define GCOV_COUNTERS			9
+#endif
 #else
 #define GCOV_COUNTERS			8
 #endif
@@ -84,15 +102,21 @@ struct gcov_fn_info {
  */
 struct gcov_info {
 	unsigned int version;
+#ifdef ANDROID_GCOV
 	void *mod_info;
+#endif
 	struct gcov_info *next;
 	unsigned int stamp;
 	const char *filename;
+#ifdef ANDROID_GCOV
 	unsigned int eof_pos;
+#endif
 	void (*merge[GCOV_COUNTERS])(gcov_type *, unsigned int);
 	unsigned int n_functions;
 	struct gcov_fn_info **functions;
+#ifdef ANDROID_GCOV
 	char **build_info;
+#endif
 };
 
 /**
