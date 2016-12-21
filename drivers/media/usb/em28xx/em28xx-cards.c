@@ -429,8 +429,6 @@ static struct em28xx_reg_seq hauppauge_dualhd_dvb[] = {
 	{EM2874_R80_GPIO,         0xdf, 0xff,    100}, /* demod 2 reset */
 	{EM2874_R80_GPIO,         0xff, 0xff,    100},
 	{EM2874_R5F_TS_ENABLE,    0x44, 0xff,     50},
-	{EM2874_R5D_TS1_PKT_SIZE, 0x05, 0xff,     50},
-	{EM2874_R5E_TS2_PKT_SIZE, 0x05, 0xff,     50},
 	{                     -1,   -1,   -1,     -1},
 };
 
@@ -3505,14 +3503,24 @@ static int em28xx_usb_probe(struct usb_interface *interface,
 		}
 
 		dev->dev_next->dvb_ep_isoc = dev->dvb_ep_isoc_ts2;
+		dev->dev_next->dvb_ep_bulk = dev->dvb_ep_bulk_ts2;
 		dev->dev_next->dvb_max_pkt_size_isoc = dev->dvb_max_pkt_size_isoc_ts2;
 		dev->dev_next->dvb_alt_isoc = dev->dvb_alt_isoc;
 
 		/* Configure hardware to support TS2*/
-		em28xx_write_reg(dev, 0x0b, 0x96);
-		mdelay(100);
-		em28xx_write_reg(dev, 0x0b, 0x82);
-		mdelay(100);
+		if(dev->dvb_xfer_bulk) {
+			/* The ep4 and ep5 are configuared for BULK */
+			em28xx_write_reg(dev, 0x0b, 0x96);
+			mdelay(100);
+			em28xx_write_reg(dev, 0x0b, 0x80);
+			mdelay(100);
+		} else {
+			/* The ep4 and ep5 are configuared for ISO */
+			em28xx_write_reg(dev, 0x0b, 0x96);
+			mdelay(100);
+			em28xx_write_reg(dev, 0x0b, 0x82);
+			mdelay(100);
+		}
 	}
 
 	request_modules(dev);
