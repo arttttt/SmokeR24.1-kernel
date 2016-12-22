@@ -85,7 +85,7 @@ static DEFINE_RATELIMIT_STATE(ratelimit, 60*HZ, 5);
 
 #define HDCP_SERVICE_UUID		{0x13F616F9, 0x4A6F8572,\
 				 0xAA04F1A1, 0xFFF9059B}
-#define HDCP_PKT_SIZE		        16
+#define HDCP_PKT_SIZE		        32
 #define HDCP_SESSION_SUCCESS		0
 #define HDCP_SESSION_FAILURE		1
 #define HDCP_CMAC_OFFSET		6
@@ -1112,7 +1112,7 @@ static int tsec_hdcp_authentication(struct tegra_nvhdcp *nvhdcp,
 		&hdcp_context->msg.rxcaps_capmask);
 	if (err)
 		goto exit;
-	pkt = kmalloc(HDCP_PKT_SIZE, GFP_KERNEL);
+	pkt = kzalloc(HDCP_PKT_SIZE, GFP_KERNEL);
 	if (!pkt) {
 		nvhdcp_err("Memory allocation failed!\n");
 		goto exit;
@@ -1616,7 +1616,7 @@ static int link_integrity_check(struct tegra_nvhdcp *nvhdcp,
 							msecs_to_jiffies(10));
 			goto exit;
 		}
-		pkt = kmalloc(HDCP_PKT_SIZE, GFP_KERNEL);
+		pkt = kzalloc(HDCP_PKT_SIZE, GFP_KERNEL);
 		if (!pkt) {
 			nvhdcp_err("Memory allocation failed\n");
 			goto exit;
