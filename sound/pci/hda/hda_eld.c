@@ -786,6 +786,13 @@ void snd_hdmi_eld_update_pcm_info(struct parsed_hdmi_eld *e,
 		/* Allow 192khz in card if sink is EAC3 decode capable */
 		if (a->format == AUDIO_CODING_TYPE_EAC3)
 			rates |= SNDRV_PCM_RATE_192000;
+		/* Allow 8ch/192KHz in card if sink is DTSHD/MLP decode
+		* capable */
+		if ((a->format == AUDIO_CODING_TYPE_DTS_HD) ||
+			(a->format == AUDIO_CODING_TYPE_MLP)) {
+			channels_max = 8;
+			rates |= SNDRV_PCM_RATE_192000;
+		}
 	}
 
 	/* restrict the parameters by the values the codec provides */
