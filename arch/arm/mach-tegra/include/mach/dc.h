@@ -1140,6 +1140,7 @@ int tegra_dc_get_panel_sync_rate(void);
 
 int tegra_dc_get_head(const struct tegra_dc *dc);
 int tegra_dc_get_out(const struct tegra_dc *dc);
+int tegra_dc_get_source_physical_address(u8 *phy_address);
 
 struct device_node *tegra_dc_get_hdmi_node(int id);
 

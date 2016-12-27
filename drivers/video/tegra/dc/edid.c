@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Google, Inc.
  * Author: Erik Gilling <konkers@android.com>
  *
- * Copyright (c) 2010-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2010-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -947,6 +947,17 @@ int tegra_edid_get_eld(struct tegra_edid *edid, struct tegra_edid_hdmi_eld *eldd
 		return -EFAULT;
 
 	memcpy(elddata,&edid->data->eld,sizeof(struct tegra_edid_hdmi_eld));
+
+	return 0;
+}
+
+int tegra_edid_get_source_physical_address(struct tegra_edid *edid, u8 *phy_address)
+{
+	if ((!phy_address) || (!edid)  || (!edid->data))
+		return -EFAULT;
+
+	phy_address[0] = edid->data->eld.port_id[0];
+	phy_address[1] = edid->data->eld.port_id[1];
 
 	return 0;
 }

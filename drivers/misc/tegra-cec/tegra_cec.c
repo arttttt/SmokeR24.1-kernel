@@ -39,6 +39,26 @@
 
 #include "tegra_cec.h"
 
+#include <mach/dc.h>
+
+#define LOGICAL_ADDRESS_RESERVED2 0xD
+#define LOGICAL_ADDRESS_TV 0x0
+#define LOGICAL_ADDRESS_BROADCAST 0xF
+#define TEXT_VIEW_ON 0x0D
+#define ACTIVE_SOURCE 0x82
+
+static bool previous_reboot_reason_is_recovery, text_view_on_sent;
+static u8 text_view_on_command[] = {
+	LOGICAL_ADDRESS_RESERVED2 << 4 | LOGICAL_ADDRESS_TV,
+	TEXT_VIEW_ON
+};
+static u8 active_source_command[] = {
+	LOGICAL_ADDRESS_RESERVED2 << 4 | LOGICAL_ADDRESS_BROADCAST,
+	ACTIVE_SOURCE,
+	0x00,
+	0x00
+};
+
 static ssize_t cec_logical_addr_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count);
 
@@ -311,6 +331,40 @@ static const struct file_operations tegra_cec_fops = {
 #endif
 };
 
+static int tegra_cec_send_one_touch_play(struct tegra_cec *cec)
+{
+	int res = 0;
+	u8 phy_address[2] = {0};
+
+	text_view_on_sent = true;
+
+	res = tegra_dc_get_source_physical_address(phy_address);
+	if (res) {
+		dev_warn(cec->dev, "Can't find physical addresse.\n");
+		return res;
+	}
+
+	dev_info(cec->dev, "physical address: %02x:%02x.\n",
+		phy_address[0], phy_address[1]);
+
+	active_source_command[2] = phy_address[0];
+	active_source_command[3] = phy_address[1];
+
+	mutex_lock(&cec->tx_lock);
+	res = tegra_cec_native_write_l(cec, text_view_on_command,
+		sizeof(text_view_on_command));
+	dev_notice(cec->dev, "Sent <Text View On> res: %d.\n", res);
+	if (!res) {
+		res = tegra_cec_native_write_l(cec, active_source_command,
+			sizeof(active_source_command));
+		dev_notice(cec->dev,
+			"Broadcast <Active Source> res: %d.\n", res);
+	}
+	mutex_unlock(&cec->tx_lock);
+
+	return res;
+}
+
 static void tegra_cec_init(struct tegra_cec *cec)
 {
 	cec->rx_wake = 0;
@@ -388,6 +442,8 @@ static void tegra_cec_init(struct tegra_cec *cec)
 	atomic_set(&cec->init_done, 1);
 	wake_up_interruptible(&cec->init_waitq);
 
+	if (!text_view_on_sent && !previous_reboot_reason_is_recovery)
+		tegra_cec_send_one_touch_play(cec);
 	dev_notice(cec->dev, "%s Done.\n", __func__);
 }
 
@@ -608,6 +664,18 @@ static int tegra_cec_resume(struct platform_device *pdev)
 	return 0;
 }
 #endif
+
+static int __init check_previous_reboot_reason_is_recovery(char *options)
+{
+	previous_reboot_reason_is_recovery = true;
+
+	pr_info("tegra_cec: the previous_reboot_reason is%s recovery.\n",
+		previous_reboot_reason_is_recovery ? "" : " not");
+
+	return 0;
+}
+
+early_param("post_recovery", check_previous_reboot_reason_is_recovery);
 
 static struct of_device_id tegra_cec_of_match[] = {
 	{ .compatible = "nvidia,tegra114-cec", },
