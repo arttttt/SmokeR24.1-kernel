@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -97,7 +97,6 @@ static void of_sysedp_reactive_capping_get_pdata(struct platform_device *pdev,
 	int i;
 	u32 lenp, val, irq_flags;
 	const char *c_ptr;
-	const char *warning_ptr;
 	const void *ptr;
 	int ret;
 	int max_capping_mw, step_alarm_mw, step_relax_mw, relax_ms;
@@ -152,11 +151,10 @@ static void of_sysedp_reactive_capping_get_pdata(struct platform_device *pdev,
 	obj_ptr->relax_ms = relax_ms;
 
 	ret = of_property_read_string(np, "nvidia,threshold_warning",
-				      &warning_ptr);
-	if (!ret) {
-		strncpy(obj_ptr->threshold_warning, warning_ptr,
-			THRESHOLD_WARNING_LEN);
-		obj_ptr->threshold_warning[THRESHOLD_WARNING_LEN-1] = 0;
+				      &(obj_ptr->threshold_warning));
+	if (ret) {
+		dev_info(&pdev->dev, "No Threshold Warning string found.\n");
+		obj_ptr->threshold_warning = NULL;
 	}
 
 	/* Only interrupt at index 0 is expected per reactive capping node. */
