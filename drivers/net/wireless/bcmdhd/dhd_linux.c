@@ -279,12 +279,6 @@ print_tainted()
 }
 #endif	/* LINUX_VERSION_CODE == KERNEL_VERSION(2, 6, 15) */
 
-/* Linux wireless extension support */
-#if defined(WL_WIRELESS_EXT)
-#include <wl_iw.h>
-extern wl_iw_extra_params_t  g_wl_iw_params;
-#endif /* defined(WL_WIRELESS_EXT) */
-
 #if defined(CONFIG_HAS_EARLYSUSPEND) && defined(DHD_USE_EARLYSUSPEND)
 #include <linux/earlysuspend.h>
 #endif /* defined(CONFIG_HAS_EARLYSUSPEND) && defined(DHD_USE_EARLYSUSPEND) */
@@ -761,10 +755,6 @@ static void dhd_dump_htsfhisto(histo_t *his, char *s);
 int dhd_monitor_init(void *dhd_pub);
 int dhd_monitor_uninit(void);
 
-
-#if defined(WL_WIRELESS_EXT)
-struct iw_statistics *dhd_get_wireless_stats(struct net_device *dev);
-#endif /* defined(WL_WIRELESS_EXT) */
 
 static void dhd_dpc(ulong data);
 /* forward decl */
@@ -4180,17 +4170,6 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr, int cmd)
 		return -1;
 	}
 
-#if defined(WL_WIRELESS_EXT)
-	/* linux wireless extensions */
-	if ((cmd >= SIOCIWFIRST) && (cmd <= SIOCIWLAST)) {
-		/* may recurse, do NOT lock */
-		ret = wl_iw_ioctl(net, ifr, cmd);
-		DHD_PERIM_UNLOCK(&dhd->pub);
-		DHD_OS_WAKE_UNLOCK(&dhd->pub);
-		return ret;
-	}
-#endif /* defined(WL_WIRELESS_EXT) */
-
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 4, 2)
 	if (cmd == SIOCETHTOOL) {
 		ret = dhd_ethtool(dhd, (void*)ifr->ifr_data);
@@ -7145,15 +7124,6 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 	net->ethtool_ops = &dhd_ethtool_ops;
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24) */
 
-#if defined(WL_WIRELESS_EXT)
-#if WIRELESS_EXT < 19
-	net->get_wireless_stats = dhd_get_wireless_stats;
-#endif /* WIRELESS_EXT < 19 */
-#if WIRELESS_EXT > 12
-	net->wireless_handlers = (struct iw_handler_def *)&wl_iw_handler_def;
-#endif /* WIRELESS_EXT > 12 */
-#endif /* defined(WL_WIRELESS_EXT) */
-
 	dhd->pub.rxsz = DBUS_RX_BUFFER_SIZE_DHD(net);
 
 	memcpy(net->dev_addr, temp_addr, ETHER_ADDR_LEN);
@@ -7313,13 +7283,6 @@ void dhd_detach(dhd_pub_t *dhdp)
 			unregister_early_suspend(&dhd->early_suspend);
 	}
 #endif /* CONFIG_HAS_EARLYSUSPEND && DHD_USE_EARLYSUSPEND */
-
-#if defined(WL_WIRELESS_EXT)
-	if (dhd->dhd_state & DHD_ATTACH_STATE_WL_ATTACH) {
-		/* Detatch and unlink in the iw */
-		wl_iw_detach();
-	}
-#endif /* defined(WL_WIRELESS_EXT) */
 
 	/* delete all interfaces, start with virtual  */
 	if (dhd->dhd_state & DHD_ATTACH_STATE_ADD_IF) {
