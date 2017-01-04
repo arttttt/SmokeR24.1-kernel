@@ -21,7 +21,6 @@
 atomic_t list1_val = ATOMIC_INIT(1);
 atomic_t list2_val = ATOMIC_INIT(1);
 char logbuf[MAX_LOGLIMIT + 128];
-char nv_error_buffer[MAX_ERROR_SIZE];
 bool enable_file_logging;
 struct list_head list1;
 struct list_head list2;
@@ -99,7 +98,7 @@ int write_log(int event, const char *buf, const char *info)
 	struct tm date_time;
 
 	mutex_lock(&suspend_lock);
-	if (!enable_file_logging) {
+	if (!enable_file_logging || logger_wqueue == NULL) {
 		mutex_unlock(&suspend_lock);
 		return -1;
 	}
