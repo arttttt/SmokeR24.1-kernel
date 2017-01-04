@@ -56,7 +56,6 @@
 #include <bcmutils.h>
 #include <bcmendian.h>
 #include <bcmdevs.h>
-#include <nv_logger.h>
 
 #include <proto/ethernet.h>
 #include <proto/bcmip.h>
@@ -995,7 +994,6 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 				tegra_sysfs_suspend();
 #endif
-				nvlogger_suspend_work();
 				/* Kernel suspended */
 				DHD_ERROR(("%s: force extra Suspend setting \n", __FUNCTION__));
 
@@ -1032,7 +1030,6 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 				tegra_sysfs_resume();
 #endif
-				nvlogger_resume_work();
 				/* Kernel resumed  */
 				DHD_ERROR(("%s: Remove extra suspend setting \n", __FUNCTION__));
 
@@ -3621,7 +3618,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen, void *dev)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
 	mutex_init(&dhd->dhd_net_if_mutex);
 	mutex_init(&dhd->dhd_suspend_mutex);
-	write_log_init();
 #endif
 	dhd_state |= DHD_ATTACH_STATE_WAKELOCKS_INIT;
 
@@ -5117,7 +5113,6 @@ void dhd_detach(dhd_pub_t *dhdp)
 #endif /* DHDTHREAD */
 		tasklet_kill(&dhd->tasklet);
 	}
-	write_log_uninit();
 #ifdef WL_CFG80211
 	if (dhd->dhd_state & DHD_ATTACH_STATE_CFG80211) {
 		wl_cfg80211_detach(NULL);

@@ -42,8 +42,6 @@
 #include "dhd_custom_sysfs_tegra.h"
 #endif
 
-#include "nv_logger.h"
-
 #if !defined(SDIO_VENDOR_ID_BROADCOM)
 #define SDIO_VENDOR_ID_BROADCOM		0x02d0
 #endif /* !defined(SDIO_VENDOR_ID_BROADCOM) */
@@ -226,8 +224,6 @@ static int bcmsdh_sdmmc_suspend(struct device *pdev)
 	if (func->num != 2)
 		return 0;
 
-	nvlogger_suspend_work();
-
 	sd_trace(("%s Enter\n", __FUNCTION__));
 	if (dhd_os_check_wakelock(bcmsdh_get_drvdata()))
 		return -EBUSY;
@@ -272,7 +268,6 @@ static int bcmsdh_sdmmc_resume(struct device *pdev)
 	tegra_sysfs_resume();
 #endif
 
-	nvlogger_resume_work();
 	smp_mb();
 	return 0;
 }
