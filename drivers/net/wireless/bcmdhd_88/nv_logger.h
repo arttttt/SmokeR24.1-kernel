@@ -35,7 +35,6 @@
 #define MAX_LOGLIMIT 1024
 #define TIMESTAMPSIZE 40
 #define MAX_ERROR_SIZE 512
-#define MAX_LOG_NUM 20
 #define nv_sprintf(fmt, args...) \
 do { \
 	snprintf(nv_error_buffer, MAX_ERROR_SIZE-1, fmt , ## args); \
