@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016 NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2014-2017 NVIDIA CORPORATION. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -13,6 +13,16 @@
  */
 
 / {
+	dvfs_rails {
+		cpu_vmin_cdev: vdd-cpu-vmin-cdev@5 {
+			nvidia,trips = <&cpu_vmin1 1130>;
+		};
+
+		cpu_vmax_cdev: vdd-cpu-vmax-cdev@8 {
+			nvidia,trips = <&cpu_vmax1 1170 &cpu_vmax2 1170>;
+		};
+
+	};
 	thermal-zones {
 		/delete-node/ Tdiode_tegra;
 
@@ -23,7 +33,7 @@
 		};
 
 		AO-therm {
-			SET_MAP_TRIP(cpu, cpu, vmin, 1, 15000);
+			SET_MAP_TRIP(cpu, cpu, vmin, 1, 86000);
 		};
 		AO-therm {
 			trips {
@@ -45,6 +55,26 @@
 		AO-therm {
 			SET_MAP_TRIP(core, core, vmin, 1, 15000);
 			SET_MAP_TRIP(core, core, vmax, 1, 85000);
+		};
+		CPU-therm {
+			trips {
+				cpu_critical {
+					temperature = <86000>;
+				};
+				cpu_heavy {
+					temperature = <84000>;
+				};
+			};
+		};
+		GPU-therm {
+			trips {
+				gpu_critical {
+					temperature = <86000>;
+				};
+				gpu_heavy {
+					temperature = <84000>;
+				};
+			};
 		};
 	};
 };
