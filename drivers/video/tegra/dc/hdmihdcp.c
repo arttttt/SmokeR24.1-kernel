@@ -1806,6 +1806,8 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 	u8 hdcp2version = 0;
 	int e;
 	int val;
+	int delay = tegra_edid_get_quirks(nvhdcp->hdmi->edid) &
+	            TEGRA_EDID_QUIRK_DELAY_HDCP ? 5000 : 100;
 	nvhdcp->state = STATE_UNAUTHENTICATED;
 	if (nvhdcp_is_plugged(nvhdcp) &&
 		atomic_read(&nvhdcp->policy) !=
@@ -1826,7 +1828,7 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 				nvhdcp->hdcp22 = HDCP1X_PROTOCOL;
 				queue_delayed_work(nvhdcp->downstream_wq,
 					&nvhdcp->hdcp1x_work,
-					msecs_to_jiffies(100));
+					msecs_to_jiffies(delay));
 			} else {
 				val = HDCP_EESS_ENABLE<<31|
 					HDCP22_EESS_START<<16|
@@ -1836,7 +1838,7 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 				nvhdcp->hdcp22 = HDCP22_PROTOCOL;
 				queue_delayed_work(nvhdcp->downstream_wq,
 					&nvhdcp->hdcp22_work,
-					msecs_to_jiffies(100));
+					msecs_to_jiffies(delay));
 			}
 		} else {
 			val = HDCP_EESS_ENABLE<<31|
@@ -1847,7 +1849,7 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 			nvhdcp->hdcp22 = HDCP1X_PROTOCOL;
 			queue_delayed_work(nvhdcp->downstream_wq,
 				&nvhdcp->hdcp1x_work,
-				msecs_to_jiffies(100));
+				msecs_to_jiffies(delay));
 		}
 	}
 	return 0;
