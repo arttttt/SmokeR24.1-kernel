@@ -1505,9 +1505,6 @@ _dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason)
 		}
 	}
 
-	/* increase total scan count using current scan count */
-	_params->params_batch.get_batch.tot_scan_cnt += pscan_results->cnt_header;
-
 	if (pscan_results->cnt_header == 0) {
 		/* In case that we didn't get any data from the firmware
 		 * Remove the current scan_result list from get_bach.scan_results_list.
@@ -1516,6 +1513,10 @@ _dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason)
 		list_del(&pscan_results->list);
 		MFREE(dhd->osh, pscan_results, SCAN_RESULTS_SIZE);
 		_params->params_batch.get_batch.top_node_cnt--;
+	} else {
+
+		/* increase total scan count using current scan count */
+		_params->params_batch.get_batch.tot_scan_cnt += pscan_results->cnt_header;
 	}
 
 	if (buf && bufsize) {
