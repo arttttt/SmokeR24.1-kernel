@@ -2389,36 +2389,9 @@ static int cgroup_procs_write_permission(struct task_struct *task,
 					 struct cgroup *dst_cgrp,
 					 struct kernfs_open_file *of)
 {
-	const struct cred *cred = current_cred();
-	const struct cred *tcred = get_task_cred(task);
 	int ret = 0;
 
-	/*
-	 * even if we're attaching all tasks in the thread group, we only
-	 * need to check permissions on one of them.
-	 */
-	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
-	    !uid_eq(cred->euid, tcred->uid) &&
-	    !uid_eq(cred->euid, tcred->suid) &&
-	    !ns_capable(tcred->user_ns, CAP_SYS_NICE)) {
-		/*
-		 * if the default permission check fails, give each
-		 * cgroup a chance to extend the permission check
-		 */
-		struct cgroup_taskset tset = {
-			.src_csets = LIST_HEAD_INIT(tset.src_csets),
-			.dst_csets = LIST_HEAD_INIT(tset.dst_csets),
-			.csets = &tset.src_csets,
-		};
-		struct css_set *cset;
-		cset = task_css_set(task);
-		list_add(&cset->mg_node, &tset.src_csets);
-		ret = cgroup_allow_attach(dst_cgrp, &tset);
-		if (ret)
-			ret = -EACCES;
-	}
-
-	if (!ret && cgroup_on_dfl(dst_cgrp)) {
+	if (cgroup_on_dfl(dst_cgrp)) {
 		struct super_block *sb = of->file->f_path.dentry->d_sb;
 		struct cgroup *cgrp;
 		struct inode *inode;
@@ -2436,9 +2409,37 @@ static int cgroup_procs_write_permission(struct task_struct *task,
 			ret = inode_permission(inode, MAY_WRITE);
 			iput(inode);
 		}
+	} else {
+		const struct cred *cred = current_cred();
+		const struct cred *tcred = get_task_cred(task);
+
+		/*
+		 * even if we're attaching all tasks in the thread group,
+		 * we only need to check permissions on one of them.
+		 */
+		if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+		    !uid_eq(cred->euid, tcred->uid) &&
+		    !uid_eq(cred->euid, tcred->suid) &&
+		    !ns_capable(tcred->user_ns, CAP_SYS_NICE)) {
+			/*
+			 * if the default permission check fails, give each
+			 * cgroup a chance to extend the permission check
+			 */
+			struct cgroup_taskset tset = {
+				.src_csets = LIST_HEAD_INIT(tset.src_csets),
+				.dst_csets = LIST_HEAD_INIT(tset.dst_csets),
+				.csets = &tset.src_csets,
+			};
+			struct css_set *cset;
+			cset = task_css_set(task);
+			list_add(&cset->mg_node, &tset.src_csets);
+			ret = cgroup_allow_attach(dst_cgrp, &tset);
+			if (ret)
+				ret = -EACCES;
+		}
+		put_cred(tcred);
 	}
 
-	put_cred(tcred);
 	return ret;
 }
 
