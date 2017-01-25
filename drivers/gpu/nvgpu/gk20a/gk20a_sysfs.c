@@ -416,6 +416,24 @@ static ssize_t gk20a_load_show(struct device *dev,
 }
 static DEVICE_ATTR(load, S_IRUGO, gk20a_load_show, NULL);
 
+static ssize_t pmu_state_read(struct device *device,
+	struct device_attribute *attr, char *buf)
+{
+	struct platform_device *ndev = to_platform_device(device);
+	struct gk20a *g = get_gk20a(ndev);
+	struct pmu_gk20a *pmu = &g->pmu;
+	int status = 0;
+
+	if (g->power_on)
+		status = (pmu->pmu_ready &&
+			(pmu->pmu_state == PMU_STATE_STARTED))
+			? 1 : 0;
+
+	return sprintf(buf, "%d\n", status);
+}
+
+static DEVICE_ATTR(pmu_state, S_IRUSR|S_IRGRP|S_IROTH, pmu_state_read, NULL);
+
 static ssize_t elpg_enable_store(struct device *device,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -768,6 +786,7 @@ void gk20a_remove_sysfs(struct device *dev)
 	device_remove_file(dev, &dev_attr_blcg_enable);
 	device_remove_file(dev, &dev_attr_slcg_enable);
 	device_remove_file(dev, &dev_attr_ptimer_scale_factor);
+	device_remove_file(dev, &dev_attr_pmu_state);
 	device_remove_file(dev, &dev_attr_elpg_enable);
 	device_remove_file(dev, &dev_attr_emc3d_ratio);
 	device_remove_file(dev, &dev_attr_fmax_at_vmin_safe);
@@ -801,6 +820,7 @@ void gk20a_create_sysfs(struct platform_device *dev)
 	error |= device_create_file(&dev->dev, &dev_attr_blcg_enable);
 	error |= device_create_file(&dev->dev, &dev_attr_slcg_enable);
 	error |= device_create_file(&dev->dev, &dev_attr_ptimer_scale_factor);
+	error |= device_create_file(&dev->dev, &dev_attr_pmu_state);
 	error |= device_create_file(&dev->dev, &dev_attr_elpg_enable);
 	error |= device_create_file(&dev->dev, &dev_attr_emc3d_ratio);
 	error |= device_create_file(&dev->dev, &dev_attr_fmax_at_vmin_safe);
