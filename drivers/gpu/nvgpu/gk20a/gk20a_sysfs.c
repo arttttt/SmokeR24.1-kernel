@@ -3,7 +3,7 @@
  *
  * GK20A Graphics
  *
- * Copyright (c) 2011-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -421,29 +421,35 @@ static ssize_t elpg_enable_store(struct device *device,
 {
 	struct platform_device *ndev = to_platform_device(device);
 	struct gk20a *g = get_gk20a(ndev);
+	struct pmu_gk20a *pmu = &g->pmu;
 	unsigned long val = 0;
 	int err;
 
 	if (kstrtoul(buf, 10, &val) < 0)
 		return -EINVAL;
 
-	/*
-	 * Since elpg is refcounted, we should not unnecessarily call
-	 * enable/disable if it is already so.
-	 */
-	err = gk20a_busy(g->dev);
-	if (err)
-		return -EAGAIN;
+	if (!g->power_on) {
+			g->elpg_enabled = val ? true : false;
+	} else {
+		/*
+		 * Since elpg is refcounted, we should not unnecessarily call
+		 * enable/disable if it is already so.
+		 */
+		err = gk20a_busy(g->dev);
+		if (err)
+			return -EAGAIN;
 
-	if (val && !g->elpg_enabled) {
-		g->elpg_enabled = true;
-		gk20a_pmu_enable_elpg(g);
-	} else if (!val && g->elpg_enabled) {
-		g->elpg_enabled = false;
-		gk20a_pmu_disable_elpg(g);
+		if (val && !g->elpg_enabled) {
+			g->elpg_enabled = true;
+			if (pmu->pmu_state == PMU_STATE_STARTED)
+				gk20a_pmu_enable_elpg(g);
+		} else if (!val && g->elpg_enabled) {
+			g->elpg_enabled = false;
+			if (pmu->pmu_state == PMU_STATE_STARTED)
+				gk20a_pmu_disable_elpg(g);
+		}
+		gk20a_idle(g->dev);
 	}
-	gk20a_idle(g->dev);
-
 	dev_info(device, "ELPG is %s.\n", g->elpg_enabled ? "enabled" :
 			"disabled");
 
@@ -522,6 +528,7 @@ static ssize_t aelpg_enable_store(struct device *device,
 {
 	struct platform_device *ndev = to_platform_device(device);
 	struct gk20a *g = get_gk20a(ndev);
+	struct pmu_gk20a *pmu = &g->pmu;
 	unsigned long val = 0;
 	int status = 0;
 	union pmu_ap_cmd ap_cmd;
@@ -530,26 +537,32 @@ static ssize_t aelpg_enable_store(struct device *device,
 	if (kstrtoul(buf, 10, &val) < 0)
 		return -EINVAL;
 
-	err = gk20a_busy(g->dev);
-	if (err)
-		return err;
+	if (!g->power_on) {
+		g->aelpg_enabled = val ? true : false;
+	} else {
+		err = gk20a_busy(g->dev);
+		if (err)
+			return err;
 
-	if (g->pmu.pmu_ready) {
 		if (val && !g->aelpg_enabled) {
 			g->aelpg_enabled = true;
-			/* Enable AELPG */
-			ap_cmd.init.cmd_id = PMU_AP_CMD_ID_ENABLE_CTRL;
-			status = gk20a_pmu_ap_send_command(g, &ap_cmd, false);
+			if (pmu->pmu_state == PMU_STATE_STARTED) {
+				/* Enable AELPG */
+				ap_cmd.init.cmd_id = PMU_AP_CMD_ID_ENABLE_CTRL;
+				status = gk20a_pmu_ap_send_command(g,
+						&ap_cmd, false);
+			}
 		} else if (!val && g->aelpg_enabled) {
 			g->aelpg_enabled = false;
-			/* Disable AELPG */
-			ap_cmd.init.cmd_id = PMU_AP_CMD_ID_DISABLE_CTRL;
-			status = gk20a_pmu_ap_send_command(g, &ap_cmd, false);
+			if (pmu->pmu_state == PMU_STATE_STARTED) {
+				/* Disable AELPG */
+				ap_cmd.init.cmd_id = PMU_AP_CMD_ID_DISABLE_CTRL;
+				status = gk20a_pmu_ap_send_command(g,
+						&ap_cmd, false);
+			}
 		}
-	} else {
-		dev_info(device, "PMU is not ready, AELPG request failed\n");
+		gk20a_idle(g->dev);
 	}
-	gk20a_idle(g->dev);
 
 	dev_info(device, "AELPG is %s.\n", g->aelpg_enabled ? "enabled" :
 			"disabled");
