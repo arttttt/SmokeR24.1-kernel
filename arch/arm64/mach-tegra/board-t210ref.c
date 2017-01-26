@@ -1,7 +1,7 @@
  /*
  * arch/arm64/mach-tegra/board-t210ref.c
  *
- * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -191,6 +191,7 @@ static struct of_dev_auxdata t210ref_auxdata_lookup[] __initdata = {
 	OF_DEV_AUXDATA("nvidia,tegra210-dc", TEGRA_DISPLAY2_BASE, "tegradc.1",
 			NULL),
 	OF_DEV_AUXDATA("pwm-backlight", 0, "pwm-backlight", NULL),
+	OF_DEV_AUXDATA("pwm-fan", 0, "pwm-fan", NULL),
 #ifdef CONFIG_TEGRA_CEC_SUPPORT
 	OF_DEV_AUXDATA("nvidia,tegra210-cec", 0x70015000, "tegra_cec", NULL),
 #endif
