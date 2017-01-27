@@ -744,6 +744,7 @@ static int gk20a_tegra_probe(struct platform_device *dev)
 	const __be32 *host1x_ptr;
 	struct platform_device *host1x_pdev = NULL;
 	bool joint_xpu_rail = false;
+	bool disable_power_saving = false;
 
 	host1x_ptr = of_get_property(np, "nvidia,host1x", NULL);
 	if (host1x_ptr) {
@@ -771,6 +772,17 @@ static int gk20a_tegra_probe(struct platform_device *dev)
 	if (joint_xpu_rail) {
 		gk20a_dbg_info("XPU rails are joint\n");
 		platform->can_railgate = false;
+	}
+
+	disable_power_saving = of_property_read_bool(of_chosen,
+				"nvidia,gpu-disable-power-saving");
+	if (disable_power_saving) {
+		dev_info(&dev->dev, "disable power gating.\n");
+		platform->can_railgate = false;
+		platform->enable_slcg = false;
+		platform->enable_blcg = false;
+		platform->enable_elcg = false;
+		platform->enable_elpg = false;
 	}
 
 	/* WAR for bug 1547668: Disable railgating and scaling irrespective of

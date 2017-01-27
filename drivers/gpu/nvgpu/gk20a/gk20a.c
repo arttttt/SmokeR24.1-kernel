@@ -1406,10 +1406,14 @@ static int gk20a_probe(struct platform_device *dev)
 		const struct of_device_id *match;
 
 		match = of_match_device(tegra_gk20a_of_match, &dev->dev);
-		if (match)
+		if (match) {
+			dev_info(&dev->dev, "load platform data from DT node.\n");
 			platform = (struct gk20a_platform *)match->data;
-	} else
+		}
+	} else {
+		dev_info(&dev->dev, "fallback and load predefined platform data.\n");
 		platform = (struct gk20a_platform *)dev->dev.platform_data;
+	}
 
 	if (!platform) {
 		dev_err(&dev->dev, "no platform data\n");
