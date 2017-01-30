@@ -355,6 +355,7 @@ int nvmap_probe(struct platform_device *pdev);
 int nvmap_remove(struct platform_device *pdev);
 int nvmap_init(struct platform_device *pdev);
 
+struct device *dma_dev_from_handle(unsigned long type);
 struct nvmap_heap_block *nvmap_carveout_alloc(struct nvmap_client *dev,
 					      struct nvmap_handle *handle,
 					      unsigned long type,

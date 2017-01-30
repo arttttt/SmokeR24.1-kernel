@@ -3,7 +3,7 @@
  *
  * User-space interface to nvmap
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -761,11 +761,21 @@ static void allocations_stringify(struct nvmap_client *client,
 		struct nvmap_handle *handle = ref->handle;
 		if (handle->alloc && handle->heap_type == heap_type) {
 			phys_addr_t base = heap_type == NVMAP_HEAP_IOVMM ? 0 :
+					   handle->heap_pgalloc ? 0 :
 					   (handle->carveout->base);
+			size_t size = K(handle->size);
+			int i = 0;
+
+next_page:
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				base = page_to_phys(handle->pgalloc.pages[i++]);
+				size = K(PAGE_SIZE);
+			}
+
 			seq_printf(s,
 				"%-18s %-18s %8llx %10zuK %8x %6u %6u %6u %6u %6u %6u %8pK\n",
 				"", "",
-				(unsigned long long)base, K(handle->size),
+				(unsigned long long)base, size,
 				handle->userflags,
 				atomic_read(&handle->ref),
 				atomic_read(&ref->dupes),
@@ -774,6 +784,11 @@ static void allocations_stringify(struct nvmap_client *client,
 				atomic_read(&handle->umap_count),
 				atomic_read(&handle->share_count),
 				handle);
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				i++;
+				if (i < (handle->size >> PAGE_SHIFT))
+					goto next_page;
+			}
 		}
 	}
 	nvmap_ref_unlock(client);
@@ -828,7 +843,17 @@ static void maps_stringify(struct nvmap_client *client,
 		struct nvmap_handle *handle = ref->handle;
 		if (handle->alloc && handle->heap_type == heap_type) {
 			phys_addr_t base = heap_type == NVMAP_HEAP_IOVMM ? 0 :
+					   handle->heap_pgalloc ? 0 :
 					   (handle->carveout->base);
+			size_t size = K(handle->size);
+			int i = 0;
+
+next_page:
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				base = page_to_phys(handle->pgalloc.pages[i++]);
+				size = K(PAGE_SIZE);
+			}
+
 			seq_printf(s,
 				"%-18s %-18s %8llx %10zuK %8x %6u %16pK "
 				"%12s %12s ",
@@ -837,6 +862,12 @@ static void maps_stringify(struct nvmap_client *client,
 				handle->userflags,
 				atomic_read(&handle->share_count),
 				handle, "", "");
+
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				i++;
+				if (i < (handle->size >> PAGE_SHIFT))
+					goto next_page;
+			}
 
 			mutex_lock(&handle->lock);
 			nvmap_get_client_handle_mss(client, handle,
@@ -960,9 +991,20 @@ static int nvmap_debug_all_allocations_show(struct seq_file *s, void *unused)
 	for (; n != NULL; n = rb_next(n)) {
 		struct nvmap_handle *handle =
 			rb_entry(n, struct nvmap_handle, node);
+		int i = 0;
+
 		if (handle->alloc && handle->heap_type == heap_type) {
 			phys_addr_t base = heap_type == NVMAP_HEAP_IOVMM ? 0 :
+					   handle->heap_pgalloc ? 0 :
 					   (handle->carveout->base);
+			size_t size = K(handle->size);
+
+next_page:
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				base = page_to_phys(handle->pgalloc.pages[i++]);
+				size = K(PAGE_SIZE);
+			}
+
 			seq_printf(s,
 				"%8llx %10zuK %9x %6u %6u %6u %6u %8p\n",
 				(unsigned long long)base, K(handle->size),
@@ -972,6 +1014,12 @@ static int nvmap_debug_all_allocations_show(struct seq_file *s, void *unused)
 				atomic_read(&handle->umap_count),
 				atomic_read(&handle->share_count),
 				handle);
+
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				i++;
+				if (i < (handle->size >> PAGE_SHIFT))
+					goto next_page;
+			}
 		}
 	}
 
@@ -998,10 +1046,21 @@ static int nvmap_debug_orphan_handles_show(struct seq_file *s, void *unused)
 	for (; n != NULL; n = rb_next(n)) {
 		struct nvmap_handle *handle =
 			rb_entry(n, struct nvmap_handle, node);
+		int i = 0;
+
 		if (handle->alloc && handle->heap_type == heap_type &&
 			!atomic_read(&handle->share_count)) {
 			phys_addr_t base = heap_type == NVMAP_HEAP_IOVMM ? 0 :
+					   handle->heap_pgalloc ? 0 :
 					   (handle->carveout->base);
+			size_t size = K(handle->size);
+
+next_page:
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				base = page_to_phys(handle->pgalloc.pages[i++]);
+				size = K(PAGE_SIZE);
+			}
+
 			seq_printf(s,
 				"%8llx %10zuK %9x %6u %6u %6u %8p\n",
 				(unsigned long long)base, K(handle->size),
@@ -1010,6 +1069,12 @@ static int nvmap_debug_orphan_handles_show(struct seq_file *s, void *unused)
 				atomic_read(&handle->kmap_count),
 				atomic_read(&handle->umap_count),
 				handle);
+
+			if ((heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+				i++;
+				if (i < (handle->size >> PAGE_SHIFT))
+					goto next_page;
+			}
 		}
 	}
 
@@ -1087,6 +1152,7 @@ static int nvmap_debug_handles_by_pid_show_client(struct seq_file *s,
 		struct nvmap_handle *handle = ref->handle;
 		struct nvmap_debugfs_handles_entry entry;
 		u64 total_mapped_size;
+		int i = 0;
 
 		if (!handle->alloc)
 			continue;
@@ -1095,16 +1161,29 @@ static int nvmap_debug_handles_by_pid_show_client(struct seq_file *s,
 		nvmap_get_client_handle_mss(client, handle, &total_mapped_size);
 		mutex_unlock(&handle->lock);
 
-		entry.base = handle->heap_type == NVMAP_HEAP_IOVMM ?
-				0 : (handle->carveout->base);
+		entry.base = handle->heap_type == NVMAP_HEAP_IOVMM ? 0 :
+			     handle->heap_pgalloc ? 0 :
+			     (handle->carveout->base);
 		entry.size = handle->size;
 		entry.flags = handle->userflags;
 		entry.share_count = atomic_read(&handle->share_count);
 		entry.mapped_size = total_mapped_size;
 
+next_page:
+		if ((handle->heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+			entry.base = page_to_phys(handle->pgalloc.pages[i++]);
+			entry.size = K(PAGE_SIZE);
+		}
+
 		ret = seq_write(s, &entry, sizeof(entry));
 		if (ret < 0)
 			break;
+
+		if ((handle->heap_type == NVMAP_HEAP_CARVEOUT_VPR) && handle->heap_pgalloc) {
+			i++;
+			if (i < (handle->size >> PAGE_SHIFT))
+				goto next_page;
+		}
 	}
 	nvmap_ref_unlock(client);
 
