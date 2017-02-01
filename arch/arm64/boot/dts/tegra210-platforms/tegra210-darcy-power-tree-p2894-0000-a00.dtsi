@@ -74,6 +74,8 @@
 					regulator-disable-ramp-delay = <32000>;
 					regulator-ramp-delay = <27500>;
 					regulator-ramp-delay-scale = <350>;
+					regulator-min-microvolt = <3000000>;
+					regulator-max-microvolt = <3000000>;
 				};
 
 				sd3 {
