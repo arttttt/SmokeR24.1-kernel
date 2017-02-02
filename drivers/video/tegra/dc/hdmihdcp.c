@@ -139,7 +139,6 @@ static inline bool nvhdcp_is_plugged(struct tegra_nvhdcp *nvhdcp)
 static inline bool nvhdcp_set_plugged(struct tegra_nvhdcp *nvhdcp, bool plugged)
 {
 	nvhdcp->plugged = plugged;
-	wmb();
 	return plugged;
 }
 
@@ -1318,6 +1317,21 @@ exit:
 	return err;
 }
 
+static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp);
+static int tegra_nvhdcp_off(struct tegra_nvhdcp *nvhdcp);
+
+static void nvhdcp_plug_worker(struct work_struct *work)
+{
+	struct tegra_nvhdcp *nvhdcp =
+		container_of(work, struct tegra_nvhdcp,
+			plug_work);
+
+	if (nvhdcp->plugged)
+		tegra_nvhdcp_on(nvhdcp);
+	else
+		tegra_nvhdcp_off(nvhdcp);
+}
+
 int tegra_hdmi_get_hotplug_state(struct tegra_hdmi *hdmi);
 void tegra_hdmi_set_hotplug_state(struct tegra_hdmi *hdmi, int new_hpd_state);
 
@@ -1876,12 +1890,9 @@ void tegra_nvhdcp_set_plug(struct tegra_nvhdcp *nvhdcp, bool hpd)
 {
 	nvhdcp_debug("hdmi hotplug detected (hpd = %d)\n", hpd);
 
-	if (hpd) {
-		nvhdcp_set_plugged(nvhdcp, true);
-		tegra_nvhdcp_on(nvhdcp);
-	} else {
-		tegra_nvhdcp_off(nvhdcp);
-	}
+	nvhdcp_set_plugged(nvhdcp, hpd);
+	cancel_work_sync(&nvhdcp->plug_work);
+	schedule_work(&nvhdcp->plug_work);
 }
 
 int tegra_nvhdcp_set_policy(struct tegra_nvhdcp *nvhdcp, int pol)
@@ -2111,6 +2122,7 @@ struct tegra_nvhdcp *tegra_nvhdcp_create(struct tegra_hdmi *hdmi,
 	INIT_DELAYED_WORK(&nvhdcp->fallback_work, nvhdcp_fallback_worker);
 	INIT_DELAYED_WORK(&nvhdcp->hdcp1x_work, nvhdcp_downstream_worker);
 	INIT_DELAYED_WORK(&nvhdcp->hdcp22_work, nvhdcp2_downstream_worker);
+	INIT_WORK(&nvhdcp->plug_work, nvhdcp_plug_worker);
 
 	nvhdcp->miscdev.minor = MISC_DYNAMIC_MINOR;
 	nvhdcp->miscdev.name = nvhdcp->name;
@@ -2137,6 +2149,7 @@ void tegra_nvhdcp_destroy(struct tegra_nvhdcp *nvhdcp)
 {
 	misc_deregister(&nvhdcp->miscdev);
 	tegra_nvhdcp_off(nvhdcp);
+	cancel_work_sync(&nvhdcp->plug_work);
 	destroy_workqueue(nvhdcp->downstream_wq);
 	destroy_workqueue(nvhdcp->fallback_wq);
 	i2c_release_client(nvhdcp->client);

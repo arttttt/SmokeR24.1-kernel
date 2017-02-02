@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/hdmihdcp.h
  *
- * Copyright (c) 2014-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -72,6 +72,7 @@ struct tegra_nvhdcp {
 	u8				repeater;
 	struct workqueue_struct		*fallback_wq;
 	struct delayed_work		fallback_work;
+	struct work_struct		plug_work;
 };
 
 #ifdef CONFIG_TEGRA_HDMIHDCP
