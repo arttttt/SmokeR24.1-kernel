@@ -4,7 +4,7 @@
  * HDMI library support functions for Nvidia Tegra processors.
  *
  * Copyright (C) 2012-2013 Google - http://www.google.com/
- * Copyright (C) 2013-2016 NVIDIA CORPORATION. All rights reserved.
+ * Copyright (C) 2013-2017 NVIDIA CORPORATION. All rights reserved.
  * Authors:	John Grossman <johngro@google.com>
  * Authors:	Mike J. Chen <mjchen@google.com>
  *
@@ -115,6 +115,8 @@ static void hdmi_state_machine_set_state_l(int target_state, int resched_time)
 		return;
 	}
 
+	rt_mutex_unlock(&work_lock);
+
 	/* If the pending_hpd_evt flag is already set, don't bother to
 	 * reschedule the state machine worker.  We should be able to assert
 	 * that there is a worker callback already scheduled, and that it is
@@ -129,7 +131,6 @@ static void hdmi_state_machine_set_state_l(int target_state, int resched_time)
 	if (!work_state.pending_hpd_evt)
 		hdmi_state_machine_sched_work_l(resched_time);
 
-	rt_mutex_unlock(&work_lock);
 }
 
 static void hdmi_state_machine_handle_hpd_l(int cur_hpd)
@@ -535,12 +536,11 @@ void hdmi_state_machine_shutdown(void)
 void hdmi_state_machine_set_pending_hpd(void)
 {
 	rt_mutex_lock(&work_lock);
+	work_state.pending_hpd_evt = 1;
+	rt_mutex_unlock(&work_lock);
 
 	/* We always schedule work any time there is a pending HPD event */
-	work_state.pending_hpd_evt = 1;
 	hdmi_state_machine_sched_work_l(0);
-
-	rt_mutex_unlock(&work_lock);
 }
 
 int hdmi_state_machine_get_state(void)
