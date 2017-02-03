@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/edid_quirks.c
  *
- * Copyright (c) 2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2015-2017, NVIDIA CORPORATION, All rights reserved.
  * Author: Anshuman Nath Kar <anshumank@nvidia.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -29,6 +29,8 @@ static const struct hdmi_blacklist {
 	{ "VIZ", 4120, "P55-C1",    TEGRA_EDID_QUIRK_DELAY_HDCP },
 	{ "VIZ", 4120, "P65-C1",    TEGRA_EDID_QUIRK_DELAY_HDCP },
 	{ "VIZ", 4120, "P75-C1",    TEGRA_EDID_QUIRK_DELAY_HDCP },
+	/* BlackMagic 12G SDI */
+	{ "BMD", 0,    "BMD HDMI",  TEGRA_EDID_QUIRK_NO_HDCP    },
 };
 
 u32 tegra_edid_lookup_quirks(const char *manufacturer, u32 model,

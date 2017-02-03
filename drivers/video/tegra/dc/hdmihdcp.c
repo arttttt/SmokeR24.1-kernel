@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/hdmihdcp.c
  *
- * Copyright (c) 2014-2016, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014-2017, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -1811,7 +1811,10 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 	nvhdcp->state = STATE_UNAUTHENTICATED;
 	if (nvhdcp_is_plugged(nvhdcp) &&
 		atomic_read(&nvhdcp->policy) !=
-		TEGRA_DC_HDCP_POLICY_ALWAYS_OFF) {
+		TEGRA_DC_HDCP_POLICY_ALWAYS_OFF &&
+		!(tegra_edid_get_quirks(nvhdcp->hdmi->edid) &
+		  TEGRA_EDID_QUIRK_NO_HDCP)
+		) {
 		nvhdcp->fail_count = 0;
 		e = nvhdcp_i2c_read8(nvhdcp, HDCP_HDCP2_VERSION, &hdcp2version);
 		if (e)

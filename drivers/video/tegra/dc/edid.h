@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Google, Inc.
  * Author: Erik Gilling <konkers@android.com>
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -134,6 +134,8 @@ enum {
 #define TEGRA_EDID_QUIRK_NO_YUV     (1 << 0)
 /* TV needs us to delay HDCP by a few seconds */
 #define TEGRA_EDID_QUIRK_DELAY_HDCP (1 << 1)
+/* TVs that blank screen if we try to do HDCP at all */
+#define TEGRA_EDID_QUIRK_NO_HDCP    (1 << 2)
 
 struct tegra_edid {
 	struct tegra_edid_pvt	*data;
