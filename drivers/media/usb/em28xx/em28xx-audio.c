@@ -60,6 +60,7 @@ static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;
 
 static int em28xx_deinit_isoc_audio(struct em28xx *dev)
 {
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int i;
 
 	dprintk("Stopping isoc\n");
@@ -272,6 +273,7 @@ static int snd_em28xx_capture_open(struct snd_pcm_substream *substream)
 {
 	struct em28xx *dev = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int ret = 0;
 
 	dprintk("opening device and trying to acquire exclusive lock\n");
@@ -291,7 +293,7 @@ static int snd_em28xx_capture_open(struct snd_pcm_substream *substream)
 
 		dprintk("changing alternate number on interface %d to %d\n",
 			dev->audio_ifnum, dev->alt);
-		usb_set_interface(dev->udev, dev->audio_ifnum, dev->alt);
+		usb_set_interface(udev, dev->audio_ifnum, dev->alt);
 
 		/* Sets volume, mute, etc */
 		dev->mute = 0;
@@ -637,6 +639,7 @@ static struct snd_pcm_ops snd_em28xx_pcm_capture = {
 static int em28xx_audio_init(struct em28xx *dev)
 {
 	struct em28xx_audio *adev = &dev->adev;
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	struct snd_pcm      *pcm;
 	struct snd_card     *card;
 	static int          devnr;
@@ -671,7 +674,7 @@ static int em28xx_audio_init(struct em28xx *dev)
 	pcm->private_data = dev;
 	strcpy(pcm->name, "Empia 28xx Capture");
 
-	snd_card_set_dev(card, &dev->udev->dev);
+	snd_card_set_dev(card, &udev->dev);
 	strcpy(card->driver, "Em28xx-Audio");
 	strcpy(card->shortname, "Em28xx Audio");
 	strcpy(card->longname, "Empia Em28xx Audio");
@@ -700,7 +703,7 @@ static int em28xx_audio_init(struct em28xx *dev)
 		return err;
 	}
 	adev->sndcard = card;
-	adev->udev = dev->udev;
+	adev->udev = udev;
 
 	return 0;
 }

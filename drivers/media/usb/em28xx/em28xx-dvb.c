@@ -700,7 +700,8 @@ static int em28xx_pctv_290e_set_lna(struct dvb_frontend *fe)
 
 	return ret;
 #else
-	dev_warn(&dev->udev->dev, "%s: LNA control is disabled (lna=%u)\n",
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
+	dev_warn(&udev->dev, "%s: LNA control is disabled (lna=%u)\n",
 			KBUILD_MODNAME, c->lna);
 	return 0;
 #endif
@@ -966,6 +967,7 @@ static int em28xx_dvb_init(struct em28xx *dev)
 {
 	int result = 0, mfe_shared = 0, dvb_alt = 0;
 	struct em28xx_dvb *dvb;
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 
 	if (!dev->board.has_dvb) {
 		/* This device does not support the extension */
@@ -1102,7 +1104,8 @@ static int em28xx_dvb_init(struct em28xx *dev)
 	case EM2880_BOARD_HAUPPAUGE_WINTV_HVR_900_R2:
 	case EM2882_BOARD_PINNACLE_HYBRID_PRO_330E:
 		dvb->fe[0] = dvb_attach(drxd_attach, &em28xx_drxd, NULL,
-					   &dev->i2c_adap[dev->def_i2c_bus], &dev->udev->dev);
+					&dev->i2c_adap[dev->def_i2c_bus],
+					&dev->intf->dev);
 		if (em28xx_attach_xc3028(0x61, dev) < 0) {
 			result = -EINVAL;
 			goto out_free;
@@ -1487,7 +1490,7 @@ static int em28xx_dvb_init(struct em28xx *dev)
 		dvb->fe[1]->callback = em28xx_tuner_callback;
 
 	/* register everything */
-	result = em28xx_register_dvb(dvb, THIS_MODULE, dev, &dev->udev->dev);
+	result = em28xx_register_dvb(dvb, THIS_MODULE, dev, &udev->dev);
 
 	if (result < 0)
 		goto out_free;
@@ -1500,7 +1503,7 @@ static int em28xx_dvb_init(struct em28xx *dev)
 	} else { /* isoc */
 		dvb_alt = dev->dvb_alt_isoc;
 	}
-	usb_set_interface(dev->udev, dev->ifnum, dvb_alt);
+	usb_set_interface(udev, dev->ifnum, dvb_alt);
 	em28xx_info("Successfully loaded em28xx-dvb\n");
 ret:
 	em28xx_set_mode(dev, EM28XX_SUSPEND);

@@ -2890,6 +2890,8 @@ static void flush_request_modules(struct em28xx *dev)
 */
 void em28xx_release_resources(struct em28xx *dev)
 {
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
+
 	/*FIXME: I2C IR should be disconnected */
 
 	em28xx_release_analog_resources(dev);
@@ -2903,7 +2905,7 @@ void em28xx_release_resources(struct em28xx *dev)
 	v4l2_device_unregister(&dev->v4l2_dev);
 
 	if (dev->ts == PRIMARY_TS)
-		usb_put_dev(dev->udev);
+		usb_put_dev(udev);
 
 	/* Mark device as unused */
 	clear_bit(dev->devno, &em28xx_devused);
@@ -2919,10 +2921,9 @@ static int em28xx_init_dev(struct em28xx *dev, struct usb_device *udev,
 {
 	struct v4l2_ctrl_handler *hdl = &dev->ctrl_handler;
 	int retval;
-	static const char *default_chip_name = "em28xx";
-	const char *chip_name = default_chip_name;
+	const char *chip_name = "em28xx";
 
-	dev->udev = udev;
+	dev->intf = interface;
 	mutex_init(&dev->vb_queue_lock);
 	mutex_init(&dev->vb_vbi_queue_lock);
 	mutex_init(&dev->ctrl_urb_lock);
@@ -2965,14 +2966,14 @@ static int em28xx_init_dev(struct em28xx *dev, struct usb_device *udev,
 			dev->eeprom_addrwidth_16bit = 1;
 			break;
 		case CHIP_ID_EM2820:
-			chip_name = "em2710/2820";
-			if (le16_to_cpu(dev->udev->descriptor.idVendor)
-								    == 0xeb1a) {
-				__le16 idProd = dev->udev->descriptor.idProduct;
+			if (le16_to_cpu(udev->descriptor.idVendor) == 0xeb1a) {
+				__le16 idProd = udev->descriptor.idProduct;
 				if (le16_to_cpu(idProd) == 0x2710)
 					chip_name = "em2710";
 				else if (le16_to_cpu(idProd) == 0x2820)
 					chip_name = "em2820";
+			} else {
+				chip_name = "em2710/2820";
 			}
 			/* NOTE: the em2820 is used in webcams, too ! */
 			break;
@@ -3014,9 +3015,7 @@ static int em28xx_init_dev(struct em28xx *dev, struct usb_device *udev,
 		}
 	}
 
-	if (chip_name != default_chip_name)
-		printk(KERN_INFO DRIVER_NAME
-		       ": chip ID is %s\n", chip_name);
+	printk(KERN_INFO DRIVER_NAME ": chip ID is %s\n", chip_name);
 
 	/*
 	 * For em2820/em2710, the name may change latter, after checking
@@ -3173,16 +3172,29 @@ unregister_dev:
 
 int em28xx_duplicate_dev(struct em28xx *dev)
 {
-	struct em28xx *sec_dev = NULL;
 	int nr;
-	sec_dev = kzalloc(sizeof(struct em28xx), GFP_KERNEL);
-	memcpy(sec_dev, dev, sizeof(struct em28xx));
-	nr = find_first_zero_bit(&em28xx_devused, EM28XX_MAXBOARDS);
-	test_and_set_bit(nr, &em28xx_devused);
+	struct em28xx *sec_dev = kzalloc(sizeof(*sec_dev), GFP_KERNEL);
+	if (sec_dev == NULL) {
+		dev->dev_next = NULL;
+		return -ENOMEM;
+	}
+	memcpy(sec_dev, dev, sizeof(sizeof(*sec_dev)));
+	/* Check to see next free device and mark as used */
+	do {
+		nr = find_first_zero_bit(&em28xx_devused, EM28XX_MAXBOARDS);
+		if (nr >= EM28XX_MAXBOARDS) {
+			/* No free device slots */
+			printk(DRIVER_NAME ": Supports only %i em28xx boards.\n",
+					EM28XX_MAXBOARDS);
+			kfree(sec_dev);
+			dev->dev_next = NULL;
+			return -ENOMEM;
+		}
+	} while (test_and_set_bit(nr, &em28xx_devused));
 	sec_dev->devno = nr;
 	snprintf(sec_dev->name, 28, "em28xx #%d", nr);
-	dev->dev_next = sec_dev;
 	sec_dev->dev_next = NULL;
+	dev->dev_next = sec_dev;
 	return 0;
 }
 
@@ -3470,8 +3482,7 @@ static int em28xx_usb_probe(struct usb_interface *interface,
 			    dev->dvb_xfer_bulk ? "bulk" : "isoc");
 	}
 
-	if (dev->board.has_dual_ts) {
-		em28xx_duplicate_dev(dev);
+	if (dev->board.has_dual_ts && em28xx_duplicate_dev(dev) == 0) {
 		dev->dev_next->ts = SECONDARY_TS;
 		dev->dev_next->alt = -1;
 		dev->dev_next->is_audio_only = has_audio && !(has_video || has_dvb);

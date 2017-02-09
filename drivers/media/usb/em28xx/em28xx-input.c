@@ -668,7 +668,7 @@ static int em28xx_ir_init(struct em28xx *dev)
 	rc->input_id.version = 1;
 	rc->input_id.vendor = le16_to_cpu(dev->udev->descriptor.idVendor);
 	rc->input_id.product = le16_to_cpu(dev->udev->descriptor.idProduct);
-	rc->dev.parent = &dev->udev->dev;
+	rc->dev.parent = &dev->intf->dev;
 	rc->driver_name = MODULE_NAME;
 
 	/* all done */

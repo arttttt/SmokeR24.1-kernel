@@ -871,6 +871,7 @@ void em28xx_do_i2c_scan(struct em28xx *dev, unsigned bus)
 int em28xx_i2c_register(struct em28xx *dev, unsigned bus,
 			enum em28xx_i2c_algo_type algo_type)
 {
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int retval;
 
 	BUG_ON(!dev->em28xx_write_regs || !dev->em28xx_read_reg);
@@ -880,7 +881,7 @@ int em28xx_i2c_register(struct em28xx *dev, unsigned bus,
 		return -ENODEV;
 
 	dev->i2c_adap[bus] = em28xx_adap_template;
-	dev->i2c_adap[bus].dev.parent = &dev->udev->dev;
+	dev->i2c_adap[bus].dev.parent = &udev->dev;
 	strcpy(dev->i2c_adap[bus].name, dev->name);
 
 	dev->i2c_bus[bus].bus = bus;

@@ -75,7 +75,8 @@ int em28xx_read_reg_req_len(struct em28xx *dev, u8 req, u16 reg,
 				   char *buf, int len)
 {
 	int ret;
-	int pipe = usb_rcvctrlpipe(dev->udev, 0);
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
+	int pipe = usb_rcvctrlpipe(udev, 0);
 
 	if (dev->disconnected)
 		return -ENODEV;
@@ -94,7 +95,7 @@ int em28xx_read_reg_req_len(struct em28xx *dev, u8 req, u16 reg,
 	}
 
 	mutex_lock(&dev->ctrl_urb_lock);
-	ret = usb_control_msg(dev->udev, pipe, req,
+	ret = usb_control_msg(udev, pipe, req,
 			      USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			      0x0000, reg, dev->urb_buf, len, HZ);
 	if (ret < 0) {
@@ -151,7 +152,8 @@ int em28xx_write_regs_req(struct em28xx *dev, u8 req, u16 reg, char *buf,
 				 int len)
 {
 	int ret;
-	int pipe = usb_sndctrlpipe(dev->udev, 0);
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
+	int pipe = usb_sndctrlpipe(udev, 0);
 
 	if (dev->disconnected)
 		return -ENODEV;
@@ -177,7 +179,7 @@ int em28xx_write_regs_req(struct em28xx *dev, u8 req, u16 reg, char *buf,
 
 	mutex_lock(&dev->ctrl_urb_lock);
 	memcpy(dev->urb_buf, buf, len);
-	ret = usb_control_msg(dev->udev, pipe, req,
+	ret = usb_control_msg(udev, pipe, req,
 			      USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			      0x0000, reg, dev->urb_buf, len, HZ);
 	mutex_unlock(&dev->ctrl_urb_lock);
@@ -883,6 +885,7 @@ int em28xx_resolution_set(struct em28xx *dev)
 /* Set USB alternate setting for analog video */
 int em28xx_set_alternate(struct em28xx *dev)
 {
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int errCode;
 	int i;
 	unsigned int min_pkt_size = dev->width * 2 + 4;
@@ -934,7 +937,7 @@ set_alt:
 	}
 	em28xx_coredbg("setting alternate %d with wMaxPacketSize=%u\n",
 		       dev->alt, dev->max_pkt_size);
-	errCode = usb_set_interface(dev->udev, 0, dev->alt);
+	errCode = usb_set_interface(udev, 0, dev->alt);
 	if (errCode < 0) {
 		em28xx_errdev("cannot change alternate number to %d (error=%i)\n",
 			      dev->alt, errCode);
@@ -1052,6 +1055,7 @@ void em28xx_uninit_usb_xfer(struct em28xx *dev, enum em28xx_mode mode)
 {
 	struct urb *urb;
 	struct em28xx_usb_bufs *usb_bufs;
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int i;
 
 	em28xx_isocdbg("em28xx: called em28xx_uninit_usb_xfer in mode %d\n",
@@ -1071,7 +1075,7 @@ void em28xx_uninit_usb_xfer(struct em28xx *dev, enum em28xx_mode mode)
 				usb_unlink_urb(urb);
 
 			if (usb_bufs->transfer_buffer[i]) {
-				usb_free_coherent(dev->udev,
+				usb_free_coherent(udev,
 					urb->transfer_buffer_length,
 					usb_bufs->transfer_buffer[i],
 					urb->transfer_dma);
@@ -1125,9 +1129,10 @@ int em28xx_alloc_urbs(struct em28xx *dev, enum em28xx_mode mode, int xfer_bulk,
 		      int num_bufs, int max_pkt_size, int packet_multiplier)
 {
 	struct em28xx_usb_bufs *usb_bufs;
+	struct urb *urb;
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int i;
 	int sb_size, pipe;
-	struct urb *urb;
 	int j, k;
 
 	em28xx_isocdbg("em28xx: called em28xx_alloc_isoc in mode %d\n", mode);
@@ -1194,7 +1199,7 @@ int em28xx_alloc_urbs(struct em28xx *dev, enum em28xx_mode mode, int xfer_bulk,
 		}
 		usb_bufs->urb[i] = urb;
 
-		usb_bufs->transfer_buffer[i] = usb_alloc_coherent(dev->udev,
+		usb_bufs->transfer_buffer[i] = usb_alloc_coherent(udev,
 			sb_size, GFP_KERNEL, &urb->transfer_dma);
 		if (!usb_bufs->transfer_buffer[i]) {
 			em28xx_err("unable to allocate %i bytes for transfer"
@@ -1207,20 +1212,20 @@ int em28xx_alloc_urbs(struct em28xx *dev, enum em28xx_mode mode, int xfer_bulk,
 		memset(usb_bufs->transfer_buffer[i], 0, sb_size);
 
 		if (xfer_bulk) { /* bulk */
-			pipe = usb_rcvbulkpipe(dev->udev,
+			pipe = usb_rcvbulkpipe(udev,
 					       mode == EM28XX_ANALOG_MODE ?
 					       dev->analog_ep_bulk :
 					       dev->dvb_ep_bulk);
-			usb_fill_bulk_urb(urb, dev->udev, pipe,
+			usb_fill_bulk_urb(urb, udev, pipe,
 					  usb_bufs->transfer_buffer[i], sb_size,
 					  em28xx_irq_callback, dev);
 			urb->transfer_flags = URB_NO_TRANSFER_DMA_MAP;
 		} else { /* isoc */
-			pipe = usb_rcvisocpipe(dev->udev,
+			pipe = usb_rcvisocpipe(udev,
 					       mode == EM28XX_ANALOG_MODE ?
 					       dev->analog_ep_isoc :
 					       dev->dvb_ep_isoc);
-			usb_fill_int_urb(urb, dev->udev, pipe,
+			usb_fill_int_urb(urb, udev, pipe,
 					 usb_bufs->transfer_buffer[i], sb_size,
 					 em28xx_irq_callback, dev, 1);
 			urb->transfer_flags = URB_ISO_ASAP |
@@ -1252,6 +1257,7 @@ int em28xx_init_usb_xfer(struct em28xx *dev, enum em28xx_mode mode,
 	struct em28xx_dmaqueue *dma_q = &dev->vidq;
 	struct em28xx_dmaqueue *vbi_dma_q = &dev->vbiq;
 	struct em28xx_usb_bufs *usb_bufs;
+	struct usb_device *udev = interface_to_usbdev(dev->intf);
 	int i;
 	int rc;
 	int alloc;
@@ -1278,7 +1284,7 @@ int em28xx_init_usb_xfer(struct em28xx *dev, enum em28xx_mode mode,
 	}
 
 	if (xfer_bulk) {
-		rc = usb_clear_halt(dev->udev, usb_bufs->urb[0]->pipe);
+		rc = usb_clear_halt(udev, usb_bufs->urb[0]->pipe);
 		if (rc < 0) {
 			em28xx_err("failed to clear USB bulk endpoint stall/halt condition (error=%i)\n",
 				   rc);
@@ -1372,10 +1378,11 @@ void em28xx_init_extension(struct em28xx *dev)
 	mutex_lock(&em28xx_devlist_mutex);
 	list_add_tail(&dev->devlist, &em28xx_devlist);
 	list_for_each_entry(ops, &em28xx_extension_devlist, next) {
-		if (ops->init)
+		if (ops->init) {
 			ops->init(dev);
-		if (dev->dev_next != NULL)
-			ops->init(dev->dev_next);
+			if (dev->dev_next != NULL)
+				ops->init(dev->dev_next);
+		}
 	}
 	mutex_unlock(&em28xx_devlist_mutex);
 }
@@ -1386,10 +1393,11 @@ void em28xx_close_extension(struct em28xx *dev)
 
 	mutex_lock(&em28xx_devlist_mutex);
 	list_for_each_entry(ops, &em28xx_extension_devlist, next) {
-		if (ops->fini)
+		if (ops->fini) {
+			if (dev->dev_next != NULL)
+				ops->fini(dev->dev_next);
 			ops->fini(dev);
-		if (dev->dev_next != NULL)
-			ops->fini(dev->dev_next);
+		}
 	}
 	list_del(&dev->devlist);
 	mutex_unlock(&em28xx_devlist_mutex);
