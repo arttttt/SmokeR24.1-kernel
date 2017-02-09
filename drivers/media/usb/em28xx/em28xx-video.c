@@ -1741,7 +1741,7 @@ static int em28xx_v4l2_close(struct file *filp)
 		em28xx_set_mode(dev, EM28XX_SUSPEND);
 
 		/* set alternate 0 */
-                if (!dev->board.has_dvb) {
+		if (!dev->board.has_dvb) {
 			dev->alt = 0;
 			em28xx_videodbg("setting alternate 0\n");
 			errCode = usb_set_interface(dev->udev, 0, 0);
@@ -1749,7 +1749,7 @@ static int em28xx_v4l2_close(struct file *filp)
 				em28xx_errdev("cannot change alternate number to "
 						"0 (error=%i)\n", errCode);
 			}
-                }
+		}
 	}
 
 	dev->users--;
