@@ -1025,6 +1025,7 @@ struct tegra_dc_platform_data {
 #endif
 	unsigned long		ctrl_num;
 	unsigned long		win_mask;
+	bool		plld2_ss_enable;
 };
 
 struct tegra_dc_bw_data {

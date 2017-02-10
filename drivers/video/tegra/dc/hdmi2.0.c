@@ -917,7 +917,6 @@ static int tegra_dc_hdmi_init(struct tegra_dc *dc)
 		}
 	}
 
-	hdmi->pdata = dc->pdata->default_out->hdmi_out;
 	hdmi->dc = dc;
 	dc_hdmi = hdmi;
 	hdmi->ddc_refcount = 0; /* assumes this is disabled when starting */
@@ -2017,6 +2016,25 @@ static long tegra_hdmi_get_pclk(struct tegra_dc_mode *mode)
 	return pclk;
 }
 
+static void tegra_dc_hdmi_configure_ss(struct tegra_dc *dc, struct clk *clk)
+{
+	struct clk *parent_clk = clk_get(NULL,
+				dc->out->parent_clk ? : "pll_d2");
+	struct tegra_hdmi *hdmi = tegra_dc_get_outdata(dc);
+
+	if (!dc->pdata->plld2_ss_enable)
+		return;
+
+	if (dc->mode.pclk == 148500000 &&
+		dc->mode.h_active == 1920 &&
+		dc->mode.v_active == 1080 &&
+		(tegra_hdmi_find_cea_vic(hdmi) == 31)) {
+		tegra_clk_cfg_ex(parent_clk, TEGRA_CLK_PLLD2_SS_ENB, 1);
+	} else {
+		tegra_clk_cfg_ex(parent_clk, TEGRA_CLK_PLLD2_SS_ENB, 0);
+	}
+}
+
 static long tegra_dc_hdmi_setup_clk(struct tegra_dc *dc, struct clk *clk)
 {
 #ifdef CONFIG_TEGRA_NVDISPLAY
@@ -2052,7 +2070,6 @@ static long tegra_dc_hdmi_setup_clk(struct tegra_dc *dc, struct clk *clk)
 	} else {
 		struct tegra_hdmi *hdmi = tegra_dc_get_outdata(dc);
 		struct tegra_dc_sor_data *sor = hdmi->sor;
-
 		if (clk_get_parent(sor->src_switch_clk) != parent_clk) {
 			if (clk_set_parent(sor->src_switch_clk, parent_clk)) {
 				dev_err(&dc->ndev->dev,
@@ -2060,12 +2077,14 @@ static long tegra_dc_hdmi_setup_clk(struct tegra_dc *dc, struct clk *clk)
 				return 0;
 			}
 		}
+		tegra_dc_hdmi_configure_ss(dc, clk);
 	}
 #endif
 	if (dc->initialized)
 		goto skip_setup;
 	if (clk_get_rate(parent_clk) != dc->mode.pclk)
 		clk_set_rate(parent_clk, dc->mode.pclk);
+
 skip_setup:
 	/*
 	 * DC clock divider is controlled by DC driver transparently to clock

@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/of_dc.c
  *
- * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -2276,6 +2276,13 @@ struct tegra_dc_platform_data
 			goto fail_parse;
 		}
 		pdata->fb->flags = (unsigned long)temp;
+	}
+
+	if (of_property_read_bool(np, "nvidia,50hz-ss-war")) {
+		pdata->plld2_ss_enable = true;
+		OF_DC_LOG("dc plld2 ss enabled - %d\n", pdata->plld2_ss_enable);
+	} else {
+		pdata->plld2_ss_enable = false;
 	}
 
 	if (pdata->default_out->type == TEGRA_DC_OUT_DSI) {

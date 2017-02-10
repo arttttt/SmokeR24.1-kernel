@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/tegra21_clocks.c
  *
- * Copyright (C) 2013-2016 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2013-2017 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -279,8 +279,9 @@
 
 #define PLLD2_MISC0_DEFAULT_VALUE	0x40000020
 #define PLLD2_MISC1_CFG_DEFAULT_VALUE	0x10000000
-#define PLLD2_MISC2_CTRL1_DEFAULT_VALUE	0x0
-#define PLLD2_MISC3_CTRL2_DEFAULT_VALUE	0x0
+#define PLLD2_MISC2_CTRL1_DEFAULT_VALUE	0xECA0EB73
+#define PLLD2_MISC3_CTRL2_DEFAULT_VALUE	0x00010000
+#define PLLD2_MISC3_CTRL2_SDM_SSC_STEP_WRITE_MASK	0xffff0000
 
 #define PLLDP_MISC0_DEFAULT_VALUE	0x40000020
 #define PLLDP_MISC1_CFG_DEFAULT_VALUE	0xc0000000
@@ -2653,6 +2654,10 @@ tegra21_plld_clk_cfg_ex(struct clk *c, enum tegra_clk_ex_param p, u32 setting)
 		mask = PLLD_BASE_DSI_MUX_MASK;
 		reg = c->reg;
 		break;
+	case TEGRA_CLK_PLLD2_SS_ENB:
+		mask = PLLDSS_MISC1_CFG_EN_SSC;
+		reg = c->reg + c->u.pll.misc1;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -2721,6 +2726,14 @@ static void plldss_defaults(struct clk *c, u32 misc0_val, u32 misc1_val,
 			PLL_MISC_CHK_DEFAULT(c, 1, default_val,
 					     PLLDSS_MISC1_CFG_WRITE_MASK &
 					     (~PLLDSS_MISC1_CFG_EN_SDM));
+			clk_writel(misc2_val, c->reg + c->u.pll.misc2);
+			default_val = clk_readl(c->reg + c->u.pll.misc3);
+			default_val &=
+				~PLLD2_MISC3_CTRL2_SDM_SSC_STEP_WRITE_MASK;
+			default_val |=
+				(misc3_val &
+				PLLD2_MISC3_CTRL2_SDM_SSC_STEP_WRITE_MASK);
+			pll_writel_delay(default_val, c->reg + c->u.pll.misc3);
 		}
 
 		/* Enable lock detect */
@@ -2805,6 +2818,7 @@ static struct clk_ops tegra_plld2_ops = {
 	.enable			= tegra_pll_clk_enable,
 	.disable		= tegra_pll_clk_disable,
 	.set_rate		= tegra_pll_clk_set_rate,
+	.clk_cfg_ex		= tegra21_plld_clk_cfg_ex,
 };
 
 static void plldp_set_defaults(struct clk *c, unsigned long input_rate)
