@@ -2954,10 +2954,12 @@ static struct tegra_usb_platform_data *tegra_udc_dt_parse_pdata(
 	pdata->u_data.dev.is_xhci =
 		of_property_read_bool(np, "nvidia,enable-xhci-host");
 
+	current_ua = 0;
 	of_property_read_u32(np, "nvidia,dcp-current-limit-ua",
 				&current_ua);
 	pdata->u_data.dev.dcp_current_limit_ma = current_ua/1000;
 
+	current_ua = 0;
 	of_property_read_u32(np, "nvidia,qc2-current-limit-ua",
 				&current_ua);
 	pdata->u_data.dev.qc2_current_limit_ma = current_ua/1000;
