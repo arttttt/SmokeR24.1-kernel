@@ -1,7 +1,7 @@
 /*
  * arch/arm/boot/dts/tegra124-vcm30_t124.dtsi
  *
- * Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,8 +22,6 @@
 #include <tegra124-platforms/tegra124-vcm30t124-fixed-reg.dtsi>
 
 / {
-	nvidia,dtbbuildtime = __DATE__, __TIME__;
-
 	#address-cells = <2>;
 	#size-cells = <2>;
 

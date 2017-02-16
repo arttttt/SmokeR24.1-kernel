@@ -1,7 +1,7 @@
 /*
  * tegra124-soc-base.dtsi: SOC specific DTSI file with all node disabled.
  *
- * Copyright (c) 2013-2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2013-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -28,6 +28,8 @@
 	interrupt-parent = <&intc>;
 	#address-cells = <2>;
 	#size-cells = <2>;
+
+	nvidia,dtbbuildtime = __DATE__, __TIME__;
 
 	aliases {
 		ehci0 = &ehci1;
