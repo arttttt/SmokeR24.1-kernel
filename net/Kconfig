@@ -293,7 +293,8 @@ config BPF_JIT
 
 	  Note, admin should enable this feature changing:
 	  /proc/sys/net/core/bpf_jit_enable
-	  /proc/sys/net/core/bpf_jit_harden (optional)
+	  /proc/sys/net/core/bpf_jit_harden   (optional)
+	  /proc/sys/net/core/bpf_jit_kallsyms (optional)
 
 menu "Network testing"
 
