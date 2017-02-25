@@ -832,7 +832,7 @@ int nvmap_ioctl_cache_maint_list(struct file *filp, void __user *arg,
 	if (copy_from_user(&op, arg, sizeof(op)))
 		return -EFAULT;
 
-	if (!op.nr)
+	if (!op.nr || op.nr > UINT_MAX / sizeof(u32))
 		return -EINVAL;
 
 	if (!access_ok(VERIFY_READ, op.handles, op.nr * sizeof(u32)))

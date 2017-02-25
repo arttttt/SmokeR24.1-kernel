@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/nvmap/nvmap_cache.c
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -312,6 +312,10 @@ int __nvmap_do_cache_maint(struct nvmap_client *client,
 	h = nvmap_handle_get(h);
 	if (!h)
 		return -EFAULT;
+	if ((start >= h->size) || (end > h->size)) {
+		nvmap_handle_put(h);
+		return -EFAULT;
+	}
 
 	nvmap_kmaps_inc(h);
 	if (op == NVMAP_CACHE_OP_INV)
