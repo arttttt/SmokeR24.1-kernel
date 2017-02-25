@@ -857,8 +857,10 @@ int cifs_readdir(struct file *file, void *direntry, filldir_t filldir)
 			 */
 			rc = cifs_filldir(current_entry, file, filldir,
 					  direntry, tmp_buf, max_len);
-			if (rc == -EOVERFLOW) {
-				rc = 0;
+			if (rc) {
+				pr_err("cifs_filldir failed with rc = %d\n", rc);
+				if (rc > 0)
+					rc = 0;
 				break;
 			}
 
