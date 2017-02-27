@@ -1,7 +1,7 @@
 /*
  * GK20A Graphics FIFO (gr host)
  *
- * Copyright (c) 2011-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -829,7 +829,8 @@ static bool gk20a_fifo_set_ctx_mmu_error(struct gk20a *g,
 	if (!ch)
 		return verbose;
 
-	if (ch->error_notifier) {
+	mutex_lock(&ch->error_notifier_mutex);
+	if (ch->error_notifier_ref) {
 		u32 err = ch->error_notifier->info32;
 		if (ch->error_notifier->status == 0xffff) {
 			/* If error code is already set, this mmu fault
@@ -840,10 +841,12 @@ static bool gk20a_fifo_set_ctx_mmu_error(struct gk20a *g,
 			if (err == NVGPU_CHANNEL_FIFO_ERROR_IDLE_TIMEOUT)
 				verbose = ch->timeout_debug_dump;
 		} else {
-			gk20a_set_error_notifier(ch,
+			gk20a_set_error_notifier_locked(ch,
 				NVGPU_CHANNEL_FIFO_ERROR_MMU_ERR_FLT);
 		}
 	}
+	mutex_unlock(&ch->error_notifier_mutex);
+
 	/* mark channel as faulted */
 	ch->has_timedout = true;
 	wmb();
