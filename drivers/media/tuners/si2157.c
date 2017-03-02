@@ -390,7 +390,9 @@ static void si2157_stat_work(struct work_struct *work)
 	c->strength.stat[0].scale = FE_SCALE_DECIBEL;
 	c->strength.stat[0].svalue = ((s8) cmd.args[3]) * 1000;
 
-	schedule_delayed_work(&dev->stat_work, msecs_to_jiffies(2000));
+        if (dev->active) {
+		schedule_delayed_work(&dev->stat_work, msecs_to_jiffies(2000));
+        }
 	return;
 err:
 	c->strength.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
@@ -450,6 +452,9 @@ static int si2157_remove(struct i2c_client *client)
 {
 	struct si2157_dev *dev = i2c_get_clientdata(client);
 	struct dvb_frontend *fe = dev->fe;
+
+        dev->active = false;
+        cancel_delayed_work_sync(&dev->stat_work);
 
 	memset(&fe->ops.tuner_ops, 0, sizeof(fe->ops.tuner_ops));
 	fe->tuner_priv = NULL;
