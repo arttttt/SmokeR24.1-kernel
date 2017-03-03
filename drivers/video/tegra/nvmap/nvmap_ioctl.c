@@ -90,6 +90,7 @@ int nvmap_ioctl_pinop(struct file *filp, bool is_pin, void __user *arg,
 			return -EFAULT;
 		op.handles = (__u32 *)(uintptr_t)op32.handles;
 		op.count = op32.count;
+		op.addr = (unsigned long *)(uintptr_t)op32.addr;
 	} else
 #endif
 		if (copy_from_user(&op, arg, sizeof(op)))
