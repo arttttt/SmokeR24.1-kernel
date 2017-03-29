@@ -2709,8 +2709,10 @@ wl_handle_private_cmd(struct net_device *net, char *command, u32 buf_size)
 		int skip = strlen(CMD_HAPD_MAC_FILTER) + 1;
 		wl_android_set_mac_address_filter(net, (const char*)command+skip);
 	}
+#if defined(ROAM_ENABLE)
 	else if (strnicmp(command, CMD_SETROAMMODE, strlen(CMD_SETROAMMODE)) == 0)
 		bytes_written = wl_android_set_roam_mode(net, command, priv_cmd.total_len);
+#endif /* ROAM_ENABLE */
 #if defined(BCMFW_ROAM_ENABLE)
 	else if (strnicmp(command, CMD_SET_ROAMPREF, strlen(CMD_SET_ROAMPREF)) == 0) {
 		bytes_written = wl_android_set_roampref(net, command, priv_cmd.total_len);

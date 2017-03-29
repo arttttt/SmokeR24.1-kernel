@@ -1644,9 +1644,9 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 #endif /* SUPPORT_PM2_ONLY */
 	/* wl_pkt_filter_enable_t	enable_parm; */
 	int bcn_li_dtim = 0; /* Default bcn_li_dtim in resume mode is 0 */
-#ifndef ENABLE_FW_ROAM_SUSPEND
+#if !defined(ENABLE_FW_ROAM_SUSPEND) && defined(ROAM_ENABLE)
 	uint roamvar = 1;
-#endif /* ENABLE_FW_ROAM_SUSPEND */
+#endif /* !defined(ENABLE_FW_ROAM_SUSPEND) && defined(ROAM_ENABLE) */
 	uint nd_ra_filter = 0;
 	int ret = 0;
 
@@ -1695,11 +1695,11 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 					  sizeof(bcn_li_dtim),
 					  NULL, 0, TRUE) < 0)
 					DHD_ERROR(("%s: set dtim failed\n", __FUNCTION__));
-#ifndef ENABLE_FW_ROAM_SUSPEND
+#if !defined(ENABLE_FW_ROAM_SUSPEND) && defined(ROAM_ENABLE)
 				/* Disable firmware roaming during suspend */
 				dhd_iovar(dhd, 0, "roam_off", (char *)&roamvar,
 						sizeof(roamvar), NULL, 0, TRUE);
-#endif /* ENABLE_FW_ROAM_SUSPEND */
+#endif /* !defined(ENABLE_FW_ROAM_SUSPEND) && defined(ROAM_ENABLE) */
 				if (FW_SUPPORTED(dhd, ndoe)) {
 					/* enable IPv6 RA filter in  firmware during suspend */
 					nd_ra_filter = 1;
@@ -1746,12 +1746,12 @@ if (bcmdhd_support_p2p_go_ps) {
 				dhd_iovar(dhd, 0, "bcn_li_dtim",
 					  (char *)&bcn_li_dtim,
 					  sizeof(bcn_li_dtim), NULL, 0, TRUE);
-#ifndef ENABLE_FW_ROAM_SUSPEND
+#if !defined(ENABLE_FW_ROAM_SUSPEND) && defined(ROAM_ENABLE)
 				roamvar = dhd_roam_disable;
 				dhd_iovar(dhd, 0, "roam_off",
 					  (char *)&roamvar, sizeof(roamvar),
 					  NULL, 0, TRUE);
-#endif /* ENABLE_FW_ROAM_SUSPEND */
+#endif /* !defined(ENABLE_FW_ROAM_SUSPEND) && defined(ROAM_ENABLE) */
 				if (FW_SUPPORTED(dhd, ndoe)) {
 					/* disable IPv6 RA filter in  firmware during suspend */
 					nd_ra_filter = 0;

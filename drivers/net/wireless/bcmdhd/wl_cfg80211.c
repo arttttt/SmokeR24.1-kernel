@@ -4185,8 +4185,8 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	wl_extjoin_params_t *ext_join_params;
 	struct wl_join_params join_params;
 	size_t join_params_size;
-#if defined(ROAM_ENABLE) && defined(ROAM_AP_ENV_DETECTION)
 	dhd_pub_t *dhd =  (dhd_pub_t *)(cfg->pub);
+#if defined(ROAM_ENABLE) && defined(ROAM_AP_ENV_DETECTION)
 	s32 roam_trigger[2] = {0, 0};
 #endif /* ROAM_AP_ENV_DETECTION */
 	s32 err = 0;
