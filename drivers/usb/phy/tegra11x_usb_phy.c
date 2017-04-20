@@ -1408,7 +1408,6 @@ static void disable_charger_detection(void __iomem *base)
 	val = readl(base + UTMIP_BAT_CHRG_CFG0);
 	val &= ~(UTMIP_OP_SRC_EN | UTMIP_ON_SINK_EN);
 	val &= ~(UTMIP_ON_SRC_EN | UTMIP_OP_SINK_EN);
-	val |= UTMIP_PD_CHRG;
 	writel(val, base + UTMIP_BAT_CHRG_CFG0);
 
 	/* Delay of 40 ms before we pull the D+ as per battery charger spec */
