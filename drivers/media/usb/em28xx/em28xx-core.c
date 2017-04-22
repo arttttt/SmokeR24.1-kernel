@@ -526,7 +526,8 @@ int em28xx_audio_setup(struct em28xx *dev)
 	u32 vid;
 
 	if (dev->chip_id == CHIP_ID_EM2870 || dev->chip_id == CHIP_ID_EM2874
-		|| dev->chip_id == CHIP_ID_EM28174) {
+		|| dev->chip_id == CHIP_ID_EM28174
+		|| dev->chip_id == CHIP_ID_EM28178) {
 		/* Digital only device - don't load any alsa module */
 		dev->audio_mode.has_audio = false;
 		dev->has_audio_class = false;
@@ -647,9 +648,10 @@ int em28xx_capture_start(struct em28xx *dev, int start)
 {
 	int rc;
 
-	if (dev->chip_id == CHIP_ID_EM2874 ||
-	    dev->chip_id == CHIP_ID_EM2884 ||
-	    dev->chip_id == CHIP_ID_EM28174) {
+	if (dev->chip_id == CHIP_ID_EM2874  ||
+	    dev->chip_id == CHIP_ID_EM2884  ||
+	    dev->chip_id == CHIP_ID_EM28174 ||
+	    dev->chip_id == CHIP_ID_EM28178) {
 		/* The Transport Stream Enable Register moved in em2874 */
 		if(dev->dvb_xfer_bulk) {
 			/* TS1 Maximum Transfer Size = 188 * EM28XX_DVB_BULK_PACKET_MULTIPLIER */

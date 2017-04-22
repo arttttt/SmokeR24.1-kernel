@@ -411,6 +411,18 @@ static struct em28xx_reg_seq pctv_520e[] = {
 	{             -1,   -1,   -1,  -1},
 };
 
+static struct em28xx_reg_seq pctv_292e[] = {
+	{EM2874_R80_GPIO,         0xff, 0xff,      0},
+	{0x0d,                    0xff, 0xff,    950},
+	{EM2874_R80_GPIO,         0xbd, 0xff,    100},
+	{EM2874_R80_GPIO,         0xfd, 0xff,    410},
+	{EM2874_R80_GPIO,         0x7d, 0xff,    300},
+	{EM2874_R80_GPIO,         0x7c, 0xff,     60},
+	{0x0d,                    0x42, 0xff,     50},
+	{EM2874_R5F_TS_ENABLE,    0x85, 0xff,      0},
+	{                  -1,      -1,   -1,     -1},
+};
+
 /* 2040:0265 Hauppauge WinTV-dualHD DVB
  * reg 0x80/0x84:
  * GPIO_0: Yellow LED tuner 1, 0=on, 1=off
@@ -2038,6 +2050,18 @@ struct em28xx_board em28xx_boards[] = {
 		.i2c_speed    = EM28XX_I2C_CLK_WAIT_ENABLE |
 				EM28XX_I2C_FREQ_400_KHZ,
 	},
+	/* 2013:025f PCTV tripleStick (292e).
+	 * 2040:0264 Hauppauge WinTV-SoloHD Isoc, 2040:8264 Bulk
+	 * Empia EM28178, Silicon Labs Si2168, Silicon Labs Si2157 */
+	[EM28178_BOARD_PCTV_292E] = {
+		.name          = "PCTV tripleStick (292e)",
+		.def_i2c_bus   = 1,
+		.i2c_speed     = EM28XX_I2C_CLK_WAIT_ENABLE | EM28XX_I2C_FREQ_400_KHZ,
+		.tuner_type    = TUNER_ABSENT,
+		.tuner_gpio    = pctv_292e,
+		.has_dvb       = 1,
+		.ir_codes      = RC_MAP_PINNACLE_PCTV_HD,
+	},
 	/* 2040:0265 Hauppauge WinTV-dualHD (DVB version).
 	 * Empia EM28274, 2x Silicon Labs Si2168, 2x Silicon Labs Si2157 */
 	[EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_DVB] = {
@@ -2223,6 +2247,14 @@ struct usb_device_id em28xx_id_table[] = {
 			.driver_info = EM2884_BOARD_PCTV_510E },
 	{ USB_DEVICE(0x2013, 0x0251),
 			.driver_info = EM2884_BOARD_PCTV_520E },
+	{ USB_DEVICE(0x2013, 0x025f),
+			.driver_info = EM28178_BOARD_PCTV_292E },
+	{ USB_DEVICE(0x2040, 0x0264), /* Hauppauge WinTV-soloHD Isoc */
+			.driver_info = EM28178_BOARD_PCTV_292E },
+	{ USB_DEVICE(0x2040, 0x8264), /* Hauppauge WinTV-soloHD Bulk OEM*/
+			.driver_info = EM28178_BOARD_PCTV_292E },
+	{ USB_DEVICE(0x2040, 0x8268), /* Hauppauge WinTV-soloHD Bulk Retail*/
+			.driver_info = EM28178_BOARD_PCTV_292E },
 	{ USB_DEVICE(0x2040, 0x0265), /* ISOC */
 			.driver_info = EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_DVB },
 	{ USB_DEVICE(0x2040, 0x8265), /* BULK */
@@ -2995,6 +3027,12 @@ static int em28xx_init_dev(struct em28xx *dev, struct usb_device *udev,
 			break;
 		case CHIP_ID_EM28174:
 			chip_name = "em28174";
+			dev->reg_gpio_num = EM2874_R80_GPIO;
+			dev->wait_after_write = 0;
+			dev->eeprom_addrwidth_16bit = 1;
+			break;
+		case CHIP_ID_EM28178:
+			chip_name = "em28178";
 			dev->reg_gpio_num = EM2874_R80_GPIO;
 			dev->wait_after_write = 0;
 			dev->eeprom_addrwidth_16bit = 1;
