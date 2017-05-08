@@ -260,7 +260,7 @@ static int tegra30_avp_load_ucode(void)
 	struct audio_engine_data *audio_engine;
 	const struct firmware *ucode_fw;
 	const struct tegra30_avp_ucode_desc *ucode_desc;
-	int ucode_size = 0, ucode_offset = 0, total_ucode_size = 0;
+	ssize_t ucode_size = 0, ucode_offset = 0, total_ucode_size = 0;
 	int i, ret = 0;
 
 	dev_vdbg(audio_avp->dev, "%s", __func__);
@@ -300,13 +300,14 @@ static int tegra30_avp_load_ucode(void)
 		}
 
 		ucode_size = ucode_fw->size;
-		if (ucode_size <= 0) {
+		if (ucode_size <= 0 ||
+			ucode_size > avp_ucode_desc[i].max_mem_size) {
 			dev_err(audio_avp->dev, "Invalid ucode size.");
 			ret = -EINVAL;
 			release_firmware(ucode_fw);
 			goto err_param_mem_free;
 		}
-		dev_vdbg(audio_avp->dev, "%s ucode size = %d bytes",
+		dev_vdbg(audio_avp->dev, "%s ucode size = %zd bytes",
 			ucode_desc->bin_name, ucode_size);
 
 		/* Read ucode */
