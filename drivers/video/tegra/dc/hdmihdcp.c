@@ -1506,6 +1506,16 @@ static void nvhdcp_downstream_worker(struct work_struct *work)
 		goto failure;
 	}
 
+	mutex_lock(&nvhdcp->lock);
+	tmp = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CTRL);
+	tmp |= CRYPT_ENABLED;
+	if (b_caps & BCAPS_11) /* HDCP 1.1 ? */
+		tmp |= ONEONE_ENABLED;
+	nvhdcp_sor_writel(hdmi, tmp, NV_SOR_TMDS_HDCP_CTRL);
+
+	nvhdcp_vdbg("CRYPT enabled\n");
+	mutex_unlock(&nvhdcp->lock);
+
 	/* if repeater then get repeater info */
 	if (b_caps & BCAPS_REPEATER) {
 		e = get_repeater_info(nvhdcp);
@@ -1517,14 +1527,6 @@ static void nvhdcp_downstream_worker(struct work_struct *work)
 	}
 
 	mutex_lock(&nvhdcp->lock);
-	tmp = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CTRL);
-	tmp |= CRYPT_ENABLED;
-	if (b_caps & BCAPS_11) /* HDCP 1.1 ? */
-		tmp |= ONEONE_ENABLED;
-	nvhdcp_sor_writel(hdmi, tmp, NV_SOR_TMDS_HDCP_CTRL);
-
-	nvhdcp_vdbg("CRYPT enabled\n");
-
 	nvhdcp->state = STATE_LINK_VERIFY;
 	nvhdcp_info("link verified!\n");
 
