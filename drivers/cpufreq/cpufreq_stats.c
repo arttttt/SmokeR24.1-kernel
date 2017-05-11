@@ -374,13 +374,12 @@ static void cpufreq_powerstats_free(void)
 }
 
 static int cpufreq_stats_create_table(struct cpufreq_policy *policy,
-		struct cpufreq_frequency_table *table, int count)
+	int cpu, struct cpufreq_frequency_table *table, int count)
 {
 	unsigned int i, j, k, l, ret = 0;
 	struct cpufreq_stats *stat;
 	struct cpufreq_policy *data;
 	unsigned int alloc_size;
-	unsigned int cpu = policy->cpu;
 	if (per_cpu(cpufreq_stats_table, cpu))
 		return -EBUSY;
 	stat = kzalloc(sizeof(struct cpufreq_stats), GFP_KERNEL);
@@ -394,8 +393,6 @@ static int cpufreq_stats_create_table(struct cpufreq_policy *policy,
 	}
 
 	ret = sysfs_create_group(&data->kobj, &stats_attr_group);
-	if (ret)
-		goto error_out;
 
 	stat->cpu = cpu;
 	per_cpu(cpufreq_stats_table, cpu) = stat;
@@ -440,9 +437,8 @@ static int cpufreq_stats_create_table(struct cpufreq_policy *policy,
 	spin_unlock(&cpufreq_stats_lock);
 	cpufreq_cpu_put(data);
 	return 0;
-error_out:
-	cpufreq_cpu_put(data);
-error_get_fail:
+error_alloc:
+	sysfs_remove_group(&data->kobj, &stats_attr_group);
 	kfree(stat);
 	per_cpu(cpufreq_stats_table, cpu) = NULL;
 	return ret;
@@ -634,7 +630,7 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 			cpufreq_powerstats_create(cpu_num, table, count);
 	}
 
-	ret = cpufreq_stats_create_table(policy, table, count);
+	ret = cpufreq_stats_create_table(policy, cpu, table, count);
 	if (ret)
 		return ret;
 	return 0;
@@ -707,7 +703,7 @@ static int cpufreq_stats_create_table_cpu(unsigned int cpu)
 			cpufreq_powerstats_create(cpu_num, table, count);
 	}
 
-	ret = cpufreq_stats_create_table(policy, table, count);
+	ret = cpufreq_stats_create_table(policy, cpu, table, count);
 
 out:
 	cpufreq_cpu_put(policy);
