@@ -346,6 +346,7 @@ static void tegra_t210ref_shutdown(struct snd_pcm_substream *substream)
 	return;
 }
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 static int tegra_t210ref_compr_set_params(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -376,6 +377,7 @@ static int tegra_t210ref_compr_set_params(struct snd_compr_stream *cstream)
 
 	return 0;
 }
+#endif
 
 static int tegra_t210ref_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -532,9 +534,11 @@ static struct snd_soc_ops tegra_t210ref_ops = {
 	.shutdown = tegra_t210ref_shutdown,
 };
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 static struct snd_soc_compr_ops tegra_t210ref_compr_ops = {
 	.set_params = tegra_t210ref_compr_set_params,
 };
+#endif
 
 static const struct snd_soc_dapm_widget tegra_t210ref_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("x Headphone Jack", tegra_rt5639_event_hp),
@@ -751,6 +755,7 @@ static int tegra_t210ref_driver_probe(struct platform_device *pdev)
 	tegra_machine_set_dai_init(TEGRA210_DAI_LINK_SFC1_RX,
 		&tegra_t210ref_sfc_init);
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 	/* set ADSP PCM */
 	for (i = TEGRA210_DAI_LINK_ADSP_PCM1;
 		i <= TEGRA210_DAI_LINK_ADSP_PCM2; i++) {
@@ -764,6 +769,7 @@ static int tegra_t210ref_driver_probe(struct platform_device *pdev)
 		tegra_machine_set_dai_compr_ops(i,
 			&tegra_t210ref_compr_ops);
 	}
+#endif
 
 	/* append t210ref specific dai_links */
 	card->num_links =

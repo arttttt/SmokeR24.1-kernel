@@ -385,6 +385,7 @@ static int tegra_t210ref_hw_free(struct snd_pcm_substream *substream)
 	return 0;
 }
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 static int tegra_t210ref_compr_set_params(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -417,6 +418,7 @@ static int tegra_t210ref_compr_set_params(struct snd_compr_stream *cstream)
 
 	return 0;
 }
+#endif
 
 static int tegra_t210ref_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -495,6 +497,7 @@ static void tegra_es755_shutdown(struct snd_pcm_substream *substream)
 	escore_pm_put_autosuspend();
 }
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 static int tegra_es755_startup_compr(struct snd_compr_stream *cstream)
 {
 	escore_pm_get_sync();
@@ -505,6 +508,7 @@ static void tegra_es755_shutdown_compr(struct snd_compr_stream *cstream)
 {
 	escore_pm_put_autosuspend();
 }
+#endif
 
 static struct snd_soc_ops tegra_t210ref_ops = {
 	.hw_params = tegra_t210ref_hw_params,
@@ -513,11 +517,13 @@ static struct snd_soc_ops tegra_t210ref_ops = {
 	.shutdown = tegra_es755_shutdown,
 };
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 static struct snd_soc_compr_ops tegra_t210ref_compr_ops = {
 	.set_params = tegra_t210ref_compr_set_params,
 	.startup = tegra_es755_startup_compr,
 	.shutdown = tegra_es755_shutdown_compr,
 };
+#endif
 
 static int tegra_t210ref_event_int_spk(struct snd_soc_dapm_widget *w,
 					struct snd_kcontrol *k, int event)
@@ -797,6 +803,7 @@ static int tegra_t210ref_driver_probe(struct platform_device *pdev)
 		i <= TEGRA210_DAI_LINK_ADMAIF10; i++)
 		tegra_machine_set_dai_ops(i, &tegra_t210ref_ops);
 
+#ifdef CONFIG_SND_SOC_TEGRA210_ADSP_ALT
 	/* set ADSP PCM */
 	for (i = TEGRA210_DAI_LINK_ADSP_PCM1;
 		i <= TEGRA210_DAI_LINK_ADSP_PCM2; i++) {
@@ -810,6 +817,7 @@ static int tegra_t210ref_driver_probe(struct platform_device *pdev)
 		tegra_machine_set_dai_compr_ops(i,
 			&tegra_t210ref_compr_ops);
 	}
+#endif
 
 	pdata->gpio_hp_det = of_get_named_gpio(np,
 					"nvidia,hp-det-gpios", 0);
