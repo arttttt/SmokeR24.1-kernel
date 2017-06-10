@@ -659,6 +659,14 @@ enum bpf_func_id {
 	BPF_FUNC_get_socket_uid,
 
 	/**
+	 * u32 bpf_set_hash(skb, hash)
+	 *     Set full skb->hash.
+	 *     @skb: pointer to skb
+	 *     @hash: hash to set
+	 */
+	BPF_FUNC_set_hash,
+
+	/**
 	 * int bpf_skb_adjust_room(skb, len_diff, mode, flags)
 	 *     Grow or shrink room in sk_buff.
 	 *     @skb: pointer to skb
