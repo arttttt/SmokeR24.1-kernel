@@ -866,14 +866,16 @@ menuconfig CGROUPS
 if CGROUPS
 
 config CGROUP_DEBUG
-	bool "Example debug cgroup subsystem"
+	bool "Debug controller"
 	default n
+	depends on DEBUG_KERNEL
 	help
-	  This option enables a simple cgroup subsystem that
-	  exports useful debugging information about the cgroups
-	  framework.
+	  This option enables a simple controller that exports
+	  debugging information about the cgroups framework. This
+	  controller is for control cgroup debugging only. Its
+	  interfaces are not stable.
 
-	  Say N if unsure.
+	  Say N.
 
 config CGROUP_FREEZER
 	bool "Freezer cgroup subsystem"
