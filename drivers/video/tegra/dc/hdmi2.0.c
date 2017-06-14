@@ -2129,10 +2129,10 @@ static void tegra_dc_hdmi_disable(struct tegra_dc *dc)
 #ifdef CONFIG_SWITCH
 	switch_set_state(&hdmi->audio_switch, 0);
 #endif
+	tegra_hda_reset_data();
 
 	tegra_hdmi_config_clk(hdmi, TEGRA_HDMI_SAFE_CLK);
 	tegra_hdmi_controller_disable(hdmi);
-	tegra_hda_reset_data();
 	return;
 }
 
