@@ -34,6 +34,7 @@
 #define to_hdmi(DATA)	((struct tegra_hdmi *)DATA)
 #define to_dp(DATA)	((struct tegra_dc_dp_data *)DATA)
 
+static DEFINE_MUTEX(hda_lock);
 static struct tegra_dc_hda_data *hda;
 
 static void tegra_hda_get_eld_header(u8 *eld_mem_block)
@@ -120,11 +121,16 @@ static int tegra_hda_eld_config(void)
 /* Applicable for dp too, func name still uses hdmi as per generic hda driver */
 int tegra_hdmi_setup_hda_presence(void)
 {
-	if (!hda)
+	mutex_lock(&hda_lock);
+	if (!hda) {
+		mutex_unlock(&hda_lock);
 		return -EAGAIN;
+	}
 
-	if (hda->sink == SINK_HDMI && to_hdmi(hda->client_data)->dvi)
+	if (hda->sink == SINK_HDMI && to_hdmi(hda->client_data)->dvi) {
+		mutex_unlock(&hda_lock);
 		return -ENODEV;
+	}
 
 	if (*(hda->enabled) && *(hda->eld_valid)) {
 		if (hda->sink == SINK_HDMI) {
@@ -146,9 +152,11 @@ int tegra_hdmi_setup_hda_presence(void)
 			tegra_hdmi_put(hda->dc);
 			tegra_dc_powergate_locked(hda->dc);
 		}
+		mutex_unlock(&hda_lock);
 		return 0;
 	}
 
+	mutex_unlock(&hda_lock);
 	return -ENODEV;
 }
 
@@ -294,11 +302,16 @@ int tegra_hdmi_setup_audio_freq_source(unsigned audio_freq,
 {
 	bool valid_freq;
 
-	if (!hda)
+	mutex_lock(&hda_lock);
+	if (!hda) {
+		mutex_unlock(&hda_lock);
 		return -ENODEV;
+	}
 
-	if (hda->sink == SINK_HDMI && to_hdmi(hda->client_data)->dvi)
+	if (hda->sink == SINK_HDMI && to_hdmi(hda->client_data)->dvi) {
+		mutex_unlock(&hda_lock);
 		return -ENODEV;
+	}
 
 	valid_freq = AUDIO_FREQ_32K == audio_freq ||
 			AUDIO_FREQ_44_1K == audio_freq ||
@@ -320,8 +333,10 @@ int tegra_hdmi_setup_audio_freq_source(unsigned audio_freq,
 			tegra_hdmi_put(hda->dc);
 		tegra_dc_io_end(hda->dc);
 	} else {
+		mutex_unlock(&hda_lock);
 		return -EINVAL;
 	}
+	mutex_unlock(&hda_lock);
 	return 0;
 }
 EXPORT_SYMBOL(tegra_hdmi_setup_audio_freq_source);
@@ -329,8 +344,12 @@ EXPORT_SYMBOL(tegra_hdmi_setup_audio_freq_source);
 /* Applicable for dp too, func name still uses hdmi as per generic hda driver */
 int tegra_hdmi_audio_null_sample_inject(bool on)
 {
-	if (!hda)
+	mutex_lock(&hda_lock);
+
+	if (!hda) {
+		mutex_unlock(&hda_lock);
 		return -ENODEV;
+	}
 
 	if (on && !hda->null_sample_inject)
 		tegra_sor_write_field_ext(hda->sor,
@@ -344,6 +363,8 @@ int tegra_hdmi_audio_null_sample_inject(bool on)
 					NV_SOR_AUDIO_CTRL_NULL_SAMPLE_DIS);
 
 	hda->null_sample_inject = on;
+
+	mutex_unlock(&hda_lock);
 	return 0;
 }
 EXPORT_SYMBOL(tegra_hdmi_audio_null_sample_inject);
@@ -455,6 +476,7 @@ static void tegra_dc_hda_disable_clocks(void)
 
 void tegra_hda_set_data(void *data, int sink)
 {
+	mutex_lock(&hda_lock);
 	hda = kzalloc(sizeof(struct tegra_dc_hda_data), GFP_KERNEL);
 	hda->client_data = data;
 	hda->sink = sink;
@@ -480,16 +502,18 @@ void tegra_hda_set_data(void *data, int sink)
 	hda->null_sample_inject = false;
 	tegra_dc_hda_get_clocks();
 	tegra_dc_hda_enable_clocks();
-
+	mutex_unlock(&hda_lock);
 	tegra_hdmi_setup_hda_presence();
 }
 
 void tegra_hda_reset_data(void)
 {
+	mutex_lock(&hda_lock);
 	tegra_dc_hda_disable_clocks();
 	tegra_dc_hda_put_clocks();
 
 	kfree(hda);
 	if (hda)
 		hda = NULL;
+	mutex_unlock(&hda_lock);
 }
