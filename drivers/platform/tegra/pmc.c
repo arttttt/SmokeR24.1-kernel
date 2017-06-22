@@ -27,6 +27,7 @@
 #include <linux/tegra-pmc.h>
 #include <linux/tegra_prod.h>
 #include <linux/platform/tegra/io-dpd.h>
+#include <linux/debugfs.h>
 
 #define PMC_CTRL			0x0
 #define PMC_CTRL_INTR_LOW		(1 << 17)
@@ -45,6 +46,8 @@
 #define TEGRA_POWERGATE_CPU3	11
 
 #define PMC_DPD_SAMPLE		0x20
+#define PMC_RST_STATUS		0x1b4
+#define PMC_RST_LEVEL_MASK	0x7
 #define PMC_IO_DPD_REQ		0x1B8
 #define PMC_IO_DPD2_REQ		0x1C0
 #define PMC_IO_DPD_STATUS_0     0x1BC
@@ -614,6 +617,63 @@ static void tegra_pmc_dev_release(struct device *dev)
 static struct device tegra_pmc_dev = { };
 static struct tegra_prod_list *prod_list;
 
+static char *pmc_rst_src[] = {
+	"Power on reset",
+	"Watchdog",
+	"Sensor",
+	"Software reset",
+	"LP0",
+	"AOTAG",
+};
+
+static void tegra_pmc_show_reset_status(void)
+{
+	u32 val, rst_src;
+
+	val = tegra_pmc_readl(PMC_RST_STATUS);
+	rst_src = val & PMC_RST_LEVEL_MASK;
+	pr_info("### PMC reset source: %s\n", pmc_rst_src[rst_src]);
+}
+
+#if defined(CONFIG_DEBUG_FS)
+static int pmc_reset_show(struct seq_file *s, void *data)
+{
+	u32 val, rst_src;
+
+	val = tegra_pmc_readl(PMC_RST_STATUS);
+
+	rst_src = val & PMC_RST_LEVEL_MASK;
+	seq_printf(s, "### PMC reset source: %s\n", pmc_rst_src[rst_src]);
+	return 0;
+}
+
+static int pmc_reset_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, pmc_reset_show, inode->i_private);
+}
+
+static const struct file_operations pmc_reset_fops = {
+	.open = pmc_reset_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void tegra_pmc_reset_debugfs_init(struct device *dev)
+{
+	struct dentry *d;
+
+	d = debugfs_create_file("pmc-reset", S_IRUGO, NULL, NULL,
+				&pmc_reset_fops);
+	if (!d)
+		dev_err(dev, "Error in creating the debugFS for pmc-reset\n");
+}
+#else
+static void tegra_pmc_reset_debugfs_init(struct device *dev)
+{
+}
+#endif
+
 static int __init tegra_pmc_init(void)
 {
 	struct device_node *np;
@@ -653,6 +713,8 @@ static int __init tegra_pmc_init(void)
 		} else {
 			pr_info("tegra-pmc device create success\n");
 		}
+		tegra_pmc_show_reset_status();
+		tegra_pmc_reset_debugfs_init(&tegra_pmc_dev);
 
 		/* Prod setting like platform specific rails */
 		prod_list = tegra_prod_get(&tegra_pmc_dev, NULL);
