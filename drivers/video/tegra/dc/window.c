@@ -670,6 +670,7 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 
 		if (!WIN_IS_ENABLED(win)) {
 		#define RGB_TO_YUV420_8BPC_BLACK_PIX 0x00801010
+		#define RGB_TO_YUV420_10BPC_BLACK_PIX 0x00000000
 		#define RGB_TO_YUV422_10BPC_BLACK_PIX 0x00001080
 		#define RGB_TO_YUV444_8BPC_BLACK_PIX 0x00801080
 
@@ -681,6 +682,12 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 				case FB_VMODE_Y420_ONLY | FB_VMODE_Y24:
 					tegra_dc_writel(dc,
 						RGB_TO_YUV420_8BPC_BLACK_PIX,
+						DC_DISP_BLEND_BACKGROUND_COLOR);
+					break;
+				case FB_VMODE_Y420 | FB_VMODE_Y30:
+				case FB_VMODE_Y420_ONLY | FB_VMODE_Y30:
+					tegra_dc_writel(dc,
+						RGB_TO_YUV420_10BPC_BLACK_PIX,
 						DC_DISP_BLEND_BACKGROUND_COLOR);
 					break;
 				case FB_VMODE_Y422 | FB_VMODE_Y36:
