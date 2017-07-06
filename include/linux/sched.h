@@ -1370,7 +1370,7 @@ struct task_struct {
 #endif
 #ifdef CONFIG_NUMA
 	struct mempolicy *mempolicy;	/* Protected by alloc_lock */
-	short il_next;
+	short il_prev;
 	short pref_node_fork;
 #endif
 #ifdef CONFIG_NUMA_BALANCING
