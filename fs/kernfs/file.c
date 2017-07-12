@@ -882,7 +882,7 @@ repeat:
 		struct inode *inode;
 		struct dentry *dentry;
 
-		inode = ilookup(info->sb, kn->ino);
+		inode = ilookup(info->sb, kn->id.ino);
 		if (!inode)
 			continue;
 
