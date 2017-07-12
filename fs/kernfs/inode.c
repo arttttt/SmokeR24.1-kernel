@@ -124,7 +124,7 @@ int kernfs_setattr(struct kernfs_node *kn, const struct iattr *iattr)
 int kernfs_iop_setattr(struct dentry *dentry, struct iattr *iattr)
 {
 	struct inode *inode = dentry->d_inode;
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = inode->i_private;
 	int error;
 
 	if (!kn)
@@ -172,7 +172,7 @@ static int kernfs_node_setsecdata(struct kernfs_node *kn, void **secdata,
 int kernfs_iop_setxattr(struct dentry *dentry, const char *name,
 			const void *value, size_t size, int flags)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = kernfs_dentry_node(dentry);
 	struct kernfs_iattrs *attrs;
 	void *secdata;
 	int error;
@@ -210,7 +210,7 @@ int kernfs_iop_setxattr(struct dentry *dentry, const char *name,
 
 int kernfs_iop_removexattr(struct dentry *dentry, const char *name)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = kernfs_dentry_node(dentry);
 	struct kernfs_iattrs *attrs;
 
 	attrs = kernfs_iattrs(kn);
@@ -223,7 +223,7 @@ int kernfs_iop_removexattr(struct dentry *dentry, const char *name)
 ssize_t kernfs_iop_getxattr(struct dentry *dentry, const char *name, void *buf,
 			    size_t size)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = kernfs_dentry_node(dentry);
 	struct kernfs_iattrs *attrs;
 
 	attrs = kernfs_iattrs(kn);
@@ -235,7 +235,7 @@ ssize_t kernfs_iop_getxattr(struct dentry *dentry, const char *name, void *buf,
 
 ssize_t kernfs_iop_listxattr(struct dentry *dentry, char *buf, size_t size)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = kernfs_dentry_node(dentry);
 	struct kernfs_iattrs *attrs;
 
 	attrs = kernfs_iattrs(kn);
@@ -282,8 +282,8 @@ static void kernfs_refresh_inode(struct kernfs_node *kn, struct inode *inode)
 int kernfs_iop_getattr(struct vfsmount *mnt, struct dentry *dentry,
 		   struct kstat *stat)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
 	struct inode *inode = dentry->d_inode;
+	struct kernfs_node *kn = inode->i_private;
 
 	mutex_lock(&kernfs_mutex);
 	kernfs_refresh_inode(kn, inode);

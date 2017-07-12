@@ -98,9 +98,9 @@ static int kernfs_get_target_path(struct kernfs_node *parent,
 	return 0;
 }
 
-static int kernfs_getlink(struct dentry *dentry, char *path)
+static int kernfs_getlink(struct inode *inode, char *path)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = inode->i_private;
 	struct kernfs_node *parent = kn->parent;
 	struct kernfs_node *target = kn->symlink.target_kn;
 	int error;
@@ -117,7 +117,7 @@ static void *kernfs_iop_follow_link(struct dentry *dentry, struct nameidata *nd)
 	int error = -ENOMEM;
 	unsigned long page = get_zeroed_page(GFP_KERNEL);
 	if (page) {
-		error = kernfs_getlink(dentry, (char *) page);
+		error = kernfs_getlink(dentry->d_inode, (char *) page);
 		if (error < 0)
 			free_page((unsigned long)page);
 	}
