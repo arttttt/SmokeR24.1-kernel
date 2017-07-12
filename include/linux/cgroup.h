@@ -633,6 +633,9 @@ static inline union kernfs_node_id *cgroup_get_kernfs_id(struct cgroup *cgrp)
 	return &cgrp->kn->id;
 }
 
+void cgroup_path_from_kernfs_id(const union kernfs_node_id *id,
+					char *buf, size_t buflen);
+
 /*
  * Default Android check for whether the current process is allowed to move a
  * task across cgroups, either because CAP_SYS_NICE is set or because the uid
@@ -690,6 +693,9 @@ static inline bool task_under_cgroup_hierarchy(struct task_struct *task,
 {
 	return true;
 }
+
+static inline void cgroup_path_from_kernfs_id(const union kernfs_node_id *id,
+	char *buf, size_t buflen) {}
 
 static inline void cgroup_init_kthreadd(void) {}
 static inline void cgroup_kthread_ready(void) {}
