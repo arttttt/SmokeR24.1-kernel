@@ -300,6 +300,7 @@ static void kernfs_init_inode(struct kernfs_node *kn, struct inode *inode)
 	inode->i_mapping->a_ops = &kernfs_aops;
 	inode->i_mapping->backing_dev_info = &kernfs_bdi;
 	inode->i_op = &kernfs_iops;
+	inode->i_generation = kn->generation;
 
 	set_default_inode_attr(inode, kn->mode);
 	kernfs_refresh_inode(kn, inode);
