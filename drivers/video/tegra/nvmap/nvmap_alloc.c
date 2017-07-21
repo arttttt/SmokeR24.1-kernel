@@ -3,7 +3,7 @@
  *
  * Handle allocation and freeing routines for nvmap
  *
- * Copyright (c) 2011-2017, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2011-2015, NVIDIA CORPORATION. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -176,78 +176,11 @@ fail:
 	return -ENOMEM;
 }
 
-static struct device *nvmap_heap_pgalloc_dev(unsigned long type)
-{
-	int ret;
-	struct device *dma_dev;
-
-	if (type != NVMAP_HEAP_CARVEOUT_VPR)
-		return ERR_PTR(-EINVAL);
-
-	dma_dev = dma_dev_from_handle(type);
-	if (IS_ERR(dma_dev))
-		return dma_dev;
-
-	ret = dma_set_resizable_heap_floor_size(dma_dev, 0);
-	if (ret)
-		return ERR_PTR(ret);
-	return dma_dev;
-}
-
-static int nvmap_heap_pgalloc(struct nvmap_client *client,
-			struct nvmap_handle *h, unsigned long type)
-{
-	size_t size = PAGE_ALIGN(h->size);
-	struct page **pages;
-	struct device *dma_dev;
-	DEFINE_DMA_ATTRS(attrs);
-	dma_addr_t pa;
-
-	dma_dev = nvmap_heap_pgalloc_dev(type);
-	if (IS_ERR(dma_dev))
-		return PTR_ERR(dma_dev);
-
-	dma_set_attr(DMA_ATTR_ALLOC_EXACT_SIZE, &attrs);
-	dma_set_attr(DMA_ATTR_ALLOC_SINGLE_PAGES, &attrs);
-
-	pages = dma_alloc_attrs(dma_dev, size, &pa,
-			DMA_MEMORY_NOMAP, &attrs);
-	if (dma_mapping_error(dma_dev, pa))
-		return -ENOMEM;
-
-	h->size = size;
-	h->pgalloc.pages = pages;
-	h->pgalloc.contig = 0;
-	atomic_set(&h->pgalloc.ndirty, 0);
-	return 0;
-}
-
-static int nvmap_heap_pgfree(struct nvmap_handle *h)
-{
-	size_t size = PAGE_ALIGN(h->size);
-	struct device *dma_dev;
-	DEFINE_DMA_ATTRS(attrs);
-	dma_addr_t pa = ~(dma_addr_t)0;
-
-	dma_dev = nvmap_heap_pgalloc_dev(h->heap_type);
-	if (IS_ERR(dma_dev))
-		return PTR_ERR(dma_dev);
-
-	dma_set_attr(DMA_ATTR_ALLOC_EXACT_SIZE, &attrs);
-	dma_set_attr(DMA_ATTR_ALLOC_SINGLE_PAGES, &attrs);
-
-	dma_free_attrs(dma_dev, size, h->pgalloc.pages, pa,
-		       &attrs);
-
-	h->pgalloc.pages = NULL;
-	return 0;
-}
 static void alloc_handle(struct nvmap_client *client,
 			 struct nvmap_handle *h, unsigned int type)
 {
 	unsigned int carveout_mask = NVMAP_HEAP_CARVEOUT_MASK;
 	unsigned int iovmm_mask = NVMAP_HEAP_IOVMM;
-	int ret;
 
 	BUG_ON(type & (type - 1));
 
@@ -277,16 +210,10 @@ static void alloc_handle(struct nvmap_client *client,
 			 */
 			mb();
 			h->alloc = true;
-			return;
 		}
-		ret = nvmap_heap_pgalloc(client, h, type);
-		if (ret)
-			return;
-		h->heap_type = NVMAP_HEAP_CARVEOUT_VPR;
-		h->heap_pgalloc = true;
-		mb();
-		h->alloc = true;
 	} else if (type & iovmm_mask) {
+		int ret;
+
 		ret = handle_page_alloc(client, h,
 			h->userflags & NVMAP_HANDLE_PHYS_CONTIG);
 		if (ret)
@@ -448,10 +375,6 @@ void _nvmap_handle_free(struct nvmap_handle *h)
 	if (!h->heap_pgalloc) {
 		nvmap_heap_free(h->carveout);
 		goto out;
-	} else {
-		int ret = nvmap_heap_pgfree(h);
-		if (!ret)
-			goto out;
 	}
 
 	nr_page = DIV_ROUND_UP(h->size, PAGE_SIZE);
