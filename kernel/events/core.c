@@ -8225,5 +8225,6 @@ struct cgroup_subsys perf_event_cgrp_subsys = {
 	.css_alloc	= perf_cgroup_css_alloc,
 	.css_free	= perf_cgroup_css_free,
 	.attach		= perf_cgroup_attach,
+	.threaded	= true,
 };
 #endif /* CONFIG_CGROUP_PERF */
