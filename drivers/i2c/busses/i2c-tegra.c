@@ -1037,6 +1037,7 @@ static int tegra_i2c_send_next_read_msg_pkt_header(struct tegra_i2c_dev *i2c_dev
 static int tegra_i2c_issue_bus_clear(struct tegra_i2c_dev *i2c_dev)
 {
 	unsigned long timeout;
+	u32 reg;
 
 	if (i2c_dev->chipdata->has_hw_arb_support) {
 		INIT_COMPLETION(i2c_dev->msg_complete);
@@ -1062,8 +1063,13 @@ static int tegra_i2c_issue_bus_clear(struct tegra_i2c_dev *i2c_dev)
 
 		wait_for_completion_timeout(&i2c_dev->msg_complete,
 				TEGRA_I2C_TIMEOUT);
-		if (!(i2c_readl(i2c_dev, I2C_BUS_CLEAR_STATUS) & I2C_BC_STATUS))
+		reg = i2c_readl(i2c_dev, I2C_BUS_CLEAR_STATUS);
+		if (!(reg & I2C_BC_STATUS)) {
+			if (i2c_dev->print_ratelimit_enabled)
+				if (!__ratelimit(&i2c_dev->print_count_per_min))
+					return 0;
 			dev_warn(i2c_dev->dev, "Un-recovered Arbitration lost\n");
+		}
 	} else {
 		i2c_algo_busclear_gpio(i2c_dev->dev,
 				i2c_dev->scl_gpio, GPIOF_OPEN_DRAIN,
