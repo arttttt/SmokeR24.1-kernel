@@ -385,7 +385,7 @@ static void __init tegra_t210ref_reserve(void)
 #endif
 	ulong vpr_size = 364 * SZ_1M;
 	if (of_flat_dt_is_compatible(of_get_flat_dt_root(), "nvidia,foster-e"))
-		vpr_size = 750 * SZ_1M;
+		vpr_size = 840 * SZ_1M;
 
 	tegra_reserve4(carveout_size, 0, 0, vpr_size);
 }
