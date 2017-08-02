@@ -20,6 +20,8 @@
 
 #include <linux/tegra-soc.h>
 #include <linux/clk/tegra.h>
+#include <linux/rwsem.h>
+#include <linux/delay.h>
 #include <soc/tegra/tegra_bpmp.h>
 
 enum {
@@ -115,6 +117,7 @@ struct tegra_dc_sor_data {
 
 	u8	clk_type;
 	u32  xbar_ctrl[5];
+	struct rw_semaphore reset_lock;
 };
 
 #define TEGRA_SOR_TIMEOUT_MS		1000
@@ -255,4 +258,47 @@ static inline int lt_param_idx(int link_bw)
 	return idx;
 }
 
+static inline void tegra_sor_reset(struct tegra_dc_sor_data *sor)
+{
+	if (tegra_platform_is_linsim())
+		return;
+
+	down_write(&sor->reset_lock);
+	tegra_periph_reset_assert(sor->sor_clk);
+	mdelay(2);
+	tegra_periph_reset_deassert(sor->sor_clk);
+	mdelay(1);
+	up_write(&sor->reset_lock);
+}
+
+static inline u32 tegra_sor_readl_ext(struct tegra_dc_sor_data *sor, u32 reg)
+{
+	u32 val;
+
+	down_read(&sor->reset_lock);
+	val = tegra_sor_readl(sor, reg);
+	up_read(&sor->reset_lock);
+	return val;
+}
+
+static inline void tegra_sor_writel_ext(struct tegra_dc_sor_data *sor,
+	u32 reg, u32 val)
+{
+	down_read(&sor->reset_lock);
+	tegra_sor_writel(sor, reg, val);
+	up_read(&sor->reset_lock);
+}
+
+static inline void tegra_sor_write_field_ext(struct tegra_dc_sor_data *sor,
+	u32 reg, u32 mask, u32 val)
+{
+	u32 reg_val;
+
+	down_read(&sor->reset_lock);
+	reg_val = tegra_sor_readl(sor, reg);
+	reg_val &= ~mask;
+	reg_val |= val;
+	tegra_sor_writel(sor, reg, reg_val);
+	up_read(&sor->reset_lock);
+}
 #endif

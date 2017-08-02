@@ -629,6 +629,8 @@ struct tegra_dc_sor_data *tegra_dc_sor_init(struct tegra_dc *dc,
 #if defined(CONFIG_TEGRA_NVDISPLAY)
 	sor_fpga_settings(dc, sor);
 #endif
+	init_rwsem(&sor->reset_lock);
+
 	return sor;
 
 #ifndef CONFIG_TEGRA_NVDISPLAY
@@ -1455,17 +1457,6 @@ static void tegra_sor_dp_cal(struct tegra_dc_sor_data *sor)
 	tegra_dc_sor_termination_cal(sor);
 
 	tegra_sor_pad_cal_power(sor, false);
-}
-
-static inline void tegra_sor_reset(struct tegra_dc_sor_data *sor)
-{
-	if (tegra_platform_is_linsim())
-		return;
-
-	tegra_periph_reset_assert(sor->sor_clk);
-	mdelay(2);
-	tegra_periph_reset_deassert(sor->sor_clk);
-	mdelay(1);
 }
 
 void tegra_sor_config_xbar(struct tegra_dc_sor_data *sor)

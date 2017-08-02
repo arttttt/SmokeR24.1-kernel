@@ -119,17 +119,6 @@ static struct tegra_dc *tegra_dc_hdmi_get_dc(struct tegra_hdmi *hdmi)
 	return hdmi ? hdmi->dc : NULL;
 }
 
-static inline u32 nvhdcp_sor_readl(struct tegra_hdmi *hdmi, u32 reg)
-{
-	return readl(hdmi->sor->base + reg * 4);
-}
-
-static inline void nvhdcp_sor_writel(struct tegra_hdmi *hdmi,
-	u32 val, u32 reg)
-{
-	writel(val, hdmi->sor->base + reg * 4);
-}
-
 static inline bool nvhdcp_is_plugged(struct tegra_nvhdcp *nvhdcp)
 {
 	rmb();
@@ -319,16 +308,16 @@ static int nvhdcp_i2c_write64(struct tegra_nvhdcp *nvhdcp, u8 reg, u64 val)
 static inline u64 get_an(struct tegra_hdmi *hdmi)
 {
 	u64 r;
-	r = (u64)nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_AN_MSB) << 32;
-	r |= nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_AN_LSB);
+	r = (u64)tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_AN_MSB) << 32;
+	r |= tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_AN_LSB);
 	return r;
 }
 
 /* 64-bit upstream exchange random number */
 static inline void set_cn(struct tegra_hdmi *hdmi, u64 c_n)
 {
-	nvhdcp_sor_writel(hdmi, (u32)c_n, NV_SOR_TMDS_HDCP_CN_LSB);
-	nvhdcp_sor_writel(hdmi, c_n >> 32, NV_SOR_TMDS_HDCP_CN_MSB);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CN_LSB, (u32)c_n);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CN_MSB, c_n >> 32);
 }
 
 
@@ -336,8 +325,9 @@ static inline void set_cn(struct tegra_hdmi *hdmi, u64 c_n)
 static inline u64 get_aksv(struct tegra_hdmi *hdmi)
 {
 	u64 r;
-	r = (u64)nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_AKSV_MSB) << 32;
-	r |= nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_AKSV_LSB);
+	r = (u64)tegra_sor_readl_ext(hdmi->sor,
+				NV_SOR_TMDS_HDCP_AKSV_MSB) << 32;
+	r |= tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_AKSV_LSB);
 	return r;
 }
 
@@ -346,24 +336,24 @@ static inline void set_bksv(struct tegra_hdmi *hdmi, u64 b_ksv, bool repeater)
 {
 	if (repeater)
 		b_ksv |= (u64)REPEATER << 32;
-	nvhdcp_sor_writel(hdmi, (u32)b_ksv, NV_SOR_TMDS_HDCP_BKSV_LSB);
-	nvhdcp_sor_writel(hdmi, b_ksv >> 32, NV_SOR_TMDS_HDCP_BKSV_MSB);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_BKSV_LSB, (u32)b_ksv);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_BKSV_MSB, b_ksv >> 32);
 }
 
 
 /* 40-bit software's key selection vector */
 static inline void set_cksv(struct tegra_hdmi *hdmi, u64 c_ksv)
 {
-	nvhdcp_sor_writel(hdmi, (u32)c_ksv, NV_SOR_TMDS_HDCP_CKSV_LSB);
-	nvhdcp_sor_writel(hdmi, c_ksv >> 32, NV_SOR_TMDS_HDCP_CKSV_MSB);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CKSV_LSB, (u32)c_ksv);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CKSV_MSB, c_ksv >> 32);
 }
 
 /* 40-bit connection state */
 static inline u64 get_cs(struct tegra_hdmi *hdmi)
 {
 	u64 r;
-	r = (u64)nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CS_MSB) << 32;
-	r |= nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CS_LSB);
+	r = (u64)tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CS_MSB) << 32;
+	r |= tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CS_LSB);
 	return r;
 }
 
@@ -371,8 +361,9 @@ static inline u64 get_cs(struct tegra_hdmi *hdmi)
 static inline u64 get_dksv(struct tegra_hdmi *hdmi)
 {
 	u64 r;
-	r = (u64)nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_DKSV_MSB) << 32;
-	r |= nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_DKSV_LSB);
+	r = (u64)tegra_sor_readl_ext(hdmi->sor,
+				NV_SOR_TMDS_HDCP_DKSV_MSB) << 32;
+	r |= tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_DKSV_LSB);
 	return r;
 }
 
@@ -380,14 +371,15 @@ static inline u64 get_dksv(struct tegra_hdmi *hdmi)
 static inline u64 get_mprime(struct tegra_hdmi *hdmi)
 {
 	u64 r;
-	r = (u64)nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_MPRIME_MSB) << 32;
-	r |= nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_MPRIME_LSB);
+	r = (u64)tegra_sor_readl_ext(hdmi->sor,
+				NV_SOR_TMDS_HDCP_MPRIME_MSB) << 32;
+	r |= tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_MPRIME_LSB);
 	return r;
 }
 
 static inline u16 get_transmitter_ri(struct tegra_hdmi *hdmi)
 {
-	return nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_RI);
+	return tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_RI);
 }
 
 static inline int get_receiver_ri(struct tegra_nvhdcp *nvhdcp, u16 *r)
@@ -456,13 +448,13 @@ static void hdcp_ctrl_run(struct tegra_hdmi *hdmi, bool v)
 	u32 ctrl;
 
 	if (v) {
-		ctrl = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CTRL);
+		ctrl = tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CTRL);
 		ctrl |= HDCP_RUN_YES;
 	} else {
 		ctrl = 0;
 	}
 
-	nvhdcp_sor_writel(hdmi, ctrl, NV_SOR_TMDS_HDCP_CTRL);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CTRL, ctrl);
 }
 
 /* wait for any bits in mask to be set in NV_SOR_TMDS_HDCP_CTRL
@@ -473,7 +465,7 @@ static int wait_hdcp_ctrl(struct tegra_hdmi *hdmi, u32 mask, u32 *v)
 	u32 ctrl;
 
 	do {
-		ctrl = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CTRL);
+		ctrl = tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CTRL);
 		if ((ctrl & mask)) {
 			if (v)
 				*v = ctrl;
@@ -498,7 +490,7 @@ static int wait_key_ctrl(struct tegra_hdmi *hdmi, u32 mask, u32 value)
 
 	do {
 		usleep_range(1, 2);
-		ctrl = nvhdcp_sor_readl(hdmi, NV_SOR_KEY_CTRL);
+		ctrl = tegra_sor_readl_ext(hdmi->sor, NV_SOR_KEY_CTRL);
 		if (((ctrl ^ value) & mask) == 0)
 			break;
 	} while (--retries);
@@ -585,8 +577,8 @@ static int get_s_prime(struct tegra_nvhdcp *nvhdcp,
 
 	set_cn(hdmi, pkt->c_n);
 
-	nvhdcp_sor_writel(hdmi, TMDS0_LINK0 | READ_S,
-					NV_SOR_TMDS_HDCP_CMODE);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CMODE,
+					TMDS0_LINK0 | READ_S);
 
 	set_cksv(hdmi, pkt->c_ksv);
 
@@ -601,9 +593,9 @@ static int get_s_prime(struct tegra_nvhdcp *nvhdcp,
 	msleep(50);
 
 	/* read 56-bit Sprime plus 16 status bits */
-	sp_msb = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_SPRIME_MSB);
-	sp_lsb1 = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_SPRIME_LSB1);
-	sp_lsb2 = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_SPRIME_LSB2);
+	sp_msb = tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_SPRIME_MSB);
+	sp_lsb1 = tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_SPRIME_LSB1);
+	sp_lsb2 = tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_SPRIME_LSB2);
 
 	/* top 8 bits of LSB2 and bottom 8 bits of MSB hold status bits. */
 	pkt->hdcp_status = (sp_msb << 8) | (sp_lsb2 >> 24);
@@ -665,8 +657,8 @@ static inline int get_m_prime(struct tegra_nvhdcp *nvhdcp,
 
 	set_cn(hdmi, pkt->c_n);
 
-	nvhdcp_sor_writel(hdmi, TMDS0_LINK0 | READ_M,
-					NV_SOR_TMDS_HDCP_CMODE);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CMODE,
+					TMDS0_LINK0 | READ_M);
 
 	/* Cksv write triggers Mprime update */
 	set_cksv(hdmi, pkt->c_ksv);
@@ -740,12 +732,12 @@ static int load_kfuse(struct tegra_hdmi *hdmi)
 
 	/* write the kfuse to HDMI SRAM */
 
-	nvhdcp_sor_writel(hdmi, 1, NV_SOR_KEY_CTRL); /* LOAD_KEYS */
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_KEY_CTRL, 1); /* LOAD_KEYS */
 
 	/* issue a reload */
-	ctrl = nvhdcp_sor_readl(hdmi, NV_SOR_KEY_CTRL);
-	nvhdcp_sor_writel(hdmi, ctrl | PKEY_RELOAD_TRIGGER
-					| LOCAL_KEYS , NV_SOR_KEY_CTRL);
+	ctrl = tegra_sor_readl_ext(hdmi->sor, NV_SOR_KEY_CTRL);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_KEY_CTRL,
+				ctrl | PKEY_RELOAD_TRIGGER | LOCAL_KEYS);
 
 	e = wait_key_ctrl(hdmi, PKEY_LOADED, PKEY_LOADED);
 	if (e) {
@@ -753,12 +745,12 @@ static int load_kfuse(struct tegra_hdmi *hdmi)
 		return -EIO;
 	}
 
-	nvhdcp_sor_writel(hdmi, 0, NV_SOR_KEY_SKEY_INDEX);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_KEY_SKEY_INDEX, 0);
 
 	/* wait for SRAM to be cleared */
 	retries = 6;
 	do {
-		tmp = nvhdcp_sor_readl(hdmi, NV_SOR_KEY_DEBUG0);
+		tmp = tegra_sor_readl_ext(hdmi->sor, NV_SOR_KEY_DEBUG0);
 		if ((tmp & 1) == 0)
 			break;
 		if (retries > 1)
@@ -772,18 +764,23 @@ static int load_kfuse(struct tegra_hdmi *hdmi)
 	for (i = 0; i < KFUSE_DATA_SZ / 4; i += 4) {
 
 		/* load 128-bits*/
-		nvhdcp_sor_writel(hdmi, buf[i], NV_SOR_KEY_HDCP_KEY_0);
-		nvhdcp_sor_writel(hdmi, buf[i+1], NV_SOR_KEY_HDCP_KEY_1);
-		nvhdcp_sor_writel(hdmi, buf[i+2], NV_SOR_KEY_HDCP_KEY_2);
-		nvhdcp_sor_writel(hdmi, buf[i+3], NV_SOR_KEY_HDCP_KEY_3);
+		tegra_sor_writel_ext(hdmi->sor,
+				NV_SOR_KEY_HDCP_KEY_0, buf[i]);
+		tegra_sor_writel_ext(hdmi->sor,
+				NV_SOR_KEY_HDCP_KEY_1, buf[i+1]);
+		tegra_sor_writel_ext(hdmi->sor,
+				NV_SOR_KEY_HDCP_KEY_2, buf[i+2]);
+		tegra_sor_writel_ext(hdmi->sor,
+				NV_SOR_KEY_HDCP_KEY_3, buf[i+3]);
 
 		/* trigger LOAD_HDCP_KEY */
-		nvhdcp_sor_writel(hdmi, 0x100, NV_SOR_KEY_HDCP_KEY_TRIG);
+		tegra_sor_writel_ext(hdmi->sor,
+				NV_SOR_KEY_HDCP_KEY_TRIG, 0x100);
 
 		tmp = LOCAL_KEYS | WRITE16;
 		if (i)
 			tmp |= AUTOINC;
-		nvhdcp_sor_writel(hdmi, tmp, NV_SOR_KEY_CTRL);
+		tegra_sor_writel_ext(hdmi->sor, NV_SOR_KEY_CTRL, tmp);
 
 		/* wait for WRITE16 to complete */
 		e = wait_key_ctrl(hdmi, 0x10, 0); /* WRITE16 */
@@ -1521,11 +1518,11 @@ static void nvhdcp_downstream_worker(struct work_struct *work)
 	}
 
 	mutex_lock(&nvhdcp->lock);
-	tmp = nvhdcp_sor_readl(hdmi, NV_SOR_TMDS_HDCP_CTRL);
+	tmp = tegra_sor_readl_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CTRL);
 	tmp |= CRYPT_ENABLED;
 	if (b_caps & BCAPS_11) /* HDCP 1.1 ? */
 		tmp |= ONEONE_ENABLED;
-	nvhdcp_sor_writel(hdmi, tmp, NV_SOR_TMDS_HDCP_CTRL);
+	tegra_sor_writel_ext(hdmi->sor, NV_SOR_TMDS_HDCP_CTRL, tmp);
 
 	nvhdcp_vdbg("CRYPT enabled\n");
 	mutex_unlock(&nvhdcp->lock);
@@ -1842,8 +1839,9 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 				val = HDCP_EESS_ENABLE<<31|
 					HDCP1X_EESS_START<<16|
 					HDCP1X_EESS_END;
-				nvhdcp_sor_writel(nvhdcp->hdmi, val,
-							HDMI_VSYNC_WINDOW);
+				tegra_sor_writel_ext(nvhdcp->hdmi->sor,
+							HDMI_VSYNC_WINDOW,
+							val);
 				nvhdcp->hdcp22 = HDCP1X_PROTOCOL;
 				queue_delayed_work(nvhdcp->downstream_wq,
 					&nvhdcp->hdcp1x_work,
@@ -1852,8 +1850,9 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 				val = HDCP_EESS_ENABLE<<31|
 					HDCP22_EESS_START<<16|
 					HDCP22_EESS_END;
-				nvhdcp_sor_writel(nvhdcp->hdmi, val,
-							HDMI_VSYNC_WINDOW);
+				tegra_sor_writel_ext(nvhdcp->hdmi->sor,
+							HDMI_VSYNC_WINDOW,
+							val);
 				nvhdcp->hdcp22 = HDCP22_PROTOCOL;
 				queue_delayed_work(nvhdcp->downstream_wq,
 					&nvhdcp->hdcp22_work,
@@ -1863,8 +1862,8 @@ static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp)
 			val = HDCP_EESS_ENABLE<<31|
 				HDCP1X_EESS_START<<16|
 				HDCP1X_EESS_END;
-			nvhdcp_sor_writel(nvhdcp->hdmi, val,
-							HDMI_VSYNC_WINDOW);
+			tegra_sor_writel_ext(nvhdcp->hdmi->sor,
+						HDMI_VSYNC_WINDOW, val);
 			nvhdcp->hdcp22 = HDCP1X_PROTOCOL;
 			queue_delayed_work(nvhdcp->downstream_wq,
 				&nvhdcp->hdcp1x_work,

@@ -142,17 +142,6 @@ static inline bool tegra_hdmi_hpd_asserted(struct tegra_hdmi *hdmi)
 	return tegra_dc_hpd(hdmi->dc);
 }
 
-static inline void tegra_hdmi_reset(struct tegra_hdmi *hdmi)
-{
-	if (tegra_platform_is_linsim())
-		return;
-
-	tegra_periph_reset_assert(hdmi->sor->sor_clk);
-	udelay(10);
-	tegra_periph_reset_deassert(hdmi->sor->sor_clk);
-	udelay(10);
-}
-
 static inline void _tegra_hdmi_ddc_enable(struct tegra_hdmi *hdmi)
 {
 	mutex_lock(&hdmi->ddc_refcount_lock);
@@ -583,7 +572,7 @@ static int tegra_hdmi_controller_disable(struct tegra_hdmi *hdmi)
 	tegra_dc_sor_detach(sor);
 	tegra_sor_power_lanes(sor, 4, false);
 	tegra_sor_hdmi_pad_power_down(sor);
-	tegra_hdmi_reset(hdmi);
+	tegra_sor_reset(hdmi->sor);
 	tegra_hdmi_put(dc);
 	cancel_delayed_work_sync(&hdmi->hdr_worker);
 	tegra_dc_put(dc);
