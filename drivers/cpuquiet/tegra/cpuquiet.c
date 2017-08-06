@@ -73,6 +73,8 @@ static unsigned int idle_bottom_freq;
 static unsigned long up_delay;
 static unsigned long down_delay;
 static unsigned int idle_top_freq;
+static unsigned int custom_max_cpu_online = 4; /* 1/2/3/4 */
+static unsigned int custom_min_cpu_online = 1; /* 1/2/3/4 */
 static struct clk *cpu_clk;
 static struct clk *cpu_g_clk;
 static struct clk *cpu_lp_clk;
@@ -387,12 +389,12 @@ static void __cpuinit __apply_core_config(void)
 	unsigned int cpu;
 	int nr_cpus;
 	struct cpumask online, offline, cpu_online;
-	int max_cpus = pm_qos_request(PM_QOS_MAX_ONLINE_CPUS);
-	int min_cpus = pm_qos_request(PM_QOS_MIN_ONLINE_CPUS);
+	int max_cpus = custom_max_cpu_online;
+	int min_cpus = custom_min_cpu_online;
 
 	if (min_cpus > num_possible_cpus())
-		min_cpus = 0;
-	if (max_cpus <= 0)
+		min_cpus = 1;
+	if (max_cpus == 0 || max_cpus > 4)
 		max_cpus = num_present_cpus();
 
 	mutex_lock(tegra_cpu_lock);
@@ -685,6 +687,8 @@ ssize_t store_no_lp(struct cpuquiet_attribute *attr,
 
 CPQ_ATTRIBUTE_CUSTOM(no_lp, 0644, show_int_attribute, store_no_lp);
 CPQ_BASIC_ATTRIBUTE(idle_top_freq, 0644, uint);
+CPQ_BASIC_ATTRIBUTE(custom_max_cpu_online, 0644, uint);
+CPQ_BASIC_ATTRIBUTE(custom_min_cpu_online, 0644, uint);
 CPQ_ATTRIBUTE(up_delay, 0644, ulong, delay_callback);
 CPQ_ATTRIBUTE(down_delay, 0644, ulong, delay_callback);
 #endif
@@ -700,6 +704,8 @@ static struct attribute *tegra_auto_attributes[] = {
 	&idle_top_freq_attr.attr,
 #endif
 	&idle_bottom_freq_attr.attr,
+	&custom_max_cpu_online_attr.attr,
+	&custom_min_cpu_online_attr.attr,
 	&enable_attr.attr,
 	&hotplug_timeout_attr.attr,
 	NULL,
