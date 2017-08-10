@@ -59,6 +59,7 @@
 
 	thermal-zones {
 		AO-therm {
+			polling-delay = <1000>;
 			status = "okay";
 		};
 
