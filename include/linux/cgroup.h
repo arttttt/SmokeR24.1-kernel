@@ -510,7 +510,7 @@ static inline struct cgroup *cgroup_parent(struct cgroup *cgrp)
 	return NULL;
 }
 
-/*
+/**
  * cgroup_is_descendant - test ancestry
  * @cgrp: the cgroup to be tested
  * @ancestor: possible ancestor of @cgrp
