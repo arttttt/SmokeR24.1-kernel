@@ -1323,6 +1323,11 @@ exit:
 	return err;
 }
 
+void tegra_nvhdcp_clear_fallback(struct tegra_nvhdcp *nvhdcp)
+{
+	g_fallback = 0;
+}
+
 static int tegra_nvhdcp_on(struct tegra_nvhdcp *nvhdcp);
 static int tegra_nvhdcp_off(struct tegra_nvhdcp *nvhdcp);
 
@@ -1380,8 +1385,6 @@ static void nvhdcp_downstream_worker(struct work_struct *work)
 	u8 b_caps;
 	u32 tmp;
 	u32 res;
-
-	g_fallback = 0;
 
 	nvhdcp_vdbg("%s():started thread %s\n", __func__, nvhdcp->name);
 	tegra_dc_io_start(dc);
