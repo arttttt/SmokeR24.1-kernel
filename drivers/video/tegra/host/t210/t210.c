@@ -218,7 +218,7 @@ struct nvhost_device_data t21_nvdec_info = {
 #endif
 	.clockgate_delay	= 10,
 	.powergate_delay	= 500,
-	.can_powergate		= true,
+	.can_powergate		= false,
 	.clocks			= {{"nvdec", 0, 0, TEGRA_MC_CLIENT_NVDEC},
 				   {"emc", HOST_NVDEC_EMC_FLOOR,
 				NVHOST_MODULE_ID_EXTERNAL_MEMORY_CONTROLLER} },
