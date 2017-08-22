@@ -18,7 +18,9 @@
 #include <linux/tegra-powergate.h>
 #include <linux/tegra-soc.h>
 #include <linux/platform/tegra/dvfs.h>
+#include <linux/platform/tegra/mc.h>
 #include <linux/tegra_soctherm.h>
+#include <linux/tegra-fuse.h>
 #include <trace/events/power.h>
 
 #include "powergate-priv.h"
@@ -26,7 +28,7 @@
 
 #define EMULATION_MC_FLUSH_TIMEOUT 100
 
-enum mc_client {
+enum mc_client_type {
 	MC_CLIENT_AFI		= 0,
 	MC_CLIENT_AVPC		= 1,
 	MC_CLIENT_DC		= 2,
@@ -57,7 +59,7 @@ enum mc_client {
 };
 
 struct tegra210_mc_client_info {
-	enum mc_client	hot_reset_clients[MAX_HOTRESET_CLIENT_NUM];
+	enum mc_client_type	hot_reset_clients[MAX_HOTRESET_CLIENT_NUM];
 };
 
 static struct tegra210_mc_client_info tegra210_pg_mc_info[] = {
@@ -442,6 +444,7 @@ static struct mc_client_hotreset_reg tegra210_mc_reg[] = {
 	[1] = { .control_reg = 0x970, .status_reg = 0x974 },
 };
 
+
 #define PMC_GPU_RG_CONTROL		0x2d4
 
 static DEFINE_SPINLOCK(tegra210_pg_lock);
@@ -462,103 +465,42 @@ static bool tegra210_pg_is_hotreset_asserted(int mc_client_bit)
 	reg_bit = mc_client_bit % 32;
 	rst_control_reg = tegra210_mc_reg[reg_idx].control_reg;
 
-	return mc_read(rst_control_reg) & (1 << reg_bit);
-}
-
-static bool tegra210_pg_hotreset_check(u32 status_reg, u32 *status)
-{
-	int i;
-	u32 curr_status;
-	u32 prev_status;
-	unsigned long flags;
-
-	spin_lock_irqsave(&tegra210_pg_lock, flags);
-	prev_status = mc_read(status_reg);
-	for (i = 0; i < HOTRESET_READ_COUNTS; i++) {
-		curr_status = mc_read(status_reg);
-		if (curr_status != prev_status) {
-			spin_unlock_irqrestore(&tegra210_pg_lock, flags);
-			return false;
-		}
-	}
-	*status = curr_status;
-	spin_unlock_irqrestore(&tegra210_pg_lock, flags);
-
-	return true;
+	return mc_readl(rst_control_reg) & (1 << reg_bit);
 }
 
 static int tegra210_pg_mc_flush(int id)
 {
-	u32 idx, rst_control, rst_status;
-	u32 rst_control_reg, rst_status_reg;
-	enum mc_client mc_client_bit;
-	unsigned long flags;
-	unsigned int timeout;
-	bool ret;
-	int reg_idx;
+	u32 idx;
+	enum mc_client_type mc_client_bit;
+	int ret = -EINVAL;
 
 	for (idx = 0; idx < MAX_HOTRESET_CLIENT_NUM; idx++) {
 		mc_client_bit = tegra210_pg_mc_info[id].hot_reset_clients[idx];
 		if (mc_client_bit == MC_CLIENT_LAST)
 			break;
 
-		reg_idx = mc_client_bit / 32;
-		mc_client_bit %= 32;
-		rst_control_reg = tegra210_mc_reg[reg_idx].control_reg;
-		rst_status_reg = tegra210_mc_reg[reg_idx].status_reg;
-
-		spin_lock_irqsave(&tegra210_pg_lock, flags);
-		rst_control = mc_read(rst_control_reg);
-		rst_control |= (1 << mc_client_bit);
-		mc_write(rst_control, rst_control_reg);
-		spin_unlock_irqrestore(&tegra210_pg_lock, flags);
-
-		timeout = 0;
-		do {
-			udelay(10);
-			rst_status = 0;
-			ret = tegra210_pg_hotreset_check(rst_status_reg,
-								&rst_status);
-			if ((timeout++ > EMULATION_MC_FLUSH_TIMEOUT) &&
-				(tegra_platform_is_qt() ||
-				tegra_platform_is_fpga())) {
-				pr_warn("%s flush %d timeout\n", __func__, id);
-				break;
-			}
-			if (!ret)
-				continue;
-		} while (!(rst_status & (1 << mc_client_bit)));
+		ret = tegra_mc_flush(mc_client_bit);
 	}
 
-	return 0;
+	return ret;
 }
 
 static int tegra210_pg_mc_flush_done(int id)
 {
-	u32 idx, rst_control, rst_control_reg;
-	enum mc_client mc_client_bit;
-	unsigned long flags;
-	int reg_idx;
+	u32 idx;
+	enum mc_client_type mc_client_bit;
+	int ret = -EINVAL;
 
 	for (idx = 0; idx < MAX_HOTRESET_CLIENT_NUM; idx++) {
 		mc_client_bit = tegra210_pg_mc_info[id].hot_reset_clients[idx];
 		if (mc_client_bit == MC_CLIENT_LAST)
 			break;
 
-		reg_idx = mc_client_bit / 32;
-		mc_client_bit %= 32;
-		rst_control_reg = tegra210_mc_reg[reg_idx].control_reg;
-
-		spin_lock_irqsave(&tegra210_pg_lock, flags);
-		rst_control = mc_read(rst_control_reg);
-		rst_control &= ~(1 << mc_client_bit);
-		mc_write(rst_control, rst_control_reg);
-		spin_unlock_irqrestore(&tegra210_pg_lock, flags);
-
+		ret = tegra_mc_flush_done(mc_client_bit);
 	}
 	wmb();
 
-	return 0;
+	return ret;
 }
 
 static const char *tegra210_pg_get_name(int id)

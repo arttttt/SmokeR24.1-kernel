@@ -36,18 +36,6 @@
 #define REMOVE_CLAMPING		0x34
 #define PWRGATE_STATUS		0x38
 
-/* MC register read/write */
-static void __iomem *mc = IO_ADDRESS(TEGRA_MC_BASE);
-static inline u32 mc_read(unsigned long reg)
-{
-	return readl(mc + reg);
-}
-
-static inline void mc_write(u32 val, unsigned long reg)
-{
-	writel_relaxed(val, mc + reg);
-}
-
 /* PMC register read/write */
 static void __iomem *pmc = IO_ADDRESS(TEGRA_PMC_BASE);
 static inline u32 pmc_read(unsigned long reg)
