@@ -42,6 +42,7 @@
 #include <linux/sched/sysctl.h>
 #include <linux/slab.h>
 #include <linux/compat.h>
+#include <linux/poison.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -1174,7 +1175,11 @@ static inline void __run_timers(struct tvec_base *base)
 			bool irqsafe;
 
 			timer = list_first_entry(head, struct timer_list,entry);
+			if (timer < INVALID_POISON_POINTER)
+				continue;
 			fn = timer->function;
+			if (fn < INVALID_POISON_POINTER)
+				continue;
 			data = timer->data;
 			irqsafe = tbase_get_irqsafe(timer->base);
 

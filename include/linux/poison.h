@@ -22,6 +22,11 @@
 #define LIST_POISON1  ((void *) 0x00100100 + POISON_POINTER_DELTA)
 #define LIST_POISON2  ((void *) 0x00200200 + POISON_POINTER_DELTA)
 
+/*
+ * invalid and non-NULL pointers
+ */
+#define INVALID_POISON_POINTER ((void *) 0x0010000)
+
 /********** include/linux/timer.h **********/
 /*
  * Magic number "tsta" to indicate a static timer initializer
