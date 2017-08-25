@@ -1,7 +1,7 @@
 /*
  * drivers/input/input-cfboost.c
  *
- * Copyright (c) 2012-2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2012-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -45,6 +45,10 @@ MODULE_AUTHOR("Antti P Miettinen <amiettinen@nvidia.com>");
 MODULE_DESCRIPTION("Input event CPU frequency booster");
 MODULE_LICENSE("GPL v2");
 
+
+#define CPU_HOTWORD_BOOST_FREQ 1912500
+#define EMC_HOTWORD_BOOST_FREQ 1600000000
+#define GPU_HOTWORD_BOOST_FREQ 921600000
 
 static struct pm_qos_request freq_req, core_req, emc_req, gpu_req;
 static struct dev_pm_qos_request gpu_wakeup_req;
@@ -138,16 +142,38 @@ static void cfb_boost(struct kthread_work *w)
 			boost_time * 1000);
 }
 
+static void cfb_hotword_boost(struct kthread_work *w)
+{
+	trace_input_cfboost_params("boost_params", boost_freq, boost_emc,
+			boost_gpu, boost_cpus, boost_time);
+	if (boost_time <= 0)
+		boost_time = 2000; /* ms */
+	/* enable all 4 cpu cores */
+	pm_qos_update_request_timeout(&core_req, 4, boost_time * 1000);
+	pm_qos_update_request_timeout(&freq_req, CPU_HOTWORD_BOOST_FREQ,
+			boost_time * 1000);
+	pm_qos_update_request_timeout(&emc_req, EMC_HOTWORD_BOOST_FREQ,
+			boost_time * 1000);
+	pm_qos_update_request_timeout(&gpu_req, GPU_HOTWORD_BOOST_FREQ,
+			boost_time * 1000);
+}
+
 static struct task_struct *boost_kthread;
 static DEFINE_KTHREAD_WORKER(boost_worker);
 static DEFINE_KTHREAD_WORK(boost_work, &cfb_boost);
+static DEFINE_KTHREAD_WORK(boost_hotword_work, &cfb_hotword_boost);
 
 static void cfb_input_event(struct input_handle *handle, unsigned int type,
 			    unsigned int code, int value)
 {
 	trace_input_cfboost_event("event", type, code, value);
-	if (jiffies < last_boost_jiffies ||
+	if ((code == BTN_TRIGGER_HAPPY14 || code == KEY_SEARCH) &&
+			time_after(jiffies, last_boost_jiffies)) {
+		queue_kthread_work(&boost_worker, &boost_hotword_work);
+		last_boost_jiffies = jiffies;
+	} else if (jiffies < last_boost_jiffies ||
 		jiffies > last_boost_jiffies + msecs_to_jiffies(boost_time/2)) {
+
 		queue_kthread_work(&boost_worker, &boost_work);
 		last_boost_jiffies = jiffies;
 	}
@@ -231,6 +257,18 @@ static const struct input_device_id cfb_ids[] = {
 			INPUT_DEVICE_ID_MATCH_KEYBIT,
 		.evbit = { BIT_MASK(EV_KEY) },
 		.keybit = {[BIT_WORD(KEY_POWER)] = BIT_MASK(KEY_POWER) },
+	},
+	{ /* TS hotword */
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+			INPUT_DEVICE_ID_MATCH_KEYBIT,
+		.evbit = { BIT_MASK(EV_KEY) },
+		.keybit = {[BIT_WORD(BTN_TRIGGER_HAPPY14)] = BIT_MASK(BTN_TRIGGER_HAPPY14) },
+	},
+	{ /* GA assist */
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+			INPUT_DEVICE_ID_MATCH_KEYBIT,
+		.evbit = { BIT_MASK(EV_KEY) },
+		.keybit = {[BIT_WORD(KEY_SEARCH)] = BIT_MASK(KEY_SEARCH) },
 	},
 	/* joystick */
 	{
