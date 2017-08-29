@@ -46,9 +46,10 @@ MODULE_DESCRIPTION("Input event CPU frequency booster");
 MODULE_LICENSE("GPL v2");
 
 
-#define CPU_HOTWORD_BOOST_FREQ 1912500
-#define EMC_HOTWORD_BOOST_FREQ 1600000000
-#define GPU_HOTWORD_BOOST_FREQ 921600000
+#define CPU_HOTWORD_BOOST_FREQ	(1912500)
+#define EMC_HOTWORD_BOOST_FREQ	(1600000000)
+#define GPU_HOTWORD_BOOST_FREQ	(921600000)
+#define HOTWORD_BOOST_TIME	(10*1000*1000) /* 10 seconds */
 
 static struct pm_qos_request freq_req, core_req, emc_req, gpu_req;
 static struct dev_pm_qos_request gpu_wakeup_req;
@@ -144,18 +145,14 @@ static void cfb_boost(struct kthread_work *w)
 
 static void cfb_hotword_boost(struct kthread_work *w)
 {
-	trace_input_cfboost_params("boost_params", boost_freq, boost_emc,
-			boost_gpu, boost_cpus, boost_time);
-	if (boost_time <= 0)
-		boost_time = 2000; /* ms */
 	/* enable all 4 cpu cores */
-	pm_qos_update_request_timeout(&core_req, 4, boost_time * 1000);
+	pm_qos_update_request_timeout(&core_req, 4, HOTWORD_BOOST_TIME);
 	pm_qos_update_request_timeout(&freq_req, CPU_HOTWORD_BOOST_FREQ,
-			boost_time * 1000);
+			HOTWORD_BOOST_TIME);
 	pm_qos_update_request_timeout(&emc_req, EMC_HOTWORD_BOOST_FREQ,
-			boost_time * 1000);
+			HOTWORD_BOOST_TIME);
 	pm_qos_update_request_timeout(&gpu_req, GPU_HOTWORD_BOOST_FREQ,
-			boost_time * 1000);
+			HOTWORD_BOOST_TIME);
 }
 
 static struct task_struct *boost_kthread;
