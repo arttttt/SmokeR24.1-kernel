@@ -728,6 +728,7 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 	struct devfreq_dev_status dev_stat;
 	int stat;
 	ktime_t now;
+	unsigned long rounded_freq;
 
 	/* Ensure maximal clock when scaling is disabled */
 	if (!podgov->enable) {
@@ -766,9 +767,16 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 		scaling_limit(df, &podgov->adjustment_frequency);
 
 		/* Round the frequency and check if we're already there */
-		if (freqlist_up(podgov, podgov->adjustment_frequency, 0) ==
-		    dev_stat.current_frequency)
-			return GET_TARGET_FREQ_DONTSCALE;
+		rounded_freq = freqlist_up(podgov,
+				podgov->adjustment_frequency, 0);
+		if (rounded_freq == dev_stat.current_frequency) {
+			if (rounded_freq == df->previous_freq)
+				return GET_TARGET_FREQ_DONTSCALE;
+			else {
+				*freq = rounded_freq;
+				return 0;
+			}
+		}
 
 		trace_podgov_estimate_freq(df->dev.parent,
 					   df->previous_freq,
@@ -803,10 +811,16 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 			msecs_to_jiffies(podgov->p_slowdown_delay));
 	}
 
-	if (!(*freq) ||
-	    (freqlist_up(podgov, *freq, 0) == dev_stat.current_frequency))
+	if (!(*freq))
 		return GET_TARGET_FREQ_DONTSCALE;
 
+	rounded_freq = freqlist_up(podgov, *freq, 0);
+	if ((rounded_freq == dev_stat.current_frequency) &&
+			(rounded_freq == df->previous_freq))
+		return GET_TARGET_FREQ_DONTSCALE;
+
+
+	*freq = rounded_freq;
 	podgov->last_scale = now;
 
 	trace_podgov_estimate_freq(df->dev.parent, df->previous_freq, *freq);
