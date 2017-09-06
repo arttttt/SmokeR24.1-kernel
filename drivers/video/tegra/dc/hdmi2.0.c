@@ -142,12 +142,32 @@ static inline bool tegra_hdmi_hpd_asserted(struct tegra_hdmi *hdmi)
 	return tegra_dc_hpd(hdmi->dc);
 }
 
+static inline int _tegra_hdmi_ddc_get_partition_id(struct tegra_hdmi *hdmi)
+{
+	int partition_id;
+#ifdef CONFIG_PM_GENERIC_DOMAINS_OF
+	partition_id = tegra_pd_get_powergate_id(tegra_sor_pd);
+#else
+	partition_id = TEGRA_POWERGATE_SOR;
+#endif
+	return partition_id;
+}
+
 static inline void _tegra_hdmi_ddc_enable(struct tegra_hdmi *hdmi)
 {
+	int partition_id = _tegra_hdmi_ddc_get_partition_id(hdmi);
+	if (partition_id < 0)
+		return;
+
 	mutex_lock(&hdmi->ddc_refcount_lock);
+
 	if (hdmi->ddc_refcount++)
 		goto fail;
+
+	tegra_unpowergate_partition(partition_id);
 	tegra_hdmi_get(hdmi->dc);
+	tegra_dpaux_clk_config(hdmi->dc, TEGRA_DPAUX_INSTANCE_1, true);
+	tegra_dpaux_clk_reset(hdmi->dc, TEGRA_DPAUX_INSTANCE_1);
 	/*
 	 * hdmi uses i2c lane muxed on dpaux1 pad.
 	 * Enable dpaux1 pads and configure the mux.
@@ -161,10 +181,16 @@ fail:
 
 static inline void _tegra_hdmi_ddc_disable(struct tegra_hdmi *hdmi)
 {
+	int partition_id = _tegra_hdmi_ddc_get_partition_id(hdmi);
+
+	if (partition_id < 0)
+		return;
+
 	mutex_lock(&hdmi->ddc_refcount_lock);
 
 	if (WARN_ONCE(hdmi->ddc_refcount <= 0, "ddc refcount imbalance"))
 		goto fail;
+
 	if (--hdmi->ddc_refcount != 0)
 		goto fail;
 
@@ -174,6 +200,8 @@ static inline void _tegra_hdmi_ddc_disable(struct tegra_hdmi *hdmi)
 	 */
 	tegra_dpaux_pad_power(hdmi->dc, TEGRA_DPAUX_INSTANCE_1, false);
 	tegra_hdmi_put(hdmi->dc);
+	tegra_dpaux_clk_config(hdmi->dc, TEGRA_DPAUX_INSTANCE_1, false);
+	tegra_powergate_partition(partition_id);
 
 fail:
 	mutex_unlock(&hdmi->ddc_refcount_lock);
@@ -185,9 +213,11 @@ static int tegra_hdmi_ddc_i2c_xfer(struct tegra_dc *dc,
 	struct tegra_hdmi *hdmi = tegra_dc_get_outdata(dc);
 	int ret;
 
+	tegra_dc_io_start(dc);
 	_tegra_hdmi_ddc_enable(hdmi);
 	ret = i2c_transfer(hdmi->ddc_i2c_client->adapter, msgs, num);
 	_tegra_hdmi_ddc_disable(hdmi);
+	tegra_dc_io_end(dc);
 	return ret;
 }
 
@@ -368,25 +398,16 @@ static bool tegra_hdmi_fb_mode_filter(const struct tegra_dc *dc,
 
 static void tegra_hdmi_ddc_power_toggle(int value)
 {
-	int partition_id;
 	if (dc_hdmi == NULL)
 		return;
 
-#ifdef CONFIG_PM_GENERIC_DOMAINS_OF
-	partition_id = tegra_pd_get_powergate_id(tegra_sor_pd);
-	if (partition_id < 0)
-		return;
-#else
-	partition_id = TEGRA_POWERGATE_SOR;
-#endif
-
+	tegra_dc_io_start(dc_hdmi->dc);
 	if (value == 0) {
 		_tegra_hdmi_ddc_disable(dc_hdmi);
-		tegra_powergate_partition(partition_id);
 	} else if (value == 1) {
-		tegra_unpowergate_partition(partition_id);
 		_tegra_hdmi_ddc_enable(dc_hdmi);
 	}
+	tegra_dc_io_end(dc_hdmi->dc);
 
 	return;
 }
@@ -1588,6 +1609,7 @@ static int tegra_hdmi_scdc_read(struct tegra_hdmi *hdmi,
 		},
 	};
 
+	tegra_dc_io_start(hdmi->dc);
 	_tegra_hdmi_ddc_enable(hdmi);
 
 	for (i = 0; i < n_entries; i++) {
@@ -1597,6 +1619,7 @@ static int tegra_hdmi_scdc_read(struct tegra_hdmi *hdmi,
 	}
 
 	_tegra_hdmi_ddc_disable(hdmi);
+	tegra_dc_io_end(hdmi->dc);
 
 	return 0;
 }
@@ -1613,6 +1636,7 @@ static int tegra_hdmi_scdc_write(struct tegra_hdmi *hdmi,
 		},
 	};
 
+	tegra_dc_io_start(hdmi->dc);
 	_tegra_hdmi_ddc_enable(hdmi);
 
 	for (i = 0; i < n_entries; i++) {
@@ -1621,6 +1645,7 @@ static int tegra_hdmi_scdc_write(struct tegra_hdmi *hdmi,
 	}
 
 	_tegra_hdmi_ddc_disable(hdmi);
+	tegra_dc_io_end(hdmi->dc);
 
 	return 0;
 }

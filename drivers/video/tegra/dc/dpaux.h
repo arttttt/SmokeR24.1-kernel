@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/dpaux.h
  *
- * Copyright (c) 2014 - 2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014 - 2017, NVIDIA CORPORATION, All rights reserved.
  * Author: Animesh Kishore <ankishore@nvidia.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -31,12 +31,15 @@ enum tegra_dpaux_instance {
 
 void tegra_set_dpaux_addr(void __iomem *dpaux_base,
 				enum tegra_dpaux_instance id);
-int tegra_dpaux_clk_en(struct device_node *np, enum tegra_dpaux_instance id);
-void tegra_dpaux_clk_dis(struct device_node *np, enum tegra_dpaux_instance id);
 void tegra_dpaux_pad_power(struct tegra_dc *dc,
 			enum tegra_dpaux_instance id,
 			bool on);
 void tegra_dpaux_config_pad_mode(struct tegra_dc *dc,
 				enum tegra_dpaux_instance id,
 				enum tegra_dpaux_pad_mode mode);
+void tegra_dpaux_clk_reset(struct tegra_dc *dc,
+					enum tegra_dpaux_instance id);
+void tegra_dpaux_clk_config(struct tegra_dc *dc,
+					enum tegra_dpaux_instance id,
+					bool enable);
 #endif

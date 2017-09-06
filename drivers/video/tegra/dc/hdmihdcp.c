@@ -155,6 +155,7 @@ static int nvhdcp_i2c_read(struct tegra_nvhdcp *nvhdcp, u8 reg,
 	if (dc->vedid)
 		goto skip_hdcp_i2c;
 
+	tegra_dc_io_start(dc);
 	tegra_dc_ddc_enable(dc, true);
 	do {
 		mutex_lock(&nvhdcp->lock);
@@ -162,6 +163,7 @@ static int nvhdcp_i2c_read(struct tegra_nvhdcp *nvhdcp, u8 reg,
 			nvhdcp_err("disconnect during i2c xfer\n");
 			mutex_unlock(&nvhdcp->lock);
 			tegra_dc_ddc_enable(dc, false);
+			tegra_dc_io_end(dc);
 			return -EIO;
 		}
 		mutex_unlock(&nvhdcp->lock);
@@ -171,6 +173,7 @@ static int nvhdcp_i2c_read(struct tegra_nvhdcp *nvhdcp, u8 reg,
 			msleep(250);
 	} while ((status < 0) && retries--);
 	tegra_dc_ddc_enable(dc, false);
+	tegra_dc_io_end(dc);
 
 	if (status < 0) {
 		nvhdcp_err("i2c xfer error %d\n", status);
@@ -206,6 +209,7 @@ static int nvhdcp_i2c_write(struct tegra_nvhdcp *nvhdcp, u8 reg,
 	buf[0] = reg;
 	memcpy(buf + 1, data, len);
 
+	tegra_dc_io_start(dc);
 	tegra_dc_ddc_enable(dc, true);
 	do {
 		mutex_lock(&nvhdcp->lock);
@@ -213,6 +217,7 @@ static int nvhdcp_i2c_write(struct tegra_nvhdcp *nvhdcp, u8 reg,
 			nvhdcp_err("disconnect during i2c xfer\n");
 			mutex_unlock(&nvhdcp->lock);
 			tegra_dc_ddc_enable(dc, false);
+			tegra_dc_io_end(dc);
 			return -EIO;
 		}
 		mutex_unlock(&nvhdcp->lock);
@@ -222,6 +227,7 @@ static int nvhdcp_i2c_write(struct tegra_nvhdcp *nvhdcp, u8 reg,
 			msleep(250);
 	} while ((status < 0) && retries--);
 	tegra_dc_ddc_enable(dc, false);
+	tegra_dc_io_end(dc);
 
 	if (status < 0) {
 		nvhdcp_err("i2c xfer error %d\n", status);

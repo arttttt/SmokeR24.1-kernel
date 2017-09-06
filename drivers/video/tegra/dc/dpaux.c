@@ -1,7 +1,7 @@
 /*
  * drivers/video/tegra/dc/dpaux.c
  *
- * Copyright (c) 2014 - 2015, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2014 - 2017, NVIDIA CORPORATION, All rights reserved.
  * Author: Animesh Kishore <ankishore@nvidia.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -18,6 +18,7 @@
 #include <linux/mutex.h>
 #include <linux/clk.h>
 #include <linux/err.h>
+#include <linux/delay.h>
 
 #include "dpaux_regs.h"
 #include "dc_priv.h"
@@ -76,7 +77,6 @@ static inline void _tegra_dpaux_pad_power(struct tegra_dc *dc,
 		regaddr);
 }
 
-__maybe_unused
 void tegra_dpaux_pad_power(struct tegra_dc *dc,
 				enum tegra_dpaux_instance id, bool on)
 {
@@ -89,16 +89,20 @@ void tegra_dpaux_pad_power(struct tegra_dc *dc,
 		return;
 	}
 
-	tegra_dpaux_clk_en(np_dp, id);
-
+	/* make sure host1x is clocked before dpaux clk access */
 	tegra_dc_io_start(dc);
+
+	tegra_dpaux_clk_en(np_dp, id);
 
 	mutex_lock(&dpaux_lock);
 	_tegra_dpaux_pad_power(dc, id, on);
 	mutex_unlock(&dpaux_lock);
 
-	tegra_dc_io_end(dc);
 	tegra_dpaux_clk_dis(np_dp, id);
+
+	/* make sure host1x clock disabled now*/
+	tegra_dc_io_end(dc);
+
 	of_node_put(np_dp);
 }
 
@@ -124,7 +128,6 @@ static inline void _tegra_dpaux_config_pad_mode(struct tegra_dc *dc,
 	writel(val, regaddr);
 }
 
-__maybe_unused
 void tegra_dpaux_config_pad_mode(struct tegra_dc *dc,
 					enum tegra_dpaux_instance id,
 					enum tegra_dpaux_pad_mode mode)
@@ -138,9 +141,10 @@ void tegra_dpaux_config_pad_mode(struct tegra_dc *dc,
 		return;
 	}
 
-	tegra_dpaux_clk_en(np_dp, id);
+	/* make sure host1x is clocked before dpaux clk access */
 	tegra_dc_io_start(dc);
 
+	tegra_dpaux_clk_en(np_dp, id);
 	mutex_lock(&dpaux_lock);
 	/*
 	 * Make sure to configure the pad mode before we power it on.
@@ -152,9 +156,49 @@ void tegra_dpaux_config_pad_mode(struct tegra_dc *dc,
 	_tegra_dpaux_pad_power(dc, id, true);
 	mutex_unlock(&dpaux_lock);
 
-	tegra_dc_io_end(dc);
 	tegra_dpaux_clk_dis(np_dp, id);
+
+	/* make sure host1x clock disabled now*/
+	tegra_dc_io_end(dc);
+
 	of_node_put(np_dp);
+}
+
+void tegra_dpaux_clk_config(struct tegra_dc *dc,
+					enum tegra_dpaux_instance id,
+					bool enable)
+{
+	struct device_node *np_dp =
+		(dc->ndev->id) ? of_find_node_by_path(DPAUX1_NODE)
+		: of_find_node_by_path(DPAUX_NODE);
+
+	if (!np_dp) {
+		dev_err(&dc->ndev->dev, "dp node not available\n");
+		return;
+	}
+
+	if (enable)
+		tegra_dpaux_clk_en(np_dp, id);
+	else
+		tegra_dpaux_clk_dis(np_dp, id);
+
+}
+
+void tegra_dpaux_clk_reset(struct tegra_dc *dc,
+					enum tegra_dpaux_instance id)
+{
+	struct device_node *np_dp =
+		(dc->ndev->id) ? of_find_node_by_path(DPAUX1_NODE)
+		: of_find_node_by_path(DPAUX_NODE);
+
+	if (!np_dp) {
+		dev_err(&dc->ndev->dev, "dp node not available\n");
+		return;
+	}
+	tegra_periph_reset_assert(tegra_dpaux_clk_get(np_dp, id));
+	mdelay(2);
+	tegra_periph_reset_deassert(tegra_dpaux_clk_get(np_dp, id));
+	mdelay(1);
 }
 
 __maybe_unused
