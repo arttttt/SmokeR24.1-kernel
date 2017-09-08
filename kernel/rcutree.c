@@ -841,12 +841,6 @@ static void rcu_dump_cpu_stacks(struct rcu_state *rsp)
 	}
 }
 
-static inline void panic_on_rcu_stall(void)
-{
-	panic("RCU Stall\n");
-}
-
-
 static void print_other_cpu_stall(struct rcu_state *rsp)
 {
 	int cpu;
@@ -912,7 +906,7 @@ static void print_other_cpu_stall(struct rcu_state *rsp)
 	/* Complain about tasks blocking the grace period. */
 
 	rcu_print_detail_task_stall(rsp);
-	panic_on_rcu_stall();
+
 	force_quiescent_state(rsp);  /* Kick them all. */
 }
 
@@ -944,7 +938,7 @@ static void print_cpu_stall(struct rcu_state *rsp)
 		rsp->jiffies_stall = jiffies +
 				     3 * rcu_jiffies_till_stall_check() + 3;
 	raw_spin_unlock_irqrestore(&rnp->lock, flags);
-	panic_on_rcu_stall();
+
 	set_need_resched();  /* kick ourselves to get things going. */
 }
 
