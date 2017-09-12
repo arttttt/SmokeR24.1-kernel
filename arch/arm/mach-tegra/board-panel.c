@@ -590,6 +590,9 @@ static struct device_node *available_internal_panel_select(
 	} else if (of_device_is_compatible(np_panel, "o,720-1280-6-0-01")) {
 		tegra_panel_register_ops(dc_out,
 			&dsi_o_720p_6_0_01_ops);
+	} else if (of_device_is_compatible(np_panel, "s,wqxga-7-9-x6")) {
+		tegra_panel_register_ops(dc_out,
+			&dsi_s_wqxga_7_9_x6_ops);
 	} else {
 		pr_info("invalid panel compatible\n");
 		of_node_put(np_panel);
