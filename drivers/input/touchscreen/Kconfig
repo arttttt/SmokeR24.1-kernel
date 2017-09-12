@@ -11,6 +11,10 @@ menuconfig INPUT_TOUCHSCREEN
 
 if INPUT_TOUCHSCREEN
 
+config CUSTOM_DT2W
+	tristate
+	default n
+
 config TOUCHSCREEN_LR388K7
 	tristate "Sharp LR388K7 touchscreen"
 	depends on SPI_MASTER
@@ -112,6 +116,7 @@ config TOUCHSCREEN_AD7879_SPI
 config TOUCHSCREEN_ATMEL_MXT
 	tristate "Atmel mXT I2C Touchscreen"
 	depends on I2C
+	select CUSTOM_DT2W
 	help
 	  Say Y here if you have Atmel mXT series I2C touchscreen,
 	  such as AT42QT602240/ATMXT224, connected to your system.

@@ -79,3 +79,4 @@ obj-$(CONFIG_TOUCHSCREEN_RM31080A)	+= rm31080a_ts.o rm31080a_ctrl.o
 obj-$(CONFIG_TOUCHSCREEN_SYN_RMI4_SPI)  += rmi4/
 obj-$(CONFIG_TOUCHSCREEN_MAXIM_STI)     += maxim_sti.o
 obj-$(CONFIG_TOUCHSCREEN_LR388K7)	+= lr388k7_ts.o
+obj-$(CONFIG_CUSTOM_DT2W)   	        += dt2w.o
