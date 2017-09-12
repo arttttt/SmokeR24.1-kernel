@@ -1,0 +1,292 @@
+/dts-v1/;
+
+#include "tegra124-tn8.dtsi"
+#include "tegra124-platforms/tegra124-tn8-emc-e1922-1100-a00.dtsi"
+#include "tegra124-platforms/tegra124-tn8-pmic-e1736-1000-a00.dtsi"
+#include "tegra124-platforms/tegra124-tn8-fixed-e1736-1000-a00.dtsi"
+
+/* this is static dtsi files */
+#include "tegra124-platforms/tegra124-mocha-gpio-e1780.dtsi"
+#include "tegra124-platforms/tegra124-mocha-keys-e1780.dtsi"
+#include "tegra124-platforms/tegra124-mocha-pinmux-e1780.dtsi"
+/* end of static dtsi files */
+
+#include "tegra124-platforms/tegra124-mocha-sysedp.dtsi"
+#include "tegra124-platforms/tegra124-mocha-camera.dtsi"
+#include "panel-s-wqxga-7-9-x6.dtsi"
+
+/ {
+	model = "NVIDIA Tegra124 TN8";
+	compatible = "nvidia,tn8", "nvidia,tegra124";
+	nvidia,dtsfilename = __FILE__;
+	nvidia,boardids = "1780:1100:3:A:7","1845:1000:0:A:7";
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	chosen {
+		bootargs = "tegraid=40.0.0.00.00 vmalloc=256M video=tegrafb console=ttyS0,115200n8 earlyprintk";
+		linux,initrd-start = <0x85000000>;
+		linux,initrd-end = <0x851bc400>;
+	};
+
+	host1x {
+		/* tegradc.0 */
+		dc@54200000 {
+			status = "okay";
+			nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+			nvidia,emc-clk-rate = <204000000>;
+			nvidia,cmu-enable = <0>;
+			nvidia,low-v-win = <0x2>;
+			nvidia,fb-bpp = <32>; /* bits per pixel */
+			nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+		};
+		dsi {
+			nvidia,dsi-controller-vs = <DSI_VS_1>;
+			status = "okay";
+		};
+	};
+
+	i2c@7000c400 {
+		status = "okay";
+		clock-frequency = <400000>;
+
+		bq27520@55 {
+			compatible = "ti,bq27520";
+			reg = <0x55>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <133 0>;
+			ti,fw-lgc-name = "0105_lgc.dffs";
+			ti,fw-atl-name = "0205_atl.dffs";
+		};
+	};
+
+	i2c@7000c700 {
+		nvidia,clock-always-on;
+		clock-frequency = <400000>;
+
+		synaptics_dsi_i2c@20 {
+			compatible = "synaptics,dsx-i2c";
+			reg = <0x20>;
+
+			synaptics,x-flip = <0>;
+			synaptics,y-flip = <0>;
+			synaptics,swap-axes = <0>;
+			synaptics,irq-gpio = <&gpio 143 0>;
+			synaptics,irq-on-state = <0>;
+			synaptics,power-on-state = <1>;
+			synaptics,reset-gpio = <&gpio 84 0>;
+			synaptics,reset-on-state = <0>;
+			synaptics,irq-flags = <0x2008>;
+			synaptics,fw-name = "synaptics_7040_firmware.fw";
+			synaptics,self-test-name = "synaptics_7040_test_data.fw";
+			synaptics,panel-x = <1536>;
+			synaptics,panel-y = <2048>;
+			synaptics,power-delay-ms = <160>;
+			synaptics,reset-delay-ms = <100>;
+			synaptics,reset-active-ms = <20>;
+			synaptics,byte-delay-us = <20>;
+			synaptics,block-delay-us = <20>;
+			synaptics,regulator-name = "vdd-touch";
+			synaptics,cap-button-map = <139 102 158 116>;
+		};
+
+		atmel_mxt_ts@4a {
+			compatible = "atmel,maxtouch-ts";
+			reg = <0x4a>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <143 0x2>;
+			atmel,irq-flags = <0x2008>;
+			atmel,reset-gpio = <&gpio 84 0>;
+			atmel,irq-gpio = <&gpio 143 0>;
+			atmel,gpio-mask = <0xc>;
+			atmel,vendor-info = <0x03eb>;
+			atmel,product-info = <0x214f>;
+			atmel,key-codes = <158 102 139 116>;
+			atmel,config-array-size = <2>;
+
+			atmel,cfg_1 {
+				atmel,family-id = <0xA4>;
+				atmel,variant-id = <0x04>;
+				atmel,version = <0x10>;
+				atmel,build = <0xAA>;
+				atmel,bootldr-id = <0x48>;
+				atmel,mxt-cfg-name = "mxt1664t_config.fw";
+				atmel,vendor-id = <0x4>;
+				atmel,mxt-fw-name = "mxt1664t.fw";
+			};
+			atmel,cfg_2 {
+				atmel,family-id = <0xA4>;
+				atmel,variant-id = <0x0B>;
+				atmel,version = <0x12>;
+				atmel,build = <0xAC>;
+				atmel,bootldr-id = <0x51>;
+				atmel,mxt-cfg-name = "mxt1066t_config.fw";
+				atmel,vendor-id = <0x4>;
+				atmel,mxt-fw-name = "mxt1066t.fw";
+			};
+		};
+	};
+
+	i2c@7000c000 {
+		backlight@2c {
+			compatible = "ti,lp8556";
+			reg = <0x2c>;
+
+			dev-ctrl = /bits/ 8 <0x83>;
+			init-brt = /bits/ 8 <0x1f>;
+			led-en   = /bits/ 8 <0x0f>;
+
+			rom_98h {
+				rom-addr = /bits/ 8 <0x98>;
+				rom-val = /bits/ 8 <0x80>;
+			};
+			rom_9eh {
+				rom-addr = /bits/ 8 <0x9e>;
+				rom-val = /bits/ 8 <0x21>;
+			};
+			rom_a0h {
+				rom-addr = /bits/ 8 <0xa0>;
+				rom-val = /bits/ 8 <0xff>;
+			};
+			rom_a1h {
+				rom-addr = /bits/ 8 <0xa1>;
+				rom-val = /bits/ 8 <0x3f>;
+			};
+			rom_a2h {
+				rom-addr = /bits/ 8 <0xa2>;
+				rom-val = /bits/ 8 <0x20>;
+			};
+			rom_a3h {
+				rom-addr = /bits/ 8 <0xa3>;
+				rom-val = /bits/ 8 <0x00>;
+			};
+			rom_a4h {
+				rom-addr = /bits/ 8 <0xa4>;
+				rom-val = /bits/ 8 <0x72>;
+			};
+			rom_a5h {
+				rom-addr = /bits/ 8 <0xa5>;
+				rom-val = /bits/ 8 <0x24>;
+			};
+			rom_a6h {
+				rom-addr = /bits/ 8 <0xa6>;
+				rom-val = /bits/ 8 <0x80>;
+			};
+			rom_a7h {
+				rom-addr = /bits/ 8 <0xa7>;
+				rom-val = /bits/ 8 <0xf5>;
+			};
+			rom_a8h {
+				rom-addr = /bits/ 8 <0xa8>;
+				rom-val = /bits/ 8 <0x24>;
+			};
+			rom_a9h {
+				rom-addr = /bits/ 8 <0xa9>;
+				rom-val = /bits/ 8 <0xb2>;
+			};
+			rom_aah {
+				rom-addr = /bits/ 8 <0xaa>;
+				rom-val = /bits/ 8 <0x8f>;
+			};
+			rom_aeh {
+				rom-addr = /bits/ 8 <0xae>;
+				rom-val = /bits/ 8 <0x0f>;
+			};
+		};
+
+		lsm6db0@08 {
+			compatible = "st,lsm6db0";
+			reg = <0x08>;
+
+			st,irq-gpio = <&gpio 139 0x00>;
+			st,reset-gpio = <&gpio 181 0x00>;
+			st,wakeup-gpio = <&gpio 144 0x00>;
+		};
+
+		isl29035@44 {
+			compatible = "intersil,isl29035";
+			reg = <0x44>;
+			interrupt-parent = <&gpio>;
+			interrupts = <187 0x08>;
+
+			als_factor = <16>;
+			als_highrange = <2>;
+			als_lowthres = <0x0e00>;
+			als_highthres = <0xf800>;
+			als_sensitive = <25>;
+		};
+
+		lp5521@32 {
+			compatible = "national,lp5521";
+			reg = <0x32>;
+			lp5521,clock-mode = <0>;
+			lp5521,gpio = <&gpio 55 0>;
+			lp5521,num-channels = <3>;
+
+			lp5521,config_1 {
+				lp5521,name = "red";
+				lp5521,chan-nr = <0>;
+				lp5521,led-current = <20>;
+				lp5521,max-current = <255>;
+			};
+			lp5521,config_2 {
+				lp5521,name = "green";
+				lp5521,chan-nr = <1>;
+				lp5521,led-current = <20>;
+				lp5521,max-current = <255>;
+			};
+			lp5521,config_3 {
+				lp5521,name = "blue";
+				lp5521,chan-nr = <2>;
+				lp5521,led-current = <20>;
+				lp5521,max-current = <255>;
+			};
+		};
+
+		rt5671@1c {
+			compatible = "realtek,rt5671";
+			reg = <0x1c>;
+
+	                realtek,jd_mode = <2>;
+	                realtek,codec_gpio = <&gpio 178 0>;
+	                realtek,in2_diff = <1>;
+	                realtek,in3_diff = <0>;
+	                realtek,in4_diff = <1>;
+	                realtek,bclk_32fs = <0 1 1 1>;
+		};
+
+		tfa9890@34 {
+			compatible = "nxp,tfa9890";
+			reg = <0x34>;
+		};
+
+		tfa9890@37 {
+			compatible = "nxp,tfa9890";
+			reg = <0x37>;
+		};
+
+	};
+	
+	tegra_pwm: pwm@7000a000 {
+		clocks = <&tegra_car 17>;
+	};
+	
+	pwmleds {
+		compatible = "pwm-leds";
+		button_led {
+			label = "button-backlight";
+			pwms = <&tegra_pwm 1 10000>;
+			max-brightness = <100>;
+			max-duty = <50>;
+		};
+	};
+
+	sound {
+		compatible = "nvidia,tegra-audio-rt5671";
+		nvidia,hp-mute-gpios = <&gpio 185 0>;
+		nvidia,i2s-param-hifi = <0 0 2 16 2 48000>;
+	};
+};
+

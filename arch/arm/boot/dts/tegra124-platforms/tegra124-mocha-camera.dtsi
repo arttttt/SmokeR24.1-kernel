@@ -1,0 +1,159 @@
+#include <dt-bindings/media/camera.h>
+
+/ {
+	camera-pcl {
+		compatible = "nvidia,tegra124-camera", "simple-bus";
+		configuration = <0xAA55AA55>;
+
+		modules {
+			module1: module1@modules {
+				compatible = "sensor,rear";
+				badge_info = "e1780_rear_camera";
+
+				sensor {
+					profile = <&imx179>;
+					platformdata = "ardbeg_imx179_pdata";
+				};
+				focuser {
+					profile = <&ad5823>;
+					platformdata = "ardbeg_ad5823_pdata";
+				};
+			};
+			module2: module2@modules {
+				compatible = "sensor,front";
+				badge_info = "e1780_front_camera";
+
+				sensor {
+					profile = <&ov5693>;
+					platformdata = "ardbeg_ov5693_pdata";
+				};
+			};
+		};
+
+		profiles {
+			imx179: imx179@2_0010 {
+				index = <1>;
+				chipname = "pcl_IMX179";
+				type = "sensor";
+				guid = "s_IMX179";
+				position = <0>;
+				bustype = "i2c";
+				busnum = <2>;
+				addr = <0x10>;
+				datalen = <2>;
+				pinmuxgrp = <0xFFFF>;
+				gpios = <3>;
+				regulators = "vana", "vdig", "vif", "imx179_reg1", "imx179_reg2";
+				clocks = "mclk";
+				drivername = "imx179";
+				detect = <0x0002 0x0002 0xFFFF 0x8179>;
+				devid = <0x0179>;
+				poweron = <
+					CAMERA_IND_CLK_SET(10000)
+					CAMERA_GPIO_SET(223)
+					CAMERA_GPIO_CLR(219)
+					CAMERA_GPIO_CLR(221)
+					CAMERA_WAITUS(10)
+					CAMERA_REGULATOR_ON(0)
+					CAMERA_REGULATOR_ON(1)
+					CAMERA_REGULATOR_ON(2)
+					CAMERA_REGULATOR_ON(3)
+					CAMERA_REGULATOR_ON(4)
+					CAMERA_WAITMS(5)
+					CAMERA_GPIO_SET(219)
+					CAMERA_WAITUS(300)
+					CAMERA_END
+					>;
+				poweroff = <
+					CAMERA_IND_CLK_CLR
+					CAMERA_GPIO_CLR(221)
+					CAMERA_GPIO_CLR(219)
+					CAMERA_GPIO_CLR(223)
+					CAMERA_WAITUS(10)
+					CAMERA_REGULATOR_OFF(4)
+					CAMERA_REGULATOR_OFF(3)
+					CAMERA_REGULATOR_OFF(2)
+					CAMERA_REGULATOR_OFF(1)
+					CAMERA_REGULATOR_OFF(0)
+					CAMERA_END
+					>;
+			};
+			ad5823: ad5823@2_000c {
+				index = <2>;
+				chipname = "pcl_AD5823";
+				type = "focuser";
+				guid = "f_AD5823";
+				position = <0>;
+				bustype = "i2c";
+				busnum = <2>;
+				addr = <0xc>;
+				datalen = <1>;
+				pinmuxgrp = <0xFFFF>;
+				gpios = <3>;
+				regulators = "vdd", "vdd_i2c";
+				drivername = "ad5823";
+				detect = <0x0002 0x0006 0xFFFF 0x0010>;
+				devid = <0x5823>;
+				poweron = <
+					CAMERA_REGULATOR_ON(1)
+					CAMERA_REGULATOR_ON(0)
+					CAMERA_WAITUS(10)
+					CAMERA_GPIO_SET(223)
+					CAMERA_WAITUS(10)
+					CAMERA_END
+					>;
+				poweroff = <
+					CAMERA_REGULATOR_OFF(0)
+					CAMERA_REGULATOR_OFF(1)
+					CAMERA_GPIO_CLR(223)
+					CAMERA_WAITUS(10)
+					CAMERA_END
+					>;
+			};
+			ov5693: ov5693@2_0036 {
+				index = <3>;
+				chipname = "pcl_OV5693";
+				type = "sensor";
+				guid = "s_OV5693";
+				position = <1>;
+				bustype = "i2c";
+				busnum = <2>;
+				addr = <0x36>;
+				datalen = <2>;
+				pinmuxgrp = <0xFFFF>;
+				gpios = <4>;
+				regulators = "dvdd", "avdd_ov5693", "vdd_cam_1v2";
+				clocks = "mclk2";
+				drivername = "ov5693";
+				detect = <0x0002 0x300A 0xFFFF 0x5690>;
+				devid = <0x5693>;
+				poweron = <
+					CAMERA_IND_CLK_SET(10000)
+					CAMERA_GPIO_CLR(222)
+					CAMERA_GPIO_CLR(225)
+					CAMERA_GPIO_CLR(223)
+					CAMERA_WAITMS(3)
+					CAMERA_REGULATOR_ON(0)
+					CAMERA_REGULATOR_ON(1)
+					CAMERA_REGULATOR_ON(2)
+					CAMERA_GPIO_SET(222)
+					CAMERA_WAITMS(3)
+					CAMERA_GPIO_SET(225)
+					CAMERA_WAITMS(10)
+					CAMERA_END
+					>;
+				poweroff = <
+					CAMERA_IND_CLK_CLR
+					CAMERA_GPIO_CLR(225)
+					CAMERA_WAITUS(10)
+					CAMERA_REGULATOR_OFF(2)
+					CAMERA_GPIO_CLR(222)
+					CAMERA_GPIO_CLR(223)
+					CAMERA_REGULATOR_OFF(1)
+					CAMERA_REGULATOR_OFF(0)
+					CAMERA_END
+					>;
+			};
+		};
+	};
+};

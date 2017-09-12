@@ -1,0 +1,74 @@
+#include <dt-bindings/display/tegra-dc.h>
+#include <dt-bindings/display/tegra-panel.h>
+
+/ {
+	host1x {
+		dsi {
+			panel-s-wqxga-7-9-x6 {
+				status = "okay";
+				nvidia,panel-rst-gpio = <&gpio TEGRA_GPIO(H, 3) 0>; /* PH3 */
+				compatible = "s,wqxga-7-9-x6";
+				nvidia,dsi-instance = <DSI_INSTANCE_0>;
+				nvidia,dsi-n-data-lanes = <8>;
+				nvidia,dsi-pixel-format = <TEGRA_DSI_PIXEL_FORMAT_24BIT_P>;
+				nvidia,dsi-refresh-rate = <60>;
+				nvidia,dsi-video-clock-mode = <TEGRA_DSI_VIDEO_CLOCK_TX_ONLY>;
+				nvidia,dsi-ganged-type = <TEGRA_DSI_GANGED_SYMMETRIC_LEFT_RIGHT>;
+				nvidia,dsi-controller-vs = <DSI_VS_1>;
+				nvidia,dsi-virtual-channel = <TEGRA_DSI_VIRTUAL_CHANNEL_0>;
+				nvidia,dsi-panel-reset = <TEGRA_DSI_ENABLE>;
+				nvidia,dsi-power-saving-suspend = <TEGRA_DSI_ENABLE>;
+				nvidia,dsi-lp00-pre-panel-wakeup = <TEGRA_DSI_ENABLE>;
+				nvidia,dsi-ulpm-not-support = <TEGRA_DSI_ENABLE>;
+				nvidia,dsi-video-burst-mode = <TEGRA_DSI_VIDEO_NONE_BURST_MODE>;
+				nvidia,dsi-ganged-write-to-all-links = <TEGRA_DSI_ENABLE>;
+				nvidia,dsi-init-cmd =
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_EXIT_SLEEP_MODE DSI_DCS_NO_OP TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_EXIT_SLEEP_MODE DSI_DCS_NO_OP TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_DELAY_MS 120>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_1_PARAM 0x51 0xFF TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_1_PARAM 0x51 0xFF TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_1_PARAM 0x55 0x01 TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_1_PARAM 0x55 0x01 TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_1_PARAM 0x53 0x2C TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_1_PARAM 0x53 0x2C TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_SET_DISPLAY_ON DSI_DCS_NO_OP TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_SET_DISPLAY_ON DSI_DCS_NO_OP TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_DELAY_MS 150>;
+				nvidia,dsi-n-init-cmd = <12>;
+				nvidia,dsi-suspend-cmd =
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_SET_DISPLAY_OFF DSI_DCS_NO_OP TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_SET_DISPLAY_OFF DSI_DCS_NO_OP TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_DELAY_MS 100>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_ENTER_SLEEP_MODE DSI_DCS_NO_OP TEGRA_DSI_LINK0>,
+							<TEGRA_DSI_PACKET_CMD DSI_DCS_WRITE_0_PARAM DSI_DCS_ENTER_SLEEP_MODE DSI_DCS_NO_OP TEGRA_DSI_LINK1>,
+							<TEGRA_DSI_DELAY_MS 150>;
+				nvidia,dsi-n-suspend-cmd = <6>;
+				disp-default-out {
+					nvidia,out-type = <TEGRA_DC_OUT_DSI>;
+					nvidia,out-width = <120>;
+					nvidia,out-height = <160>;
+					nvidia,out-parent-clk = "pll_d_out0";
+					nvidia,out-xres = <1536>;
+					nvidia,out-yres = <2048>;
+					nvidia,out-flags = <TEGRA_DC_OUT_CONTINUOUS_MODE TEGRA_DC_OUT_INITIALIZED_MODE>;
+				};
+				display-timings {
+					1536x2048-32 {
+						clock-frequency = <214824960>;
+						nvidia,h-ref-to-sync = <11>;	// .h_ref_to_sync = 11,
+						nvidia,v-ref-to-sync = <1>;		// .v_ref_to_sync = 1,
+						hsync-len = <28>;				// .h_sync_width = 28,
+						vsync-len = <2>;				// .v_sync_width = 2,
+						hback-porch = <28>;				// .h_back_porch = 28,
+						vback-porch = <8>;				// .v_back_porch = 8,
+						hactive = <1536>; 				// .h_active = 1536,
+						vactive = <2048>;				// .v_active = 2048,
+						hfront-porch = <136>;			// .h_front_porch = 136,
+						vfront-porch = <14>;			// .v_front_porch = 14,
+					};
+				};
+			};
+		};
+	};
+};
