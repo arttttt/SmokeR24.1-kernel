@@ -110,6 +110,7 @@ obj-y                                   += panel-l-720p-5-loki.o
 obj-y                                   += panel-s-edp-uhdtv-15-6.o
 obj-y                                   += panel-o-720p-6-0.o
 obj-y                                   += panel-o-720p-6-0-01.o
+obj-y                                   += panel-s-wqxga-7-9-x6.o
 
 obj-${CONFIG_MACH_ARDBEG}               += board-ardbeg.o
 obj-${CONFIG_MACH_ARDBEG}               += board-ardbeg-sdhci.o
