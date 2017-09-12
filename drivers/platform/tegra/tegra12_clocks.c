@@ -1330,7 +1330,7 @@ static struct clk_ops tegra13_super_cclk_ops = {
  */
 static void tegra12_cpu_clk_init(struct clk *c)
 {
-	c->state = (!is_lp_cluster() == (c->u.cpu.mode == MODE_G))? ON : OFF;
+	c->state = (is_lp_cluster() != (c->u.cpu.mode == MODE_G))? ON : OFF;
 }
 
 static int tegra12_cpu_clk_enable(struct clk *c)
