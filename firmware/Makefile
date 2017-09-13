@@ -121,6 +121,8 @@ fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_MXT) += mxt1664t_config.fw \
 						mxt1066t_config.fw \
 						mxt1066t.fw \
 						mxt1664t.fw
+fw-shipped-$(CONFIG_BATTERY_BQ27x00) += 0105_lgc.dffs \
+					0205_atl.dffs
 else
 fw-shipped- += keyspan/mpr.fw keyspan/usa18x.fw keyspan/usa19.fw	\
 	keyspan/usa19qi.fw keyspan/usa19qw.fw keyspan/usa19w.fw		\
