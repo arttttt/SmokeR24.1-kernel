@@ -180,4 +180,6 @@ source "drivers/phy/Kconfig"
 
 source "drivers/android/Kconfig"
 
+source "drivers/tspdrv/Kconfig"
+
 endmenu
