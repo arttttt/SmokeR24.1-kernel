@@ -554,7 +554,7 @@
 						};
 					};
 
-					ldo3 {
+					ldo3_reg: ldo3 {
 						regulator-name = "vdd-touch";
 						regulator-min-microvolt = <3300000>;
 						regulator-max-microvolt = <3300000>;

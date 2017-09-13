@@ -97,6 +97,7 @@
 
 			interrupt-parent = <&gpio>;
 			interrupts = <143 0x2>;
+			vdd-touch-supply = <&ldo3_reg>;
 			atmel,irq-flags = <0x2008>;
 			atmel,reset-gpio = <&gpio 84 0>;
 			atmel,irq-gpio = <&gpio 143 0>;
