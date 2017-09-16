@@ -66,6 +66,16 @@
 		dsi {
 			nvidia,dsi-controller-vs = <DSI_VS_1>;
 			status = "okay";
+			panel-s-wqxga-7-9-x6 {
+				nvidia,dsi-boardinfo = <1780 0 0 0>;
+				nvidia,panel-rst-gpio = <&gpio TEGRA_GPIO(H, 3) 0>; /* PH3 */	
+				disp-default-out {
+					nvidia,out-flags = <TEGRA_DC_OUT_CONTINUOUS_MODE TEGRA_DC_OUT_INITIALIZED_MODE>;
+				};	
+				smartdimmer {
+						status = "disabled";
+				};
+			};
 		};
 	};
 
