@@ -45,6 +45,13 @@
 		linux,initrd-end = <0x851bc400>;
 	};
 
+	firmware {
+		android {
+			compatible = "android,firmware";
+			hardware = "tn8";
+		};
+	};
+
 	host1x {
 		/* tegradc.0 */
 		dc@54200000 {
