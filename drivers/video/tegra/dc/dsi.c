@@ -1445,6 +1445,7 @@ static void tegra_dsi_setup_ganged_mode_pkt_length(struct tegra_dc *dc,
 	u32 hact_pkt_len_pix = 0;
 	u32 hact_pkt_len_bytes = 0;
 	u32 hfp_pkt_len_bytes = 0;
+	u32 hbp_pkt_len_bytes = 0;
 	u32 pix_per_line_orig = 0;
 	u32 pix_per_line = 0;
 	u32 val = 0;
@@ -1482,7 +1483,14 @@ static void tegra_dsi_setup_ganged_mode_pkt_length(struct tegra_dc *dc,
 			dsi->pixel_scaler_mul / dsi->pixel_scaler_div -
 			hact_pkt_len_bytes - HEADER_OVERHEAD;
 
-		val = DSI_PKT_LEN_2_3_LENGTH_2(0x0) |
+		hbp_pkt_len_bytes = DIV_ROUND_UP(
+			(dc->mode.h_sync_width + dc->mode.h_back_porch) *
+			dsi->pixel_scaler_mul / dsi->pixel_scaler_div, 2) - 14;
+		hfp_pkt_len_bytes = DIV_ROUND_UP(
+			dc->mode.h_front_porch *
+			dsi->pixel_scaler_mul / dsi->pixel_scaler_div, 2) - 8;
+
+		val = DSI_PKT_LEN_2_3_LENGTH_2(hbp_pkt_len_bytes) |
 			DSI_PKT_LEN_2_3_LENGTH_3(hact_pkt_len_bytes);
 		tegra_dsi_controller_writel(dsi, val, DSI_PKT_LEN_2_3, i);
 
@@ -1648,16 +1656,9 @@ static void tegra_dsi_set_pkt_seq(struct tegra_dc *dc,
 			break;
 		case TEGRA_DSI_VIDEO_NONE_BURST_MODE:
 		default:
-			if (dsi->info.ganged_type) {
-				pkt_seq_3_5_rgb_lo =
-					DSI_PKT_SEQ_3_LO_PKT_31_ID(rgb_info);
-				pkt_seq =
-				dsi_pkt_seq_video_non_burst_no_eot_no_lp_no_hbp;
-			} else {
 				pkt_seq_3_5_rgb_lo =
 					DSI_PKT_SEQ_3_LO_PKT_32_ID(rgb_info);
 				pkt_seq = dsi_pkt_seq_video_non_burst;
-			}
 
 			/* Simulator does not support EOT packet yet */
 			if (tegra_cpu_is_asim())
