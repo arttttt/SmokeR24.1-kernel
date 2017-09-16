@@ -133,10 +133,11 @@
 				};
 			};
 
-			extcon {
+			palmas_extcon: extcon {
 				compatible = "ti,palmas-usb";
 				extcon-name = "palmas-extcon";
 				ti,wakeup;
+				#extcon-cells = <0x1>;
 				ti,enable-id-detection;
 				ti,enable-vbus-detection;
 			};
@@ -857,5 +858,30 @@
 	psy_extcon {
 		compatible = "power-supply-extcon";
 		power-supply,extcon-dev = "tegra-udc";
+		power-supply,y-cable-extcon-dev = "tegra-otg";
 	};
+
+	extcon {
+ 		extcon_cable_xlate: extcon@0 {
+ 			compatible = "extcon-cable-xlate";
+ 			reg = <0x0>;
+ 			extcon-name = "cable-xlate";
+ 			output-cable-names = "USB", "USB-Host", "ACA-A", "Y-Cable", "ACA-B", "ACA-C", "ACA-NV";
+ 			extcon-cables = <&palmas_extcon 0 &palmas_extcon 1 &palmas_extcon 2 &palmas_extcon 3 &palmas_extcon 4>;
+ 			extcon-cable-names = "vbus", "id", "aca-ra", "aca-rb", "aca-rc";
+ 			cable-new-states = <0x0     0x0     0x3F    0x0 0x0
+ 					0x0     0x1     0x3F    0x1   0x0
+ 					0x2     0x1     0x3F    0x0   0x0
+ 					0x0     0x2     0x3F    0x2   0x0
+ 					0x0     0x3     0x3F    0x8   0x0
+ 					0x2     0x3     0x3F    0x2   0x0
+ 					0x3     0x1     0x3F    0x0   0x0
+ 					0x3     0x2     0x3F    0x2   0x0
+					0x0     0x4     0x3F    0x4   0x0
+                                        0x0     0x8     0x3F    0x10  0x0
+                                        0x0     0x10    0x3F    0x20  0x0>;
+ 			#extcon-cells = <1>;
+ 			status = "okay";
+ 		};
+ 	};
 };

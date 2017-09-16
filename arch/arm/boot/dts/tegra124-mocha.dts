@@ -1,3 +1,22 @@
+/*
+ * arch/arm/boot/dts/tegra124-tn8-p1761-1270-a00.dts
+ *
+ * Copyright (c) 2017, Smoke Team.  All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ */
 /dts-v1/;
 
 #include "tegra124-tn8.dtsi"
@@ -5,12 +24,9 @@
 #include "tegra124-platforms/tegra124-tn8-pmic-e1736-1000-a00.dtsi"
 #include "tegra124-platforms/tegra124-tn8-fixed-e1736-1000-a00.dtsi"
 
-/* this is static dtsi files */
 #include "tegra124-platforms/tegra124-mocha-gpio-e1780.dtsi"
 #include "tegra124-platforms/tegra124-mocha-keys-e1780.dtsi"
 #include "tegra124-platforms/tegra124-mocha-pinmux-e1780.dtsi"
-/* end of static dtsi files */
-
 #include "tegra124-platforms/tegra124-mocha-sysedp.dtsi"
 #include "tegra124-platforms/tegra124-mocha-camera.dtsi"
 #include "panel-s-wqxga-7-9-x6.dtsi"
@@ -288,6 +304,27 @@
 		compatible = "nvidia,tegra-audio-rt5671";
 		nvidia,hp-mute-gpios = <&gpio 185 0>;
 		nvidia,i2s-param-hifi = <0 0 2 16 2 48000>;
+	};
+	
+	udc@7d000000 {
+		nvidia,id-detection-type = <0x1>;
+		nvidia,enable-pmu-vbus-detection;
+		nvidia,enable-aca-rid-detection;
+		extcon-cables = <&extcon_cable_xlate 0 &extcon_cable_xlate 2 &extcon_cable_xlate 5>;
+		extcon-cable-names = "vbus", "aca-rb", "aca-rc";
+		#extcon-cells = <0x1>;
+		status = "okay";
+	};
+	
+	otg@7d000000 {
+		status = "okay";
+		nvidia,enable-pmu-vbus-detection;
+		nvidia,id-detection-type = <0x1>;
+		nvidia,enable-y-cable-detection;
+		nvidia,enable-aca-rid-detection;
+		extcon-cables = <&extcon_cable_xlate 0 &extcon_cable_xlate 1 &extcon_cable_xlate 2 &extcon_cable_xlate 3 &extcon_cable_xlate 4 &extcon_cable_xlate 5>;
+		extcon-cable-names = "vbus", "id", "aca-ra", "y-cable", "aca-rb", "aca-rc";
+		#extcon-cells = <0x1>;
 	};
 };
 
