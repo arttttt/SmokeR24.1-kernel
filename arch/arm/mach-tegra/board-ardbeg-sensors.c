@@ -59,100 +59,6 @@ static struct i2c_board_info ardbeg_i2c_board_info_cm32181[] = {
 };
 #endif
 
-/* MPU board file definition    */
-static struct mpu_platform_data mpu9250_gyro_data = {
-	.orientation    = MTMAT_TOP_CCW_0,
-};
-
-static struct mpu_platform_data mpu9250_gyro_data_e1762 = {
-	.orientation    = MTMAT_TOP_CCW_270,
-};
-
-static struct mpu_platform_data mpu_compass_data = {
-	.orientation = MTMAT_TOP_CCW_270,
-};
-
-static struct i2c_board_info __initdata inv_mpu9250_i2c0_board_info[] = {
-	{
-		I2C_BOARD_INFO("mpu6xxx", 0x69),
-		.platform_data = &mpu9250_gyro_data,
-	},
-	{
-		I2C_BOARD_INFO("bmpX80", 0x77),
-	},
-	{
-		I2C_BOARD_INFO("ak89xx", 0x0C),
-		.platform_data = &mpu_compass_data,
-	},
-	{
-		I2C_BOARD_INFO("cm3217", 0x10),
-	},
-	{
-		I2C_BOARD_INFO("cm3218x", 0x48),
-	},
-	{
-		I2C_BOARD_INFO("max4400x", 0x44),
-	},
-};
-
-static void mpuirq_init(void)
-{
-	int ret = 0;
-/*	unsigned gyro_irq_gpio = TEGRA_GPIO_PR3; oldest platforms */
-/*	unsigned gyro_irq_gpio = TEGRA_GPIO_PO7; older platforms */
-	unsigned gyro_irq_gpio = TEGRA_GPIO_PS0;
-	unsigned als_irq_gpio = TEGRA_GPIO_PX3;
-	char *gyro_name = MPU_GYRO_NAME;
-	struct board_info board_info;
-
-	pr_info("*** MPU START *** mpuirq_init...\n");
-
-	ret = gpio_request(als_irq_gpio, "als");
-	if (ret < 0) {
-		pr_err("%s: gpio_request %d failed %d\n",
-		       __func__, als_irq_gpio, ret);
-	} else {
-		ret = gpio_direction_input(als_irq_gpio);
-		if (ret < 0) {
-			pr_err("%s: gpio_direction_input %d failed %d\n",
-			        __func__, als_irq_gpio, ret);
-			gpio_free(als_irq_gpio);
-		} else {
-			inv_mpu9250_i2c0_board_info[4].irq =
-						     gpio_to_irq(als_irq_gpio);
-			inv_mpu9250_i2c0_board_info[5].irq =
-						     gpio_to_irq(als_irq_gpio);
-		}
-	}
-
-	tegra_get_board_info(&board_info);
-
-	ret = gpio_request(gyro_irq_gpio, gyro_name);
-	if (ret < 0) {
-		pr_err("%s: gpio_request failed %d\n", __func__, ret);
-		return;
-	}
-
-	ret = gpio_direction_input(gyro_irq_gpio);
-	if (ret < 0) {
-		pr_err("%s: gpio_direction_input failed %d\n", __func__, ret);
-		gpio_free(gyro_irq_gpio);
-		return;
-	}
-	pr_info("*** MPU END *** mpuirq_init...\n");
-
-	/* TN8 with diferent Compass address from ardbeg */
-	if (of_machine_is_compatible("nvidia,tn8"))
-		inv_mpu9250_i2c0_board_info[2].addr = MPU_COMPASS_ADDR_TN8;
-
-	if (board_info.board_id == BOARD_E1762)
-		inv_mpu9250_i2c0_board_info[0].platform_data =
-					&mpu9250_gyro_data_e1762;
-	inv_mpu9250_i2c0_board_info[0].irq = gpio_to_irq(gyro_irq_gpio);
-	i2c_register_board_info(0, inv_mpu9250_i2c0_board_info,
-		ARRAY_SIZE(inv_mpu9250_i2c0_board_info));
-}
-
 /*
  * Soc Camera platform driver for testing
  */
@@ -1663,16 +1569,6 @@ int __init ardbeg_sensors_init(void)
 {
 	struct board_info board_info;
 	tegra_get_board_info(&board_info);
-	/* PM363 and PM359 don't have mpu 9250 mounted */
-	/* TN8 sensors use Device Tree */
-	if (board_info.board_id != BOARD_PM363 &&
-		board_info.board_id != BOARD_PM359 &&
-		!of_machine_is_compatible("nvidia,tn8") &&
-		!of_machine_is_compatible("nvidia,green-arrow") &&
-		!of_machine_is_compatible("nvidia,bowmore") &&
-		!of_machine_is_compatible("nvidia,e2141") &&
-		board_info.board_id != BOARD_PM375)
-		mpuirq_init();
 	ardbeg_camera_init();
 
 	if (board_info.board_id == BOARD_P1761 ||
