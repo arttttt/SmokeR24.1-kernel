@@ -1653,7 +1653,7 @@ static int ardbeg_nct72_init(void)
 					1); /* only register device[0] */
 	}
 	else
-		i2c_register_board_info(1, ardbeg_i2c_nct72_board_info,
+		i2c_register_board_info(0, ardbeg_i2c_nct72_board_info,
 			ARRAY_SIZE(ardbeg_i2c_nct72_board_info));
 
 	return ret;
