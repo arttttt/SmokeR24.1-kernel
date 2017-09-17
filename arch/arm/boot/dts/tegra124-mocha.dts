@@ -38,7 +38,6 @@
 	nvidia,boardids = "1780:1100:3:A:7","1845:1000:0:A:7";
 	#address-cells = <2>;
 	#size-cells = <2>;
-	nvidia,dtbbuildtime = __DATE__, __TIME__;
 
 	chosen {
 		bootargs = "tegraid=40.0.0.00.00 vmalloc=256M video=tegrafb console=ttyS0,115200n8 earlyprintk";
