@@ -46,6 +46,8 @@ rst|-   -   -  |AVG        |Vbus_CT    |Vsh_CT     |MODE
 
 #define INA3221_RAIL_NAME_SIZE	32
 
+#define POWER_LSB_TO_CURRENT_LSB_RATIO 25
+
 struct ina230_platform_data {
 	const char rail_name[INA3221_RAIL_NAME_SIZE];
 	s32 current_threshold;

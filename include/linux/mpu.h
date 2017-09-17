@@ -240,6 +240,7 @@ enum ext_slave_id {
 	COMPASS_ID_HSCDTD004A,
 
 	PRESSURE_ID_BMA085,
+	PRESSURE_ID_BMP280,
 };
 
 #define INV_PROD_KEY(ver, rev) (ver * 100 + rev)
@@ -398,6 +399,17 @@ struct mpu_platform_data {
 	__s8 secondary_orientation[9];
 	__u8 key[16];
 	__u8 config;
+	enum secondary_slave_type aux_slave_type;
+	enum ext_slave_id aux_slave_id;
+	__u16 aux_i2c_addr;
+
+#ifdef CONFIG_DTS_INV_MPU_IIO
+	int (*power_on)(struct mpu_platform_data *);
+	int (*power_off)(struct mpu_platform_data *);
+	struct regulator *vdd_ana;
+	struct regulator *vdd_i2c;
+	__u8 regulator_config;
+#endif
 };
 
 /**

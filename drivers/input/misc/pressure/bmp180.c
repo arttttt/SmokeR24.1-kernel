@@ -27,9 +27,8 @@
 #define BMP280_RANGE_DFLT		(5)
 
 #define BMPX80_NAME			"bmpX80"
-#define BMPX80_COMPATIBLE_NAME	"bmpX80-input"
-#define BMP180_COMPATIBLE_NAME	"bmp180-input"
-#define BMP280_COMPATIBLE_NAME	"bmp280-input"
+#define BMP180_NAME			"bmp180"
+#define BMP280_NAME			"bmp280"
 #define BMP280_I2C_ADDR0		(0x76)
 #define BMPX80_I2C_ADDR1		(0x77)
 #define BMPX80_HW_DELAY_POR_MS		(10)
@@ -402,7 +401,7 @@ static int bmp_port_free(struct bmp_inf *inf, int port)
 	int err = 0;
 
 	if ((inf->use_mpu) && (inf->port_id[port] >= 0)) {
-		err = nvi_input_mpu_port_free(inf->port_id[port]);
+		err = nvi_mpu_port_free(inf->port_id[port]);
 		if (!err)
 			inf->port_id[port] = -1;
 	}
@@ -450,7 +449,7 @@ static int bmp_nvi_mpu_bypass_request(struct bmp_inf *inf)
 
 	if (inf->use_mpu) {
 		for (i = 0; i < BMPX80_MPU_RETRY_COUNT; i++) {
-			err = nvi_input_mpu_bypass_request(true);
+			err = nvi_mpu_bypass_request(true);
 			if ((!err) || (err == -EPERM))
 				break;
 
@@ -467,7 +466,7 @@ static int bmp_nvi_mpu_bypass_release(struct bmp_inf *inf)
 	int err = 0;
 
 	if (inf->use_mpu)
-		err = nvi_input_mpu_bypass_release();
+		err = nvi_mpu_bypass_release();
 	return err;
 }
 
@@ -488,7 +487,7 @@ static int bmp_port_enable(struct bmp_inf *inf, int port, bool enable)
 	int err = 0;
 
 	if (enable != inf->port_en[port]) {
-		err = nvi_input_mpu_enable(inf->port_id[port],
+		err = nvi_mpu_enable(inf->port_id[port],
 				     enable, inf->fifo_enable);
 		if (!err)
 			inf->port_en[port] = enable;
@@ -510,7 +509,7 @@ static int bmp180_mode_wr_mpu(struct bmp_inf *inf, u8 mode)
 	int err = 0;
 
 	if (mode) {
-		err = nvi_input_mpu_data_out(inf->port_id[WR], mode);
+		err = nvi_mpu_data_out(inf->port_id[WR], mode);
 		err |= bmp_ports_enable(inf, true);
 	}
 	return err;
@@ -534,7 +533,7 @@ static int bmp280_mode_wr_mpu(struct bmp_inf *inf, u8 mode)
 		if (mode_old == BMP280_REG_CTRL_MODE_NORMAL)
 			err = bmp_wr(inf, BMPX80_REG_CTRL,
 				     BMP280_REG_CTRL_MODE_SLEEP);
-		err |= nvi_input_mpu_data_out(inf->port_id[WR], mode);
+		err |= nvi_mpu_data_out(inf->port_id[WR], mode);
 		err |= bmp_ports_enable(inf, true);
 		break;
 
@@ -542,7 +541,7 @@ static int bmp280_mode_wr_mpu(struct bmp_inf *inf, u8 mode)
 		if (mode_old == BMP280_REG_CTRL_MODE_NORMAL)
 			err = bmp_wr(inf, BMPX80_REG_CTRL,
 				     BMP280_REG_CTRL_MODE_SLEEP);
-		err |= nvi_input_mpu_data_out(inf->port_id[WR], mode);
+		err |= nvi_mpu_data_out(inf->port_id[WR], mode);
 		err |= bmp_ports_enable(inf, true);
 		break;
 
@@ -627,7 +626,7 @@ static int bmp_delay(struct bmp_inf *inf,
 	if (i != inf->range_i) {
 		err = 0;
 		if (inf->use_mpu)
-			err = nvi_input_mpu_delay_ms(inf->port_id[WR],
+			err = nvi_mpu_delay_ms(inf->port_id[WR],
 					       inf->hal->bmp_delay_ms_tbl[i]);
 		if (err < 0)
 			err_t |= err;
@@ -642,7 +641,7 @@ static int bmp_delay(struct bmp_inf *inf,
 				 __func__, delay_us);
 		err = 0;
 		if (inf->use_mpu)
-			err = nvi_input_mpu_delay_us(inf->port_id[RD],
+			err = nvi_mpu_delay_us(inf->port_id[RD],
 					       (unsigned long)delay_us);
 		if (err)
 			err_t |= err;
@@ -793,9 +792,9 @@ static void bmp180_mpu_handler(u8 *data, unsigned int len, s64 ts, void *p_val)
 		err = bmp180_read_sts(inf, data);
 		if (err > 0) {
 			bmp_report(inf, ts);
-			nvi_input_mpu_data_out(inf->port_id[WR], inf->data_out);
+			nvi_mpu_data_out(inf->port_id[WR], inf->data_out);
 		} else if (err < 0) {
-			nvi_input_mpu_data_out(inf->port_id[WR], inf->data_out);
+			nvi_mpu_data_out(inf->port_id[WR], inf->data_out);
 		}
 	}
 }
@@ -1403,10 +1402,44 @@ static int bmp_sysfs_create(struct bmp_inf *inf)
 		dev_err(&inf->i2c->dev, "%s ERR %d\n", __func__, err);
 		return err;
 	}
-	err = nvi_input_mpu_sysfs_register(&inf->idev->dev.kobj, BMPX80_NAME);
+	err = nvi_mpu_sysfs_register(&inf->idev->dev.kobj, BMPX80_NAME);
 	if (err)
 		dev_err(&inf->i2c->dev, "%s ERR %d\n", __func__, err);
 	return err;
+}
+
+static struct device_attribute *attributes[] = {
+	&dev_attr_enable,
+	&dev_attr_delay,
+	&dev_attr_resolution,
+	&dev_attr_max_range,
+	&dev_attr_divisor,
+	&dev_attr_microamp,
+	&dev_attr_data,
+	&dev_attr_mpu_fifo_en
+};
+
+static int add_sysfs_interfaces(struct device *dev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(attributes); i++)
+		if (device_create_file(dev, attributes[i]))
+			goto undo;
+	return 0;
+undo:
+	for (; i >= 0 ; i--)
+		device_remove_file(dev, attributes[i]);
+	dev_err(dev, "%s: failed to create sysfs interface\n", __func__);
+	return -ENODEV;
+}
+
+static void remove_sysfs_interfaces(struct device *dev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(attributes); i++)
+		device_remove_file(dev, attributes[i]);
 }
 
 static void bmp_input_close(struct input_dev *idev)
@@ -1468,7 +1501,7 @@ static int bmp_id_compare(struct bmp_inf *inf, u8 val,
 		dev_err(&inf->i2c->dev, "%s ERR: ID %x != %s\n",
 			__func__, val, id->name);
 	} else {
-		dev_dbg(&inf->i2c->dev, "%s using ID %x for %s\n",
+		dev_err(&inf->i2c->dev, "%s using ID %x for %s\n",
 			__func__, inf->dev_id, id->name);
 	}
 	return err;
@@ -1531,9 +1564,9 @@ static int bmp_id(struct bmp_inf *inf, const struct i2c_device_id *id)
 	if ((inf->i2c->addr != BMP280_I2C_ADDR0) ||
 					  (inf->i2c->addr != BMPX80_I2C_ADDR1))
 		inf->i2c->addr = BMPX80_I2C_ADDR1;
-	if (!strcmp(id->name, BMP180_COMPATIBLE_NAME))
+	if (!strcmp(id->name, BMP180_NAME))
 		inf->dev_id = BMPX80_REG_ID_BMP180;
-	else if (!strcmp(id->name, BMP280_COMPATIBLE_NAME))
+	else if (!strcmp(id->name, BMP280_NAME))
 		inf->dev_id = BMPX80_REG_ID_BMP280;
 	if ((config_boot == NVI_CONFIG_BOOT_MPU) && (!inf->dev_id)) {
 		dev_err(&inf->i2c->dev, "%s ERR: NVI_CONFIG_BOOT_MPU && %s\n",
@@ -1544,7 +1577,7 @@ static int bmp_id(struct bmp_inf *inf, const struct i2c_device_id *id)
 		nmp.addr = inf->i2c->addr | 0x80;
 		nmp.reg = BMPX80_REG_ID;
 		nmp.ctrl = 1;
-		err = nvi_input_mpu_dev_valid(&nmp, &val);
+		err = nvi_mpu_dev_valid(&nmp, &val);
 		dev_dbg(&inf->i2c->dev, "%s AUTO ID=%x err=%d\n",
 			__func__, val, err);
 		/* see mpu.h for possible return values */
@@ -1574,7 +1607,7 @@ static int bmp_id(struct bmp_inf *inf, const struct i2c_device_id *id)
 			nmp.ctrl = 10; /* MPU FIFO can't handle odd size */
 			nmp.handler = &bmp280_mpu_handler;
 		}
-		err = nvi_input_mpu_port_alloc(&nmp);
+		err = nvi_mpu_port_alloc(&nmp);
 		dev_dbg(&inf->i2c->dev, "%s MPU port/err=%d\n",
 			__func__, err);
 		if (err < 0)
@@ -1590,7 +1623,7 @@ static int bmp_id(struct bmp_inf *inf, const struct i2c_device_id *id)
 		nmp.shutdown_bypass = false;
 		nmp.handler = NULL;
 		nmp.ext_driver = NULL;
-		err = nvi_input_mpu_port_alloc(&nmp);
+		err = nvi_mpu_port_alloc(&nmp);
 		dev_dbg(&inf->i2c->dev, "%s MPU port/err=%d\n",
 			__func__, err);
 		if (err < 0) {
@@ -1655,6 +1688,7 @@ static struct mpu_platform_data *bmp_parse_dt(struct i2c_client *client)
 		return ERR_PTR(-EINVAL);
 	}
 
+	dev_dbg(&client->dev, "config=%s\n", pchar);
 	for (config = 0; config < ARRAY_SIZE(bmp_configs); config++) {
 		if (!strcasecmp(pchar, bmp_configs[config])) {
 			pdata->config = config;
@@ -1677,7 +1711,7 @@ static int bmp_probe(struct i2c_client *client,
 	struct mpu_platform_data *pd;
 	int err;
 
-	dev_info(&client->dev, "%s\n", __func__);
+	dev_info(&client->dev, "%s:id=%s\n", __func__, id->name);
 	inf = devm_kzalloc(&client->dev, sizeof(*inf), GFP_KERNEL);
 	if (!inf) {
 		dev_err(&client->dev, "%s kzalloc ERR\n", __func__);
@@ -1700,6 +1734,8 @@ static int bmp_probe(struct i2c_client *client,
 
 	bmp_pm_init(inf);
 	err = bmp_id(inf, id);
+	if (err)
+		goto bmp_probe_err;
 	bmp_pm(inf, false);
 	if (err == -EAGAIN)
 		goto bmp_probe_again;
@@ -1718,7 +1754,7 @@ static int bmp_probe(struct i2c_client *client,
 	}
 
 	INIT_DELAYED_WORK(&inf->dw, bmp_work);
-	err = bmp_sysfs_create(inf);
+	err = add_sysfs_interfaces(&inf->idev->dev);
 	if (err)
 		goto bmp_probe_err;
 
@@ -1732,18 +1768,18 @@ bmp_probe_again:
 }
 
 static const struct i2c_device_id bmp_i2c_device_id[] = {
-	{BMPX80_COMPATIBLE_NAME, 0},
-	{BMP180_COMPATIBLE_NAME, 0},
-	{BMP280_COMPATIBLE_NAME, 0},
+	{BMPX80_NAME, 0},
+	{BMP180_NAME, 0},
+	{BMP280_NAME, 0},
 	{}
 };
 
 MODULE_DEVICE_TABLE(i2c, bmp_i2c_device_id);
 
 static const struct of_device_id bmp_of_match[] = {
-	{ .compatible = "bmp,bmpX80-input", },
-	{ .compatible = "bmp,bmp180-input", },
-	{ .compatible = "bmp,bmp280-input", },
+	{ .compatible = "bmp,bmpX80", },
+	{ .compatible = "bmp,bmp180", },
+	{ .compatible = "bmp,bmp280", },
 	{ },
 };
 
