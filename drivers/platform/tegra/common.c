@@ -1492,7 +1492,7 @@ void tegra_get_board_info(struct board_info *bi)
 
 	if (!parsed) {
 		parsed = 1;
-		ret = tegra_get_board_info_properties(bi, "proc-board");
+		ret = tegra_get_board_info_properties(bi, "board_info");
 		if (!ret) {
 			memcpy(&main_board_info, bi, sizeof(struct board_info));
 			system_serial_high = (bi->board_id << 16) | bi->sku;
@@ -1516,19 +1516,23 @@ void tegra_get_board_info(struct board_info *bi)
 }
 EXPORT_SYMBOL(tegra_get_board_info);
 
+static int __init tegra_pmu_board_info(char *info)
+{
+	char *p = info;
+	pmu_board_info.board_id = memparse(p, &p);
+	pmu_board_info.sku = memparse(p+1, &p);
+	pmu_board_info.fab = memparse(p+1, &p);
+	pmu_board_info.major_revision = memparse(p+1, &p);
+	pmu_board_info.minor_revision = memparse(p+1, &p);
+	return 0;
+}
+
 void tegra_get_pmu_board_info(struct board_info *bi)
 {
-	static bool parsed = 0;
-
-	if (!parsed) {
-		int ret;
-		parsed = 1;
-		ret = tegra_get_board_info_properties(bi, "pmu-board");
-		if (!ret)
-			memcpy(&pmu_board_info, bi, sizeof(struct board_info));
-	}
 	memcpy(bi, &pmu_board_info, sizeof(struct board_info));
 }
+
+early_param("pmuboard", tegra_pmu_board_info);
 
 void tegra_get_display_board_info(struct board_info *bi)
 {
