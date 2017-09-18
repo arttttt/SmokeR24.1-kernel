@@ -836,7 +836,8 @@ int __init ardbeg_soctherm_init(void)
 	tegra_chip_id = tegra_get_chip_id();
 
 	if (board_info.board_id == BOARD_E1923 ||
-			board_info.board_id == BOARD_E1922) {
+			board_info.board_id == BOARD_E1922 ||
+			board_info.board_id == BOARD_E1780) {
 		memcpy(ardbeg_soctherm_data.therm,
 				ardbeg_therm_pop, sizeof(ardbeg_therm_pop));
 	}
@@ -902,7 +903,8 @@ int __init ardbeg_soctherm_init(void)
 		board_info.board_id == BOARD_E1971 ||
 		board_info.board_id == BOARD_E2141 ||
 		board_info.board_id == BOARD_E1991 ||
-		board_info.board_id == BOARD_E1922) {
+		board_info.board_id == BOARD_E1922 ||
+		board_info.board_id == BOARD_E1780) {
 		tegra_add_cpu_vmin_trips(
 			ardbeg_soctherm_data.therm[therm_cpu].trips,
 			&ardbeg_soctherm_data.therm[therm_cpu].num_trips);
