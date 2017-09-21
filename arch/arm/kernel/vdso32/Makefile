@@ -15,7 +15,8 @@ GCOV_PROFILE := n
 
 ccflags-y := -shared -fPIC -fno-common -fno-builtin -march=armv7-a
 ccflags-y += -nostdlib -Wl,-soname=linux-vdso32.so.1 \
-		$(call cc-ldoption, -Wl$(comma)--hash-style=sysv)
+		$(call cc-ldoption, -Wl$(comma)--hash-style=sysv) \
+		$(call cc-option, -fuse-ld=bfd)
 asflags-y := -D__VDSO32__ -s
 
 obj-y += vdso32_wrapper.o
