@@ -32,7 +32,7 @@
 			reg = <0x6b>;
 
 
-			charger {
+			battery_charger: charger {
 				regulator-name = "batt_regulator";
 				regulator-max-microamp = <2000000>;
 				ti,watchdog-timeout = <0>;
@@ -55,7 +55,7 @@
 				};
 			};
 
-			vbus {
+			usb0_vbus_reg: vbus {
 				regulator-name = "vbus_regulator";
 				consumers {
 					c1 {
@@ -515,7 +515,7 @@
 						};
 					};
 
-					ldo2 {
+					palmas_ldo2: ldo2 {
 						regulator-name = "vdd-lcd-io";
 						regulator-min-microvolt = <1800000>;
 						regulator-max-microvolt = <1800000>;
@@ -606,7 +606,7 @@
 						};
 					};
 
-					ldo5 {
+					ldo5_reg: ldo5 {
 						regulator-name = "avdd-dsi-csi";
 						regulator-min-microvolt = <1200000>;
 						regulator-max-microvolt = <1200000>;
@@ -764,7 +764,7 @@
 						};
 					};
 
-					ldo9 {
+					palmas_ldo9: ldo9 {
 						regulator-name = "vddio-sdmmc-2";
 						regulator-min-microvolt = <1800000>;
 						regulator-max-microvolt = <3300000>;
@@ -807,7 +807,7 @@
 						};
 					};
 
-					ldousb {
+					ldousb_reg: ldousb {
 						regulator-name = "avdd-usb";
 						regulator-always-on;
 						regulator-boot-on;
