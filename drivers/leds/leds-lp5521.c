@@ -31,6 +31,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_data/leds-lp55xx.h>
 #include <linux/slab.h>
+#include <linux/of_gpio.h>
 
 #include "leds-lp55xx-common.h"
 
@@ -111,6 +112,8 @@
 #define LP5521_RUN_R			0x20
 #define LP5521_RUN_G			0x08
 #define LP5521_RUN_B			0x02
+
+static int lp5521_gpio;
 
 static inline void lp5521_wait_opmode_done(void)
 {
@@ -410,13 +413,76 @@ static struct lp55xx_device_config lp5521_cfg = {
 	.dev_attr_group     = &lp5521_group,
 };
 
+static int lp5521_setup(void)
+{
+	return gpio_request_one(lp5521_gpio, GPIOF_DIR_OUT,
+			"lp5521_enable");
+}
+
+static void lp5521_release(void)
+{
+	gpio_free(lp5521_gpio);
+}
+
+static void lp5521_enable(bool state)
+{
+	gpio_set_value(lp5521_gpio, !!state);
+}
+
+static int lp5521_parse_dt(struct device *dev, struct lp55xx_platform_data *pdata)
+{
+	struct device_node *temp, *np = dev->of_node;
+	struct lp55xx_led_config *config;
+
+	lp5521_gpio = of_get_named_gpio(np, "lp5521,gpio", 0);
+	if (lp5521_gpio < 0)
+		lp5521_gpio = -1;
+
+	of_property_read_u32(np, "lp5521,clock-mode", (u32 *) &pdata->clock_mode);
+	of_property_read_u32(np, "lp5521,num-channels", (u32 *) &pdata->num_channels);
+
+	config = devm_kzalloc(dev, pdata->num_channels *
+				sizeof(struct lp55xx_led_config), GFP_KERNEL);
+
+	pdata->led_config = config;
+
+	for_each_child_of_node(np, temp) {
+		of_property_read_string(temp, "lp5521,name", &config->name);
+		of_property_read_u32(temp, "lp5521,chan-nr", (unsigned int *) &config->chan_nr);
+		of_property_read_u32(temp, "lp5521,led-current", (unsigned int *) &config->led_current);
+		of_property_read_u32(temp, "lp5521,max-current", (unsigned int *) &config->max_current);
+
+		config++;
+	}
+
+	pdata->setup_resources = lp5521_setup;
+	pdata->release_resources = lp5521_release;
+	pdata->enable = lp5521_enable;
+
+	return 0;
+}
+
 static int lp5521_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	int ret;
 	struct lp55xx_chip *chip;
 	struct lp55xx_led *led;
-	struct lp55xx_platform_data *pdata = client->dev.platform_data;
+	struct lp55xx_platform_data *pdata;
+
+	if (client->dev.of_node) {
+		pdata = devm_kzalloc(&client->dev,
+			sizeof(struct lp55xx_platform_data), GFP_KERNEL);
+		if (!pdata) {
+			dev_err(&client->dev, "Failed to allocate memory\n");
+			return -ENOMEM;
+		}
+
+		ret = lp5521_parse_dt(&client->dev, pdata);
+		if (ret)
+			return ret;
+	} else
+		pdata = client->dev.platform_data;
 
 	if (!pdata) {
 		dev_err(&client->dev, "no platform data\n");
@@ -485,9 +551,15 @@ static const struct i2c_device_id lp5521_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, lp5521_id);
 
+static const struct of_device_id of_lp5521_leds_match[] = {
+	{ .compatible = "national,lp5521", },
+	{},
+};
+
 static struct i2c_driver lp5521_driver = {
 	.driver = {
 		.name	= "lp5521",
+		.of_match_table = of_lp5521_leds_match,
 	},
 	.probe		= lp5521_probe,
 	.remove		= lp5521_remove,
