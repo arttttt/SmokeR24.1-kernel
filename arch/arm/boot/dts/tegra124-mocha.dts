@@ -134,7 +134,6 @@
 			atmel,gpio-mask = <0xc>;
 			atmel,vendor-info = <0x03eb>;
 			atmel,product-info = <0x214f>;
-			atmel,key-codes = <158 102 139 116>;
 			atmel,config-array-size = <2>;
 
 			atmel,cfg_1 {
@@ -146,6 +145,7 @@
 				atmel,mxt-cfg-name = "mxt1664t_config.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1664t.fw";
+				atmel,key-codes = <158 102 139 116>;
 			};
 			atmel,cfg_2 {
 				atmel,family-id = <0xA4>;
@@ -156,6 +156,7 @@
 				atmel,mxt-cfg-name = "mxt1066t_config.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1066t.fw";
+				atmel,key-codes = <139 102 158 116>;
 			};
 		};
 	};
