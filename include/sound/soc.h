@@ -612,7 +612,7 @@ struct snd_soc_jack_gpio {
 	struct snd_soc_jack *jack;
 	struct delayed_work work;
 
-	int (*jack_status_check)(void);
+	int (*jack_status_check)(struct snd_soc_jack_gpio *gpio);
 };
 #endif
 

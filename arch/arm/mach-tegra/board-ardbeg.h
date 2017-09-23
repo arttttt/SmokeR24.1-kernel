@@ -89,11 +89,9 @@ enum tegra_bb_type {
 #define TOUCH_GPIO_RST_MAXIM_STI_SPI	TEGRA_GPIO_PK4
 
 /* Audio-related GPIOs */
-/*Same GPIO's used for T114(Interposer) and T124*/
-/*Below GPIO's are same for Laguna and Ardbeg*/
-#define TEGRA_GPIO_CDC_IRQ	TEGRA_GPIO_PH4
-#define TEGRA_GPIO_HP_DET	TEGRA_GPIO_PR7
-#define NORRIN_GPIO_HP_DET	TEGRA_GPIO_PI7
+#define TEGRA_GPIO_CDC_IRQ	TEGRA_GPIO_PW2
+#define TEGRA_GPIO_HP_DET	TEGRA_GPIO_PK2
+#define TEGRA_GPIO_HP_MUTE	TEGRA_GPIO_PX1
 /*LDO_EN signal is required only for RT5639 and not for RT5645,
 on Laguna the LDO_EN signal comes from a GPIO expander and
 this is exposed as a fixed regulator directly handeled from

@@ -102,6 +102,10 @@ static struct emc_iso_usage tegra12_emc_iso_usage[] = {
 		50, iso_share_calc_t124_general
 	},
 	{
+		BIT(EMC_USER_AUDIO),
+ 		50, iso_share_calc_t124_general
+ 	},
+ 	{
 		BIT(EMC_USER_DC1) | BIT(EMC_USER_VI),
 		50, iso_share_calc_t124_general
 	},

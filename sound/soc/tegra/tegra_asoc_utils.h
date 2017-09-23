@@ -45,6 +45,7 @@ struct tegra_asoc_utils_data {
 	struct device *dev;
 	struct snd_soc_card *card;
 	enum tegra_asoc_utils_soc soc;
+	struct clk *clk_audio_emc;
 	struct clk *clk_pll_a;
 	struct clk *clk_pll_a_out0;
 	struct clk *clk_cdev1;

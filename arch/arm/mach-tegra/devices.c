@@ -974,6 +974,11 @@ struct platform_device baseband_dit_device = {
 	.id = 2,
 };
 
+struct platform_device fm_dit_device = {
+ 	.name = "spdif-dit",
+ 	.id = 3,
+};
+
 struct platform_device tegra_pcm_device = {
 	.name = "tegra-pcm-audio",
 	.id = -1,

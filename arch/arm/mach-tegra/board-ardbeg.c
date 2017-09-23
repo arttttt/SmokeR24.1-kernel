@@ -180,6 +180,7 @@ static __initdata struct tegra_clk_init_table ardbeg_clk_init_table[] = {
 	{ "uartb",	"pll_p",	408000000,	false},
 	{ "uartc",	"pll_p",	408000000,	false},
 	{ "uartd",	"pll_p",	408000000,	false},
+	{ "audio.emc",	"emc",		50000000,	false},
 	{ NULL,		NULL,		0,		0},
 };
 
@@ -237,6 +238,7 @@ static struct platform_device *ardbeg_devices[] __initdata = {
 	&baseband_dit_device,
 	&tegra_offload_device,
 	&tegra30_avp_audio_device,
+	&fm_dit_device,
 };
 
 static struct tegra_usb_platform_data tegra_udc_pdata = {
@@ -617,6 +619,8 @@ static struct of_dev_auxdata ardbeg_auxdata_lookup[] __initdata = {
 	OF_DEV_AUXDATA("nvidia,icera-i500", 0, "tegra_usb_modem_power", NULL),
 	OF_DEV_AUXDATA("nvidia,ptm", 0x7081c000, "ptm", NULL),
 	OF_DEV_AUXDATA("nvidia,tegra30-hda", 0x70030000, "tegra30-hda", NULL),
+	OF_DEV_AUXDATA("nvidia,tegra-audio-rt5671", 0x0, "tegra-snd-rt5671",
+  				NULL),
 	{}
 };
 #endif

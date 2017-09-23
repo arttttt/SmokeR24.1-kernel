@@ -2353,7 +2353,7 @@ int __init tegra_soc_device_init(const char *machine)
 	soc_dev = soc_device_register(soc_dev_attr);
 	if (IS_ERR_OR_NULL(soc_dev)) {
 		kfree(soc_dev_attr);
-		return -1;
+		return -EPERM;
 	}
 
 	return 0;
