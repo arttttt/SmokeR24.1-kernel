@@ -67,4 +67,7 @@
 			vdd-touch-supply = <&ldo3_reg>;
 		};
 	};
+	sound {
+		ldoen-supply = <&ldoen>;
+	};
 };
