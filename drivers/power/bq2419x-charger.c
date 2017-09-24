@@ -46,6 +46,7 @@
 #include <linux/power/battery-charger-gauge-comm.h>
 #include <linux/workqueue.h>
 #include <linux/extcon.h>
+#include <linux/power_supply.h>
 
 #define MAX_STR_PRINT 50
 
@@ -63,6 +64,8 @@
 #define BQ2419x_TEMP_H_CHG_DISABLE	50
 #define BQ2419x_TEMP_L_CHG_DISABLE	0
 #define BQ2419x_SW_CHG_CURRENT_LIMIT	2000
+
+extern int tps6591x_gpio7_enable(bool enable);
 
 /* input current limit */
 static const unsigned int iinlim[] = {
@@ -723,7 +726,7 @@ static int bq2419x_set_charging_current(struct regulator_dev *rdev,
 
 	old_current_limit = bq2419x->in_current_limit;
 	bq2419x->last_charging_current = max_uA;
-	if ((val & BQ2419x_VBUS_STAT) == BQ2419x_VBUS_UNKNOWN) {
+	if (((val & BQ2419x_VBUS_STAT) == BQ2419x_VBUS_UNKNOWN) && (max_uA == 0)) {
 		in_current_limit = 500;
 		bq2419x->cable_connected = 0;
 		bq2419x->chg_status = BATTERY_DISCHARGING;
@@ -761,6 +764,11 @@ static int bq2419x_set_charging_current(struct regulator_dev *rdev,
 	ret = bq2419x_configure_charging_current(bq2419x, in_current_limit);
 	if (ret < 0)
 		goto error;
+
+	if (max_uA > 0)
+		tps6591x_gpio7_enable(0);
+	else
+		tps6591x_gpio7_enable(1);
 
 	battery_charging_status_update(bq2419x->bc_dev, bq2419x->chg_status);
 	if (bq2419x->disable_suspend_during_charging) {
@@ -2221,7 +2229,7 @@ skip_bcharger_init:
 	/* enable charging */
 	ret = bq2419x_charger_enable(bq2419x);
 	if (ret < 0)
-		goto scrub_wq;
+		goto scrub_vbus_reg;
 
 	if (bq2419x->battery_presense) {
 		bq2419x->thermal_init_retry = 10;
@@ -2236,6 +2244,8 @@ skip_bcharger_init:
 				bq2419x_otg_reset_work_handler);
 
 	return 0;
+scrub_vbus_reg:
+	regulator_unregister(bq2419x->vbus_rdev);
 scrub_wq:
 	if (pdata->bcharger_pdata)
 		battery_charger_unregister(bq2419x->bc_dev);
@@ -2258,7 +2268,8 @@ static int bq2419x_remove(struct i2c_client *client)
 		cancel_delayed_work_sync(&bq2419x->otg_reset_work);
 		bq2419x_vbus_disable(bq2419x->vbus_rdev);
 	}
-
+	
+	regulator_unregister(bq2419x->vbus_rdev);
 	mutex_destroy(&bq2419x->mutex);
 	mutex_destroy(&bq2419x->otg_mutex);
 	cancel_delayed_work_sync(&bq2419x->thermal_init_work);
