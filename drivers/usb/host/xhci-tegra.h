@@ -1,7 +1,7 @@
 /*
  * xhci-tegra.h - Nvidia xHCI host controller related data
  *
- * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -338,6 +338,14 @@ struct tegra_rx_ctrl_ops {
 	void (*clamp_en_early)(unsigned port, bool enable);
 };
 
+struct usb_downgraded_port {
+	int portnum;
+	u16 id_vendor;
+	u16 id_product;
+	char serial[31];
+	struct list_head downgraded_list;
+};
+
 struct tegra_xhci_hcd {
 	struct platform_device *pdev;
 	struct xhci_hcd *xhci;
@@ -461,6 +469,7 @@ struct tegra_xhci_hcd {
 	bool clock_enable_done;
 
 	struct tegra_rx_ctrl_ops *rx_ctrl_ops;
+	struct usb_downgraded_port degraded_port[XUSB_SS_PORT_COUNT];
 };
 
 #define NOT_SUPPORTED	0xFFFFFFFF

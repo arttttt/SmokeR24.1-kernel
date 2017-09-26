@@ -1,7 +1,7 @@
 /*
  * xhci-tegra.c - Nvidia xHCI host controller driver
  *
- * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2017, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -50,10 +50,12 @@
 #include <mach/xusb.h>
 
 #include <linux/platform/tegra/mc.h>
+#include <linux/usb/quirks.h>
 
 #include "xhci-tegra.h"
 #include "xhci.h"
 #include "../../../arch/arm/mach-tegra/iomap.h"
+#include "../core/usb.h"
 
 #if defined(CONFIG_ARCH_TEGRA_21x_SOC)
 #include "xhci-tegra-t210-padreg.h"
@@ -302,6 +304,16 @@ MODULE_PARM_DESC(firmware_file, FIRMWARE_FILE_HELP);
 static unsigned int boost_cpu_freq = CONFIG_TEGRA_EHCI_BOOST_CPU_FREQ;
 module_param(boost_cpu_freq, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(boost_cpu_freq, "CPU frequency (in KHz) to boost");
+
+#define BLACKLIST_SIZE	100
+static uint downgraded_usb3[BLACKLIST_SIZE];
+static int downgraded_count;
+module_param_array(downgraded_usb3, uint, &downgraded_count,
+	S_IRUGO | S_IWUSR | S_IWGRP);
+MODULE_PARM_DESC(downgraded_usb3,
+"Downgraded USB3 devices with idVendoridProduct,e.g., 0x11112222,0x33334444");
+
+static LIST_HEAD(hub_downgraded_list);
 
 #define BOOST_PERIOD		(msecs_to_jiffies(2*1000)) /* 2 seconds */
 #define BOOST_TRIGGER		16384 /* 16KB */
@@ -4266,7 +4278,70 @@ static void set_port_cdp(struct tegra_xhci_hcd *tegra, bool enable, int pad)
 
 static void tegra_xhci_free_dev(struct usb_hcd *hcd, struct usb_device *udev)
 {
-		xhci_free_dev(hcd, udev);
+	struct list_head *ptr;
+	struct usb_downgraded_port *port_ptr;
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
+	u32 portsc;
+	char serial[31];
+
+	portsc = xhci_readl(xhci, xhci->usb2_ports[udev->portnum - 1]);
+	/* If disconnected from USB2.0 root hub */
+	if ((xhci->main_hcd->self.root_hub == udev->parent) &&
+	    !(portsc & PORT_CONNECT)) {
+		if (udev->serial) {
+			strncpy(serial, udev->serial, 30);
+			serial[30] = 0;
+		} else {
+			serial[0] = 0;
+		}
+
+		mutex_lock(&tegra->sync_lock);
+		if (!list_empty(&hub_downgraded_list)) {
+			list_for_each(ptr, &hub_downgraded_list) {
+				port_ptr = list_entry(ptr,
+				struct usb_downgraded_port, downgraded_list);
+				if ((udev->descriptor.idVendor ==
+					port_ptr->id_vendor) &&
+				    (udev->descriptor.idProduct ==
+					port_ptr->id_product)) {
+					if (!port_ptr->serial[0] && !serial[0])
+						break;
+					if (port_ptr->serial[0] && serial[0] &&
+					    !strcmp(port_ptr->serial, serial))
+						break;
+				}
+			}
+
+			if (ptr != &hub_downgraded_list) {
+				pm_runtime_get_noresume(hcd->self.controller);
+				/* Port Power on for downgraded USB3.0 port */
+				portsc = xhci_readl(xhci,
+					xhci->usb3_ports[port_ptr->portnum
+						- 1]);
+				portsc |= PORT_POWER;
+				xhci_writel(xhci, portsc,
+					xhci->usb3_ports[port_ptr->portnum
+						- 1]);
+				msleep(10);
+				/* Warm reset */
+				portsc = xhci_readl(xhci,
+					xhci->usb3_ports[port_ptr->portnum
+						- 1]);
+				portsc |= PORT_WR;
+				xhci_writel(xhci, portsc,
+					xhci->usb3_ports[port_ptr->portnum
+						- 1]);
+				pm_runtime_put_noidle(hcd->self.controller);
+
+				list_del(&port_ptr->downgraded_list);
+				/* Clear id_vendor as empty entry */
+				port_ptr->id_vendor = 0;
+			}
+		}
+		mutex_unlock(&tegra->sync_lock);
+	}
+	xhci_free_dev(hcd, udev);
 }
 
 static int tegra_xhci_alloc_dev(struct usb_hcd *hcd, struct usb_device *udev)
@@ -4434,6 +4509,77 @@ static int tegra_xhci_update_hub_device(struct usb_hcd *hcd,
 	return xhci_update_hub_device(hcd, hdev, tt, mem_flags);
 }
 
+static int tegra_xhci_update_device(struct usb_hcd *hcd,
+				    struct usb_device *udev)
+{
+	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	int to_downgrade = 0;
+	u32 portsc;
+	int i;
+	struct usb_downgraded_port *port_ptr;
+	char *buf;
+
+	/* If connected to USB3.0 root hub */
+	if (xhci->shared_hcd->self.root_hub == udev->parent) {
+		for (i = 0; i < downgraded_count; i++) {
+			if ((le16_to_cpu(udev->descriptor.idVendor) ==
+			    (downgraded_usb3[i] >> 16)) &&
+			    (le16_to_cpu(udev->descriptor.idProduct) ==
+			    (downgraded_usb3[i] & 0xFFFF))) {
+				to_downgrade = 1;
+				break;
+			}
+		}
+		if (udev->quirks & USB_QUIRK_DOWNGRADE_USB3)
+			to_downgrade = 1;
+	}
+
+	if (to_downgrade) {
+		dev_info(&udev->dev,
+			"Downgrade idVendor=%04x idProduct=%04x to USB2.0\n",
+			le16_to_cpu(udev->descriptor.idVendor),
+			le16_to_cpu(udev->descriptor.idProduct));
+
+		for (i = 0; i < XUSB_SS_PORT_COUNT; i++)
+			if (tegra->degraded_port[i].id_vendor == 0)
+				break;
+		if (i < XUSB_SS_PORT_COUNT) {
+			port_ptr = &tegra->degraded_port[i];
+
+			/* Save information to be used by disconnect */
+			port_ptr->portnum = udev->portnum;
+			port_ptr->id_vendor =
+				udev->descriptor.idVendor;
+			port_ptr->id_product =
+				udev->descriptor.idProduct;
+
+			buf = usb_cache_string(udev,
+				udev->descriptor.iSerialNumber);
+			if (buf) {
+				strncpy(port_ptr->serial, buf, 30);
+				port_ptr->serial[30] = 0;
+				kfree(buf);
+			} else {
+				port_ptr->serial[0] = 0;
+			}
+			INIT_LIST_HEAD(&port_ptr->downgraded_list);
+
+			mutex_lock(&tegra->sync_lock);
+			list_add_tail(&port_ptr->downgraded_list,
+				&hub_downgraded_list);
+			/* Port Power off for downgraded USB3.0 port */
+			portsc = xhci_readl(xhci,
+				xhci->usb3_ports[udev->portnum - 1]);
+			portsc &= ~PORT_POWER;
+			xhci_writel(xhci, portsc,
+				xhci->usb3_ports[udev->portnum - 1]);
+			mutex_unlock(&tegra->sync_lock);
+		}
+	}
+	return xhci_update_device(hcd, udev);
+}
+
 static void tegra_xhci_endpoint_soft_retry(struct usb_hcd *hcd,
 		struct usb_host_endpoint *ep, bool on)
 {
@@ -4564,6 +4710,7 @@ static const struct hc_driver tegra_plat_xhci_driver = {
 	.address_device =	xhci_address_device,
 	.update_hub_device =	tegra_xhci_update_hub_device,
 	.reset_device =		xhci_discover_or_reset_device,
+	.update_device =	tegra_xhci_update_device,
 
 	/*
 	 * scheduling support
