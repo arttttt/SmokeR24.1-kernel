@@ -41,4 +41,7 @@
 /* device can't handle Link Power Management */
 #define USB_QUIRK_NO_LPM			BIT(10)
 
+/* Downgrade SS device to USB2 mode */
+#define USB_QUIRK_DOWNGRADE_USB3	BIT(12)
+
 #endif /* __LINUX_USB_QUIRKS_H */
