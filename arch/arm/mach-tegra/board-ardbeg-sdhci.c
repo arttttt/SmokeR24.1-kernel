@@ -44,11 +44,6 @@
 #define ARDBEG_WLAN_RST	TEGRA_GPIO_PCC5
 #define ARDBEG_WLAN_PWR	TEGRA_GPIO_PX7
 #define ARDBEG_WLAN_WOW	TEGRA_GPIO_PU5
-#if defined(CONFIG_BCMDHD_EDP_SUPPORT)
-#define ON 3070 /* 3069mW */
-#define OFF 0
-static unsigned int wifi_states[] = {ON, OFF};
-#endif
 
 #define ARDBEG_SD_CD	TEGRA_GPIO_PV2
 #define ARDBEG_SD_WP	TEGRA_GPIO_PQ4
@@ -57,63 +52,6 @@ static unsigned int wifi_states[] = {ON, OFF};
 static void (*wifi_status_cb)(int card_present, void *dev_id);
 static void *wifi_status_cb_devid;
 static int ardbeg_wifi_status_register(void (*callback)(int , void *), void *);
-
-static int ardbeg_wifi_reset(int on);
-static int ardbeg_wifi_power(int on);
-static int ardbeg_wifi_set_carddetect(int val);
-static int ardbeg_wifi_get_mac_addr(unsigned char *buf);
-
-static struct wifi_platform_data ardbeg_wifi_control = {
-	.set_power	= ardbeg_wifi_power,
-	.set_reset	= ardbeg_wifi_reset,
-	.set_carddetect	= ardbeg_wifi_set_carddetect,
-	.get_mac_addr	= ardbeg_wifi_get_mac_addr,
-#if defined (CONFIG_BCMDHD_EDP_SUPPORT)
-	/* wifi edp client information */
-	.client_info	= {
-		.name		= "wifi_edp_client",
-		.states		= wifi_states,
-		.num_states	= ARRAY_SIZE(wifi_states),
-		.e0_index	= 0,
-		.priority	= EDP_MAX_PRIO,
-	},
-#endif
-};
-
-static struct resource wifi_resource[] = {
-	[0] = {
-		.name	= "bcm4329_wlan_irq",
-		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL
-				| IORESOURCE_IRQ_SHAREABLE,
-	},
-};
-
-static struct platform_device ardbeg_wifi_device = {
-	.name		= "bcm4329_wlan",
-	.id		= 1,
-	.num_resources	= 1,
-	.resource	= wifi_resource,
-	.dev		= {
-		.platform_data = &ardbeg_wifi_control,
-	},
-};
-
-static struct resource mrvl_wifi_resource[] = {
-	[0] = {
-		.name   = "mrvl_wlan_irq",
-		.flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWLEVEL | IORESOURCE_IRQ_SHAREABLE,
-	},
-};
-
-static struct platform_device marvell_wifi_device = {
-	.name           = "mrvl_wlan",
-	.id             = 1,
-	.num_resources  = 1,
-	.resource       = mrvl_wifi_resource,
-	.dev            = {
-		.platform_data = &ardbeg_wifi_control,
-	},
-};
 
 static struct resource sdhci_resource0[] = {
 	[0] = {
@@ -275,174 +213,6 @@ static int ardbeg_wifi_status_register(
 	return 0;
 }
 
-static int ardbeg_wifi_set_carddetect(int val)
-{
-	pr_debug("%s: %d\n", __func__, val);
-	if (wifi_status_cb)
-		wifi_status_cb(val, wifi_status_cb_devid);
-	else
-		pr_warn("%s: Nobody to notify\n", __func__);
-	return 0;
-}
-
-static int ardbeg_wifi_power(int on)
-{
-	pr_err("%s: %d\n", __func__, on);
-
-	gpio_set_value(ARDBEG_WLAN_PWR, on);
-	gpio_set_value(ARDBEG_WLAN_RST, on);
-	mdelay(100);
-
-	return 0;
-}
-
-static int ardbeg_wifi_reset(int on)
-{
-	pr_debug("%s: do nothing\n", __func__);
-	return 0;
-}
-
-static int _ardbeg_wifi_get_mac_addr_nct(unsigned char *buf)
-{
-	int ret = -ENODATA;
-#ifdef CONFIG_TEGRA_USE_NCT
-	union nct_item_type *entry = NULL;
-	entry = kmalloc(sizeof(union nct_item_type), GFP_KERNEL);
-	if (entry) {
-		if (!tegra_nct_read_item(NCT_ID_WIFI_MAC_ADDR, entry)) {
-			memcpy(buf, entry->wifi_mac_addr.addr,
-					sizeof(struct nct_mac_addr_type));
-			ret = 0;
-		}
-		kfree(entry);
-	}
-
-	if (ret)
-		pr_warn("%s: Couldn't find MAC address from NCT\n", __func__);
-#endif
-
-	return ret;
-}
-
-#define ARDBEG_WIFI_MAC_ADDR_FILE	"/mnt/factory/wifi/wifi_mac.txt"
-static int _ardbeg_wifi_get_mac_addr_file(unsigned char *buf)
-{
-	struct file *fp;
-	int rdlen;
-	char str[32];
-	int mac[6];
-	int ret = 0;
-
-	/* open wifi mac address file */
-	fp = filp_open(ARDBEG_WIFI_MAC_ADDR_FILE, O_RDONLY, 0);
-	if (IS_ERR(fp)) {
-		pr_err("%s: cannot open %s\n",
-			__func__, ARDBEG_WIFI_MAC_ADDR_FILE);
-		return -ENOENT;
-	}
-
-	/* read wifi mac address file */
-	memset(str, 0, sizeof(str));
-	rdlen = kernel_read(fp, fp->f_pos, str, 17);
-	if (rdlen > 0)
-		fp->f_pos += rdlen;
-	if (rdlen != 17) {
-		pr_err("%s: bad mac address file"
-			" - len %d < 17",
-			__func__, rdlen);
-		ret = -ENOENT;
-	} else if (sscanf(str, "%x:%x:%x:%x:%x:%x",
-		&mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6) {
-		pr_err("%s: bad mac address file"
-			" - must contain xx:xx:xx:xx:xx:xx\n",
-			__func__);
-		ret = -ENOENT;
-	} else {
-		pr_info("%s: using wifi mac %02x:%02x:%02x:%02x:%02x:%02x\n",
-			__func__,
-			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-		buf[0] = (unsigned char) mac[0];
-		buf[1] = (unsigned char) mac[1];
-		buf[2] = (unsigned char) mac[2];
-		buf[3] = (unsigned char) mac[3];
-		buf[4] = (unsigned char) mac[4];
-		buf[5] = (unsigned char) mac[5];
-	}
-
-	/* close wifi mac address file */
-	filp_close(fp, NULL);
-
-	return ret;
-}
-
-static int ardbeg_wifi_get_mac_addr(unsigned char *buf)
-{
-	/* try to get mac address stored in NCT first */
-	if (_ardbeg_wifi_get_mac_addr_nct(buf))
-		return _ardbeg_wifi_get_mac_addr_file(buf);
-
-	return 0;
-}
-
-static int __init ardbeg_wifi_init(void)
-{
-	int rc;
-	struct board_info board_info;
-
-	tegra_get_board_info(&board_info);
-
-	rc = gpio_request(ARDBEG_WLAN_PWR, "wlan_power");
-	if (rc)
-		pr_err("WLAN_PWR gpio request failed:%d\n", rc);
-	rc = gpio_request(ARDBEG_WLAN_RST, "wlan_rst");
-	if (rc)
-		pr_err("WLAN_RST gpio request failed:%d\n", rc);
-	rc = gpio_request(ARDBEG_WLAN_WOW, "bcmsdh_sdmmc");
-	if (rc)
-		pr_err("WLAN_WOW gpio request failed:%d\n", rc);
-
-	rc = gpio_direction_output(ARDBEG_WLAN_PWR, 0);
-	if (rc)
-		pr_err("WLAN_PWR gpio direction configuration failed:%d\n", rc);
-	rc = gpio_direction_output(ARDBEG_WLAN_RST, 0);
-	if (rc)
-		pr_err("WLAN_RST gpio direction configuration failed:%d\n", rc);
-
-	rc = gpio_direction_input(ARDBEG_WLAN_WOW);
-	if (rc)
-		pr_err("WLAN_WOW gpio direction configuration failed:%d\n", rc);
-
-	wifi_resource[0].start = wifi_resource[0].end =
-		gpio_to_irq(ARDBEG_WLAN_WOW);
-
-	platform_device_register(&ardbeg_wifi_device);
-
-	mrvl_wifi_resource[0].start = mrvl_wifi_resource[0].end =
-		gpio_to_irq(ARDBEG_WLAN_WOW);
-	platform_device_register(&marvell_wifi_device);
-
-	return 0;
-}
-
-#ifdef CONFIG_TEGRA_PREPOWER_WIFI
-static int __init ardbeg_wifi_prepower(void)
-{
-	if (!of_machine_is_compatible("nvidia,ardbeg") &&
-		!of_machine_is_compatible("nvidia,laguna") &&
-		!of_machine_is_compatible("nvidia,ardbeg_sata") &&
-		!of_machine_is_compatible("nvidia,tn8") &&
-		!of_machine_is_compatible("nvidia,norrin") &&
-		!of_machine_is_compatible("nvidia,bowmore") &&
-		!of_machine_is_compatible("nvidia,jetson-tk1"))
-		return 0;
-	ardbeg_wifi_power(1);
-
-	return 0;
-}
-
-subsys_initcall_sync(ardbeg_wifi_prepower);
-#endif
-
 int __init ardbeg_sdhci_init(void)
 {
 	int nominal_core_mv;
@@ -551,10 +321,8 @@ int __init ardbeg_sdhci_init(void)
 	if (!is_uart_over_sd_enabled())
 		platform_device_register(&tegra_sdhci_device2);
 	if (board_info.board_id != BOARD_PM359 &&
-			board_info.board_id != BOARD_PM375) {
+			board_info.board_id != BOARD_PM375)
 		platform_device_register(&tegra_sdhci_device0);
-		ardbeg_wifi_init();
-	}
 
 	return 0;
 }
