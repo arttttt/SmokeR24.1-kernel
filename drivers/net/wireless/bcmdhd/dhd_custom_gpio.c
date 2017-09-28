@@ -44,6 +44,12 @@
 
 #endif 
 
+#ifdef GET_CUSTOM_MAC_ENABLE
+static unsigned char mac[6];
+module_param_array(mac, byte, NULL, 0644);
+MODULE_PARM_DESC(mac, "DHD mac address");
+#endif 
+
 #if defined(OOB_INTR_ONLY)
 
 #if defined(BCMLXSDMMC)
@@ -128,7 +134,12 @@ dhd_custom_get_mac_address(void *adapter, unsigned char *buf)
 	/* Customer access to MAC address stored outside of DHD driver */
 #if defined(CUSTOMER_HW2)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
+	if ((mac[0] != 0) || (mac[1] != 0)) {
+ 		bcopy((char *)&mac, buf, 6);
+ 		return ret;
+ 	}
 	ret = wifi_platform_get_mac_addr(adapter, buf);
+	printk("get mac here\n");
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35) */
 #endif 
 
