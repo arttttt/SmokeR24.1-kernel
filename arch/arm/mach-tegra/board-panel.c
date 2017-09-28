@@ -114,8 +114,6 @@ int tegra_panel_reset(struct tegra_panel_of *panel, unsigned int delay_ms)
 
 static int tegra_bl_notify(struct device *dev, int brightness)
 {
-	int cur_sd_brightness;
-
 	struct lp855x *lp = NULL;
 	struct platform_device *pdev = NULL;
 	struct device *dc_dev;
@@ -161,10 +159,6 @@ static int tegra_bl_notify(struct device *dev, int brightness)
 
 	if (bl_curve)
 		brightness = bl_curve[brightness];
-
-	cur_sd_brightness = atomic_read(&sd_brightness);
-	/* SD brightness is a percentage */
-	brightness = (brightness * cur_sd_brightness) / 255;
 
 	if (bl_measured)
 		brightness = bl_measured[brightness];
