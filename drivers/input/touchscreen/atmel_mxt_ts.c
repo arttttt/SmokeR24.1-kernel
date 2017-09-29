@@ -3808,7 +3808,7 @@ static int mxt_proc_init(void)
 
 	buf = kzalloc(PATH_MAX, GFP_KERNEL);
 	if (buf)
-		path = "/sys/devices/platform/tegra12-i2c.3/i2c-3/3-004a";
+		path = "/sys/devices/platform/7000c700.i2c/i2c-3/3-004a";
 
 	proc_entry_tp = proc_mkdir("touchpanel", NULL);
 	if (proc_entry_tp == NULL) {
