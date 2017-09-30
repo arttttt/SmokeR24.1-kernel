@@ -27,6 +27,7 @@
 #include <linux/iio/machine.h>
 #include <linux/extcon.h>
 #include <linux/thermal.h>
+#include <linux/wakelock.h>
 
 #define PALMAS_NUM_CLIENTS	4
 
@@ -779,6 +780,7 @@ struct palmas_usb {
 	struct delayed_work cable_update_wq;
 	int cable_debounce_time;
 	int cur_cable_index;
+	struct wake_lock wakelock;
 };
 
 #define comparator_to_palmas(x) container_of((x), struct palmas_usb, comparator)

@@ -35,6 +35,7 @@
 #include <linux/workqueue.h>
 
 #define PALMAS_USB_ID_STATE_CONNECTED		1
+#define TEMPORARY_HOLD_TIME_1000MS 		1000
 
 enum palmas_usb_cable_id {
 	USB_CABLE_INIT,
@@ -208,6 +209,9 @@ static irqreturn_t palmas_vbus_irq_handler(int irq, void *_palmas_usb)
 	struct palmas_usb *palmas_usb = _palmas_usb;
 	unsigned int vbus_line_state;
 
+	wake_lock_timeout(&palmas_usb->wakelock,
+			msecs_to_jiffies(TEMPORARY_HOLD_TIME_1000MS));
+
 	palmas_read(palmas_usb->palmas, PALMAS_INTERRUPT_BASE,
 		PALMAS_INT3_LINE_STATE, &vbus_line_state);
 
@@ -246,6 +250,9 @@ static irqreturn_t palmas_id_irq_handler(int irq, void *_palmas_usb)
 {
 	unsigned int set;
 	struct palmas_usb *palmas_usb = _palmas_usb;
+
+	wake_lock_timeout(&palmas_usb->wakelock,
+			msecs_to_jiffies(TEMPORARY_HOLD_TIME_1000MS));
 
 	palmas_read(palmas_usb->palmas, PALMAS_USB_OTG_BASE,
 		PALMAS_USB_ID_INT_LATCH_SET, &set);
@@ -402,6 +409,9 @@ static int palmas_usb_probe(struct platform_device *pdev)
 			goto fail_extcon;
 		}
 	}
+
+	wake_lock_init(&palmas_usb->wakelock, WAKE_LOCK_SUSPEND,
+						"PALMAS_USB_WAKE_LOCK");
 
 	palmas_enable_irq(palmas_usb);
 	device_set_wakeup_capable(&pdev->dev, true);
