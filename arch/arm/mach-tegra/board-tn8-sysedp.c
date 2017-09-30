@@ -60,7 +60,7 @@ static struct sysedp_consumer_data tn8_sysedp_consumer_data[] = {
 	SYSEDP_CONSUMER_DATA("mt9m114", mt9m114_states),
 	SYSEDP_CONSUMER_DATA("speaker", speaker_states),
 	SYSEDP_CONSUMER_DATA("wifi", wifi_states),
-	SYSEDP_CONSUMER_DATA("pwm-backlight", pwm_backlight_default_states),
+	SYSEDP_CONSUMER_DATA("lcd-backlight", pwm_backlight_default_states),
 	SYSEDP_CONSUMER_DATA("sdhci-tegra.2", sdhci_states),
 	SYSEDP_CONSUMER_DATA("sdhci-tegra.3", sdhci_states),
 	SYSEDP_CONSUMER_DATA("as364x", as364x_states),
