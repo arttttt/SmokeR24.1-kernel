@@ -90,59 +90,6 @@
 #include "tegra-of-dev-auxdata.h"
 
 static struct board_info board_info, display_board_info;
-#ifndef CONFIG_USE_OF
-static struct resource ardbeg_bluedroid_pm_resources[] = {
-	[0] = {
-		.name   = "shutdown_gpio",
-		.start  = TEGRA_GPIO_PR1,
-		.end    = TEGRA_GPIO_PR1,
-		.flags  = IORESOURCE_IO,
-	},
-	[1] = {
-		.name = "host_wake",
-		.flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
-	},
-	[2] = {
-		.name = "gpio_ext_wake",
-		.start  = TEGRA_GPIO_PEE1,
-		.end    = TEGRA_GPIO_PEE1,
-		.flags  = IORESOURCE_IO,
-	},
-	[3] = {
-		.name = "gpio_host_wake",
-		.start  = TEGRA_GPIO_PU6,
-		.end    = TEGRA_GPIO_PU6,
-		.flags  = IORESOURCE_IO,
-	},
-	[4] = {
-		.name = "reset_gpio",
-		.start  = TEGRA_GPIO_PX1,
-		.end    = TEGRA_GPIO_PX1,
-		.flags  = IORESOURCE_IO,
-	},
-};
-
-static struct platform_device ardbeg_bluedroid_pm_device = {
-	.name = "bluedroid_pm",
-	.id             = 0,
-	.num_resources  = ARRAY_SIZE(ardbeg_bluedroid_pm_resources),
-	.resource       = ardbeg_bluedroid_pm_resources,
-};
-
-static noinline void __init ardbeg_setup_bluedroid_pm(void)
-{
-	struct board_info board_info;
-
-	tegra_get_board_info(&board_info);
-	if (board_info.board_id == BOARD_E2141)
-		ardbeg_bluedroid_pm_resources[0].name = "";
-
-	ardbeg_bluedroid_pm_resources[1].start =
-		ardbeg_bluedroid_pm_resources[1].end =
-				gpio_to_irq(TEGRA_GPIO_PU6);
-	platform_device_register(&ardbeg_bluedroid_pm_device);
-}
-#endif
 
 static __initdata struct tegra_clk_init_table ardbeg_clk_init_table[] = {
 	/* name		parent		rate		enabled */
@@ -805,9 +752,7 @@ static void __init tegra_ardbeg_late_init(void)
 		ardbeg_sensors_init();
 		ardbeg_soctherm_init();
 	}
-#ifndef CONFIG_USE_OF
-	ardbeg_setup_bluedroid_pm();
-#endif
+
 	ardbeg_sysedp_dynamic_capping_init();
 }
 
