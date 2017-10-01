@@ -309,6 +309,7 @@ static void ardbeg_usb_init(void)
 
 	/* ST8 is supported through DT, return */
 	if (board_info.board_id == BOARD_P1761 ||
+			board_info.board_id == BOARD_E1780 ||
 			of_machine_is_compatible("nvidia,green-arrow"))
 		return;
 
