@@ -61,6 +61,12 @@
 		usb_bat_chg-supply = <&battery_charger>;
 		usb_vbus-supply = <&usb0_vbus_reg>;
 	};
+
+	ehci@7d000000 {
+		avdd_usb-supply = <&ldousb_reg>;
+		avdd_pll_utmip-supply = <&palmas_smps8>;
+		usb_vbus-supply = <&usb0_vbus_reg>;
+	};
 	
 	i2c@7000c700 {
 		atmel_mxt_ts@4a {
