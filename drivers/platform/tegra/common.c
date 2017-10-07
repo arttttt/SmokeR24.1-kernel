@@ -1826,7 +1826,7 @@ static struct platform_device ramoops_dev  = {
 static void __init tegra_reserve_ramoops_memory(unsigned long reserve_size)
 {
 	ramoops_data.mem_size = reserve_size;
-	ramoops_data.mem_address = memblock_end_of_4G() - reserve_size;
+	ramoops_data.mem_address = 0xef800000;
 	ramoops_data.record_size = RECORD_MEM_SIZE;
 #ifdef CONFIG_PSTORE_CONSOLE
 	ramoops_data.console_size = CONSOLE_MEM_SIZE;
