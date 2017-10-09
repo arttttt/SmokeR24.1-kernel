@@ -1353,7 +1353,7 @@ static struct thermal_zone_params cpu_tzp = {
 };
 
 static struct thermal_zone_params board_tzp = {
-	.governor_name = "pid_thermal_gov"
+	.governor_name = "step_wise"
 };
 
 static struct nct1008_platform_data ardbeg_nct72_pdata = {
