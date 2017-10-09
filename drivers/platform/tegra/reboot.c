@@ -96,7 +96,7 @@ static int tegra_restart_notify(struct notifier_block *nb,
 
 	/* program reboot reason for the bootloader */
 	ret = program_reboot_reason(cmd);
-	if (ret && pm_power_reset) {
+	if (pm_power_reset) {
 		pr_info("%s: using %pF()\n", __func__, pm_power_reset);
 		pm_power_reset();
 	}
