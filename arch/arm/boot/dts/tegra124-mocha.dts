@@ -94,6 +94,37 @@
 		};
 	};
 
+	i2c@7000c700 {
+		nvidia,clock-always-on;
+		clock-frequency = <400000>;
+
+		synaptics_dsi_i2c@20 {
+			compatible = "synaptics,dsx-i2c";
+			reg = <0x20>;
+
+			synaptics,x-flip = <0>;
+			synaptics,y-flip = <0>;
+			synaptics,swap-axes = <0>;
+			synaptics,irq-gpio = <&gpio 143 0>;
+			synaptics,irq-on-state = <0>;
+			synaptics,power-on-state = <1>;
+			synaptics,reset-gpio = <&gpio 84 0>;
+			synaptics,reset-on-state = <0>;
+			synaptics,irq-flags = <0x2008>;
+			synaptics,fw-name = "synaptics_7040_firmware.fw";
+			synaptics,self-test-name = "synaptics_7040_test_data.fw";
+			synaptics,panel-x = <1536>;
+			synaptics,panel-y = <2048>;
+			synaptics,power-delay-ms = <160>;
+			synaptics,reset-delay-ms = <100>;
+			synaptics,reset-active-ms = <20>;
+			synaptics,byte-delay-us = <20>;
+			synaptics,block-delay-us = <20>;
+			synaptics,regulator-name = "vdd-touch";
+			synaptics,cap-button-map = <139 102 158 116>;
+		};
+	};
+
 	i2c@7000c000 {
 		backlight@2c {
 			compatible = "ti,lp8556";
