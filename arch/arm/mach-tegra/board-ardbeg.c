@@ -75,6 +75,8 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <mach/xusb.h>
+#include <linux/i2c/atmel_mxt_ts.h>
+#include <linux/firmware.h>
 
 #include "board.h"
 #include "board-ardbeg.h"
@@ -573,6 +575,130 @@ static struct of_dev_auxdata ardbeg_auxdata_lookup[] __initdata = {
 };
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_ATMEL_MXT
+
+#define TP_GPIO_RESET			TEGRA_GPIO_PK4
+#define TP_GPIO_INTR			TEGRA_GPIO_PR7
+
+#include "mxT1664T.h"
+#include "mxT1066T.h"
+#define MXT1664T_FIRMWARE		"mxt1664t_fw"
+#define MXT1066T_FIRMWARE		"mxt1066t_fw"
+#define MXT1664T_LENS_CONFIG_NO_DUMMY		"mxt1664t_lens_config_no_dummy.cfg"
+#define MXT1664T_LENS_CONFIG_WITH_DUMMY		"mxt1664t_lens_config_with_dummy.cfg"
+#define MXT1066T_LENS_CONFIG			"mxt1066t_lens_config.cfg"
+ 
+static unsigned char mXT1664T_lens_config_no_dummy[] = {
+ 	#include "mxt_lens_1664t_config_no_dummy.h"
+};
+ 
+static unsigned char mXT1664T_lens_config_with_dummy[] = {
+ 	#include "mxt_lens_1664t_config_with_dummy.h"
+};
+ 
+static unsigned char mXT1066T_lens_config[] = {
+	#include "mxt_lens_1066t_config.h"
+};
+ 
+DECLARE_BUILTIN_FIRMWARE_SIZE(MXT1664T_FIRMWARE, mXT1664Tfw, sizeof(mXT1664Tfw)-1);
+DECLARE_BUILTIN_FIRMWARE_SIZE(MXT1066T_FIRMWARE, mXT1066Tfw, sizeof(mXT1066Tfw)-1);
+DECLARE_BUILTIN_FIRMWARE_SIZE(MXT1664T_LENS_CONFIG_NO_DUMMY, \
+ 						mXT1664T_lens_config_no_dummy, \
+ 						sizeof(mXT1664T_lens_config_no_dummy)-1);
+DECLARE_BUILTIN_FIRMWARE_SIZE(MXT1664T_LENS_CONFIG_WITH_DUMMY, \
+ 						mXT1664T_lens_config_with_dummy, \
+ 						sizeof(mXT1664T_lens_config_with_dummy)-1);
+DECLARE_BUILTIN_FIRMWARE_SIZE(MXT1066T_LENS_CONFIG, \
+ 						mXT1066T_lens_config, \
+ 						sizeof(mXT1066T_lens_config)-1);
+ 
+static int mxt_lens_1664t_key_codes[MXT_KEYARRAY_MAX_KEYS] = {
+ 	KEY_BACK, KEY_HOME, KEY_MENU, KEY_POWER,
+};
+
+static int mxt_lens_1066t_key_codes[MXT_KEYARRAY_MAX_KEYS] = {
+ 	KEY_MENU, KEY_HOME, KEY_BACK, KEY_POWER,
+};
+ 
+static struct mxt_config_info mxt_config_array[] = {
+ 	{
+ 		.family_id	= 0xA4,
+ 		.variant_id	= 0x04,
+ 		.version	= 0x10,
+ 		.build		= 0xAA,
+ 		.user_id	= 0x00,
+ 		.bootldr_id	= 0x48,
+ 		.mxt_cfg_name	= MXT1664T_LENS_CONFIG_NO_DUMMY,
+ 		.vendor_id	= 0x4,
+ 		.key_codes		= mxt_lens_1664t_key_codes,
+ 		.key_num		= 4,
+ 		.mxt_fw_name		= MXT1664T_FIRMWARE,
+ 	},
+ 	{
+ 		.family_id	= 0xA4,
+ 		.variant_id	= 0x04,
+ 		.version	= 0x10,
+ 		.build		= 0xAA,
+ 		.user_id	= 0xAA,
+ 		.bootldr_id	= 0x48,
+ 		.mxt_cfg_name	= MXT1664T_LENS_CONFIG_WITH_DUMMY,
+ 		.vendor_id	= 0x4,
+ 		.key_codes		= mxt_lens_1664t_key_codes,
+ 		.key_num		= 4,
+ 		.mxt_fw_name		= MXT1664T_FIRMWARE,
+ 	},
+ 	{
+ 		.family_id	= 0xA4,
+ 		.variant_id	= 0x0B,
+ 		.version	= 0x12,
+ 		.build		= 0xAA,
+ 		.user_id	= 0x00,
+ 		.bootldr_id	= 0x51,
+ 		.mxt_cfg_name	= MXT1066T_LENS_CONFIG,
+ 		.vendor_id	= 0x4,
+ 		.key_codes		= mxt_lens_1066t_key_codes,
+ 		.key_num		= 4,
+ 		.mxt_fw_name		= MXT1066T_FIRMWARE,
+ 	},
+};
+
+static struct mxt_platform_data mxt_platform_data = {
+ 	.config_array		= mxt_config_array,
+ 	.config_array_size		= ARRAY_SIZE(mxt_config_array),
+ 	.irqflags		= IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+ 	.power_gpio		= -1,
+ 	.reset_gpio		= TP_GPIO_RESET,
+ 	.irq_gpio		= TP_GPIO_INTR,
+ 	.gpio_mask		= 0xc,
+ 	.vendor_info		= 0x03eb,
+ 	.product_info		= 0x214f,
+ };
+ 
+static struct i2c_board_info mxt_device_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("atmel_mxt_ts", 0x4a),
+ 		.platform_data = &mxt_platform_data,
+ 	},
+};
+ 
+#endif
+
+static int __init ardbeg_touch_init(void)
+{
+#ifdef CONFIG_TOUCHSCREEN_ATMEL_MXT	
+ 	int i;
+ 	
+ 	pr_info(" %s init atmel touch\n", __func__);
+ 	for (i = 0; i < ARRAY_SIZE(mxt_device_info); i++) {
+ 		mxt_device_info[i].irq = gpio_to_irq(TP_GPIO_INTR);
+ 	}		
+ 
+ 	i2c_register_board_info(3, mxt_device_info, ARRAY_SIZE(mxt_device_info));			
+#endif	
+
+	return 0;
+}
+
 static void __init ardbeg_sysedp_init(void)
 {
 	struct board_info bi;
@@ -723,6 +849,7 @@ static void __init tegra_ardbeg_late_init(void)
 		ardbeg_emc_init();
 
 	isomgr_init();
+	ardbeg_touch_init();
 
 	if (board_info.board_id == BOARD_E2548 ||
 			board_info.board_id == BOARD_P2530)

@@ -555,6 +555,7 @@ struct mxt_data {
 	u8 t100_tchaux_bits;
 	unsigned long keystatus;
 	u8 vendor_id;
+	u8 user_id;
 	int current_index;
 	u8 update_flag;
 	u8 test_result[6];
@@ -2133,19 +2134,28 @@ static int mxt_probe_power_cfg(struct mxt_data *data)
 	return 0;
 }
 
-static const char *mxt_get_config(struct mxt_data *data)
+static const char *mxt_get_config(struct mxt_data *data, bool is_default)
 {
 	struct device *dev = &data->client->dev;
 	const struct mxt_platform_data *pdata = data->pdata;
 	int i;
 
 	for (i = 0; i < pdata->config_array_size; i++) {
-		if (data->info.family_id == pdata->config_array[i].family_id &&
-			data->info.variant_id == pdata->config_array[i].variant_id) {
-			dev_info(dev, "select config %d, config name = %s\n", i, pdata->config_array[i].mxt_cfg_name);
-			data->current_index = i;
+ 		if (data->info.family_id == pdata->config_array[i].family_id &&
+ 			data->info.variant_id == pdata->config_array[i].variant_id &&
+ 			data->info.version == pdata->config_array[i].version &&
+ 			data->info.build == pdata->config_array[i].build) {
+ 			if (!is_default) {
+ 				if (data->user_id == pdata->config_array[i].user_id) {
+ 					dev_info(dev, "select config %d, config name = %s\n", i, pdata->config_array[i].mxt_cfg_name);
+ 					data->current_index = i;
 
-			return  pdata->config_array[i].mxt_cfg_name;
+ 					return  pdata->config_array[i].mxt_cfg_name;
+ 				}
+ 			} else {
+ 				data->current_index = i;
+ 				return  pdata->config_array[i].mxt_cfg_name;
+ 			}
 		}
 	}
 
@@ -2206,13 +2216,41 @@ static int mxt_backup_nv(struct mxt_data *data)
 	return 0;
 }
 
+static int mxt_read_user_id(struct mxt_data *data)
+{
+ 	struct device *dev = &data->client->dev;
+ 	int error;
+ 	u8 val;
+ 
+ 	error = mxt_read_object(data, MXT_SPT_USERDATA_T38, 0, &val);
+ 	if (error) {
+ 		dev_err(dev, "Failed to read t38 user id!\n");
+ 		return error;
+ 	}
+ 
+ 	data->user_id = val;
+ 
+ 	return 0;
+}
+
 static int mxt_check_reg_init(struct mxt_data *data)
 {
 	struct device *dev = &data->client->dev;
 	int ret;
 	const char *config_name = NULL;
+	bool is_recheck = false;
 
-	config_name = mxt_get_config(data);
+ 
+start:
+ 	ret = mxt_read_user_id(data);
+ 	if (ret) {
+ 		dev_err(dev, "Can not get user id, just give default one!\n");
+ 		config_name = mxt_get_config(data, true);
+ 		is_recheck = true;
+ 	} else {
+ 		config_name = mxt_get_config(data, false);
+ 		is_recheck = false;
+ 	}
 
 	if (config_name == NULL) {
 		dev_info(dev, "Not found matched config!\n");
@@ -2232,6 +2270,9 @@ static int mxt_check_reg_init(struct mxt_data *data)
 		dev_err(dev, "back nv failed!\n");
 		return ret;
 	}
+
+	if (is_recheck)
+ 		goto start;
 
 	ret = mxt_check_power_cfg_post_reset(data);
 	if (ret)
