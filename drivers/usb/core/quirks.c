@@ -182,6 +182,12 @@ static const struct usb_device_id usb_quirk_list[] = {
 	/* Sandisk Extreme USB 3.0 64GB */
 	{ USB_DEVICE(0x0781, 0x5580), .driver_info = USB_QUIRK_ENABLE_U1U2 },
 
+	/* NVIDIA GTX model 1 flash disk */
+	{ USB_DEVICE(0x8564, 0x1000), .driver_info = USB_QUIRK_DOWNGRADE_USB3 },
+
+	/* NVIDIA GTX model 2 flash disk */
+	{ USB_DEVICE(0x8564, 0x2000), .driver_info = USB_QUIRK_DOWNGRADE_USB3 },
+
 	{ }  /* terminating entry must be last */
 };
 
