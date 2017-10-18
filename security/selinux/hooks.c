@@ -84,6 +84,7 @@
 #include <linux/export.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
+#include <linux/bpf.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -5784,9 +5785,117 @@ static int selinux_key_getsecurity(struct key *key, char **_buffer)
 
 #endif
 
+#ifdef CONFIG_BPF_SYSCALL
+static int selinux_bpf(int cmd, union bpf_attr *attr,
+				     unsigned int size)
+{
+	u32 sid = current_sid();
+	int ret;
+
+	switch (cmd) {
+	case BPF_MAP_CREATE:
+		ret = avc_has_perm(sid, sid, SECCLASS_BPF, BPF__MAP_CREATE,
+				   NULL);
+		break;
+	case BPF_PROG_LOAD:
+		ret = avc_has_perm(sid, sid, SECCLASS_BPF, BPF__PROG_LOAD,
+				   NULL);
+		break;
+	default:
+		ret = 0;
+		break;
+	}
+
+	return ret;
+}
+
+static u32 bpf_map_fmode_to_av(fmode_t fmode)
+{
+	u32 av = 0;
+
+	if (fmode & FMODE_READ)
+		av |= BPF__MAP_READ;
+	if (fmode & FMODE_WRITE)
+		av |= BPF__MAP_WRITE;
+	return av;
+}
+
+static int selinux_bpf_map(struct bpf_map *map, fmode_t fmode)
+{
+	u32 sid = current_sid();
+	struct bpf_security_struct *bpfsec;
+
+	bpfsec = map->security;
+	return avc_has_perm(sid, bpfsec->sid, SECCLASS_BPF,
+			    bpf_map_fmode_to_av(fmode), NULL);
+}
+
+static int selinux_bpf_prog(struct bpf_prog *prog)
+{
+	u32 sid = current_sid();
+	struct bpf_security_struct *bpfsec;
+
+	bpfsec = prog->aux->security;
+	return avc_has_perm(sid, bpfsec->sid, SECCLASS_BPF,
+			    BPF__PROG_RUN, NULL);
+}
+
+static int selinux_bpf_map_alloc(struct bpf_map *map)
+{
+	struct bpf_security_struct *bpfsec;
+
+	bpfsec = kzalloc(sizeof(*bpfsec), GFP_KERNEL);
+	if (!bpfsec)
+		return -ENOMEM;
+
+	bpfsec->sid = current_sid();
+	map->security = bpfsec;
+
+	return 0;
+}
+
+static void selinux_bpf_map_free(struct bpf_map *map)
+{
+	struct bpf_security_struct *bpfsec = map->security;
+
+	map->security = NULL;
+	kfree(bpfsec);
+}
+
+static int selinux_bpf_prog_alloc(struct bpf_prog_aux *aux)
+{
+	struct bpf_security_struct *bpfsec;
+
+	bpfsec = kzalloc(sizeof(*bpfsec), GFP_KERNEL);
+	if (!bpfsec)
+		return -ENOMEM;
+
+	bpfsec->sid = current_sid();
+	aux->security = bpfsec;
+
+	return 0;
+}
+
+static void selinux_bpf_prog_free(struct bpf_prog_aux *aux)
+{
+	struct bpf_security_struct *bpfsec = aux->security;
+
+	aux->security = NULL;
+	kfree(bpfsec);
+}
+#endif
+
 static struct security_operations selinux_ops = {
 	.name =				"selinux",
-
+#ifdef CONFIG_BPF_SYSCALL
+	.bpf =                          selinux_bpf,
+	.bpf_map =                      selinux_bpf_map,
+	.bpf_prog =                     selinux_bpf_prog,
+	.bpf_map_alloc_security =       selinux_bpf_map_alloc,
+	.bpf_map_free_security =        selinux_bpf_map_free,
+	.bpf_prog_alloc_security =      selinux_bpf_prog_alloc,
+	.bpf_prog_free_security =       selinux_bpf_prog_free,
+#endif
 	.binder_set_context_mgr =	selinux_binder_set_context_mgr,
 	.binder_transaction =		selinux_binder_transaction,
 	.binder_transfer_binder =	selinux_binder_transfer_binder,
