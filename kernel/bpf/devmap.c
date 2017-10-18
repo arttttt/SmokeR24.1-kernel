@@ -61,6 +61,9 @@ static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
 	u64 cost;
 	int err;
 
+	if (!capable(CAP_NET_ADMIN))
+		return ERR_PTR(-EPERM);
+
 	/* check sanity of attributes */
 	if (attr->max_entries == 0 || attr->key_size != 4 ||
 	    attr->value_size != 4 || attr->map_flags)
