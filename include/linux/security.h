@@ -22,6 +22,7 @@
 #ifndef __LINUX_SECURITY_H
 #define __LINUX_SECURITY_H
 
+#include <linux/bpf.h>
 #include <linux/key.h>
 #include <linux/capability.h>
 #include <linux/slab.h>
@@ -1706,6 +1707,38 @@ extern void __init security_fixup_ops(struct security_operations *ops);
 
 
 /* Security operations */
+
+#ifdef CONFIG_BPF_SYSCALL
+int security_bpf(int cmd, union bpf_attr *attr, unsigned int size)
+{
+	return security_ops->bpf(cmd, attr, size);
+}
+int security_bpf_map(struct bpf_map *map, fmode_t fmode)
+{
+	return security_ops->bpf_map(map, fmode);
+}
+int security_bpf_prog(struct bpf_prog *prog)
+{
+	return security_ops->bpf_prog(prog);
+}
+int security_bpf_map_alloc(struct bpf_map *map)
+{
+	return security_ops->bpf_map_alloc_security(map);
+}
+int security_bpf_prog_alloc(struct bpf_prog_aux *aux)
+{
+	return security_ops->bpf_prog_alloc_security(aux);
+}
+void security_bpf_map_free(struct bpf_map *map)
+{
+	security_ops->bpf_map_free_security(map);
+}
+void security_bpf_prog_free(struct bpf_prog_aux *aux)
+{
+	security_ops->bpf_prog_free_security(aux);
+}
+#endif /* CONFIG_BPF_SYSCALL */
+
 int security_binder_set_context_mgr(struct task_struct *mgr);
 int security_binder_transaction(struct task_struct *from, struct task_struct *to);
 int security_binder_transfer_binder(struct task_struct *from, struct task_struct *to);
