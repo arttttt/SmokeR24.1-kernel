@@ -470,6 +470,8 @@ struct tegra_xhci_hcd {
 
 	struct tegra_rx_ctrl_ops *rx_ctrl_ops;
 	struct usb_downgraded_port degraded_port[XUSB_SS_PORT_COUNT];
+	struct device_attribute downgrade_usb3_attr;
+	unsigned int downgrade_enabled;
 };
 
 #define NOT_SUPPORTED	0xFFFFFFFF
