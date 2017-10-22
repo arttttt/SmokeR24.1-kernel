@@ -40,6 +40,8 @@
 	
 	bcmdhd_wlan {
 		compatible = "android,bcmdhd_wlan";
+		sdhci-host = <&sdmmc1>;
+		edp-consumer-name = "primary-wifi";
 		interrupt-parent = <&gpio>;
 		interrupts = <TEGRA_GPIO(U, 5) 0x14>;
 		wlan-pwr-gpio = <&gpio TEGRA_GPIO(X, 7) 0>;
