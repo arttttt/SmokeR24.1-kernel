@@ -1,3 +1,19 @@
+/*
+ * arch/arm/boot/dts/tegra124-platforms/tegra124-mocha-wireless.dtsi
+ *
+ * Copyright (c) 2017, SmokeTeam. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ */
+
 / {
 	gpio: gpio@6000d000 {
 		gpio-init-1 = <&wlan_default>;
