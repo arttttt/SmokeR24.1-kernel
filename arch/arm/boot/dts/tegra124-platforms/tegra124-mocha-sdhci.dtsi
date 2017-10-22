@@ -1,0 +1,78 @@
+/*
+ * arch/arm/boot/dts/tegra124-platforms/tegra124-mocha-sdhci.dtsi
+ *
+ * Copyright (c) 2017, SmokeTeam. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ */
+ 
+#include <dt-bindings/gpio/tegra-gpio.h>
+
+/ {
+	
+ 	aliases {
+ 		sdhci0 = &sdmmc1;
+		sdhci2 = &sdmmc3;
+		sdhci3 = &sdmmc4;
+	};
+	
+	/* MMC */
+	sdmmc4: sdhci@700b0600 {
+		id = <3>;
+		bus_width = <8>;
+		built-in;
+		mmc-ocr-mask = <0>;
+		tap-delay = <4>;
+		power-off-rail;
+		trim-delay = <4>;
+		nvidia,is-ddr-trim-delay;
+		ddr-trim-delay = <0>;
+		calib-3v3-offsets = <0x0202>;
+		calib-1v8-offsets = <0x0202>;
+		ddr-clk-limit = <51000000>;
+		max-clk-limit = <200000000>;
+		status = "okay";
+ 	};
+	
+	/* SDcard */
+	sdmmc3: sdhci@700b0400 {
+		id = <2>;
+		cd-gpios = <&gpio TEGRA_GPIO(V, 2) 0>;
+ 		tap-delay = <0>;
+		power-off-rail = <1>;
+ 		trim-delay = <3>;
+ 		uhs_mask = <8>;
+ 		power-gpios = <&gpio TEGRA_GPIO(R, 0) 0>;
+		calib-3v3-offsets = <0x7676>;
+		calib-1v8-offsets = <0x7676>;
+		ddr-clk-limit = <41000000>;
+		max-clk-limit = <204000000>;
+		nvidia,enable-ext-loopback = <1>;
+ 		status = "okay";
+ 	};
+	
+	/* Wi-Fi */
+ 	sdmmc1: sdhci@700b0000 {
+		id = <0>;
+ 		tap-delay = <0>;
+		power-off-rail = <1>;
+ 		trim-delay = <2>;
+ 		uhs_mask = <8>;
+		calib-3v3-offsets = <0x7676>;
+		calib-1v8-offsets = <0x7676>;
+		max-clk-limit = <136000000>;
+		ddr-clk-limit = <41000000>;
+		mmc-ocr-mask = <0>;
+		default-drv-type = <0>;
+		built-in;
+ 		status = "okay";
+ 	};
+};

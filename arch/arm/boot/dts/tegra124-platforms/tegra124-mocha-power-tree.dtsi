@@ -67,13 +67,23 @@
 		avdd_pll_utmip-supply = <&palmas_smps8>;
 		usb_vbus-supply = <&usb0_vbus_reg>;
 	};
-	
+
 	i2c@7000c700 {
 		atmel_mxt_ts@4a {
 			vdd-touch-supply = <&ldo3_reg>;
 		};
 	};
+
 	sound {
 		ldoen-supply = <&ldoen>;
+	};
+
+	sdhci@700b0600 {
+		vddio_sd_slot-supply = <&palmas_smps9>;
+		vddio_sdmmc-supply = <&palmas_smps8>;
+	};
+
+	sdhci@700b0400 {
+		vddio_sd_slot-supply = <&palmas_smps9>;
 	};
 };

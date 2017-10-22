@@ -308,14 +308,14 @@
 							};
 							c11 {
 								regulator-consumer-supply = "vddio_sdmmc";
-								regulator-consumer-device = "sdhci-tegra.0";
+								regulator-consumer-device = "700b0000.sdhci";
 							};
 							c12 {
 								regulator-consumer-supply = "pwrdet_sdmmc1";
 							};
 							c13 {
 								regulator-consumer-supply = "vddio_sdmmc";
-								regulator-consumer-device = "sdhci-tegra.3";
+								regulator-consumer-device = "700b0600.sdhci";
 							};
 							c14 {
 								regulator-consumer-supply = "pwrdet_sdmmc4";
@@ -411,11 +411,11 @@
 							};
 							c2 {
 								regulator-consumer-supply = "vddio_sd_slot";
-								regulator-consumer-device = "sdhci-tegra.3";
+								regulator-consumer-device = "700b0600.sdhci";
 							};
 							c3 {
 								regulator-consumer-supply = "vddio_sd_slot";
-								regulator-consumer-device = "sdhci-tegra.2";
+								regulator-consumer-device = "700b0400.sdhci";
 							};
 							c4 {
 								regulator-consumer-supply = "vdd_3v3_gps";
@@ -772,7 +772,7 @@
 						consumers {
 							c1 {
 								regulator-consumer-supply = "vddio_sdmmc";
-								regulator-consumer-device = "sdhci-tegra.2";
+								regulator-consumer-device = "700b0400.sdhci";
 							};
 							c2 {
 								regulator-consumer-supply = "pwrdet_sdmmc3";
