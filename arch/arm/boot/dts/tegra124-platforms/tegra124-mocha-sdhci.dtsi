@@ -44,35 +44,35 @@
 	
 	/* SDcard */
 	sdmmc3: sdhci@700b0400 {
-		id = <2>;
+		mmc-ocr-mask = <3>;
 		cd-gpios = <&gpio TEGRA_GPIO(V, 2) 0>;
- 		tap-delay = <0>;
-		power-off-rail = <1>;
- 		trim-delay = <3>;
- 		uhs_mask = <8>;
+		tap-delay = <0>;
+		power-off-rail;
+		trim-delay = <3>;
+		uhs-mask = <8>;
  		power-gpios = <&gpio TEGRA_GPIO(R, 0) 0>;
 		calib-3v3-offsets = <0x7676>;
 		calib-1v8-offsets = <0x7676>;
 		ddr-clk-limit = <41000000>;
 		max-clk-limit = <204000000>;
-		nvidia,enable-ext-loopback = <1>;
- 		status = "okay";
- 	};
+		nvidia,enable-ext-loopback;
+		status = "okay";
+	};
 	
 	/* Wi-Fi */
- 	sdmmc1: sdhci@700b0000 {
+	sdmmc1: sdhci@700b0000 {
 		id = <0>;
  		tap-delay = <0>;
-		power-off-rail = <1>;
+		power-off-rail;
  		trim-delay = <2>;
- 		uhs_mask = <8>;
+ 		uhs-mask = <8>;
 		calib-3v3-offsets = <0x7676>;
 		calib-1v8-offsets = <0x7676>;
 		max-clk-limit = <136000000>;
 		ddr-clk-limit = <41000000>;
 		mmc-ocr-mask = <0>;
-		default-drv-type = <0>;
+		default-drv-type = <1>;
 		built-in;
  		status = "okay";
- 	};
+	};
 };
