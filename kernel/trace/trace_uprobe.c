@@ -832,13 +832,12 @@ static void uprobe_perf_print(struct trace_uprobe *tu,
 {
 	struct ftrace_event_call *call = &tu->call;
 	struct uprobe_trace_entry_head *entry;
-	struct bpf_prog *prog = call->prog;
 	struct hlist_head *head;
 	void *data;
 	int size, rctx, i;
 
 
-        if (prog && !trace_call_bpf(prog, regs))
+	if (bpf_prog_array_valid(call) && !trace_call_bpf(call, regs))
                 return;
 
 	size = SIZEOF_TRACE_ENTRY(is_ret_probe(tu));
