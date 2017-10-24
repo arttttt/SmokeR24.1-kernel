@@ -85,5 +85,10 @@
 
 	sdhci@700b0400 {
 		vddio_sd_slot-supply = <&palmas_smps9>;
+		vddio_sdmmc-supply = <&palmas_ldo9>;
+	};
+
+	sdhci@700b0000 {
+		vddio_sdmmc-supply = <&palmas_smps8>;
 	};
 };
