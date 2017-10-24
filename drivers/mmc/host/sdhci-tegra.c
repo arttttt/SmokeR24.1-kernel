@@ -1385,14 +1385,22 @@ static irqreturn_t carddetect_irq(int irq, void *data)
 	plat = pdev->dev.platform_data;
 
 	tegra_host->card_present =
-			(gpio_get_value_cansleep(plat->cd_gpio) == 0);
+			(gpio_get_value_cansleep(plat->cd_gpio) != 0);
+  
+  	dev_err(mmc_dev(sdhost->mmc),
+  		"sd card detect card present = %d\n",
+  		(int)tegra_host->card_present);
 
 	if (!tegra_host->card_present) {
+		if (gpio_is_valid(plat->power_gpio))
+  			gpio_set_value_cansleep(plat->power_gpio, 1);
 		err = tegra_sdhci_configure_regulators(tegra_host,
 			CONFIG_REG_DIS, 0 , 0);
 		if (err)
 			dev_err(mmc_dev(sdhost->mmc),
 				"Failed to disable card regulators %d\n", err);
+		if (gpio_is_valid(plat->power_gpio))
+  			gpio_set_value_cansleep(plat->power_gpio, 0);
 		/*
 		 * Set retune request as tuning should be done next time
 		 * a card is inserted.
@@ -4165,7 +4173,7 @@ static int tegra_sdhci_resume(struct sdhci_host *sdhci)
 			disable_irq_wake(cd_irq);
 		}
 		tegra_host->card_present =
-			(gpio_get_value_cansleep(plat->cd_gpio) == 0);
+			(gpio_get_value_cansleep(plat->cd_gpio) != 0);
 	}
 
 	/* Setting the min identification clock of freq 400KHz */
@@ -5844,7 +5852,7 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate power gpio\n");
 			goto err_power_req;
 		}
-		gpio_direction_output(plat->power_gpio, 1);
+		gpio_direction_output(plat->power_gpio, 0);
 	}
 
 	if (gpio_is_valid(plat->cd_gpio)) {
@@ -5857,7 +5865,9 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 		gpio_direction_input(plat->cd_gpio);
 
 		tegra_host->card_present =
-			(gpio_get_value_cansleep(plat->cd_gpio) == 0);
+			(gpio_get_value_cansleep(plat->cd_gpio) != 0);
+  		if (tegra_host->card_present && gpio_is_valid(plat->power_gpio))
+  			gpio_direction_output(plat->power_gpio, 1);
 
 	} else if (plat->mmc_data.register_status_notify) {
 		plat->mmc_data.register_status_notify(sdhci_status_notify_cb, host);

@@ -193,7 +193,10 @@ static int mmc_clock_opt_get(void *data, u64 *val)
 {
 	struct mmc_host *host = data;
 
-	*val = host->ios.clock;
+	if (!host)
+  		*val = 0;
+  	else
+  		*val = host->ios.clock;
 
 	return 0;
 }
@@ -201,6 +204,9 @@ static int mmc_clock_opt_get(void *data, u64 *val)
 static int mmc_clock_opt_set(void *data, u64 val)
 {
 	struct mmc_host *host = data;
+
+	if (!host)
+  		return -EINVAL;
 
 	/* We need this check due to input value is u64 */
 	if (val > host->f_max)
@@ -329,6 +335,9 @@ static int mmc_speed_opt_set(void *data, u64 val)
 	u32 timing_req = 0;
 	u32 maxdtr_req = 0;
 	u64 current_mode;
+
+	if (!host || !host->card)
+  		return 0;
 
 	mmc_speed_opt_get(host, &current_mode);
 

@@ -506,6 +506,17 @@ struct mmc_host {
 	struct mmc_queue_req	*mqrq_cur;	/* for mmc trace */
 	struct mmc_queue_req	*mqrq_prev;	/* for mmc trace */
 #endif
+#ifdef CONFIG_MMC_PERF_PROFILING
+ 	struct {
+ 
+ 		unsigned long rbytes_drv;  /* Rd bytes MMC Host  */
+ 		unsigned long wbytes_drv;  /* Wr bytes MMC Host  */
+ 		ktime_t rtime_drv;         /* Rd time  MMC Host  */
+ 		ktime_t wtime_drv;         /* Wr time  MMC Host  */
+ 		ktime_t start;
+ 	} perf;
+ 	bool perf_enable;
+#endif
 	unsigned long		private[0] ____cacheline_aligned;
 };
 

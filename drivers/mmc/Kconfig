@@ -26,6 +26,14 @@ config MMC_CQ
 	  If you say Y here, the MMC layer CQ feature will be enabled
 	  for  eMMC device.
 
+config MMC_PERF_PROFILING
+ 	bool "MMC performance profiling"
+ 	depends on MMC != n
+ 	default n
+ 	help
+ 	  If you say Y here, support will be added for collecting
+ 	  performance numbers at the MMC Queue and Host layers.
+
 if MMC
 
 source "drivers/mmc/core/Kconfig"
