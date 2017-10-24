@@ -783,13 +783,18 @@ try_again:
 	 */
 	if (!mmc_host_is_spi(host) && rocr &&
 	   ((*rocr & 0x41000000) == 0x41000000)) {
-		err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180);
-		if (err == -EAGAIN) {
-			retries--;
-			goto try_again;
-		} else if (err) {
+		if (host->is_sd_device) {
 			retries = 0;
 			goto try_again;
+		} else {
+			err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180);
+			if (err == -EAGAIN) {
+				retries--;
+				goto try_again;
+			} else if (err) {
+				retries = 0;
+				goto try_again;
+			}
 		}
 	} else {
 		if (host->ops->validate_sd2_0) {

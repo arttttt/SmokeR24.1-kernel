@@ -6033,8 +6033,10 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 
 		if (plat && (plat->mmc_data.ocr_mask & SDHOST_1V8_OCR_MASK))
 			signal_voltage = MMC_SIGNAL_VOLTAGE_180;
-		else
+		else {
 			signal_voltage = MMC_SIGNAL_VOLTAGE_330;
+			host->mmc->is_sd_device = true;
+		}
 		rc = tegra_sdhci_signal_voltage_switch(host, signal_voltage);
 		if (rc) {
 			dev_err(mmc_dev(host->mmc),
