@@ -385,7 +385,7 @@ static int tegra_wdt_probe(struct platform_device *pdev)
 		tegra_wdt->config = ((int) (3 + ((res_wdt->start & 0xff) -
 							0x50) / 8)) % 10;
 	/* Enable interrupts and reset events by default */
-	tegra_wdt->config |= WDT_CFG_PERIOD | WDT_CFG_INT_EN |
+	tegra_wdt->config |= WDT_CFG_PERIOD |
 				WDT_CFG_FIQ_EN | WDT_CFG_PMC2CAR_RST_EN;
 
 	tegra_wdt_disable(&tegra_wdt->wdt);
