@@ -36,6 +36,8 @@
 
 #include <wlioctl.h>
 
+#include <linux/platform/tegra/common.h>
+
 #define WL_ERROR(x) printf x
 #define WL_TRACE(x)
 
@@ -45,6 +47,7 @@
 #endif 
 
 #ifdef GET_CUSTOM_MAC_ENABLE
+static unsigned char custom_mac[6];
 static unsigned char mac[6];
 module_param_array(mac, byte, NULL, 0644);
 MODULE_PARM_DESC(mac, "DHD mac address");
@@ -137,7 +140,18 @@ dhd_custom_get_mac_address(void *adapter, unsigned char *buf)
 	if ((mac[0] != 0) || (mac[1] != 0)) {
  		bcopy((char *)&mac, buf, 6);
  		return ret;
- 	}
+ 	} else {
+		if((custom_mac[0] == 0) || (custom_mac[1] == 0)) {
+			custom_mac[0] = (unsigned char) serial_number[5];
+			custom_mac[1] = (unsigned char) serial_number[4];
+			custom_mac[2] = (unsigned char) serial_number[3];
+			custom_mac[3] = (unsigned char) serial_number[2];
+			custom_mac[4] = (unsigned char) serial_number[1];
+			custom_mac[5] = (unsigned char) serial_number[0];
+		}
+ 		bcopy((char *)&custom_mac, buf, 6);
+ 		return ret;
+	}
 	ret = wifi_platform_get_mac_addr(adapter, buf);
 	printk("get mac here\n");
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35) */
