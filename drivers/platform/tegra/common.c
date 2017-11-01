@@ -348,6 +348,7 @@ static unsigned int memory_type;
 static int usb_port_owner_info;
 static int lane_owner_info;
 static int chip_personality;
+char *serial_number;
 
 #ifdef CONFIG_ARCH_TEGRA_11x_SOC
 static __initdata struct tegra_clk_init_table tegra11x_clk_init_table[] = {
@@ -1140,11 +1141,19 @@ static int __init tegra_tsec_arg(char *options)
 	tegra_tsec_size = memparse(p, &p);
 	if (*p == '@')
 		tegra_tsec_start = memparse(p+1, &p);
-	pr_info("Found tsec, start=0x%llx size=%llx",
+	pr_info("Found tsec, start=0x%llx size=%llx\n",
 		(u64)tegra_tsec_start, (u64)tegra_tsec_size);
 	return 0;
 }
 early_param("tsec", tegra_tsec_arg);
+
+static int __init serialnumber(char *options)
+{
+	serial_number = options;
+
+	return 0;
+}
+early_param("androidboot.serialno", serialnumber);
 
 #ifdef CONFIG_TEGRA_USE_NCT
 static int __init tegra_nck_arg(char *options)
