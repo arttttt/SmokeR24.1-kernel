@@ -786,8 +786,6 @@ static void __init tegra_ardbeg_late_init(void)
 	if (board_info.board_id == BOARD_E2548 ||
 			board_info.board_id == BOARD_P2530)
 		loki_sdhci_init();
-	else
-		ardbeg_sdhci_init();
 	if (board_info.board_id == BOARD_PM359 ||
 			board_info.board_id == BOARD_PM358 ||
 			board_info.board_id == BOARD_PM370 ||
