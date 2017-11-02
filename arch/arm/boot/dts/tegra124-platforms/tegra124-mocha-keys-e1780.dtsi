@@ -23,5 +23,21 @@
 			gpios = <&gpio TEGRA_GPIO(Q, 6) GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_VOLUMEUP>;
 		};
+
+		hall_intr1 {
+			label = "lid_back";
+			gpios = <&gpio TEGRA_GPIO(W, 3) GPIO_ACTIVE_LOW>;
+			linux,code = <18>;
+			linux,input-type = <5>;
+			gpio-key,wakeup;
+		};
+
+		hall_intr2 {
+			label = "lid_front";
+			gpios = <&gpio TEGRA_GPIO(I, 5) GPIO_ACTIVE_LOW>;
+			linux,code = <0>;
+			linux,input-type = <5>;
+			gpio-key,wakeup;
+		};
 	};
 };
