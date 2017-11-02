@@ -105,7 +105,7 @@ static char dummy_name[DUMMY_DEV_MAX_NAME_SIZE] = DUMMY_DEV_NAME;
 static struct swgid_fixup tegra_swgid_fixup_t124[] = {
 	{ .name = "nvavp",	.swgids = TEGRA_SWGROUP_BIT(AVPC) |
 					  TEGRA_SWGROUP_BIT(A9AVP), },
-	{ .name = "sdhci-tegra.2",	.swgids = TEGRA_SWGROUP_BIT(SDMMC3A) },
+	{ .name = "700b0400.sdhci",	.swgids = TEGRA_SWGROUP_BIT(SDMMC3A) },
 	{ .name = "serial8250",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
 	{ .name = "dtv",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
 	{ .name = "snd-soc-dummy",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
