@@ -34,6 +34,7 @@ static unsigned int mt9m114_states[] = { 0, 150 };
 static unsigned int sdhci_states[] = { 0, 966 };
 static unsigned int speaker_states[] = { 0, 1080 };
 static unsigned int wifi_states[] = { 0, 1020 };
+static unsigned int dsi_states[] = { 0, 616 };
 
 /* default - 19x12 8" panel*/
 static unsigned int pwm_backlight_default_states[] = {
@@ -64,6 +65,7 @@ static struct sysedp_consumer_data tn8_sysedp_consumer_data[] = {
 	SYSEDP_CONSUMER_DATA("700b0400.sdhci", sdhci_states),
 	SYSEDP_CONSUMER_DATA("700b0600.sdhci", sdhci_states),
 	SYSEDP_CONSUMER_DATA("as364x", as364x_states),
+	SYSEDP_CONSUMER_DATA("dsi_0", dsi_states)
 };
 
 static struct sysedp_platform_data tn8_sysedp_platform_data = {
