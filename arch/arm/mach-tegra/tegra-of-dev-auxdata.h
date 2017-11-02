@@ -49,9 +49,9 @@
 				"spi-tegra114-slave.5", NULL)
 
 #define T124_SDMMC_OF_DEV_AUXDATA \
-        OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0600, "sdhci-tegra.3", NULL),  \
-        OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0400, "sdhci-tegra.2", NULL),  \
-        OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0000, "sdhci-tegra.0", NULL)
+        OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0600, "700b0600.sdhci", NULL),  \
+        OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0400, "700b0400.sdhci", NULL),  \
+        OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0000, "700b0000.sdhci", NULL)
 
 
 #endif
