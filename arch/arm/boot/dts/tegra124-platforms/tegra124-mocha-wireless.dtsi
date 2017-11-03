@@ -46,8 +46,6 @@
 		interrupts = <TEGRA_GPIO(U, 5) 0x14>;
 		wlan-pwr-gpio = <&gpio TEGRA_GPIO(X, 7) 0>;
 		status = "okay";
-		mac-address-chosen-dtb-node = "nvidia,wifi-mac";
-		mac-address-file = "/mnt/factory/wifi/wifi_mac.txt";
 		fw_path = "/system/vendor/firmware/fw_bcmdhd.bin";
 		nv_path = "/system/etc/nvram_4350.txt";
 
