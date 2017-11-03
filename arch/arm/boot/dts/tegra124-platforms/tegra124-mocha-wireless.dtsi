@@ -46,8 +46,8 @@
 		interrupts = <TEGRA_GPIO(U, 5) 0x14>;
 		wlan-pwr-gpio = <&gpio TEGRA_GPIO(X, 7) 0>;
 		status = "okay";
-		fw_path = "/system/vendor/firmware/fw_bcmdhd.bin";
-		nv_path = "/system/etc/nvram_4350.txt";
+		fw_path = "/system/vendor/firmware/mocha_fw_bcmdhd.bin";
+		nv_path = "/system/etc/mocha_nvram_4350.txt";
 
 		country_code_map {
 
