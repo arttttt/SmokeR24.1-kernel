@@ -17,6 +17,8 @@
 #ifndef __MACH_TEGRA_COMMON_H
 #define __MACH_TEGRA_COMMON_H
 
+extern char *serial_number;
+
 extern struct smp_operations tegra_smp_ops;
 
 extern phys_addr_t tegra_tsec_start;
