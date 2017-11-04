@@ -47,7 +47,7 @@
 		wlan-pwr-gpio = <&gpio TEGRA_GPIO(X, 7) 0>;
 		status = "okay";
 		fw_path = "/system/vendor/firmware/mocha_fw_bcmdhd.bin";
-		nv_path = "/system/etc/mocha_nvram_4350.txt";
+		nv_path = "/system/etc/mocha_nvram.txt";
 
 		country_code_map {
 
