@@ -666,61 +666,8 @@ static int __init ardbeg_touch_init(void)
 	return 0;
 }
 
-static void __init ardbeg_sysedp_init(void)
-{
-	struct board_info bi;
-
-	tegra_get_board_info(&bi);
-
-	switch (bi.board_id) {
-	case BOARD_E1780:
-		if (bi.sku == 1100)
-			tn8_new_sysedp_init();
-		break;
-	case BOARD_E1971:
-	case BOARD_E1922:
-	case BOARD_E1784:
-	case BOARD_P1761:
-	case BOARD_P1765:
-		tn8_new_sysedp_init();
-		break;
-	case BOARD_PM358:
-	case BOARD_PM359:
-	case BOARD_PM375:
-	default:
-		break;
-	}
-}
-
-static void __init ardbeg_sysedp_dynamic_capping_init(void)
-{
-	struct board_info bi;
-
-	tegra_get_board_info(&bi);
-
-	switch (bi.board_id) {
-	case BOARD_E1780:
-		if (bi.sku == 1100)
-			tn8_sysedp_dynamic_capping_init();
-		break;
-	case BOARD_E1971:
-	case BOARD_E1922:
-	case BOARD_E1784:
-	case BOARD_P1761:
-	case BOARD_P1765:
-		tn8_sysedp_dynamic_capping_init();
-		break;
-	case BOARD_PM358:
-	case BOARD_PM359:
-	case BOARD_PM375:
-	default:
-		break;
-	}
-}
-
 static void __init tegra_ardbeg_early_init(void)
 {
-	ardbeg_sysedp_init();
 	tegra_clk_init_from_table(ardbeg_clk_init_table);
 	tegra_clk_verify_parents();
 	if (of_machine_is_compatible("nvidia,jetson-tk1"))
@@ -845,8 +792,6 @@ static void __init tegra_ardbeg_late_init(void)
 		ardbeg_sensors_init();
 		ardbeg_soctherm_init();
 	}
-
-	ardbeg_sysedp_dynamic_capping_init();
 }
 
 static void __init tegra_ardbeg_init_early(void)

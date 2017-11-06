@@ -153,11 +153,6 @@ int loki_rail_alignment_init(void);
 #define I2C_KB_IRQ	TEGRA_GPIO_PC7
 #define I2C_TP_IRQ	TEGRA_GPIO_PW3
 
-/* TN8 specific */
-
-void tn8_new_sysedp_init(void);
-void tn8_sysedp_dynamic_capping_init(void);
-
 /* SATA Specific */
 
 #define CLK_RST_CNTRL_RST_DEV_W_SET 0x7000E438

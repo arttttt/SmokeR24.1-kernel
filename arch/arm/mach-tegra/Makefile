@@ -120,9 +120,6 @@ obj-${CONFIG_MACH_ARDBEG}               += board-norrin-power.o
 obj-${CONFIG_MACH_ARDBEG}               += board-norrin-memory.o
 obj-${CONFIG_MACH_ARDBEG}               += panel-a-1080p-11-6.o
 obj-${CONFIG_MACH_ARDBEG}               += panel-s-edp-wqxgap-15-6.o
-ifeq ($(CONFIG_MACH_ARDBEG),y)
-obj-${CONFIG_SYSEDP_FRAMEWORK}          += board-tn8-sysedp.o
-endif
 
 obj-${CONFIG_MACH_LOKI}               	+= board-loki.o
 obj-${CONFIG_MACH_LOKI}               	+= board-loki-kbc.o
