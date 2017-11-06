@@ -1,5 +1,117 @@
 
 / {
+	sysedp_reactive_capping@1 {
+		compatible = "nvidia,tegra124-sysedp_reactive_capping";
+		nvidia,max_capping_mw = <15000>;
+		nvidia,step_alarm_mw = <1000>;
+		nvidia,step_relax_mw = <500>;
+		nvidia,relax_ms = <250>;
+		interrupt-parent = <&soctherm>;
+		interrupts = <1 0x2002>;
+
+		sysedpc {
+			nvidia,name = "voltmon_oc1";
+		};
+	};
+
+	sysedp_reactive_capping@2 {
+		compatible = "nvidia,tegra124-sysedp_reactive_capping";
+		nvidia,max_capping_mw = <15000>;
+		nvidia,step_alarm_mw = <1000>;
+		nvidia,step_relax_mw = <500>;
+		nvidia,relax_ms = <250>;
+		interrupt-parent = <&soctherm>;
+		interrupts = <2 0x2002>;
+		sysedpc {
+			nvidia,name = "battery_oc4";
+		};
+	};
+
+	sysedp-dynamic-capping {
+		compatible = "nvidia,tegra124-sysedp-dynamic-capping";
+		nvidia,corecap = <
+			5000   1500  108000 933000  1500  108000 933000  918
+			6000   3000  108000 933000  3000  108000 933000  2109
+			7000   4000  108000 933000  3000  180000 933000  2589
+			8000   5000  108000 933000  3000  252000 933000  3068
+			9000   6000  180000 933000  2500  396000 933000  3630
+			10000  7000  108000 933000  3500  396000 933000  4425
+			11000  7000  252000 933000  4000  468000 933000  5301
+			12000  8000  180000 933000  3000  540000 933000  5348
+			13000  9000  108000 933000  5000  540000 933000  6969
+			14000  10000 108000 933000  3500  612000 933000  6846
+			15000  10000 180000 933000  4000  648000 933000  7880
+			16000  10000 252000 933000  3500  684000 933000  8120
+			17000  10000 396000 933000  4000  708000 933000  9024
+			18000  10000 396000 933000  3000  756000 933000  9252
+			19000  10000 468000 933000  4000  756000 933000  10046
+			20000  10000 540000 933000  5000  756000 933000  10873
+			21000  10000 540000 933000  3500  804000 933000  10909
+			22000  10000 612000 933000  4000  804000 933000  11306
+			23000  10000 648000 933000  4000  853000 933000  12696
+			24000  10000 708000 933000  5000  853000 933000  13524
+			25000  10000 708000 933000  5000  853000 933000  13524
+			26000  10000 708000 933000  6000  853000 933000  14049
+			27000  10000 756000 933000  7000  853000 933000  15002
+			28000  10000 756000 933000  8000  853000 933000  15071
+			29000  10000 804000 933000  8000  853000 933000  15621
+			30000  10000 804000 933000  8000  853000 933000  15621
+			31000  10000 804000 933000  8000  853000 933000  15621
+			32000  10000 804000 933000  9000  853000 933000  16331
+			33000  10000 853000 933000  10000 853000 933000  17721
+		>;
+		nvidia,core_gain = <100>;
+		nvidia,init_req_watts = <20000>;
+		nvidia,throttle_depth = <75>;
+		nvidia,cap_method = <2>;
+	};
+
+	sysedp {
+		compatible = "nvidia,tegra124-sysedp";
+		nvidia,margin = <0>;
+		nvidia,min_budget = <4400>;
+		nvidia,initial_budget = <30000>;
+
+		consumers {
+			consumer1 {
+				nvidia,consumer_name = "ov5693";
+				nvidia,states = <0 300>;
+			};
+			consumer2 {
+				nvidia,consumer_name = "imx179";
+				nvidia,states = <0 500>;
+			};
+			consumer3 {
+				nvidia,consumer_name = "speaker";
+				nvidia,states = <0 1080>;
+			};
+			consumer4 {
+				nvidia,consumer_name = "primary-wifi";
+				nvidia,states = <0 1020>;
+			};
+			consumer5 {
+				nvidia,consumer_name = "lcd-backlight";
+				nvidia,states = <0 125 250 375 500 625 750 875 1000 1125 1250>;
+			};
+			consumer6 {
+				nvidia,consumer_name = "700b0000.sdhci";
+				nvidia,states = <0 966>;
+			};
+			consumer7 {
+				nvidia,consumer_name = "700b0400.sdhci";
+				nvidia,states = <0 966>;
+			};
+			consumer8 {
+				nvidia,consumer_name = "700b0600.sdhci";
+				nvidia,states = <0 966>;
+			};
+			consumer9 {
+				nvidia,consumer_name = "dsi_0";
+				nvidia,states = <0 616>;
+			};
+		};
+	};
+
 	sysedp_batmon_calc {
 		compatible = "nvidia,tegra124-sysedp_batmon_calc";
 		ocv_lut = <
