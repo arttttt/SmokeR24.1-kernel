@@ -561,8 +561,7 @@ static void __init tegra_ardbeg_init_early(void)
 	if (board_info.board_id == BOARD_E2548 ||
 			board_info.board_id == BOARD_P2530)
 		loki_rail_alignment_init();
-	else
-		ardbeg_rail_alignment_init();
+
 	tegra12x_init_early();
 }
 
