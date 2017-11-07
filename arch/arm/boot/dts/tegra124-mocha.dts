@@ -30,6 +30,7 @@
 #include "tegra124-platforms/tegra124-mocha-sdhci.dtsi"
 #include "tegra124-platforms/tegra124-mocha-wireless.dtsi"
 #include "tegra124-platforms/tegra124-mocha-dfll.dtsi"
+#include "tegra124-platforms/tegra124-mocha-thermal.dtsi"
 #include "panel-s-wqxga-7-9-x6.dtsi"
 
 / {
@@ -325,29 +326,6 @@
 		nvidia,vbus-oc-map = <4>;
 		nvidia,xcvr-setup-offset = <0>;
 		status = "disabled";
-	};
-
-	therm_est_sensor {
-		use_activator = <0>;
-		subdev {
-			coeff_set@0 {
-				toffset = <3543>;
-				coeffs = <
-					2 2 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 2 3
-					(-5) 1 0 1 1 0 1 1 0 2 (-1) 1 2 3 3 2 2 1 8 53
-				>;
-			};
-		};
-	};
-
-	thermal-zones {
-		therm_est {
-			trips {
-				skin_trip {
-					temperature = <47000>;
-				};
-			};
-		};
 	};
 };
 
