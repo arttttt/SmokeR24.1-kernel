@@ -510,10 +510,6 @@ static void __init tegra_ardbeg_late_init(void)
 	else if (board_info.board_id == BOARD_E2548 ||
 			board_info.board_id == BOARD_P2530)
 		loki_regulator_init();
-	else if (of_machine_is_compatible("nvidia,e2141"))
-		; /* T210_interposer use DT for power tree*/
-	else
-		ardbeg_regulator_init();
 	ardbeg_suspend_init();
 
 	if ((board_info.board_id == BOARD_PM374) ||
