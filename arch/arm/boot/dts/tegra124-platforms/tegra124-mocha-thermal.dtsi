@@ -1,5 +1,27 @@
 / {
+	soctherm@0x700E2000 {
+		throttle@oc1 {
+			status = "disabled";
+		};
+		throttle@oc2 {
+			status = "disabled";
+		};
+		throttle@oc3 {
+			status = "disabled";
+		};
+		throttle@oc4 {
+			status = "disabled";
+		};
+		throttle_dev@gpu_low {
+			level = "low_throttling";
+		};
+		throttle_dev@gpu_high {
+			level = "heavy_throttling";
+		};
+	};
+
 	therm_est_sensor {
+		status = "disabled";
 		use_activator = <0>;
 		subdev {
 			coeff_set@0 {
@@ -166,25 +188,25 @@
 				up_compensation = <20>;
 				down_compensation = <20>;
 			};
-				trips {
-				pll_critical {
+			trips {
+				pll_active {
 					temperature = <78000>;
 					hysteresis = <0>;
-					type = "critical";
+					type = "active";
 					writable;
 				};
 			};
 			cooling-maps {
 				map0 {
-					trip = <&{/thermal-zones/PLL-therm/trips/pll_critical}>;
-					cdev-type = "tegra-shutdown";
-					cooling-device = <&{/soctherm@0x700E2000/throttle@critical}
-						THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					trip = <&{/thermal-zones/PLL-therm/trips/pll_active}>;
+					cdev-type = "tegra-dram";
+					cooling-device = <&{/soctherm@0x700E2000/throttle@light} 1 1>;
 				};
 			};
 		};
 
 		therm_est {
+			status = "disabled";
 			trips {
 				skin_trip {
 					temperature = <47000>;
