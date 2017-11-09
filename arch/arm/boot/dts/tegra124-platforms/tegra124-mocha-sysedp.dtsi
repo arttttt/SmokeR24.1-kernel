@@ -6,6 +6,7 @@
 		nvidia,step_alarm_mw = <1000>;
 		nvidia,step_relax_mw = <500>;
 		nvidia,relax_ms = <250>;
+		nvidia,threshold_warning = "WARNING - SYSTEM Voltage Droop detected, please refer to the Power management application note";
 		interrupt-parent = <&soctherm>;
 		interrupts = <1 0x2002>;
 
@@ -20,6 +21,7 @@
 		nvidia,step_alarm_mw = <1000>;
 		nvidia,step_relax_mw = <500>;
 		nvidia,relax_ms = <250>;
+		nvidia,threshold_warning = "WARNING - SYSTEM Voltage Droop detected, please refer to the Power management application note";
 		interrupt-parent = <&soctherm>;
 		interrupts = <2 0x2002>;
 		sysedpc {
