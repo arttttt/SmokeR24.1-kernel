@@ -115,7 +115,6 @@ obj-y                                   += panel-s-wqxga-7-9-x6.o
 obj-${CONFIG_MACH_ARDBEG}               += board-ardbeg.o
 obj-${CONFIG_MACH_ARDBEG}               += board-ardbeg-sensors.o
 obj-${CONFIG_MACH_ARDBEG}               += board-ardbeg-memory.o
-obj-${CONFIG_MACH_ARDBEG}               += board-ardbeg-power.o
 obj-${CONFIG_MACH_ARDBEG}               += board-norrin-power.o
 obj-${CONFIG_MACH_ARDBEG}               += board-norrin-memory.o
 obj-${CONFIG_MACH_ARDBEG}               += panel-a-1080p-11-6.o

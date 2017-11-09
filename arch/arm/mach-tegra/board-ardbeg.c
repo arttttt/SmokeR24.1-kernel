@@ -475,6 +475,32 @@ static struct tegra_io_dpd pexclk2_io = {
 	.io_dpd_bit		= 6,
 };
 
+static struct tegra_suspend_platform_data ardbeg_suspend_data = {
+	.cpu_timer      = 500,
+	.cpu_off_timer  = 300,
+	.cpu_suspend_freq = 1044000,
+	.suspend_mode   = TEGRA_SUSPEND_LP0,
+	.core_timer     = 0x157e,
+	.core_off_timer = 10,
+	.corereq_high   = true,
+	.sysclkreq_high = true,
+	.cpu_lp2_min_residency = 1000,
+	.min_residency_vmin_fmin = 1000,
+	.min_residency_ncpu_fast = 8000,
+	.min_residency_ncpu_slow = 5000,
+	.min_residency_mclk_stop = 5000,
+	.min_residency_crail = 20000,
+#ifdef CONFIG_TEGRA_LP1_LOW_COREVOLTAGE
+	.lp1_lowvolt_support = true,
+	.i2c_base_addr = TEGRA_I2C5_BASE,
+	.pmuslave_addr = 0xB0,
+	.core_reg_addr = 0x33,
+	.lp1_core_volt_low_cold = 0x33,
+	.lp1_core_volt_low = 0x33,
+	.lp1_core_volt_high = 0x42,
+#endif
+};
+
 static void __init tegra_ardbeg_late_init(void)
 {
 	struct board_info board_info;
@@ -510,7 +536,7 @@ static void __init tegra_ardbeg_late_init(void)
 	else if (board_info.board_id == BOARD_E2548 ||
 			board_info.board_id == BOARD_P2530)
 		loki_regulator_init();
-	ardbeg_suspend_init();
+	tegra_init_suspend(&ardbeg_suspend_data);
 
 	if ((board_info.board_id == BOARD_PM374) ||
 		(board_info.board_id == BOARD_E1971) ||
