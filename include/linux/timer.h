@@ -202,6 +202,7 @@ extern int del_timer(struct timer_list * timer);
 extern int mod_timer(struct timer_list *timer, unsigned long expires);
 extern int mod_timer_pending(struct timer_list *timer, unsigned long expires);
 extern int mod_timer_pinned(struct timer_list *timer, unsigned long expires);
+extern int timer_reduce(struct timer_list *timer, unsigned long expires);
 
 extern void set_timer_slack(struct timer_list *time, int slack_hz);
 

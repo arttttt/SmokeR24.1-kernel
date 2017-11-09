@@ -721,9 +721,12 @@ static struct tvec_base *lock_timer_base(struct timer_list *timer,
 	}
 }
 
+#define MOD_TIMER_PENDING_ONLY		0x01
+#define MOD_TIMER_REDUCE		0x02
+
 static inline int
 __mod_timer(struct timer_list *timer, unsigned long expires,
-						bool pending_only, int pinned)
+						unsigned int options, int pinned)
 {
 	struct tvec_base *base, *new_base;
 	unsigned long flags;
@@ -734,8 +737,14 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 
 	base = lock_timer_base(timer, &flags);
 
+	if (timer_pending(timer) && (options & MOD_TIMER_REDUCE) &&
+	    time_before_eq(timer->expires, expires)) {
+		ret = 1;
+		goto out_unlock;
+	}
+
 	ret = detach_if_pending(timer, base, false);
-	if (!ret && pending_only)
+	if (!ret && (options & MOD_TIMER_PENDING_ONLY))
 		goto out_unlock;
 
 	debug_activate(timer, expires);
@@ -787,7 +796,7 @@ out_unlock:
  */
 int mod_timer_pending(struct timer_list *timer, unsigned long expires)
 {
-	return __mod_timer(timer, expires, true, TIMER_NOT_PINNED);
+	return __mod_timer(timer, expires, MOD_TIMER_PENDING_ONLY, TIMER_NOT_PINNED);
 }
 EXPORT_SYMBOL(mod_timer_pending);
 
@@ -862,9 +871,36 @@ int mod_timer(struct timer_list *timer, unsigned long expires)
 	if (timer_pending(timer) && timer->expires == expires)
 		return 1;
 
-	return __mod_timer(timer, expires, false, TIMER_NOT_PINNED);
+	return __mod_timer(timer, expires, 0, TIMER_NOT_PINNED);
 }
 EXPORT_SYMBOL(mod_timer);
+
+/**
+ * timer_reduce - Modify a timer's timeout if it would reduce the timeout
+ * @timer:	The timer to be modified
+ * @expires:	New timeout in jiffies
+ *
+ * timer_reduce() is very similar to mod_timer(), except that it will only
+ * modify a running timer if that would reduce the expiration time (it will
+ * start a timer that isn't running).
+ */
+int timer_reduce(struct timer_list *timer, unsigned long expires)
+{
+	/*
+	 * This is a common optimization triggered by the networking code - if
+	 * the timer is re-modified to have the same timeout or ends up in the
+	 * same array bucket then just return:
+	 */
+	if (timer_pending(timer)) {
+		long diff = timer->expires - expires;
+
+		if (diff <= 0)
+			return 1;
+	}
+
+	return __mod_timer(timer, expires, MOD_TIMER_REDUCE, TIMER_NOT_PINNED);
+}
+EXPORT_SYMBOL(timer_reduce);
 
 /**
  * mod_timer_pinned - modify a timer's timeout
@@ -890,7 +926,7 @@ int mod_timer_pinned(struct timer_list *timer, unsigned long expires)
 	if (timer->expires == expires && timer_pending(timer))
 		return 1;
 
-	return __mod_timer(timer, expires, false, TIMER_PINNED);
+	return __mod_timer(timer, expires, 0, TIMER_PINNED);
 }
 EXPORT_SYMBOL(mod_timer_pinned);
 
@@ -1491,7 +1527,7 @@ signed long __sched schedule_timeout(signed long timeout)
 	expire = timeout + jiffies;
 
 	setup_timer_on_stack(&timer, process_timeout, (unsigned long)current);
-	__mod_timer(&timer, expire, false, TIMER_NOT_PINNED);
+	__mod_timer(&timer, expire, 0, TIMER_NOT_PINNED);
 	schedule();
 	del_singleshot_timer_sync(&timer);
 
