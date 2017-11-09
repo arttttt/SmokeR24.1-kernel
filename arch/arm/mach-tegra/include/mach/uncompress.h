@@ -203,7 +203,6 @@ static inline void arch_decomp_setup(void)
 	int uart_id = -1;
 	volatile u32 *addr;
 	u32 uart_dll = DEBUG_UART_DLL_216;
-	u32 val;
 
 #if defined(CONFIG_TEGRA_DEBUG_UART_AUTO_ODMDATA)
 	uart_id = auto_odmdata();
