@@ -8,6 +8,7 @@
 	camera-pcl {
 		compatible = "nvidia,tegra124-camera", "simple-bus";
 		configuration = <0xAA55AA55>;
+		status = "disabled";
 
 		modules {
 			module1: module1@modules {
