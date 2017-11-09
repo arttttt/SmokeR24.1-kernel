@@ -522,72 +522,24 @@ static void __init tegra_ardbeg_late_init(void)
 	platform_add_devices(ardbeg_devices, ARRAY_SIZE(ardbeg_devices));
 
 	tegra_io_dpd_init();
-	if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530)
-		loki_sdhci_init();
-	if (board_info.board_id == BOARD_PM359 ||
-			board_info.board_id == BOARD_PM358 ||
-			board_info.board_id == BOARD_PM370 ||
-			board_info.board_id == BOARD_PM375 ||
-			board_info.board_id == BOARD_PM363)
-		laguna_regulator_init();
-	else if (board_info.board_id == BOARD_PM374)
-		norrin_regulator_init();
-	else if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530)
-		loki_regulator_init();
 	tegra_init_suspend(&ardbeg_suspend_data);
 
-	if ((board_info.board_id == BOARD_PM374) ||
-		(board_info.board_id == BOARD_E1971) ||
-		(board_info.board_id == BOARD_E1973))
-		norrin_emc_init();
-	else if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530)
-		loki_emc_init();
-	else
-		ardbeg_emc_init();
+	ardbeg_emc_init();
 
 	isomgr_init();
 	ardbeg_touch_init();
 
-	if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530)
-		loki_panel_init();
 
-		/* put PEX pads into DPD mode to save additional power */
-		tegra_io_dpd_enable(&pexbias_io);
-		tegra_io_dpd_enable(&pexclk1_io);
-		tegra_io_dpd_enable(&pexclk2_io);
+	/* put PEX pads into DPD mode to save additional power */
+	tegra_io_dpd_enable(&pexbias_io);
+	tegra_io_dpd_enable(&pexclk1_io);
+	tegra_io_dpd_enable(&pexclk2_io);
 
-	if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530)
-		loki_kbc_init();
-
-	if (board_info.board_id == BOARD_PM374 ||
-		board_info.board_id == BOARD_PM359 ||
-		board_info.board_id == BOARD_PM358 ||
-		board_info.board_id == BOARD_PM370 ||
-		board_info.board_id == BOARD_PM375 ||
-		board_info.board_id == BOARD_PM363) {
-		ardbeg_sensors_init();
-		norrin_soctherm_init();
-	}	else if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530) {
-		loki_sensors_init();
-		loki_soctherm_init();
-	}	else {
-		ardbeg_sensors_init();
-	}
+	ardbeg_sensors_init();
 }
 
 static void __init tegra_ardbeg_init_early(void)
 {
-	tegra_get_board_info(&board_info);
-	if (board_info.board_id == BOARD_E2548 ||
-			board_info.board_id == BOARD_P2530)
-		loki_rail_alignment_init();
-
 	tegra12x_init_early();
 }
 
