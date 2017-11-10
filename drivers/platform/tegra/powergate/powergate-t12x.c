@@ -22,6 +22,7 @@
 #include "powergate-priv.h"
 #include "powergate-ops-t1xx.h"
 #include <linux/platform/tegra/dvfs.h>
+#include <linux/tegra_soctherm.h>
 
 enum mc_client {
 	MC_CLIENT_AFI		= 0,
@@ -437,6 +438,8 @@ static int tegra12x_gpu_powergate(int id, struct powergate_partition_info *pg_in
 
 	udelay(10);
 
+	tegra_soctherm_gpu_tsens_invalidate(1);
+
 	if (gpu_rail && tegra_powergate_is_powered(id)) {
 		ret = tegra_dvfs_rail_power_down(gpu_rail);
 		if (ret)
@@ -484,6 +487,8 @@ static int tegra12x_gpu_unpowergate(int id,
 	ret = tegra_dvfs_rail_power_up(gpu_rail);
 	if (ret)
 		goto err_power;
+
+	tegra_soctherm_gpu_tsens_invalidate(0);
 
 	/* If first clk_ptr is null, fill clk info for the partition */
 	if (!pg_info->clk_info[0].clk_ptr)
