@@ -22,9 +22,11 @@
 #include "powergate-priv.h"
 #include "powergate-ops-t1xx.h"
 #include <linux/platform/tegra/dvfs.h>
+#include <linux/platform/tegra/mc.h>
 #include <linux/tegra_soctherm.h>
+#include <linux/tegra-fuse.h>
 
-enum mc_client {
+enum mc_client_type {
 	MC_CLIENT_AFI		= 0,
 	MC_CLIENT_DC		= 2,
 	MC_CLIENT_DCB		= 3,
@@ -42,7 +44,7 @@ enum mc_client {
 };
 
 struct tegra12x_powergate_mc_client_info {
-	enum mc_client hot_reset_clients[MAX_HOTRESET_CLIENT_NUM];
+	enum mc_client_type hot_reset_clients[MAX_HOTRESET_CLIENT_NUM];
 };
 
 static struct tegra12x_powergate_mc_client_info tegra12x_pg_mc_info[] = {
@@ -300,27 +302,6 @@ static DEFINE_MUTEX(tegra12x_powergate_disp_lock);
 static struct dvfs_rail *gpu_rail;
 
 #define HOTRESET_READ_COUNT	5
-static bool tegra12x_stable_hotreset_check(u32 stat_reg, u32 *stat)
-{
-	int i;
-	u32 cur_stat;
-	u32 prv_stat;
-	unsigned long flags;
-
-	spin_lock_irqsave(&tegra12x_powergate_lock, flags);
-	prv_stat = mc_read(stat_reg);
-	for (i = 0; i < HOTRESET_READ_COUNT; i++) {
-		cur_stat = mc_read(stat_reg);
-		if (cur_stat != prv_stat) {
-			spin_unlock_irqrestore(&tegra12x_powergate_lock, flags);
-			return false;
-		}
-	}
-	*stat = cur_stat;
-	spin_unlock_irqrestore(&tegra12x_powergate_lock, flags);
-	return true;
-}
-
 int tegra12x_powergate_mc_enable(int id)
 {
 	return 0;
@@ -333,79 +314,40 @@ int tegra12x_powergate_mc_disable(int id)
 
 int tegra12x_powergate_mc_flush(int id)
 {
-	u32 idx, rst_ctrl, rst_stat;
-	u32 rst_ctrl_reg, rst_stat_reg;
-	enum mc_client mcClientBit;
-	unsigned long flags;
-	bool ret;
+        u32 idx;
+        enum mc_client_type mc_client_bit;
+        int ret = -EINVAL;
 
 	for (idx = 0; idx < MAX_HOTRESET_CLIENT_NUM; idx++) {
-		mcClientBit =
+		mc_client_bit =
 			tegra12x_pg_mc_info[id].hot_reset_clients[idx];
-		if (mcClientBit == MC_CLIENT_LAST)
+		if (mc_client_bit == MC_CLIENT_LAST)
 			break;
 
-		if (mcClientBit < 32) {
-			rst_ctrl_reg = MC_CLIENT_HOTRESET_CTRL;
-			rst_stat_reg = MC_CLIENT_HOTRESET_STAT;
-		} else {
-			mcClientBit %= 32;
-			rst_ctrl_reg = MC_CLIENT_HOTRESET_CTRL_1;
-			rst_stat_reg = MC_CLIENT_HOTRESET_STAT_1;
-		}
-
-		spin_lock_irqsave(&tegra12x_powergate_lock, flags);
-
-		rst_ctrl = mc_read(rst_ctrl_reg);
-		rst_ctrl |= (1 << mcClientBit);
-		mc_write(rst_ctrl, rst_ctrl_reg);
-
-		spin_unlock_irqrestore(&tegra12x_powergate_lock, flags);
-
-		do {
-			udelay(10);
-			rst_stat = 0;
-			ret = tegra12x_stable_hotreset_check(rst_stat_reg, &rst_stat);
-			if (!ret)
-				continue;
-		} while (!(rst_stat & (1 << mcClientBit)));
+               ret = tegra_mc_flush(mc_client_bit);
 	}
 
-	return 0;
+	return ret;
 }
 
 int tegra12x_powergate_mc_flush_done(int id)
 {
-	u32 idx, rst_ctrl, rst_ctrl_reg;
-	enum mc_client mcClientBit;
-	unsigned long flags;
+        u32 idx;
+        enum mc_client_type mc_client_bit;
+        int ret = -EINVAL;
 
 	for (idx = 0; idx < MAX_HOTRESET_CLIENT_NUM; idx++) {
-		mcClientBit =
+		mc_client_bit =
 			tegra12x_pg_mc_info[id].hot_reset_clients[idx];
-		if (mcClientBit == MC_CLIENT_LAST)
+		if (mc_client_bit == MC_CLIENT_LAST)
 			break;
 
-		if (mcClientBit < 32)
-			rst_ctrl_reg = MC_CLIENT_HOTRESET_CTRL;
-		else {
-			mcClientBit %= 32;
-			rst_ctrl_reg = MC_CLIENT_HOTRESET_CTRL_1;
-		}
-
-		spin_lock_irqsave(&tegra12x_powergate_lock, flags);
-
-		rst_ctrl = mc_read(rst_ctrl_reg);
-		rst_ctrl &= ~(1 << mcClientBit);
-		mc_write(rst_ctrl, rst_ctrl_reg);
-		mc_read(rst_ctrl_reg);
-
-		spin_unlock_irqrestore(&tegra12x_powergate_lock, flags);
+                ret = tegra_mc_flush_done(mc_client_bit);
 	}
 
 	wmb();
 
-	return 0;
+	return ret;
 }
 
 static int tegra12x_gpu_powergate(int id, struct powergate_partition_info *pg_info)
@@ -457,7 +399,7 @@ err_power_off:
 static int mc_check_vpr(void)
 {
 	int ret = 0;
-	u32 val = mc_read(MC_VIDEO_PROTECT_REG_CTRL);
+	u32 val = mc_readl(MC_VIDEO_PROTECT_REG_CTRL);
 	if ((val & 1) == 0) {
 		pr_err("VPR configuration not locked down\n");
 		ret = -EINVAL;
