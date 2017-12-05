@@ -168,7 +168,7 @@ static void ex_check_cpu(int cpu, unsigned int load)
 			freq_next = MAX(freq_next, policy->min);
 
 		__cpufreq_driver_target(policy, freq_next,
-			CPUFREQ_RELATION_L);
+			CPUFREQ_RELATION_C);
 	}
 
 finished:
