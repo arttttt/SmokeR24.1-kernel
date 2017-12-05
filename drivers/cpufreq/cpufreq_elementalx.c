@@ -22,7 +22,7 @@
 #define DEF_FREQUENCY_UP_THRESHOLD		(90)
 #define DEF_FREQUENCY_DOWN_DIFFERENTIAL		(20)
 #define DEF_INPUT_EVENT_MIN_FREQ		(1224000)
-#define DEF_INPUT_EVENT_TIMEOUT			(600)
+#define DEF_INPUT_EVENT_TIMEOUT			(700)
 #define DEF_GBOOST_MIN_FREQ			(1530000)
 #define MIN_SAMPLING_RATE			(10000)
 #define FREQ_NEED_BURST(x)			(x < 800000 ? 1 : 0)
@@ -123,11 +123,11 @@ static void ex_check_cpu(int cpu, unsigned int load)
 
 		if (FREQ_NEED_BURST(cur_freq) &&
 				load > up_threshold_level[0]) {
-			freq_next = policy->max;
+			freq_next = DEF_GBOOST_MIN_FREQ;
 		}
 		
 		else if (avg_load > up_threshold_level[0]) {
-			freq_next = cur_freq + 1200000;
+			freq_next = cur_freq + 800000;
 		}
 		
 		else if (avg_load <= up_threshold_level[1]) {
@@ -136,11 +136,11 @@ static void ex_check_cpu(int cpu, unsigned int load)
 	
 		else {		
 			if (load > up_threshold_level[0]) {
-				freq_next = cur_freq + 600000;
+				freq_next = cur_freq + 400000;
 			}
 		
 			else {
-				freq_next = cur_freq + 300000;
+				freq_next = cur_freq + 200000;
 			}
 		}
 
