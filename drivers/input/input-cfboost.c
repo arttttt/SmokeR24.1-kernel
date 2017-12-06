@@ -71,6 +71,8 @@ static struct kernel_param_ops boost_freq_ops = {
 	.set = boost_freq_set,
 	.get = boost_freq_get,
 };
+static bool boost_enabled = 1; /* 1 = enabled */
+module_param(boost_enabled, bool, 0644);
 module_param_cb(boost_freq, &boost_freq_ops, &boost_freq, 0644);
 static unsigned int boost_emc; /* kHz */
 module_param(boost_emc, uint, 0644);
@@ -163,6 +165,9 @@ static DEFINE_KTHREAD_WORK(boost_hotword_work, &cfb_hotword_boost);
 static void cfb_input_event(struct input_handle *handle, unsigned int type,
 			    unsigned int code, int value)
 {
+	if (!boost_enabled)
+		return;
+
 	trace_input_cfboost_event("event", type, code, value);
 	if ((code == BTN_TRIGGER_HAPPY14 || code == KEY_SEARCH) &&
 			time_after(jiffies, last_boost_jiffies)) {
