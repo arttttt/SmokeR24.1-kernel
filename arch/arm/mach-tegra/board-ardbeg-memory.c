@@ -28,7 +28,6 @@
 #include <linux/platform/tegra/tegra12_emc.h>
 #include "devices.h"
 
-#define MOCHA_EMC_DVFS_USE_OF 		0
 #define NV_ADDRESS_MAP_PMC_BASE         0x7000E400
 #define APBDEV_PMC_STRAPPING_OPT_A_0    0x464
 
@@ -36468,84 +36467,77 @@ int __init ardbeg_emc_init(void)
 	struct board_info bi;
 	u32 reg;
 
-	/* If Device Tree Partition contains emc-tables, load them */
-	if (of_find_compatible_node(NULL, NULL, "nvidia,tegra12-emc")) {
-		pr_info("Loading EMC tables from DeviceTree.\n");
-	} else {
-		tegra_get_board_info(&bi);
+	tegra_get_board_info(&bi);
 
-		switch (bi.board_id) {
-		case BOARD_PM358:
-			pr_info("Loading PM358 EMC tables.\n");
-			tegra_emc_device.dev.platform_data =
-					&ardbeg_ddr3_emc_pdata_pm358;
+	switch (bi.board_id) {
+	case BOARD_PM358:
+		pr_err("Loading PM358 EMC tables.\n");
+		tegra_emc_device.dev.platform_data =
+				&ardbeg_ddr3_emc_pdata_pm358;
+		break;
+	case BOARD_PM359:
+		pr_err("Loading PM359 EMC tables.\n");
+		tegra_emc_device.dev.platform_data =
+				&ardbeg_ddr3_emc_pdata_pm359;
+		break;
+	case BOARD_E1780:
+		reg = readl(IO_ADDRESS(NV_ADDRESS_MAP_PMC_BASE+APBDEV_PMC_STRAPPING_OPT_A_0));
+		reg = (reg & 0x000000F0) >> 4;
+		pr_err("%s: board id = %d, memory id = %d\n", __func__, bi.board_id, reg);
+		switch (reg) {
+		case 3:
+			tegra_emc_device.dev.platform_data = &mocha_emc_pdata_samsung_2gb;
 			break;
-		case BOARD_PM359:
-			pr_info("Loading PM359 EMC tables.\n");
-			tegra_emc_device.dev.platform_data =
-					&ardbeg_ddr3_emc_pdata_pm359;
+		case 2:
+			tegra_emc_device.dev.platform_data = &mocha_emc_pdata_samsung_3gb;
 			break;
-		case BOARD_E1780:
-#if !MOCHA_EMC_DVFS_USE_OF
-			reg = readl(IO_ADDRESS(NV_ADDRESS_MAP_PMC_BASE+APBDEV_PMC_STRAPPING_OPT_A_0));
-			reg = (reg & 0x000000F0) >> 4;
-			pr_info("memory id = %d\n", reg);
-			switch (reg) {
-			case 3:
-				tegra_emc_device.dev.platform_data = &mocha_emc_pdata_samsung_2gb;
-				break;
-			case 2:
-				tegra_emc_device.dev.platform_data = &mocha_emc_pdata_samsung_3gb;
-				break;
-			case 0:
-				pr_info("unknown memory id\n");
-			default:
-				tegra_emc_device.dev.platform_data = &mocha_emc_pdata_hynix_2gb;
-				break;
-			}
-
-			break;
-#endif
-		case BOARD_E1782:
-			if (tegra_get_memory_type()) {
-				pr_info("Loading Ardbeg 4GB EMC tables.\n");
-				tegra_emc_device.dev.platform_data =
-					&ardbeg_4GB_emc_pdata;
-			} else {
-				pr_info("Loading Ardbeg EMC tables.\n");
-				tegra_emc_device.dev.platform_data =
-					&ardbeg_emc_pdata;
-			}
-			break;
-		case BOARD_E1792:
-			pr_info("Loading Ardbeg EMC tables.\n");
-			tegra_emc_device.dev.platform_data =
-						&ardbeg_lpddr3_emc_pdata;
-			break;
-		case BOARD_E1781:
-			pr_info("Loading Ardbeg (1781) EMC tables\n");
-			tegra_emc_device.dev.platform_data =
-					&ardbeg_lpddr3_emc_pdata_E1781;
-			break;
-		case BOARD_PM375:
-			if (of_machine_is_compatible("nvidia,jetson-tk1")) {
-				pr_info("Loading jetson TK1 EMC tables.\n");
-				tegra_emc_device.dev.platform_data =
-					&jetson_tk1_2GB_emc_pdata;
-			} else {
-				pr_info("Loading PM375 EMC tables.\n");
-				tegra_emc_device.dev.platform_data =
-					&pm375_2GB_emc_pdata;
-			}
-			break;
+		case 0:
+			pr_err("unknown memory id\n");
 		default:
-			pr_info("emc dvfs table not present\n");
-			return -EINVAL;
+			tegra_emc_device.dev.platform_data = &mocha_emc_pdata_hynix_2gb;
+			break;
 		}
 
-		platform_device_register(&tegra_emc_device);
+		break;
+	case BOARD_E1782:
+		if (tegra_get_memory_type()) {
+			pr_err("Loading Ardbeg 4GB EMC tables.\n");
+			tegra_emc_device.dev.platform_data =
+				&ardbeg_4GB_emc_pdata;
+		} else {
+			pr_err("Loading Ardbeg EMC tables.\n");
+			tegra_emc_device.dev.platform_data =
+				&ardbeg_emc_pdata;
+		}
+		break;
+	case BOARD_E1792:
+		pr_info("Loading Ardbeg EMC tables.\n");
+		tegra_emc_device.dev.platform_data =
+					&ardbeg_lpddr3_emc_pdata;
+		break;
+	case BOARD_E1781:
+		pr_err("Loading Ardbeg (1781) EMC tables\n");
+		tegra_emc_device.dev.platform_data =
+				&ardbeg_lpddr3_emc_pdata_E1781;
+		break;
+	case BOARD_PM375:
+		if (of_machine_is_compatible("nvidia,jetson-tk1")) {
+			pr_err("Loading jetson TK1 EMC tables.\n");
+			tegra_emc_device.dev.platform_data =
+				&jetson_tk1_2GB_emc_pdata;
+		} else {
+			pr_err("Loading PM375 EMC tables.\n");
+			tegra_emc_device.dev.platform_data =
+				&pm375_2GB_emc_pdata;
+		}
+		break;
+	default:
+		pr_err("emc dvfs table not present\n");
+		return -EINVAL;
 	}
 
+	platform_device_register(&tegra_emc_device);
+	
 	tegra12_emc_init();
 	return 0;
 }
