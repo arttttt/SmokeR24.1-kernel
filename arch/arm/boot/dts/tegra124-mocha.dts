@@ -326,8 +326,9 @@
 		nvidia,hp-mute-gpios = <&gpio 185 0>;
 		nvidia,i2s-param-hifi = <0 0 2 16 2 48000>;
 	};
-	
+
 	udc@7d000000 {
+		status = "disabled";
 		nvidia,id-detection-type = <0x1>;
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,enable-aca-rid-detection;
@@ -340,7 +341,7 @@
 	};
 	
 	otg@7d000000 {
-		status = "okay";
+		status = "disabled";
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,id-detection-type = <0x1>;
 		nvidia,enable-y-cable-detection;
@@ -351,6 +352,7 @@
 	};
 
 	ehci@7d000000 {
+		status = "disabled";
 		nvidia,port-otg;
 		nvidia,has-hostpc;
 		nvidia,turn-off-vbus-on-lp0;
@@ -360,12 +362,11 @@
 		nvidia,elastic-limit = <16>;
 		nvidia,term-range-adj = <6>;
 		nvidia,xcvr-setup = <15>;
-		nvidia,xcvr-lsfslew = <2>;
-		nvidia,xcvr-lsrslew = <2>;
+		nvidia,xcvr-lsfslew = <0>;
+		nvidia,xcvr-lsrslew = <3>;
 		nvidia,xcvr-use-fuses;
 		nvidia,vbus-oc-map = <4>;
 		nvidia,xcvr-setup-offset = <0>;
-		status = "disabled";
 	};
 };
 
