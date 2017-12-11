@@ -23,9 +23,9 @@
 #define DEF_FREQUENCY_DOWN_DIFFERENTIAL		(20)
 #define DEF_INPUT_EVENT_MIN_FREQ		(1224000)
 #define DEF_INPUT_EVENT_TIMEOUT			(700)
-#define DEF_GBOOST_MIN_FREQ			(1530000)
+#define DEF_GBOOST_MIN_FREQ			(1428000)
 #define MIN_SAMPLING_RATE			(10000)
-#define FREQ_NEED_BURST(x)			(x < 800000 ? 1 : 0)
+#define FREQ_NEED_BURST(x)			(x < 1224000 ? 1 : 0)
 #define MAX(x,y)				(x > y ? x : y)
 #define MIN(x,y)				(x < y ? x : y)
 
@@ -104,7 +104,7 @@ static void ex_check_cpu(int cpu, unsigned int load)
 	//gboost mode
 	if (ex_tuners->gboost && ex_data.g_count > 500) {
 				
-		if (avg_load > 70) {
+		if (avg_load > 90) {
 			freq_next = policy->max;
 		} else {
 			freq_next = policy->max * avg_load / 100;
@@ -168,7 +168,7 @@ static void ex_check_cpu(int cpu, unsigned int load)
 			freq_next = MAX(freq_next, policy->min);
 
 		__cpufreq_driver_target(policy, freq_next,
-			CPUFREQ_RELATION_C);
+			CPUFREQ_RELATION_L);
 	}
 
 finished:
