@@ -34,8 +34,6 @@ static DEFINE_PER_CPU(struct ex_cpu_dbs_info_s, ex_cpu_dbs_info);
 
 static unsigned int up_threshold_level[2] __read_mostly = {95, 85};
 
-extern unsigned long gpu_load;
-
 static struct ex_governor_data {
 	unsigned int input_event_timeout;
 	unsigned int input_min_freq;
