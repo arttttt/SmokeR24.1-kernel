@@ -5,6 +5,7 @@
  *            (C)  2003 Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>
  *                      Jun Nakajima <jun.nakajima@intel.com>
  *            (C)  2015 Aaron Segaert <asegaert@gmail.com>
+ *            (C)  2017 Artem Bambalov <artem-bambalov@yandex.ru>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -95,28 +96,6 @@ static void ex_check_cpu(int cpu, unsigned int load)
 			max_load_freq = load * policy->cur;
 	}
 	avg_load = (ex_data.prev_load + load) >> 1;
-
-	if (ex_tuners->gboost) {
-		ewma_add(&ex_data.gpu_avg, gpu_load);
-		ex_data.g_count = ewma_read(&ex_data.gpu_avg);
-	}
-
-	//gboost mode
-	if (ex_tuners->gboost && ex_data.g_count > 500) {
-				
-		if (avg_load > 90) {
-			freq_next = policy->max;
-		} else {
-			freq_next = policy->max * avg_load / 100;
-			freq_next = MAX(freq_next, ex_tuners->gboost_min_freq);
-		}
-
-		target_freq = ex_freq_increase(policy, freq_next, cpu);
-
-		__cpufreq_driver_target(policy, target_freq, CPUFREQ_RELATION_H);
-
-		goto finished;
-	} 
 
 	//normal mode
 	if (max_load_freq > up_threshold_level[1] * cur_freq) {
@@ -373,24 +352,6 @@ static ssize_t store_down_differential(struct dbs_data *dbs_data,
 	return count;
 }
 
-static ssize_t store_gboost(struct dbs_data *dbs_data, const char *buf,
-		size_t count)
-{
-	struct ex_dbs_tuners *ex_tuners = dbs_data->tuners;
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	if (ret != 1 || input > 1)
-		return -EINVAL;
-
-	if (input == 0)
-		ex_data.g_count = 0;
-
-	ex_tuners->gboost = input;
-	return count;
-}
-
 static ssize_t store_gboost_min_freq(struct dbs_data *dbs_data,
 		const char *buf, size_t count)
 {
@@ -441,7 +402,6 @@ static ssize_t store_input_min_freq(struct dbs_data *dbs_data,
 show_store_one(ex, sampling_rate);
 show_store_one(ex, up_threshold);
 show_store_one(ex, down_differential);
-show_store_one(ex, gboost);
 show_store_one(ex, gboost_min_freq);
 show_store_one(ex, input_event_timeout);
 show_store_one(ex, input_min_freq);
@@ -450,7 +410,6 @@ declare_show_sampling_rate_min(ex);
 gov_sys_pol_attr_rw(sampling_rate);
 gov_sys_pol_attr_rw(up_threshold);
 gov_sys_pol_attr_rw(down_differential);
-gov_sys_pol_attr_rw(gboost);
 gov_sys_pol_attr_rw(gboost_min_freq);
 gov_sys_pol_attr_rw(input_event_timeout);
 gov_sys_pol_attr_rw(input_min_freq);
@@ -461,7 +420,6 @@ static struct attribute *dbs_attributes_gov_sys[] = {
 	&sampling_rate_gov_sys.attr,
 	&up_threshold_gov_sys.attr,
 	&down_differential_gov_sys.attr,
-	&gboost_gov_sys.attr,
 	&gboost_min_freq_gov_sys.attr,
 	&input_event_timeout_gov_sys.attr,
 	&input_min_freq_gov_sys.attr,
@@ -478,7 +436,6 @@ static struct attribute *dbs_attributes_gov_pol[] = {
 	&sampling_rate_gov_pol.attr,
 	&up_threshold_gov_pol.attr,
 	&down_differential_gov_pol.attr,
-	&gboost_gov_pol.attr,
 	&gboost_min_freq_gov_pol.attr,
 	&input_event_timeout_gov_pol.attr,
 	&input_min_freq_gov_pol.attr,
@@ -505,7 +462,6 @@ static int ex_init(struct dbs_data *dbs_data)
 	tuners->up_threshold = DEF_FREQUENCY_UP_THRESHOLD;
 	tuners->down_differential = DEF_FREQUENCY_DOWN_DIFFERENTIAL;
 	tuners->ignore_nice_load = 0;
-	tuners->gboost = 1;
 	tuners->gboost_min_freq = DEF_GBOOST_MIN_FREQ;
 	tuners->input_event_timeout = DEF_INPUT_EVENT_TIMEOUT;
 	tuners->input_min_freq = DEF_INPUT_EVENT_MIN_FREQ;
