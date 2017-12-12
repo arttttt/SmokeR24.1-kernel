@@ -40,7 +40,6 @@ static struct ex_governor_data {
 	unsigned int input_event_timeout;
 	unsigned int input_min_freq;
 	unsigned int prev_load;
-	unsigned int g_count;
 	struct ewma gpu_avg;
 	bool suspended;
 	struct notifier_block notif;
@@ -48,7 +47,6 @@ static struct ex_governor_data {
 	.input_event_timeout = DEF_INPUT_EVENT_TIMEOUT,
 	.input_min_freq = DEF_INPUT_EVENT_MIN_FREQ,
 	.prev_load = 0,
-	.g_count = 0,
 	.suspended = false
 };
 
@@ -73,7 +71,7 @@ static inline unsigned int ex_freq_increase(struct cpufreq_policy *p, unsigned i
 		return p->max;
 	} 
 	
-	else if (input_event_boosted(cpu) || ex_data.g_count > 400) {
+	else if (input_event_boosted(cpu)) {
 		freq = MAX(freq, ex_data.input_min_freq);
 	} 
 
