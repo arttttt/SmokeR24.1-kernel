@@ -30,7 +30,7 @@
 
 static DEFINE_PER_CPU(struct ex_cpu_dbs_info_s, ex_cpu_dbs_info);
 
-static unsigned int up_threshold_level[2] __read_mostly = {95, 85};
+static unsigned int up_threshold_level __read_mostly = 95;
 
 static struct ex_governor_data {
 	unsigned int input_event_timeout;
@@ -90,19 +90,18 @@ static void ex_check_cpu(int cpu, unsigned int load)
 	}
 	avg_load = (ex_data.prev_load + load) >> 1;
 
-	//normal mode
-	if (max_load_freq > up_threshold_level[1] * cur_freq) {
+	if (max_load_freq > up_threshold_level * cur_freq) {
 		
-		if (avg_load > up_threshold_level[0]) {
+		if (avg_load > up_threshold_level) {
 			freq_next = cur_freq + 800000;
 		}
 		
-		else if (avg_load <= up_threshold_level[1]) {
+		else if (avg_load <= up_threshold_level) {
 			freq_next = cur_freq;
 		}
 	
 		else {		
-			if (load > up_threshold_level[0]) {
+			if (load > up_threshold_level) {
 				freq_next = cur_freq + 400000;
 			}
 		
@@ -122,12 +121,8 @@ static void ex_check_cpu(int cpu, unsigned int load)
 		goto finished;
 	}
 
-	if (max_load_freq <
-	    (ex_tuners->up_threshold - ex_tuners->down_differential) *
-	     cur_freq) {
-		freq_next = max_load_freq /
-				(ex_tuners->up_threshold -
-				 ex_tuners->down_differential);
+	if (max_load_freq < (ex_tuners->up_threshold - ex_tuners->down_differential) * cur_freq) {
+		freq_next = max_load_freq / (ex_tuners->up_threshold - ex_tuners->down_differential);
 
 		if (input_event_boosted(cpu))
 			freq_next = MAX(freq_next, ex_data.input_min_freq);
