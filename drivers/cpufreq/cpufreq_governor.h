@@ -193,7 +193,6 @@ struct ex_dbs_tuners {
 	unsigned int ignore_nice_load;
 	unsigned int sampling_rate;
 	unsigned int up_threshold;
-	unsigned int down_differential;
 	unsigned int gboost_min_freq;
 	unsigned int input_event_timeout;
 	unsigned int input_min_freq;

@@ -21,7 +21,6 @@
 
 /* elementalx governor macros */
 #define DEF_FREQUENCY_UP_THRESHOLD		(95)
-#define DEF_FREQUENCY_DOWN_DIFFERENTIAL		(20)
 #define DEF_INPUT_EVENT_MIN_FREQ		(1044000)
 #define DEF_INPUT_EVENT_TIMEOUT			(500)
 #define MIN_SAMPLING_RATE			(10000)
@@ -121,8 +120,8 @@ static void ex_check_cpu(int cpu, unsigned int load)
 		goto finished;
 	}
 
-	if (max_load_freq < (ex_tuners->up_threshold - ex_tuners->down_differential) * cur_freq) {
-		freq_next = max_load_freq / (ex_tuners->up_threshold - ex_tuners->down_differential);
+	if (max_load_freq < ex_tuners->up_threshold * cur_freq) {
+		freq_next = max_load_freq / ex_tuners->up_threshold;
 
 		if (input_event_boosted(cpu))
 			freq_next = MAX(freq_next, ex_data.input_min_freq);
@@ -313,25 +312,10 @@ static ssize_t store_up_threshold(struct dbs_data *dbs_data, const char *buf,
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	if (ret != 1 || input > 100 || input <= ex_tuners->down_differential)
+	if (ret != 1 || input > 100 || input <= 10)
 		return -EINVAL;
 
 	ex_tuners->up_threshold = input;
-	return count;
-}
-
-static ssize_t store_down_differential(struct dbs_data *dbs_data,
-		const char *buf, size_t count)
-{
-	struct ex_dbs_tuners *ex_tuners = dbs_data->tuners;
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	if (ret != 1 || input > 100 || input >= ex_tuners->up_threshold)
-		return -EINVAL;
-
-	ex_tuners->down_differential = input;
 	return count;
 }
 
@@ -369,14 +353,12 @@ static ssize_t store_input_min_freq(struct dbs_data *dbs_data,
 
 show_store_one(ex, sampling_rate);
 show_store_one(ex, up_threshold);
-show_store_one(ex, down_differential);
 show_store_one(ex, input_event_timeout);
 show_store_one(ex, input_min_freq);
 declare_show_sampling_rate_min(ex);
 
 gov_sys_pol_attr_rw(sampling_rate);
 gov_sys_pol_attr_rw(up_threshold);
-gov_sys_pol_attr_rw(down_differential);
 gov_sys_pol_attr_rw(input_event_timeout);
 gov_sys_pol_attr_rw(input_min_freq);
 gov_sys_pol_attr_ro(sampling_rate_min);
@@ -385,7 +367,6 @@ static struct attribute *dbs_attributes_gov_sys[] = {
 	&sampling_rate_min_gov_sys.attr,
 	&sampling_rate_gov_sys.attr,
 	&up_threshold_gov_sys.attr,
-	&down_differential_gov_sys.attr,
 	&input_event_timeout_gov_sys.attr,
 	&input_min_freq_gov_sys.attr,
 	NULL
@@ -400,7 +381,6 @@ static struct attribute *dbs_attributes_gov_pol[] = {
 	&sampling_rate_min_gov_pol.attr,
 	&sampling_rate_gov_pol.attr,
 	&up_threshold_gov_pol.attr,
-	&down_differential_gov_pol.attr,
 	&input_event_timeout_gov_pol.attr,
 	&input_min_freq_gov_pol.attr,
 	NULL
@@ -424,7 +404,6 @@ static int ex_init(struct dbs_data *dbs_data)
 	}
 
 	tuners->up_threshold = DEF_FREQUENCY_UP_THRESHOLD;
-	tuners->down_differential = DEF_FREQUENCY_DOWN_DIFFERENTIAL;
 	tuners->ignore_nice_load = 0;
 	tuners->input_event_timeout = DEF_INPUT_EVENT_TIMEOUT;
 	tuners->input_min_freq = DEF_INPUT_EVENT_MIN_FREQ;
