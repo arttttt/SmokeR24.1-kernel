@@ -84,7 +84,7 @@ static void ex_check_cpu(int cpu, unsigned int load)
 
 	cur_freq = policy->cur;
 
-	for_each_cpu(j, policy->cpus) {
+	for_each_online_cpu(j) {
 		if (load > max_load_freq)
 			max_load_freq = load * policy->cur;
 	}
