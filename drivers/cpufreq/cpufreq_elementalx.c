@@ -38,7 +38,6 @@ static struct ex_governor_data {
 	unsigned int input_event_timeout;
 	unsigned int input_min_freq;
 	unsigned int prev_load;
-	struct ewma gpu_avg;
 	bool suspended;
 	struct notifier_block notif;
 } ex_data = {
@@ -473,8 +472,6 @@ static int ex_init(struct dbs_data *dbs_data)
 		pr_err("%s: Failed to register fb_notifier\n", __func__);
 
 	mutex_init(&dbs_data->mutex);
-
-	ewma_init(&ex_data.gpu_avg, 1028, 64);
 
 	return 0;
 }
