@@ -312,8 +312,13 @@ static ssize_t store_up_threshold(struct dbs_data *dbs_data, const char *buf,
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	if (ret != 1 || input > 100 || input <= 10)
+	if (ret != 1)
 		return -EINVAL;
+
+	if (input > 100)
+		input = 100;
+	else if (input <= 50)
+		input = 50;
 
 	ex_tuners->up_threshold = input;
 	return count;
