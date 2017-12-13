@@ -20,10 +20,10 @@
 #include "cpufreq_governor.h"
 
 /* elementalx governor macros */
-#define DEF_FREQUENCY_UP_THRESHOLD		(90)
+#define DEF_FREQUENCY_UP_THRESHOLD		(95)
 #define DEF_FREQUENCY_DOWN_DIFFERENTIAL		(20)
-#define DEF_INPUT_EVENT_MIN_FREQ		(1224000)
-#define DEF_INPUT_EVENT_TIMEOUT			(700)
+#define DEF_INPUT_EVENT_MIN_FREQ		(1044000)
+#define DEF_INPUT_EVENT_TIMEOUT			(500)
 #define MIN_SAMPLING_RATE			(10000)
 #define MAX(x,y)				(x > y ? x : y)
 #define MIN(x,y)				(x < y ? x : y)
