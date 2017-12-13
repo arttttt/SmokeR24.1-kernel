@@ -111,7 +111,7 @@ static void ex_check_cpu(int cpu, unsigned int load)
 
 		target_freq = ex_freq_increase(policy, freq_next, cpu);
 
-		__cpufreq_driver_target(policy, target_freq, CPUFREQ_RELATION_H);
+		__cpufreq_driver_target(policy, target_freq, CPUFREQ_RELATION_C);
 
 		goto finished;
 	}
