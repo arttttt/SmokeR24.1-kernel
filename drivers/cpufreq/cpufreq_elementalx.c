@@ -16,7 +16,6 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/fb.h>
-#include <linux/average.h>
 #include "cpufreq_governor.h"
 
 /* elementalx governor macros */
