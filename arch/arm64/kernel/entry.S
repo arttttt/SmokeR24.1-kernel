@@ -383,7 +383,7 @@ el0_sync:
 	adr 	x26, el0_fpsimd_exc
 	cmp	x24, #ESR_EL1_EC_FP_EXC64	// FP/ASIMD exception
 	b.eq	el0_sync_tramp
-	adr	x26, el0_undef
+	adr	x26, el0_sys
 	cmp	x24, #ESR_EL1_EC_SYS64		// configurable trap
 	b.eq	el0_sync_tramp
 	adr	x26, el0_sp_pc
@@ -533,6 +533,15 @@ el0_undef:
 	// enable interrupts before calling the main handler
 	enable_irq
 	b	do_undefinstr
+el0_sys:
+	/*
+	 * System instructions, for trapped cache maintenance instructions
+	 */
+	enable_dbg
+	enable_irq
+	mov     x0, x25
+	mov     x1, sp
+	b       do_sysinstr
 el0_dbg:
 	/*
 	 * Debug exception handling
