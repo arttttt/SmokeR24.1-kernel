@@ -25,6 +25,8 @@
 #include <asm/hwcap.h>
 #include <asm/pgtable-hwdef.h>
 #include <asm/pgtable.h>
+#include <asm/cpufeature.h>
+#include <asm/alternative-asm.h>
 
 #include "proc-macros.S"
 
@@ -62,6 +64,7 @@ ENDPROC(cpu_cache_off)
  */
 	.align	5
 ENTRY(cpu_reset)
+
 	mrs	x1, sctlr_el1
 	bic	x1, x1, #1
 	msr	sctlr_el1, x1			// disable the MMU
@@ -172,6 +175,14 @@ ENTRY(cpu_do_switch_mm)
 	bfi	x0, x1, #48, #16		// set the ASID
 	msr	ttbr0_el1, x0			// set TTBR0
 	isb
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+alternative_if_not ARM64_IC_IALLU_ON_CTX_CHANGE
+	nop
+alternative_else
+	ic	iallu
+	/* DSB in __switch_to */
+alternative_endif
+#endif
 	ret
 ENDPROC(cpu_do_switch_mm)
 

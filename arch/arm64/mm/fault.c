@@ -156,6 +156,10 @@ static void __do_user_fault(struct task_struct *tsk, unsigned long addr,
 	si.si_errno = 0;
 	si.si_code = code;
 	si.si_addr = (void __user *)addr;
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+	asm(ALTERNATIVE("nop; nop", "ic iallu; dsb nsh",
+			ARM64_IC_IALLU_ON_CTX_CHANGE));
+#endif
 	force_sig_info(sig, &si, tsk);
 }
 

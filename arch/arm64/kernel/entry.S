@@ -111,6 +111,14 @@
 	ARM64_WORKAROUND_845719
 #endif
 #endif
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+alternative_if_not ARM64_IC_IALLU_ON_CTX_CHANGE
+	nop
+alternative_else
+	ic	iallu
+	/* DSB in __switch_to */
+alternative_endif
+#endif
 	.endif
 	msr	elr_el1, x21			// set up the return data
 	msr	spsr_el1, x22
