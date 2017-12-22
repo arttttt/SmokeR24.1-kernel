@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2013-2018 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,5 +23,6 @@ int te_set_vpr_params(void *vpr_base, size_t vpr_size);
 void te_restore_keyslots(void);
 int  te_vrr_set_buf(phys_addr_t addr);
 void te_vrr_sec(void);
+void te_invalidate_btb(void);
 
 #endif

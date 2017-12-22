@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016 NVIDIA Corporation. All rights reserved.
+ * Copyright (c) 2012-2018 NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -219,6 +219,20 @@ int te_vrr_set_buf(phys_addr_t addr)
 	return _tlk_generic_smc(TE_SMC_VRR_SET_BUF, addr, 0);
 }
 EXPORT_SYMBOL(te_vrr_set_buf);
+
+/*
+ * Invalidates current BTB
+ */
+void te_invalidate_btb(void)
+{
+	int ver;
+	/* Calling get version SMC as entry into secure world invalidates BTB */
+	ver = _tlk_generic_smc(TE_SMC_GET_MONITOR_VER, 0, 0);
+	if (ver < 0) {
+		pr_err("%s: ERROR(0x%x) in getting version\n", __func__, ver);
+	}
+}
+EXPORT_SYMBOL(te_invalidate_btb);
 
 /*
  * VRR Sec
