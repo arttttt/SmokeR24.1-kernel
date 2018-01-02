@@ -1554,6 +1554,21 @@ config VM_EVENT_COUNTERS
 	  on EXPERT systems.  /proc/vmstat will only show page counts
 	  if VM event counters are disabled.
 
+config AIO_SSD_ONLY
+  	bool "Tune AIO performance for SSDs" if EXPERT
+  	default n
+  	depends on AIO
+  	help
+  	  Solid state storage have no head to move and no location
+  	  to "physically reach", as the block is being retrieved
+  	  in the exact moment we request it.
+  	  Optimize Asynchronous IO for those conditions.
+  
+  	  Enabling this option on systems with rotational drives
+  	  WILL be resulting in bad storage performance.
+  
+  	  If you've got ONLY SSDs, say Y. If unsure, say N.
+
 config SLUB_DEBUG
 	default y
 	bool "Enable SLUB debugging support" if EXPERT
