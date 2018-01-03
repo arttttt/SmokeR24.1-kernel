@@ -181,7 +181,7 @@ void tegra_emc_timer_training_stop(void)
 {
 	emc_timer_dbg(1, "EMC training timer stop\n");
 
-	del_timer(&emc_timer_training);
+	del_timer_sync(&emc_timer_training);
 }
 
 #ifdef CONFIG_THERMAL
