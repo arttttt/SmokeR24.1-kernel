@@ -46,12 +46,9 @@ struct vfsmount;
 struct cred;
 struct swap_info_struct;
 struct seq_file;
-<<<<<<< HEAD
 struct workqueue_struct;
-=======
 struct fscrypt_info;
 struct fscrypt_operations;
->>>>>>> f2fs/linux-3.10.y
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
