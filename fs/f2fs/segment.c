@@ -63,7 +63,7 @@ static struct kmem_cache *inmem_entry_slab;
  * Reverse the order of a chain of llist entries and return the
  * new first entry.
  */
-struct llist_node *llist_reverse_order(struct llist_node *head)
+/*struct llist_node *llist_reverse_order(struct llist_node *head)
 {
 	struct llist_node *new_head = NULL;
 
@@ -75,7 +75,7 @@ struct llist_node *llist_reverse_order(struct llist_node *head)
 	}
 
 	return new_head;
-}
+}*/
 
 /**
  * Copied from latest linux/list.h

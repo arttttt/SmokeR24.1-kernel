@@ -179,10 +179,10 @@ static inline bool wq_has_sleeper(wait_queue_head_t *wq)
 	return waitqueue_active(wq);
 }
 
-static inline struct inode *d_inode(const struct dentry *dentry)
+/*static inline struct inode *d_inode(const struct dentry *dentry)
 {
 	return dentry->d_inode;
-}
+}*/
 
 static inline struct dentry *file_dentry(const struct file *file)
 {
