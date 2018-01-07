@@ -376,7 +376,7 @@ static void cpufreq_powerstats_free(void)
 static int cpufreq_stats_create_table(struct cpufreq_policy *policy,
 		struct cpufreq_frequency_table *table, int count)
 {
-	unsigned int i, j, k, l, count = 0, ret = 0;
+	unsigned int i, j, k, l, ret = 0;
 	struct cpufreq_stats *stat;
 	struct cpufreq_policy *data;
 	unsigned int alloc_size;
