@@ -96,15 +96,15 @@
 				nvidia,states = <0 125 250 375 500 625 750 875 1000 1125 1250>;
 			};
 			consumer6 {
-				nvidia,consumer_name = "700b0000.sdhci";
+				nvidia,consumer_name = "sdhci-tegra.0";
 				nvidia,states = <0 966>;
 			};
 			consumer7 {
-				nvidia,consumer_name = "700b0400.sdhci";
+				nvidia,consumer_name = "sdhci-tegra.2";
 				nvidia,states = <0 966>;
 			};
 			consumer8 {
-				nvidia,consumer_name = "700b0600.sdhci";
+				nvidia,consumer_name = "sdhci-tegra.3";
 				nvidia,states = <0 966>;
 			};
 			consumer9 {
