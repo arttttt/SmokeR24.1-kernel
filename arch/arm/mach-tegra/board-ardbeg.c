@@ -568,6 +568,12 @@ static struct of_dev_auxdata ardbeg_auxdata_lookup[] __initdata = {
 	OF_DEV_AUXDATA("nvidia,tegra30-hda", 0x70030000, "tegra30-hda", NULL),
 	OF_DEV_AUXDATA("nvidia,tegra-audio-rt5671", 0x0, "tegra-snd-rt5671",
   				NULL),
+	OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0600, "sdhci-tegra.3", 
+			NULL),
+	OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0400, "sdhci-tegra.2", 
+			NULL),
+	OF_DEV_AUXDATA("nvidia,tegra124-sdhci", 0x700b0000, "sdhci-tegra.0", 
+			NULL),
 	{}
 };
 #endif
