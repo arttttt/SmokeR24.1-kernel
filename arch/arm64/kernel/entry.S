@@ -431,10 +431,10 @@ el0_sync_compat:
 	adr	x26, el0_undef
 	cmp	x24, #ESR_EL1_EC_UNKNOWN	// unknown exception in EL0
 	b.eq	el0_sync_tramp
-	adr	x26, el0_undef
+	adr	x26, el0_sys
 	cmp	x24, #ESR_EL1_EC_CP15_32	// CP15 MRC/MCR trap
 	b.eq	el0_sync_tramp
-	adr	x26, el0_undef
+	adr	x26, el0_sys
 	cmp	x24, #ESR_EL1_EC_CP15_64	// CP15 MRRC/MCRR trap
 	b.eq	el0_sync_tramp
 	adr	x26, el0_undef
