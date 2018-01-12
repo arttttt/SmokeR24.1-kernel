@@ -383,11 +383,11 @@ asmlinkage void __exception do_sysinstr(unsigned int esr, struct pt_regs *regs)
 	 * disabled, these two instructions will trigger the trap as well.
 	 */
 	if ((esr >> ESR_EL1_EC_SHIFT) == ESR_EL1_EC_CP15_64 &&
-	    (esr & ESR_ELx_CP15_64_ISS_OPC_MASK) == ESR_ELx_CP15_64_ISS_OPC_CNTVCT) {
+	    (esr & ESR_ELx_CP15_64_ISS_SYS_MASK) == ESR_ELx_CP15_64_ISS_SYS_CNTVCT) {
 		cntvct_read32_handler(esr, regs);
 		return;
 	} else if ((esr >> ESR_EL1_EC_SHIFT) == ESR_EL1_EC_CP15_32 &&
-		   (esr & ESR_ELx_CP15_32_ISS_OPC_MASK) == ESR_ELx_CP15_32_ISS_OPC_CNTFRQ) {
+		   (esr & ESR_ELx_CP15_32_ISS_SYS_MASK) == ESR_ELx_CP15_32_ISS_SYS_CNTFRQ) {
 		cntfrq_read_handler(esr, regs);
 		return;
 	}
