@@ -25,6 +25,27 @@
 
 #include "bpf_jit_32.h"
 
+/*
+ * eBPF prog stack layout
+ *
+ *                         high
+ * original ARM_SP =>     +-----+ eBPF prologue
+ *                        |FP/LR|
+ * current ARM_FP =>      +-----+
+ *                        | ... | callee saved registers
+ * eBPF fp register =>    +-----+ <= (BPF_FP)
+ *                        | ... | eBPF JIT scratch space
+ *                        |     | eBPF prog stack
+ *                        +-----+
+ *                        |RSVD | JIT scratchpad
+ * current ARM_SP =>      +-----+ <= (BPF_FP - STACK_SIZE)
+ *                        |     |
+ *                        | ... | Function call stack
+ *                        |     |
+ *                        +-----+
+ *                          low
+ */
+
 #define STACK_OFFSET(k)	(k)
 #define TMP_REG_1	(MAX_BPF_JIT_REG + 0)	/* TEMP Register 1 */
 #define TMP_REG_2	(MAX_BPF_JIT_REG + 1)	/* TEMP Register 2 */
@@ -1084,27 +1105,6 @@ static void build_prologue(struct jit_ctx *ctx)
 	const u8 *tcc = bpf2a32[TCALL_CNT];
 
 	u16 reg_set = 0;
-
-	/*
-	 * eBPF prog stack layout
-	 *
-	 *                         high
-	 * original ARM_SP =>     +-----+ eBPF prologue
-	 *                        |FP/LR|
-	 * current ARM_FP =>      +-----+
-	 *                        | ... | callee saved registers
-	 * eBPF fp register =>    +-----+ <= (BPF_FP)
-	 *                        | ... | eBPF JIT scratch space
-	 *                        |     | eBPF prog stack
-	 *                        +-----+
-	 *			  |RSVD | JIT scratchpad
-	 * current A64_SP =>      +-----+ <= (BPF_FP - STACK_SIZE)
-	 *                        |     |
-	 *                        | ... | Function call stack
-	 *                        |     |
-	 *                        +-----+
-	 *                          low
-	 */
 
 	/* Save callee saved registers. */
 	reg_set |= (1<<r4) | (1<<r5) | (1<<r6) | (1<<r7) | (1<<r8) | (1<<r10);
