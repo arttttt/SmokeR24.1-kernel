@@ -304,6 +304,7 @@ unsigned long gen_pool_alloc_addr(struct gen_pool *pool, size_t size,
 		if (size > atomic_read(&chunk->avail))
 			continue;
 
+		start_bit = 0;
 		end_bit = chunk_size(chunk) >> order;
 		if (alloc_addr) {
 			if (alloc_addr < chunk->start_addr ||
