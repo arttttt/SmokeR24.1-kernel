@@ -1636,7 +1636,7 @@ int zfcp_fsf_open_wka_port(struct zfcp_fc_wka_port *wka_port)
 		zfcp_fsf_req_free(req);
 out:
 	spin_unlock_irq(&qdio->req_q_lock);
-	if (req && !IS_ERR(req))
+	if (!retval)
 		zfcp_dbf_rec_run_wka("fsowp_1", wka_port, req->req_id);
 	return retval;
 }
@@ -1691,7 +1691,7 @@ int zfcp_fsf_close_wka_port(struct zfcp_fc_wka_port *wka_port)
 		zfcp_fsf_req_free(req);
 out:
 	spin_unlock_irq(&qdio->req_q_lock);
-	if (req && !IS_ERR(req))
+	if (!retval)
 		zfcp_dbf_rec_run_wka("fscwp_1", wka_port, req->req_id);
 	return retval;
 }
@@ -2286,7 +2286,8 @@ int zfcp_fsf_fcp_cmnd(struct scsi_cmnd *scsi_cmnd)
 	fcp_cmnd = (struct fcp_cmnd *) &req->qtcb->bottom.io.fcp_cmnd;
 	zfcp_fc_scsi_to_fcp(fcp_cmnd, scsi_cmnd, 0);
 
-	if (scsi_prot_sg_count(scsi_cmnd)) {
+	if ((scsi_get_prot_op(scsi_cmnd) != SCSI_PROT_NORMAL) &&
+	    scsi_prot_sg_count(scsi_cmnd)) {
 		zfcp_qdio_set_data_div(qdio, &req->qdio_req,
 				       scsi_prot_sg_count(scsi_cmnd));
 		retval = zfcp_qdio_sbals_from_sg(qdio, &req->qdio_req,

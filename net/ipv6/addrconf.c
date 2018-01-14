@@ -2956,6 +2956,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 {
 	struct net_device *dev = (struct net_device *) data;
 	struct inet6_dev *idev = __in6_dev_get(dev);
+	struct net *net = dev_net(dev);
 	int run_pending = 0;
 	int err;
 
@@ -3052,7 +3053,7 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 			 * IPV6_MIN_MTU stop IPv6 on this interface.
 			 */
 			if (dev->mtu < IPV6_MIN_MTU)
-				addrconf_ifdown(dev, 1);
+				addrconf_ifdown(dev, dev != net->loopback_dev);
 		}
 		break;
 
@@ -4844,8 +4845,7 @@ static void addrconf_disable_change(struct net *net, __s32 newf)
 	struct net_device *dev;
 	struct inet6_dev *idev;
 
-	rcu_read_lock();
-	for_each_netdev_rcu(net, dev) {
+	for_each_netdev(net, dev) {
 		idev = __in6_dev_get(dev);
 		if (idev) {
 			int changed = (!idev->cnf.disable_ipv6) ^ (!newf);
@@ -4854,7 +4854,6 @@ static void addrconf_disable_change(struct net *net, __s32 newf)
 				dev_disable_change(idev);
 		}
 	}
-	rcu_read_unlock();
 }
 
 static int addrconf_disable_ipv6(struct ctl_table *table, int *p, int newf)

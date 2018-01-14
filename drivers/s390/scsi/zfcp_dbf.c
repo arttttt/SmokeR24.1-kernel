@@ -282,11 +282,12 @@ void zfcp_dbf_rec_trig(char *tag, struct zfcp_adapter *adapter,
 
 
 /**
- * zfcp_dbf_rec_run - trace event related to running recovery
+ * zfcp_dbf_rec_run_lvl - trace event related to running recovery
+ * @level: trace level to be used for event
  * @tag: identifier for event
  * @erp: erp_action running
  */
-void zfcp_dbf_rec_run(char *tag, struct zfcp_erp_action *erp)
+void zfcp_dbf_rec_run_lvl(int level, char *tag, struct zfcp_erp_action *erp)
 {
 	struct zfcp_dbf *dbf = erp->adapter->dbf;
 	struct zfcp_dbf_rec *rec = &dbf->rec_buf;
@@ -311,6 +312,48 @@ void zfcp_dbf_rec_run(char *tag, struct zfcp_erp_action *erp)
 		rec->u.run.rec_count = atomic_read(&erp->port->erp_counter);
 	else
 		rec->u.run.rec_count = atomic_read(&erp->adapter->erp_counter);
+
+	debug_event(dbf->rec, level, rec, sizeof(*rec));
+	spin_unlock_irqrestore(&dbf->rec_lock, flags);
+}
+
+/**
+ * zfcp_dbf_rec_run - trace event related to running recovery
+ * @tag: identifier for event
+ * @erp: erp_action running
+ */
+void zfcp_dbf_rec_run(char *tag, struct zfcp_erp_action *erp)
+{
+	zfcp_dbf_rec_run_lvl(1, tag, erp);
+}
+
+/**
+ * zfcp_dbf_rec_run_wka - trace wka port event with info like running recovery
+ * @tag: identifier for event
+ * @wka_port: well known address port
+ * @req_id: request ID to correlate with potential HBA trace record
+ */
+void zfcp_dbf_rec_run_wka(char *tag, struct zfcp_fc_wka_port *wka_port,
+			  u64 req_id)
+{
+	struct zfcp_dbf *dbf = wka_port->adapter->dbf;
+	struct zfcp_dbf_rec *rec = &dbf->rec_buf;
+	unsigned long flags;
+
+	spin_lock_irqsave(&dbf->rec_lock, flags);
+	memset(rec, 0, sizeof(*rec));
+
+	rec->id = ZFCP_DBF_REC_RUN;
+	memcpy(rec->tag, tag, ZFCP_DBF_TAG_LEN);
+	rec->port_status = wka_port->status;
+	rec->d_id = wka_port->d_id;
+	rec->lun = ZFCP_DBF_INVALID_LUN;
+
+	rec->u.run.fsf_req_id = req_id;
+	rec->u.run.rec_status = ~0;
+	rec->u.run.rec_step = ~0;
+	rec->u.run.rec_action = ~0;
+	rec->u.run.rec_count = ~0;
 
 	debug_event(dbf->rec, 1, rec, sizeof(*rec));
 	spin_unlock_irqrestore(&dbf->rec_lock, flags);
@@ -545,19 +588,32 @@ void zfcp_dbf_scsi(char *tag, int level, struct scsi_cmnd *sc,
 
 	if (fsf) {
 		rec->fsf_req_id = fsf->req_id;
+		rec->pl_len = FCP_RESP_WITH_EXT;
 		fcp_rsp = (struct fcp_resp_with_ext *)
 				&(fsf->qtcb->bottom.io.fcp_rsp);
+		/* mandatory parts of FCP_RSP IU in this SCSI record */
 		memcpy(&rec->fcp_rsp, fcp_rsp, FCP_RESP_WITH_EXT);
 		if (fcp_rsp->resp.fr_flags & FCP_RSP_LEN_VAL) {
 			fcp_rsp_info = (struct fcp_resp_rsp_info *) &fcp_rsp[1];
 			rec->fcp_rsp_info = fcp_rsp_info->rsp_code;
+			rec->pl_len += be32_to_cpu(fcp_rsp->ext.fr_rsp_len);
 		}
 		if (fcp_rsp->resp.fr_flags & FCP_SNS_LEN_VAL) {
-			rec->pl_len = min((u16)SCSI_SENSE_BUFFERSIZE,
-					  (u16)ZFCP_DBF_PAY_MAX_REC);
-			zfcp_dbf_pl_write(dbf, sc->sense_buffer, rec->pl_len,
-					  "fcp_sns", fsf->req_id);
+			rec->pl_len += be32_to_cpu(fcp_rsp->ext.fr_sns_len);
 		}
+		/* complete FCP_RSP IU in associated PAYload record
+		 * but only if there are optional parts
+		 */
+		if (fcp_rsp->resp.fr_flags != 0)
+			zfcp_dbf_pl_write(
+				dbf, fcp_rsp,
+				/* at least one full PAY record
+				 * but not beyond hardware response field
+				 */
+				min_t(u16, max_t(u16, rec->pl_len,
+						 ZFCP_DBF_PAY_MAX_REC),
+				      FSF_FCP_RSP_SIZE),
+				"fcp_riu", fsf->req_id);
 	}
 
 	debug_event(dbf->scsi, level, rec, sizeof(*rec));

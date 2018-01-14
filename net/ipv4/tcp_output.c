@@ -1971,26 +1971,14 @@ repair:
 
 bool tcp_schedule_loss_probe(struct sock *sk)
 {
-	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
-	u32 timeout, tlp_time_stamp, rto_time_stamp;
 	u32 rtt = tp->srtt >> 3;
+	u32 timeout, rto_delta;
 
-	if (WARN_ON(icsk->icsk_pending == ICSK_TIME_EARLY_RETRANS))
-		return false;
-	/* No consecutive loss probes. */
-	if (WARN_ON(icsk->icsk_pending == ICSK_TIME_LOSS_PROBE)) {
-		tcp_rearm_rto(sk);
-		return false;
-	}
 	/* Don't do any loss probe on a Fast Open connection before 3WHS
 	 * finishes.
 	 */
 	if (sk->sk_state == TCP_SYN_RECV)
-		return false;
-
-	/* TLP is only scheduled when next timer event is RTO. */
-	if (icsk->icsk_pending != ICSK_TIME_RETRANS)
 		return false;
 
 	/* Schedule a loss probe in 2*RTT for SACK capable connections
@@ -2013,14 +2001,10 @@ bool tcp_schedule_loss_probe(struct sock *sk)
 				(rtt + (rtt >> 1) + TCP_DELACK_MAX));
 	timeout = max_t(u32, timeout, msecs_to_jiffies(10));
 
-	/* If RTO is shorter, just schedule TLP in its place. */
-	tlp_time_stamp = tcp_time_stamp + timeout;
-	rto_time_stamp = (u32)inet_csk(sk)->icsk_timeout;
-	if ((s32)(tlp_time_stamp - rto_time_stamp) > 0) {
-		s32 delta = rto_time_stamp - tcp_time_stamp;
-		if (delta > 0)
-			timeout = delta;
-	}
+	/* If the RTO formula yields an earlier time, then use that time. */
+	rto_delta = tcp_rto_delta(sk);  /* How far in future is RTO? */
+	if (rto_delta > 0)
+		timeout = min_t(u32, timeout, rto_delta);
 
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_LOSS_PROBE, timeout,
 				  TCP_RTO_MAX);
@@ -2180,9 +2164,11 @@ u32 __tcp_select_window(struct sock *sk)
 	int full_space = min_t(int, tp->window_clamp, tcp_full_space(sk));
 	int window;
 
-	if (mss > full_space)
+	if (unlikely(mss > full_space)) {
 		mss = full_space;
-
+		if (mss <= 0)
+			return 0;
+	}
 	if (free_space < (full_space >> 1)) {
 		icsk->icsk_ack.quick = 0;
 
