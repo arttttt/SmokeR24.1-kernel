@@ -941,17 +941,6 @@ qdisc_create(struct net_device *dev, struct netdev_queue *dev_queue,
 	sch->handle = handle;
 
 	if (!ops->init || (err = ops->init(sch, tca[TCA_OPTIONS])) == 0) {
-		if (qdisc_is_percpu_stats(sch)) {
-			sch->cpu_bstats =
-				netdev_alloc_pcpu_stats(struct gnet_stats_basic_cpu);
-			if (!sch->cpu_bstats)
-				goto err_out4;
-
-			sch->cpu_qstats = alloc_percpu(struct gnet_stats_queue);
-			if (!sch->cpu_qstats)
-				goto err_out4;
-		}
-
 		if (tca[TCA_STAB]) {
 			stab = qdisc_get_stab(tca[TCA_STAB]);
 			if (IS_ERR(stab)) {
@@ -989,6 +978,8 @@ qdisc_create(struct net_device *dev, struct netdev_queue *dev_queue,
 	}
 err_out3:
 	dev_put(dev);
+	free_percpu(sch->cpu_bstats);
+	free_percpu(sch->cpu_qstats);
 	kfree((char *) sch - sch->padded);
 err_out2:
 	module_put(ops->owner);
@@ -997,8 +988,6 @@ err_out:
 	return NULL;
 
 err_out4:
-	free_percpu(sch->cpu_bstats);
-	free_percpu(sch->cpu_qstats);
 	/*
 	 * Any broken qdiscs that would require a ops->reset() here?
 	 * The qdisc was never in action so it shouldn't be necessary.

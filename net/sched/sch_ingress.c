@@ -52,7 +52,6 @@ static struct tcf_proto __rcu **ingress_find_tcf(struct Qdisc *sch,
 static int ingress_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	net_inc_ingress_queue();
-	sch->flags |= TCQ_F_CPUSTATS;
 
 	return 0;
 }
@@ -93,6 +92,7 @@ static const struct Qdisc_class_ops ingress_class_ops = {
 static struct Qdisc_ops ingress_qdisc_ops __read_mostly = {
 	.cl_ops		=	&ingress_class_ops,
 	.id		=	"ingress",
+	.static_flags	=	TCQ_F_CPUSTATS,
 	.init		=	ingress_init,
 	.destroy	=	ingress_destroy,
 	.dump		=	ingress_dump,
@@ -136,8 +136,6 @@ static int clsact_init(struct Qdisc *sch, struct nlattr *opt)
 	net_inc_ingress_queue();
 	net_inc_egress_queue();
 
-	sch->flags |= TCQ_F_CPUSTATS;
-
 	return 0;
 }
 
@@ -165,6 +163,7 @@ static const struct Qdisc_class_ops clsact_class_ops = {
 static struct Qdisc_ops clsact_qdisc_ops __read_mostly = {
 	.cl_ops		=	&clsact_class_ops,
 	.id		=	"clsact",
+	.static_flags	=	TCQ_F_CPUSTATS,
 	.init		=	clsact_init,
 	.destroy	=	clsact_destroy,
 	.dump		=	ingress_dump,
