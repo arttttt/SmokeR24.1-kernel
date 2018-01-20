@@ -121,8 +121,8 @@
 			synaptics,power-delay-ms = <160>;
 			synaptics,reset-delay-ms = <100>;
 			synaptics,reset-active-ms = <20>;
-			synaptics,byte-delay-us = <20>;
-			synaptics,block-delay-us = <20>;
+			synaptics,byte-delay-us = <30>;
+			synaptics,block-delay-us = <30>;
 			synaptics,regulator-name = "vdd-touch";
 			synaptics,cap-button-map = <139 102 158 116>;
 		};
