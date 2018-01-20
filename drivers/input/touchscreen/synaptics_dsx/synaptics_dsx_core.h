@@ -222,6 +222,7 @@ struct synaptics_rmi4_data {
 	struct regulator *regulator;
 	struct mutex rmi4_reset_mutex;
 	struct mutex rmi4_io_ctrl_mutex;
+	struct mutex rmi4_report_mutex;
 	unsigned char current_page;
 	unsigned char button_0d_enabled;
 	unsigned char full_pm_cycle;
