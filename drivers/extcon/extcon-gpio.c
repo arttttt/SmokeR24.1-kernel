@@ -72,7 +72,7 @@ static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
 	struct gpio_extcon_data *extcon_data = dev_id;
 
 	if (extcon_data->debounce_jiffies)
-		schedule_delayed_work(&extcon_data->work,
+		queue_delayed_work(system_power_efficient_wq, &extcon_data->work,
 			      extcon_data->debounce_jiffies);
 	else
 		gpio_extcon_work(&extcon_data->work.work);
