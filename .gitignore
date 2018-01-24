@@ -95,3 +95,4 @@ signing_key.x509
 x509.genkey
 
 /anykernel
+/output
