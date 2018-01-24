@@ -220,7 +220,8 @@ static int bq2419x_reset_wdt(struct bq2419x_chip *bq2419x, const char *from)
 
 scrub:
 	timeout = bq2419x->wdt_refresh_timeout;
-	schedule_delayed_work(&bq2419x->wdt_restart_wq,
+	queue_delayed_work(system_power_efficient_wq,
+						&bq2419x->wdt_restart_wq,
 						msecs_to_jiffies(timeout * 1000));
 	return ret;
 }
@@ -586,7 +587,8 @@ static int bq2419x_disable_otg_mode(struct bq2419x_chip *bq2419x)
 			mutex_unlock(&bq2419x->otg_mutex);
 			return ret;
 		}
-		schedule_delayed_work(&bq2419x->otg_reset_work,
+		queue_delayed_work(system_power_efficient_wq,
+					&bq2419x->otg_reset_work,
 					BQ2419x_OTG_ENABLE_TIME);
 	}
 	mutex_unlock(&bq2419x->otg_mutex);
@@ -912,7 +914,8 @@ static void bq2419x_thermal_init_work(struct work_struct *work)
 	if (IS_ERR(die_tz_device)) {
 		ret = PTR_ERR(die_tz_device);
 		if ((ret == -EPROBE_DEFER) && (bq2419x->thermal_init_retry)) {
-			schedule_delayed_work(&bq2419x->thermal_init_work,
+			queue_delayed_work(system_power_efficient_wq,
+					&bq2419x->thermal_init_work,
 					msecs_to_jiffies(1000));
 			bq2419x->thermal_init_retry--;
 		}
