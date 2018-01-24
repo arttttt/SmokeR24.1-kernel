@@ -826,7 +826,8 @@ static void bq27x00_battery_poll(struct work_struct *work)
 			delay = max((unsigned int)1, poll_interval);
 		/* The timer does not have to be accurate. */
 		set_timer_slack(&di->work.timer, delay * HZ / 4);
-		schedule_delayed_work(&di->work, delay * HZ);
+		queue_delayed_work(system_power_efficient_wq,
+							&di->work, delay * HZ);
 	}
 
 	return;
@@ -1146,7 +1147,8 @@ static void bq27x00_external_power_changed(struct power_supply *psy)
 	struct bq27x00_device_info *di = to_bq27x00_device_info(psy);
 
 	cancel_delayed_work_sync(&di->work);
-	schedule_delayed_work(&di->work, 0);
+	queue_delayed_work(system_power_efficient_wq,
+						&di->work, 0);
 }
 
 /*
@@ -1182,7 +1184,8 @@ static void bq27x00_battery_debug_poll(struct work_struct *work)
 	di->debug_info[di->debug_index].timestamp = ts;
 
 	if (di->debug_print_interval > 0)
-		schedule_delayed_work(&di->debug_work, HZ);
+		queue_delayed_work(system_power_efficient_wq,
+							&di->debug_work, HZ);
 
 	/* Dumps out 1HZ recording of V, I and T at fixed interval */
 	if (di->debug_print_interval > 0 &&
@@ -1816,7 +1819,8 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 		switch_set_state(&di->sdev, 0);
 		switch_set_state(&di->sdev, 1);
 		cancel_delayed_work(&di->work);
-		schedule_delayed_work(&di->work, 0);
+		queue_delayed_work(system_power_efficient_wq,
+							&di->work, 0);
 	} else {
 		dev_info(di->dev, "SYSDOWN condition not detected\n");
 		switch_set_state(&di->sdev, 0);
@@ -1978,7 +1982,8 @@ static ssize_t set_debug_print_interval(struct device *dev,
 	di->debug_index = 0;
 
 	if (di->debug_print_interval)
-		schedule_delayed_work(&di->debug_work, 0);
+		queue_delayed_work(system_power_efficient_wq,
+							&di->debug_work, 0);
 
 	return count;
 }
@@ -2172,9 +2177,11 @@ static ssize_t _update_firmware(struct device *dev, const char *firmware_filenam
 	}
 	mutex_unlock(&battery_mutex);
 
-	schedule_delayed_work(&di->work, 5 * HZ);
+	queue_delayed_work(system_power_efficient_wq,
+						&di->work, 5 * HZ);
 	if (di->debug_print_interval > 0)
-		schedule_delayed_work(&di->debug_work, poll_interval * HZ);
+		queue_delayed_work(system_power_efficient_wq,
+							&di->debug_work, poll_interval * HZ);
 
 	release_firmware(fw);
 
@@ -2396,7 +2403,8 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	 * 3) Dump additional data ram
 	 */
 	if (di->debug_print_interval) {
-		schedule_delayed_work(&di->debug_work, 0);
+		queue_delayed_work(system_power_efficient_wq,
+							&di->debug_work, 0);
 		di->data_flash_update_time =
 			jiffies + msecs_to_jiffies(debug_dataflash_interval);
 	}
@@ -2483,7 +2491,8 @@ static int bq27x00_battery_suspend_resume(struct i2c_client *client, const char 
 		if (suspend_resume == SUSPEND_STR)
 			cancel_delayed_work_sync(&di->work);
 		else if (suspend_resume == RESUME_STR)
-			schedule_delayed_work(&di->debug_work, HZ);
+			queue_delayed_work(system_power_efficient_wq,
+								&di->debug_work, HZ);
 	}
 
 	mutex_unlock(&di->lock);
