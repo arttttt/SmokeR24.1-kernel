@@ -622,7 +622,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 
 static enum hrtimer_restart vibrator_timer_func(struct hrtimer *timer)
 {
-	schedule_work(&vibdata.work);
+	queue_work(system_power_efficient_wq, &vibdata.work);
 	return HRTIMER_NORESTART;
 }
 
