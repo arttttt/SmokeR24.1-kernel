@@ -201,7 +201,8 @@ static int ecx_attach_cable(struct extcon_cable_xlate *ecx)
 	}
 	ecx->last_cable_out_state = new_state;
 	if (reschedule_wq)
-		schedule_delayed_work(&ecx->work, msecs_to_jiffies(1000));
+		queue_delayed_work(system_power_efficient_wq, 
+							&ecx->work, msecs_to_jiffies(1000));
 	mutex_unlock(&ecx->cable_lock);
 	return 0;
 }
@@ -216,13 +217,15 @@ static void ecx_cable_state_update_work(struct work_struct *work)
 		ret = ecx_init_input_cables(ecx);
 		if (ret < 0) {
 			if (ret == -EPROBE_DEFER)
-				schedule_delayed_work(&ecx->work,
+				queue_delayed_work(system_power_efficient_wq, 
+					&ecx->work,
 					msecs_to_jiffies(1000));
 			return;
 		}
 		dev_info(ecx->dev, "Extcon Init success\n");
 		ecx->extcon_init_done = true;
-		schedule_delayed_work(&ecx->work, msecs_to_jiffies(1000));
+		queue_delayed_work(system_power_efficient_wq, 
+							&ecx->work, msecs_to_jiffies(1000));
 		return;
 	}
 	ecx_attach_cable(ecx);
@@ -232,7 +235,7 @@ static void ecx_extcon_notifier_timer(unsigned long _data)
 {
 	struct extcon_cable_xlate *ecx = (struct extcon_cable_xlate *)_data;
 
-	schedule_delayed_work(&ecx->work, ecx->timer_to_work_jiffies);
+	queue_delayed_work(system_power_efficient_wq, &ecx->work, ecx->timer_to_work_jiffies);
 }
 
 static int ecx_extcon_notifier(struct notifier_block *self,
@@ -457,7 +460,7 @@ defer_now:
 		ecx_cable_state_update_work(&ecx->work.work);
 	} else {
 		extcon_set_state(&ecx->edev, 0);
-		schedule_delayed_work(&ecx->work, msecs_to_jiffies(1000));
+		queue_delayed_work(system_power_efficient_wq, &ecx->work, msecs_to_jiffies(1000));
 	}
 	dev_info(&pdev->dev, "%s() get success\n", __func__);
 	return 0;
