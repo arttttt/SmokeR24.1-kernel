@@ -20,9 +20,9 @@ make_zip()
 	zip_name="$output_archive($(date +'%d.%m.%Y-%H:%M'))"
 	zip -r $zip_name.zip *
 
-	if [ -f "$KERNEL_DIR/$zip_name.zip" ]; then
+	if [ -f "$PWD/$zip_name.zip" ]; then
 		printf "\n$zip_name.zip создан, перемещение в $output"
-		mv "$KERNEL_DIR/$zip_name.zip" $output
+		mv "$PWD/$zip_name.zip" $output
 
 		if [ -f "$output/$zip_name.zip" ]; then
 			echo
