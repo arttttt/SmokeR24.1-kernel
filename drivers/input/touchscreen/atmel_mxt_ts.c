@@ -3683,7 +3683,7 @@ static int mxt_chip_reset(struct mxt_data *data)
 
 	error = mxt_initialize(data);
 
-	schedule_work(&data->self_tuning_work);
+	queue_work(system_power_efficient_wq, &data->self_tuning_work);
 
 	return error;
 }
@@ -3756,7 +3756,7 @@ static int mxt_input_event(struct input_dev *dev,
 				ms->data = data;
 				ms->mode = (u8)value;
 				INIT_WORK(&ms->switch_mode_work, mxt_switch_mode_work);
-				schedule_work(&ms->switch_mode_work);
+				queue_work(system_power_efficient_wq, &ms->switch_mode_work);
 			} else {
 				dev_err(&data->client->dev,
 					"Failed in allocating memory for mxt_mode_switch!\n");
@@ -4102,7 +4102,7 @@ static int mxt_resume(struct device *dev)
 		data->is_stopped = 0;
 		mutex_unlock(&input_dev->mutex);
 	} else
-		schedule_work(&data->reset_work);
+		queue_work(system_power_efficient_wq, &data->reset_work);
 
 	return 0;
 }
@@ -4578,7 +4578,7 @@ retry:
 
 	mxt_debugfs_init(data);
 	if (0)
-		schedule_work(&data->self_tuning_work);
+		queue_work(system_power_efficient_wq, &data->self_tuning_work);
 
 	mxt_auto_return(data->client);
 

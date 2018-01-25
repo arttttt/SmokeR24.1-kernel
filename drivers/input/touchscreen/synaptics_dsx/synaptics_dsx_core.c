@@ -2729,7 +2729,7 @@ static int synaptics_rmi4_event(struct input_dev *dev,
 			ms->data = data;
 			ms->mode = (u8)value;
 			INIT_WORK(&ms->switch_mode_work, synaptics_rmi4_switch_mode_work);
-			schedule_work(&ms->switch_mode_work);
+			queue_work(system_power_efficient_wq, &ms->switch_mode_work);
 		} else {
 			dev_err(data->pdev->dev.parent,
 				"Failed in allocating memory for mode switch!\n");

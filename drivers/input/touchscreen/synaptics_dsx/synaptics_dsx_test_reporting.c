@@ -1738,7 +1738,7 @@ static void timeout_set_status(struct work_struct *work)
 
 static enum hrtimer_restart get_report_timeout(struct hrtimer *timer)
 {
-	schedule_work(&(f54->timeout_work));
+	queue_work(system_power_efficient_wq, &(f54->timeout_work));
 
 	return HRTIMER_NORESTART;
 }
