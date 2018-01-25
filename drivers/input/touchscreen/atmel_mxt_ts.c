@@ -29,8 +29,10 @@
 #include <linux/string.h>
 #include <linux/wait.h>
 #include <linux/of_gpio.h>
+#ifdef CONFIG_CUSTOM_DT2W
 #include <linux/input/dt2w.h>
 #include <linux/fb.h>
+#endif
 
 /* Version */
 #define MXT_VER_20		20
@@ -469,7 +471,9 @@
 #define MXT_MAX_FINGER_NUM	10
 #define BOOTLOADER_1664_1188	1
 
+#ifdef CONFIG_CUSTOM_DT2W
 struct notifier_block fb_notif_atm;
+#endif
 
 struct mxt_info {
 	u8 family_id;
@@ -1237,12 +1241,14 @@ static void mxt_proc_t9_messages(struct mxt_data *data, u8 *message)
 		mxt_input_sync(data);
 		input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, 0);
 
+#ifdef CONFIG_CUSTOM_DT2W
 		if (detect_dt2w_event(x, y) && data->wakeup_gesture_mode) {
 			input_event(input_dev, EV_KEY, KEY_POWER, 1);
 			input_sync(input_dev);
 			input_event(input_dev, EV_KEY, KEY_POWER, 0);
 			input_sync(input_dev);
 		}
+#endif
 	}
 }
 
@@ -1360,12 +1366,14 @@ static void mxt_proc_t100_messages(struct mxt_data *data, u8 *message)
 			mxt_input_sync(data);
 			input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, 0);
 
+#ifdef CONFIG_CUSTOM_DT2W
 			if (detect_dt2w_event(x, y) && data->wakeup_gesture_mode) {
 				input_event(input_dev, EV_KEY, KEY_POWER, 1);
 				input_sync(input_dev);
 				input_event(input_dev, EV_KEY, KEY_POWER, 0);
 				input_sync(input_dev);
 			}
+#endif
 		}
 	}
 }
@@ -4412,10 +4420,12 @@ static int mxt_probe(struct i2c_client *client,
 		return -ENOMEM;
 	}
 
+#ifdef CONFIG_CUSTOM_DT2W
 	if (fb_notifier_register(&fb_notif_atm))
 		pr_err("%s: failed to register fb notifier\n", __func__);
 	else
 		pr_err("%s: fb notifier registered\n", __func__);
+#endif
 
 	data->state = INIT;
 
@@ -4600,8 +4610,10 @@ err_reset_gpio_req:
 err_free_data:
 	kfree(data);
 
+#ifdef CONFIG_CUSTOM_DT2W
 	fb_notifier_unregister(&fb_notif_atm);
 	pr_err("%s: fb notifier unregistered\n", __func__);
+#endif
 
 	return error;
 }

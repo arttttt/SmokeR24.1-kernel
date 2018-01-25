@@ -33,7 +33,9 @@
 #include <linux/input/mt.h>
 #endif
 #include <asm/bootinfo.h>
+#ifdef CONFIG_CUSTOM_DT2W
 #include <linux/input/dt2w.h>
+#endif
 
 #define INPUT_PHYS_NAME "synaptics_dsx/touch_input"
 
@@ -124,7 +126,9 @@ static ssize_t synaptics_rmi4_wake_gesture_show(struct device *dev,
 static ssize_t synaptics_rmi4_wake_gesture_store(struct device *dev,
   		struct device_attribute *attr, const char *buf, size_t count);
 
+#ifdef CONFIG_CUSTOM_DT2W
 struct notifier_block fb_notif_syn;
+#endif
 
 struct synaptics_rmi4_f01_device_status {
 	union {
@@ -754,12 +758,14 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 #endif
 	}
 
+#ifdef CONFIG_CUSTOM_DT2W
 	if (touch_count == 0 && detect_dt2w_event(x, y) && rmi4_data->wakeup_enable) {
 		input_event(rmi4_data->input_dev, EV_KEY, KEY_POWER, 1);
 		input_sync(rmi4_data->input_dev);
 		input_event(rmi4_data->input_dev, EV_KEY, KEY_POWER, 0);
 		input_sync(rmi4_data->input_dev);
 	}
+#endif
 
 	input_sync(rmi4_data->input_dev);
 
@@ -2780,10 +2786,12 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+#ifdef CONFIG_CUSTOM_DT2W
 	if (fb_notifier_register(&fb_notif_syn))
 		pr_err("%s: failed to register fb notifier\n", __func__);
 	else
 		pr_err("%s: fb notifier registered\n", __func__);
+#endif
 
 	if (bdata->regulator_name != NULL) {
 		rmi4_data->regulator = regulator_get(&pdev->dev,
@@ -2949,8 +2957,10 @@ err_set_gpio:
 err_regulator:
 	kfree(rmi4_data);
 
-        fb_notifier_unregister(&fb_notif_syn);
+#ifdef CONFIG_CUSTOM_DT2W
+	fb_notifier_unregister(&fb_notif_syn);
 	pr_err("%s: fb notifier unregistered\n", __func__);
+#endif
 
 	return retval;
 }
