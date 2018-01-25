@@ -8,16 +8,33 @@ clean_build=0
 config="tegra12_android_defconfig"
 original_output="$KERNEL_DIR/arch/arm/boot"
 output="$KERNEL_DIR/output"
-output_archive="SmokeR24.2"
+kernel_name="SmokeR24.2"
 threads=5
 toolchain="$HOME/Android/toolchain/linaro-4.9.4/bin/arm-linux-gnueabihf-"
+
+generate_version()
+{
+	if [ -f "$KERNEL_DIR/.git/HEAD" ]; then
+		eval "$(awk -F"-"  '{print "current_branch="$2}' $KERNEL_DIR/.git/HEAD)"
+		if [ "$current_branch" != "stable" ]; then
+			if [ ! -f "$KERNEL_DIR/version" ]; then
+				echo "build_number=0" > $KERNEL_DIR/version
+			fi;
+
+			awk -F"="  '{$2+=1; print $1"="$2}' $KERNEL_DIR/version > tmpfile
+			mv tmpfile $KERNEL_DIR/version
+			eval "$(awk -F"="  '{print "current_build="$2}' $KERNEL_DIR/version)"
+			export LOCALVERSION="-build$current_build"
+		fi;
+	fi;
+}
 
 make_zip()
 {
 	printf "\nСоздание zip архива\n\n"
 
 	cd $KERNEL_DIR/anykernel
-	zip_name="$output_archive($(date +'%d.%m.%Y-%H:%M'))"
+	local zip_name="$kernel_name($(date +'%d.%m.%Y-%H:%M'))"
 	zip -r $zip_name.zip *
 
 	if [ -f "$PWD/$zip_name.zip" ]; then
@@ -36,7 +53,7 @@ make_zip()
 
 compile()
 {
-	start=$(date +%s)
+	local start=$(date +%s)
 	clear
 
 	if [ "$clean_build" == 1 ]; then
@@ -44,6 +61,7 @@ compile()
 		make mrproper
 	fi
 
+	generate_version
 	make $config
 	make -j$threads ARCH=$arch CROSS_COMPILE=$toolchain zImage
 
@@ -63,9 +81,10 @@ compile()
 		exit 0
 	fi
 
-	end=$(date +%s)
-	comp_time=$((end-start))
+	local end=$(date +%s)
+	local comp_time=$((end-start))
 	printf "\nЯдро скомпилировано за %02d:%02d\n" $((($comp_time/60)%60)) $(($comp_time%60))
+	printf "Сборка номер %d в ветке %s" $current_build $current_branch
 
 	make_zip
 }
