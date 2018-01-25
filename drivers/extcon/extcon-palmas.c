@@ -199,7 +199,8 @@ static void palmas_usb_id_st_wq(struct work_struct *work)
 			cable_update_wq.work);
 	ret = palmas_usb_id_state_update(palmas_usb);
 	if (ret == -EAGAIN)
-		schedule_delayed_work(&palmas_usb->cable_update_wq,
+		queue_delayed_work(system_power_efficient_wq, 
+			&palmas_usb->cable_update_wq,
 			msecs_to_jiffies(palmas_usb->cable_debounce_time));
 }
 
@@ -223,7 +224,8 @@ static irqreturn_t palmas_vbus_irq_handler(int irq, void *_palmas_usb)
 			extcon_set_cable_state(&palmas_usb->edev, "USB", true);
 			dev_info(palmas_usb->dev, "USB cable is attached\n");
 			if (palmas_usb->enable_id_detect_on_vbus) {
-				schedule_delayed_work(
+				queue_delayed_work(
+					system_power_efficient_wq, 
 					&palmas_usb->cable_update_wq,
 					 msecs_to_jiffies(
 					  palmas_usb->cable_debounce_time));
@@ -260,7 +262,8 @@ static irqreturn_t palmas_id_irq_handler(int irq, void *_palmas_usb)
 	palmas_write(palmas_usb->palmas, PALMAS_USB_OTG_BASE,
 		PALMAS_USB_ID_INT_LATCH_CLR, set);
 
-	schedule_delayed_work(&palmas_usb->cable_update_wq,
+	queue_delayed_work(system_power_efficient_wq, 
+			&palmas_usb->cable_update_wq,
 			msecs_to_jiffies(palmas_usb->cable_debounce_time));
 	return IRQ_HANDLED;
 }
@@ -289,7 +292,8 @@ static void palmas_enable_irq(struct palmas_usb *palmas_usb)
 		msleep(palmas_usb->cable_debounce_time);
 		ret = palmas_usb_id_state_update(palmas_usb);
 		if (ret == -EAGAIN)
-			schedule_delayed_work(&palmas_usb->cable_update_wq,
+			queue_delayed_work(system_power_efficient_wq, 
+				&palmas_usb->cable_update_wq,
 			    msecs_to_jiffies(palmas_usb->cable_debounce_time));
 	}
 }
