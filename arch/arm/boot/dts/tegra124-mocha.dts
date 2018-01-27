@@ -328,7 +328,7 @@
 	};
 
 	udc@7d000000 {
-		status = "disabled";
+		status = "okay";
 		nvidia,id-detection-type = <0x1>;
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,enable-aca-rid-detection;
@@ -337,11 +337,10 @@
 		extcon-cables = <&extcon_cable_xlate 0 &extcon_cable_xlate 2 &extcon_cable_xlate 5>;
 		extcon-cable-names = "vbus", "aca-rb", "aca-rc";
 		#extcon-cells = <0x1>;
-		status = "okay";
 	};
 	
 	otg@7d000000 {
-		status = "disabled";
+		status = "okay";
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,id-detection-type = <0x1>;
 		nvidia,enable-y-cable-detection;
@@ -355,8 +354,8 @@
 		status = "disabled";
 		nvidia,port-otg;
 		nvidia,has-hostpc;
+		nvidia,is-intf-utmi;
 		nvidia,turn-off-vbus-on-lp0;
-		nvidia,id-detection-type = <2>;
 		nvidia,hssync-start-delay = <0>;
 		nvidia,idle-wait-delay = <17>;
 		nvidia,elastic-limit = <16>;
