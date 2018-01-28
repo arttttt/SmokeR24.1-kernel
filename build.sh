@@ -57,6 +57,7 @@ make_zip()
 		printf "\nНе удалось создать архив\n"
 		exit 0
 	fi
+	cd $KERNEL_DIR
 }
 
 compile()
