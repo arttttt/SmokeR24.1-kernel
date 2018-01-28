@@ -4,6 +4,8 @@ export ARCH="arm"
 export KBUILD_BUILD_HOST="eOS-0.4.1-Loki"
 export KBUILD_BUILD_USER="arttttt"
 
+clean_build=0
+config="tegra12_android_defconfig"
 kernel_name="SmokeR24.2"
 threads=5
 toolchain="$HOME/Android/toolchain/linaro-4.9.4/bin/arm-linux-gnueabihf-"
