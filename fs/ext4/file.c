@@ -226,7 +226,7 @@ ext4_file_dio_write(struct kiocb *iocb, const struct iovec *iov,
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file->f_mapping->host;
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	int unaligned_aio = 0;
@@ -247,7 +247,7 @@ ext4_file_dio_write(struct kiocb *iocb, const struct iovec *iov,
 	BUG_ON(iocb->ki_pos != pos);
 
 	mutex_lock(&inode->i_mutex);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 
@@ -289,7 +289,7 @@ ext4_file_dio_write(struct kiocb *iocb, const struct iovec *iov,
 		if (err < 0 && ret > 0)
 			ret = err;
 	}
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 

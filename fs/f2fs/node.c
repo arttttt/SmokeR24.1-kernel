@@ -439,13 +439,13 @@ cache:
 static void ra_node_pages(struct page *parent, int start, int n)
 {
 	struct f2fs_sb_info *sbi = F2FS_P_SB(parent);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	int i, end;
 	nid_t nid;
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 
@@ -457,7 +457,7 @@ static void ra_node_pages(struct page *parent, int start, int n)
 		ra_node_page(sbi, nid);
 	}
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 }
@@ -1698,7 +1698,7 @@ static int f2fs_write_node_pages(struct address_space *mapping,
 			    struct writeback_control *wbc)
 {
 	struct f2fs_sb_info *sbi = F2FS_M_SB(mapping);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	long diff;
@@ -1714,11 +1714,11 @@ static int f2fs_write_node_pages(struct address_space *mapping,
 
 	diff = nr_pages_to_write(sbi, NODE, wbc);
 	wbc->sync_mode = WB_SYNC_NONE;
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 	sync_node_pages(sbi, wbc);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 	wbc->nr_to_write = max((long)0, wbc->nr_to_write - diff);

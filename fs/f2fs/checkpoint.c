@@ -165,14 +165,14 @@ int ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
 					REQ_RAHEAD,
 		.encrypted_page = NULL,
 	};
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 
 	if (unlikely(type == META_POR))
 		fio.op_flags &= ~REQ_META;
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 	for (; nrpages-- > 0; blkno++) {
@@ -219,7 +219,7 @@ int ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
 	}
 out:
 	f2fs_submit_merged_bio(sbi, META, READ);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 	return blkno - start;
@@ -310,13 +310,13 @@ long sync_meta_pages(struct f2fs_sb_info *sbi, enum page_type type,
 	struct writeback_control wbc = {
 		.for_reclaim = 0,
 	};
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 
 	pagevec_init(&pvec, 0);
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 
@@ -372,7 +372,7 @@ stop:
 	if (nwritten)
 		f2fs_submit_merged_bio(sbi, type, WRITE);
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 
@@ -981,12 +981,12 @@ static int block_operations(struct f2fs_sb_info *sbi)
 		.nr_to_write = LONG_MAX,
 		.for_reclaim = 0,
 	};
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	int err = 0;
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 
@@ -1040,7 +1040,7 @@ retry_flush_nodes:
 	__prepare_cp_block(sbi);
 	up_write(&sbi->node_change);
 out:
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 	return err;

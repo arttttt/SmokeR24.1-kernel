@@ -882,7 +882,7 @@ static int do_garbage_collect(struct f2fs_sb_info *sbi,
 {
 	struct page *sum_page;
 	struct f2fs_summary_block *sum;
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	unsigned int segno = start_segno;
@@ -902,7 +902,7 @@ static int do_garbage_collect(struct f2fs_sb_info *sbi,
 		unlock_page(sum_page);
 	}
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 
@@ -943,7 +943,7 @@ next:
 		f2fs_submit_merged_bio(sbi,
 				(type == SUM_TYPE_NODE) ? NODE : DATA, WRITE);
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 

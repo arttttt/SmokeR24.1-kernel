@@ -2352,7 +2352,7 @@ static ssize_t f2fs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file_inode(file);
 	size_t count;
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	ssize_t ret;
@@ -2375,12 +2375,12 @@ static ssize_t f2fs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 			inode_unlock(inode);
 			return err;
 		}
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 		blk_start_plug(&plug);
 #endif
 		ret = __generic_file_aio_write(iocb, iov, nr_segs,
 							&iocb->ki_pos);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 		blk_finish_plug(&plug);
 #endif
 	}

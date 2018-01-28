@@ -2415,7 +2415,7 @@ static int ext4_writepages(struct address_space *mapping,
 	int needed_blocks, rsv_blocks = 0, ret = 0;
 	struct ext4_sb_info *sbi = EXT4_SB(mapping->host->i_sb);
 	bool done;
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
 #endif
 	bool give_up_on_write = false;
@@ -2433,11 +2433,11 @@ static int ext4_writepages(struct address_space *mapping,
 	if (ext4_should_journal_data(inode)) {
 		struct blk_plug plug;
 
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 		blk_start_plug(&plug);
 #endif
 		ret = write_cache_pages(mapping, wbc, __writepage, mapping);
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 		blk_finish_plug(&plug);
 #endif
 		goto out_writepages;
@@ -2505,7 +2505,7 @@ retry:
 	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
 		tag_pages_for_writeback(mapping, mpd.first_page, mpd.last_page);
 	done = false;
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
 #endif
 	while (!done && mpd.first_page <= mpd.last_page) {
@@ -2577,7 +2577,7 @@ retry:
 		if (ret)
 			break;
 	}
-#ifndef CONFIG_AIO_SSD_ONLY
+#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
 #endif
 	if (!ret && !cycled && wbc->nr_to_write > 0) {
