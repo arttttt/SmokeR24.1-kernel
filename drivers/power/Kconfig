@@ -320,14 +320,6 @@ config BATTERY_BQ27441
 	  BQ27441 is fuel-gauge systems for lithium-ion (Li+) batteries
 	  in handheld and portable equipment.
 
-config BATTERY_BQ27520
- 	tristate "TI's BQ27520 Fuel Gauge"
- 	depends on I2C
- 	select BATTERY_CHARGER_GAUGE_COMM
- 	help
- 	  BQ27520 is fuel-gauge systems for lithium-ion (Li+) batteries
- 	  in handheld and portable equipment.
-
 config BATTERY_LC709203F
 	tristate "On semi's LC709203F Fuel Gauge"
 	depends on I2C
