@@ -529,6 +529,8 @@ struct mxt_mode_switch {
 
 /* Each client has this additional data */
 struct mxt_data {
+	struct mutex input_mutex;
+	struct mutex calib_mutex;
 	struct i2c_client *client;
 	struct input_dev *input_dev;
 	const struct mxt_platform_data *pdata;
@@ -1143,6 +1145,8 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 	u32 crc;
 	u8 status = msg[1];
 
+	mutex_lock(&data->calib_mutex);
+
 	crc = msg[2] | (msg[3] << 8) | (msg[4] << 16);
 
 	if (crc != data->config_crc && data->config_crc == 0) {
@@ -1162,6 +1166,8 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 			(status & MXT_STATUS_CAL) ? "CAL " : "",
 			(status & MXT_STATUS_CFGERR) ? "CFGERR " : "",
 			(status & MXT_STATUS_COMSERR) ? "COMSERR " : "");
+
+	mutex_unlock(&data->calib_mutex);
 }
 
 static void mxt_input_sync(struct mxt_data *data)
@@ -1192,6 +1198,8 @@ static void mxt_proc_t9_messages(struct mxt_data *data, u8 *message)
 			id, data->num_touchids);
 		return;
 	}
+
+	mutex_lock(&data->input_mutex);
 
 	status = message[1];
 
@@ -1250,6 +1258,8 @@ static void mxt_proc_t9_messages(struct mxt_data *data, u8 *message)
 		}
 #endif
 	}
+
+	mutex_unlock(&data->input_mutex);
 }
 
 static int mxt_do_diagnostic(struct mxt_data *data, u8 mode)
@@ -1305,6 +1315,8 @@ static void mxt_proc_t100_messages(struct mxt_data *data, u8 *message)
 			id, data->num_touchids);
 		return;
 	}
+
+	mutex_lock(&data->input_mutex);
 
 	if (id == 0) {
 		status = message[1];
@@ -1376,6 +1388,8 @@ static void mxt_proc_t100_messages(struct mxt_data *data, u8 *message)
 #endif
 		}
 	}
+
+	mutex_unlock(&data->input_mutex);
 }
 
 static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
@@ -1389,12 +1403,14 @@ static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
 	unsigned long keystates = le32_to_cpu(msg[2]);
 	int index = data->current_index;
 
+	mutex_lock(&data->input_mutex);
+
 	if (!input_dev || data->driver_paused)
-		return;
+		goto exit;
 
         if(!data->enable_keys) {
                 dev_err(&data->client->dev, "keyarray is disabled\n");
-                return;
+                goto exit;
         }
 
 	for (key = 0; key < pdata->config_array[index].key_num; key++) {
@@ -1416,6 +1432,9 @@ static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
 
 	if (sync)
 		input_sync(input_dev);
+
+exit:
+	mutex_unlock(&data->input_mutex);
 }
 
 static void mxt_proc_t19_messages(struct mxt_data *data, u8 *msg)
@@ -4426,6 +4445,9 @@ static int mxt_probe(struct i2c_client *client,
 	else
 		pr_err("%s: fb notifier registered\n", __func__);
 #endif
+
+	mutex_init(&data->input_mutex);
+	mutex_init(&data->calib_mutex);
 
 	data->state = INIT;
 
