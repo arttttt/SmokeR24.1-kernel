@@ -33,6 +33,7 @@ struct bq27x00_platform_data {
 	int bat_low_irq;
 	int (*translate_temp)(int temperature);
 	const char *fw_name[BQ27X00_BATT_MAX];
+	const char *tz_name;
 };
 
 extern int palmas_gpadc_read_physical(int channel);

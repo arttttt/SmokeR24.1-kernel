@@ -39,7 +39,6 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/firmware.h>
-#include <linux/wakelock.h>
 #include <asm/unaligned.h>
 #include <linux/switch.h>
 #include <linux/interrupt.h>
@@ -343,6 +342,9 @@ struct bq27x00_device_info {
 	int			id;
 	enum bq27x00_chip	chip;
 
+	struct bq27x00_platform_data	*pdata;
+	struct i2c_client		*client;
+
 	struct bq27x00_reg_cache cache;
 	int charge_design_full;
 	int fake_battery;
@@ -371,7 +373,6 @@ struct bq27x00_device_info {
 	int df_ver;
 
 	struct switch_dev sdev;
-	struct wake_lock wake_lock;
 	struct battery_gauge_dev	*bg_dev;
 	int bat_status;
 	int is_rom_mode;
@@ -943,7 +944,6 @@ static struct battery_gauge_ops bq27x00_bg_ops = {
 static struct battery_gauge_info bq27x00_bgi = {
 	.cell_id = 0,
 	.bg_ops = &bq27x00_bg_ops,
-	.tz_name = "battery-temp",
 };
 
 /*
@@ -1815,7 +1815,6 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 
 	if (flags & SYSDOWN_BIT) {
 		dev_warn(di->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
-		wake_lock(&di->wake_lock);
 		switch_set_state(&di->sdev, 0);
 		switch_set_state(&di->sdev, 1);
 		cancel_delayed_work(&di->work);
@@ -1824,7 +1823,6 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 	} else {
 		dev_info(di->dev, "SYSDOWN condition not detected\n");
 		switch_set_state(&di->sdev, 0);
-		wake_unlock(&di->wake_lock);
 	}
 
 	mutex_unlock(&di->lock);
@@ -2188,9 +2186,10 @@ static ssize_t _update_firmware(struct device *dev, const char *firmware_filenam
 	return error;
 }
 
-static int update_firmware(struct bq27x00_device_info *di, struct bq27x00_platform_data *pdata)
+static int update_firmware(struct bq27x00_device_info *di)
 {
 	struct i2c_client *client = to_i2c_client(di->dev);
+	struct bq27x00_platform_data *pdata = di->pdata;
 	unsigned long version;
 	int bat_id;
 	int type, error = 0;
@@ -2233,6 +2232,23 @@ static int update_firmware(struct bq27x00_device_info *di, struct bq27x00_platfo
 	return error;
 }
 
+static ssize_t bq27x00_update_firmware(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int val, version;
+	sscanf(buf, "%du", &val);
+
+	if (val == 1 && the_di) {
+		/* forced update */
+		version = the_di->df_ver;
+		the_di->df_ver = 0;
+		update_firmware(the_di);
+		the_di->df_ver = version;
+	}
+
+	return count;
+}
+
 static DEVICE_ATTR(dump_partial_data_flash, S_IRUGO,
 	show_dump_partial_data_flash, NULL);
 static DEVICE_ATTR(dump_data_flash, S_IRUGO, show_dump_data_flash, NULL);
@@ -2245,6 +2261,7 @@ static DEVICE_ATTR(qpassed_hires, S_IRUGO, show_hires_qpassed, NULL);
 static DEVICE_ATTR(battery_details, S_IRUGO, show_battery_details, NULL);
 static DEVICE_ATTR(debug_print_interval, S_IWUSR|S_IRUGO,
 		   show_debug_print_interval, set_debug_print_interval);
+static DEVICE_ATTR(update_fw, S_IWUSR|S_IRUSR , NULL, bq27x00_update_firmware);
 
 static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_dump_partial_data_flash.attr,
@@ -2257,6 +2274,7 @@ static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_qpassed_hires.attr,
 	&dev_attr_battery_details.attr,
 	&dev_attr_debug_print_interval.attr,
+	&dev_attr_update_fw.attr,
 	NULL
 };
 
@@ -2289,15 +2307,23 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di)
 static void of_bq27x00_parse_platform_data(struct i2c_client *client,
 				struct bq27x00_platform_data *pdata)
 {
+	char const *pstr;
 	struct device_node *np = client->dev.of_node;
 
-	pdata->soc_int_irq = client->irq;
+	if (!of_property_read_string(np, "ti,fw-lgc-name", &pstr))
+		pdata->fw_name[0] = pstr;
+	else
+		dev_warn(&client->dev, "Failed to read fw-lgc-name\n");
 
-	if (pdata->soc_int_irq)
-		pdata->bat_low_irq = -1;
+	if (!of_property_read_string(np, "ti,fw-atl-name", &pstr))
+		pdata->fw_name[1] = pstr;
+	else
+		dev_warn(&client->dev, "Failed to read fw-atl-name\n");
 
-	of_property_read_string(np, "ti,fw-lgc-name", &pdata->fw_name[0]);
-	of_property_read_string(np, "ti,fw-atl-name", &pdata->fw_name[1]);
+	if (!of_property_read_string(np, "ti,tz-name", &pstr))
+		pdata->tz_name = pstr;
+	else
+		dev_warn(&client->dev, "Failed to read tz-name\n");
 }
 
 static int bq27x00_battery_probe(struct i2c_client *client,
@@ -2307,17 +2333,6 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	struct bq27x00_device_info *di;
 	int num;
 	int retval = 0;
-	struct bq27x00_platform_data *pdata;
-
-	if (client->dev.of_node) {
-		pdata = devm_kzalloc(&client->dev,
-					sizeof(struct bq27x00_platform_data), GFP_KERNEL);
-		if (!pdata)
-			return -ENOMEM;
-		of_bq27x00_parse_platform_data(client, pdata);
-	} else {
-		pdata = client->dev.platform_data;
-	}
 
 	pr_info("%s: start\n", __func__);
 	/* Get new ID for the new battery device */
@@ -2344,6 +2359,17 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 		goto batt_failed_2;
 	}
 
+	if (client->dev.of_node) {
+		di->pdata = devm_kzalloc(&client->dev,
+					sizeof(struct bq27x00_platform_data), GFP_KERNEL);
+		if (!di->pdata)
+			return -ENOMEM;
+		of_bq27x00_parse_platform_data(client, di->pdata);
+	} else {
+		di->pdata = client->dev.platform_data;
+	}
+
+	di->client = client;
 	di->id = num;
 	di->dev = &client->dev;
 	di->chip = id->driver_data;
@@ -2354,14 +2380,12 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	di->debug_index = 0;
 	di->bat_status = POWER_SUPPLY_STATUS_DISCHARGING;
 
-	if (pdata && pdata->translate_temp)
-		di->translate_temp = pdata->translate_temp;
+	if (di->pdata && di->pdata->translate_temp)
+		di->translate_temp = di->pdata->translate_temp;
 	else
 		dev_warn(&client->dev, "fixup func not set, using default thermistor behavior\n");
 
 	bq27x00_reset_registers(di);
-
-	wake_lock_init(&di->wake_lock, WAKE_LOCK_SUSPEND, "battery_wake_lock");
 
 	/* use switch dev reporting to tell userspace to poweroff gracefully */
 	di->sdev.name = "poweroff";
@@ -2376,9 +2400,11 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, di);
 
-	if (pdata->soc_int_irq >= 0) {
-		retval = request_threaded_irq(pdata->soc_int_irq, NULL,
-				soc_int_irq_threaded_handler, IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "soc_int_irq", di);
+	if (di->client->irq >= 0) {
+		retval = devm_request_threaded_irq(&client->dev, di->client->irq, 
+				NULL, soc_int_irq_threaded_handler, 
+				IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
+				dev_name(&client->dev), di);
 
 		if (retval) {
 			dev_err(&client->dev, "failed to request threaded irq for soc_int: %d\n", retval);
@@ -2386,12 +2412,17 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 		}
 	}
 
+	bq27x00_bgi.tz_name = di->pdata->tz_name;
+
 	di->bg_dev = battery_gauge_register(&client->dev, &bq27x00_bgi, di);
 	if (IS_ERR(di->bg_dev)) {
 		retval = PTR_ERR(di->bg_dev);
 		dev_err(&client->dev, "battery gauge register failed: %d\n", retval);
 		goto batt_failed_3;
 	}
+
+	device_set_wakeup_capable(&client->dev, 1);
+	device_wakeup_enable(&client->dev);
 
 	retval = sysfs_create_group(&client->dev.kobj, &bq27x00_attr_group);
 	if (retval)
@@ -2410,14 +2441,13 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	}
 
 	/* Update firmware */
-	update_firmware(di, pdata);
+	update_firmware(di);
 
 	the_di = di;
 
 	return 0;
 
 batt_failed_3:
-	wake_lock_destroy(&di->wake_lock);
 	kfree(di);
 batt_failed_2:
 	kfree(name);
@@ -2442,7 +2472,6 @@ static int bq27x00_battery_remove(struct i2c_client *client)
 	mutex_unlock(&battery_mutex);
 
 	switch_dev_unregister(&di->sdev);
-	wake_lock_destroy(&di->wake_lock);
 
 	kfree(di);
 
@@ -2460,7 +2489,7 @@ static int bq27x00_battery_dump_qpassed(struct bq27x00_device_info *di, char *bu
 
 	bq27x00_battery_qpassed(di, &val);
 
-	cnt = scnprintf(buf, size, "%d mAh", val.intval);
+	cnt = scnprintf(buf, size, "%dmAh", val.intval);
 
 	/* Read hi resolution version if available */
 	if (di->fw_ver >= L1_604_FW_VERSION) {
@@ -2470,53 +2499,70 @@ static int bq27x00_battery_dump_qpassed(struct bq27x00_device_info *di, char *bu
 	return 0;
 }
 
-static char *SUSPEND_STR = "suspend";
-static char *RESUME_STR = "resume";
-static int bq27x00_battery_suspend_resume(struct i2c_client *client, const char *suspend_resume)
+static void bq27x00_shutdown(struct i2c_client *client)
 {
 	struct bq27x00_device_info *di = i2c_get_clientdata(client);
-	char buf[100];
-	int ret;
 
-	if (!di) {
-		dev_err(di->dev, "Missing device info\n");
-		return -EINVAL;
-	}
+	if (di->client->irq)
+		disable_irq(di->client->irq);
+
+	cancel_delayed_work_sync(&di->work);
+	dev_err(&di->client->dev, "At shutdown Voltage %dmV\n",
+			di->cache.voltage);
+}
+
+static int bq27x00_suspend(struct device *dev)
+{
+	char buf[100];
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
 
 	mutex_lock(&di->lock);
 
-	ret = bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
-
-	if (di->debug_print_interval > 0) {
-		if (suspend_resume == SUSPEND_STR)
-			cancel_delayed_work_sync(&di->work);
-		else if (suspend_resume == RESUME_STR)
-			queue_delayed_work(system_power_efficient_wq,
-								&di->debug_work, HZ);
-	}
+	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
+	cancel_delayed_work_sync(&di->work);
 
 	mutex_unlock(&di->lock);
 
-	if (ret < 0) {
-		dev_err(di->dev, "Failed to get Qpassed value!\n");
-		return -EIO;
+	if (device_may_wakeup(&di->client->dev) && di->client->irq) {
+		enable_irq_wake(di->client->irq);
+		dev_err(di->dev, "irq wake enabled\n");
 	}
 
-	dev_info(di->dev, "Qpassed @%s: %s\n", suspend_resume, buf);
+	dev_err(di->dev, "Qpassed suspend: %s and voltage %dmV\n", 
+				buf, di->cache.voltage);
 
 	return 0;
 }
 
-static int bq27x00_battery_suspend(struct i2c_client *client, pm_message_t mesg)
+static int bq27x00_resume(struct device *dev)
 {
-	return bq27x00_battery_suspend_resume(client, SUSPEND_STR);
+	char buf[100];
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
+
+	if (device_may_wakeup(&di->client->dev) && di->client->irq) {
+		disable_irq_wake(di->client->irq);
+		dev_err(di->dev, "irq wake disabled\n");
+	}
+
+	mutex_lock(&di->lock);
+
+	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
+	queue_delayed_work(system_power_efficient_wq, &di->debug_work, HZ);
+
+	mutex_unlock(&di->lock);
+
+	dev_err(di->dev, "Qpassed resume: %s and voltage %dmV\n", 
+				buf, di->cache.voltage);
+
+	return 0;
 }
 
-static int bq27x00_battery_resume(struct i2c_client *client)
-{
-	return bq27x00_battery_suspend_resume(client, RESUME_STR);
-}
+static SIMPLE_DEV_PM_OPS(bq27x00_pm_ops, bq27x00_suspend, bq27x00_resume);
 
+static const struct of_device_id bq27520_dt_match[] = {
+	{ .compatible = "ti,bq27520" },
+	{ },
+};
 
 static const struct i2c_device_id bq27x00_id[] = {
 	{ "bq27200", BQ27000 },	/* bq27200 is same as bq27000, but with i2c */
@@ -2529,12 +2575,13 @@ MODULE_DEVICE_TABLE(i2c, bq27x00_id);
 static struct i2c_driver bq27x00_battery_driver = {
 	.driver = {
 		.name = "bq27x00-battery",
+		.of_match_table = of_match_ptr(bq27520_dt_match),
+		.pm = &bq27x00_pm_ops,
 	},
 	.probe = bq27x00_battery_probe,
 	.remove = bq27x00_battery_remove,
-	.suspend = bq27x00_battery_suspend,
-	.resume = bq27x00_battery_resume,
 	.id_table = bq27x00_id,
+	.shutdown	= bq27x00_shutdown,
 };
 
 static inline int bq27x00_battery_i2c_init(void)
@@ -2558,141 +2605,6 @@ static inline void bq27x00_battery_i2c_exit(void) {};
 
 #endif
 
-/* platform specific code */
-#ifdef CONFIG_BATTERY_BQ27X00_PLATFORM
-
-static int bq27000_read_platform(struct bq27x00_device_info *di, u8 reg,
-			bool single)
-{
-	struct device *dev = di->dev;
-	struct bq27000_platform_data *pdata = dev->platform_data;
-	unsigned int timeout = 3;
-	int upper, lower;
-	int temp;
-
-	if (!single) {
-		/* Make sure the value has not changed in between reading the
-		 * lower and the upper part */
-		upper = pdata->read(dev, reg + 1);
-		do {
-			temp = upper;
-			if (upper < 0)
-				return upper;
-
-			lower = pdata->read(dev, reg);
-			if (lower < 0)
-				return lower;
-
-			upper = pdata->read(dev, reg + 1);
-		} while (temp != upper && --timeout);
-
-		if (timeout == 0)
-			return -EIO;
-
-		return (upper << 8) | lower;
-	}
-
-	return pdata->read(dev, reg);
-}
-
-static int __devinit bq27000_battery_probe(struct platform_device *pdev)
-{
-	struct bq27x00_device_info *di;
-	struct bq27000_platform_data *pdata = pdev->dev.platform_data;
-	int ret;
-
-	if (!pdata) {
-		dev_err(&pdev->dev, "no platform_data supplied\n");
-		return -EINVAL;
-	}
-
-	if (!pdata->read) {
-		dev_err(&pdev->dev, "no hdq read callback supplied\n");
-		return -EINVAL;
-	}
-
-	di = kzalloc(sizeof(*di), GFP_KERNEL);
-	if (!di) {
-		dev_err(&pdev->dev, "failed to allocate device info data\n");
-		return -ENOMEM;
-	}
-
-	platform_set_drvdata(pdev, di);
-
-	di->dev = &pdev->dev;
-	di->chip = BQ27000;
-
-	di->bat.name = pdata->name ?: dev_name(&pdev->dev);
-	di->bus.read = &bq27000_read_platform;
-
-	ret = bq27x00_powersupply_init(di);
-	if (ret)
-		goto err_free;
-
-	return 0;
-
-err_free:
-	platform_set_drvdata(pdev, NULL);
-	kfree(di);
-
-	return ret;
-}
-
-static int __devexit bq27000_battery_remove(struct platform_device *pdev)
-{
-	struct bq27x00_device_info *di = platform_get_drvdata(pdev);
-
-	bq27x00_powersupply_unregister(di);
-
-	platform_set_drvdata(pdev, NULL);
-	kfree(di);
-
-	return 0;
-}
-
-static const struct i2c_device_id bq27520_id[] = {
-	{ "bq27520", 0 },
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, bq27520_id);
-
-static const struct of_device_id bq27520_dt_match[] = {
-	{ .compatible = "ti,bq27520" },
-	{ },
-};
-MODULE_DEVICE_TABLE(of, bq27520_dt_match);
-
-static struct platform_driver bq27000_battery_driver = {
-	.probe	= bq27000_battery_probe,
-	.remove = __devexit_p(bq27000_battery_remove),
-	.driver = {
-		.name = "bq27000-battery",
-		.owner = THIS_MODULE,
-		.of_match_table = of_match_ptr(bq27520_dt_match),
-	},
-};
-
-static inline int bq27x00_battery_platform_init(void)
-{
-	int ret = platform_driver_register(&bq27000_battery_driver);
-	if (ret)
-		printk(KERN_ERR "Unable to register BQ27000 platform driver\n");
-
-	return ret;
-}
-
-static inline void bq27x00_battery_platform_exit(void)
-{
-	platform_driver_unregister(&bq27000_battery_driver);
-}
-
-#else
-
-static inline int bq27x00_battery_platform_init(void) { return 0; }
-static inline void bq27x00_battery_platform_exit(void) {};
-
-#endif
-
 /*
  * Module stuff
  */
@@ -2705,17 +2617,12 @@ static int __init bq27x00_battery_init(void)
 	if (ret)
 		return ret;
 
-	ret = bq27x00_battery_platform_init();
-	if (ret)
-		bq27x00_battery_i2c_exit();
-
 	return ret;
 }
 module_init(bq27x00_battery_init);
 
 static void __exit bq27x00_battery_exit(void)
 {
-	bq27x00_battery_platform_exit();
 	bq27x00_battery_i2c_exit();
 }
 module_exit(bq27x00_battery_exit);
