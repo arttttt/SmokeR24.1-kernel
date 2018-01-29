@@ -93,6 +93,7 @@
 			interrupts = <133 0>;
 			ti,fw-lgc-name = "0105_lgc.dffs";
 			ti,fw-atl-name = "0205_atl.dffs";
+			ti,tz-name = "battery";
 		};
 	};
 
