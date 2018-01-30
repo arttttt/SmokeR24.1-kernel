@@ -49,7 +49,7 @@
 #include <linux/power/bq27x00_battery.h>
 #include <linux/mfd/palmas.h>
 
-#define DRIVER_VERSION			"1.2.0"
+#define DRIVER_VERSION			"1.3.0"
 
 #define G3_FW_VERSION			0x0324
 #define G4_FW_VERSION			0x0329
