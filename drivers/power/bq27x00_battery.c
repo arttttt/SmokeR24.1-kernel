@@ -459,7 +459,7 @@ static int bq27x00_battery_read_raw_soc(struct bq27x00_device_info *di)
 	rsoc = bq27x00_read(di, BQ27x00_REG_TRUESOC, false);
 
 	if (rsoc < 0)
-		dev_err(di->client->dev, "error reading raw State-of-Charge\n");
+		dev_err(&di->client->dev, "error reading raw State-of-Charge\n");
 
 	return rsoc;
 }
@@ -478,7 +478,7 @@ static int bq27x00_battery_read_rsoc(struct bq27x00_device_info *di)
 		rsoc = bq27x00_read(di, BQ27x00_REG_RSOC, true);
 
 	if (rsoc < 0)
-		dev_err(di->client->dev, "error reading relative State-of-Charge\n");
+		dev_err(&di->client->dev, "error reading relative State-of-Charge\n");
 
 	return rsoc;
 }
@@ -493,7 +493,7 @@ static int bq27x00_battery_read_charge(struct bq27x00_device_info *di, u8 reg)
 
 	charge = bq27x00_read(di, reg, false);
 	if (charge < 0) {
-		dev_err(di->client->dev, "error reading nominal available capacity\n");
+		dev_err(&di->client->dev, "error reading nominal available capacity\n");
 		return charge;
 	}
 
@@ -537,7 +537,7 @@ static int bq27x00_battery_read_ilmd(struct bq27x00_device_info *di)
 		ilmd = bq27x00_read(di, BQ27x00_REG_ILMD, true);
 
 	if (ilmd < 0) {
-		dev_err(di->client->dev, "error reading initial last measured discharge\n");
+		dev_err(&di->client->dev, "error reading initial last measured discharge\n");
 		return ilmd;
 	}
 
@@ -559,7 +559,7 @@ static int bq27x00_battery_read_cyct(struct bq27x00_device_info *di)
 
 	cyct = bq27x00_read(di, BQ27x00_REG_CC, false);
 	if (cyct < 0)
-		dev_err(di->client->dev, "error reading cycle count total\n");
+		dev_err(&di->client->dev, "error reading cycle count total\n");
 
 	return cyct;
 }
@@ -574,7 +574,7 @@ static int bq27x00_battery_read_time(struct bq27x00_device_info *di, u8 reg)
 
 	tval = bq27x00_read(di, reg, false);
 	if (tval < 0) {
-		dev_err(di->client->dev, "error reading register %02x: %d\n", reg, tval);
+		dev_err(&di->client->dev, "error reading register %02x: %d\n", reg, tval);
 		return tval;
 	}
 
@@ -627,7 +627,7 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 			block_addr = 0x61;
 			block_len  = 11;
 			if (bq27x00_read_block_i2c(di, block_addr, block_data, block_len) < 0) {
-				dev_err(di->client->dev,
+				dev_err(&di->client->dev,
 					"error block reading debug registers @ 0x%x\n", block_addr);
 			} else {
 				cache.q_max = (short) get_unaligned_le16(block_data+1);
@@ -644,7 +644,7 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 			block_addr = 0x24;
 			block_len  = 26;
 			if (bq27x00_read_block_i2c(di, block_addr, block_data, block_len) < 0) {
-				dev_err(di->client->dev,
+				dev_err(&di->client->dev,
 					"error block reading debug registers @ 0x%x\n", block_addr);
 			} else {
 				cache.q_passed_hires_int = get_unaligned_le16(block_data);
@@ -863,7 +863,7 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 		static int once = 0;
 
 		if (!once) {
-			dev_warn(di->client->dev, "Battery thermistor missing or malfunctioning, falling back to "
+			dev_warn(&di->client->dev, "Battery thermistor missing or malfunctioning, falling back to "
 					"gas gauge internal temp\n");
 			once = 1;
 		}
@@ -909,7 +909,7 @@ static int bq27x00_battery_current(struct bq27x00_device_info *di,
 		val->intval = val->intval * (-1);
 	} else {
 		if (di->cache.flags & BQ27000_FLAG_CHGS) {
-			dev_dbg(di->client->dev, "negative current!\n");
+			dev_dbg(&di->client->dev, "negative current!\n");
 			curr = -curr;
 		}
 
@@ -974,7 +974,7 @@ static int bq27x00_battery_energy(struct bq27x00_device_info *di,
 
 	ae = bq27x00_read(di, BQ27x00_REG_AE, false);
 	if (ae < 0) {
-		dev_err(di->client->dev, "error reading available energy\n");
+		dev_err(&di->client->dev, "error reading available energy\n");
 		return ae;
 	}
 
@@ -1255,13 +1255,13 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	/*
 	 * NOTE: Properties can be read as soon as we register the power supply.
 	 */
-	ret = power_supply_register(di->client->dev, &di->bat);
+	ret = power_supply_register(&di->client->dev, &di->bat);
 	if (ret) {
-		dev_err(di->client->dev, "failed to register battery: %d\n", ret);
+		dev_err(&di->client->dev, "failed to register battery: %d\n", ret);
 		return ret;
 	}
 
-	dev_info(di->client->dev, "support ver. %s enabled\n", DRIVER_VERSION);
+	dev_info(&di->client->dev, "support ver. %s enabled\n", DRIVER_VERSION);
 
 	/* If debug is enabled, force a DR and DF dump on boot */
 	if (di->debug_print_interval > 0)
@@ -1447,7 +1447,7 @@ static int bq27x00_read_block_i2c(struct bq27x00_device_info *di, u8 reg,
 
 static int bq27x00_battery_reset(struct bq27x00_device_info *di)
 {
-	dev_info(di->client->dev, "Gas Gauge Reset\n");
+	dev_info(&di->client->dev, "Gas Gauge Reset\n");
 
 	bq27x00_write_i2c(di, CONTROL_CMD, RESET_SUBCMD, false);
 
@@ -1520,7 +1520,7 @@ static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, 
 	/* enable block flash control */
 	ret = bq27x00_write_i2c(di, 0x61, 0x00, true);
 	if (ret) {
-		dev_warn(di->client->dev, "Failed to write (enable block flash control): %d\n", ret);
+		dev_warn(&di->client->dev, "Failed to write (enable block flash control): %d\n", ret);
 		goto error;
 	}
 
@@ -1529,7 +1529,7 @@ static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, 
 	/* set subclass */
 	ret = bq27x00_write_i2c(di, 0x3e, subclass, true);
 	if (ret) {
-		dev_warn(di->client->dev, "Failed to write (set subclass 0x%02x): %d\n", subclass, ret);
+		dev_warn(&di->client->dev, "Failed to write (set subclass 0x%02x): %d\n", subclass, ret);
 		goto error;
 	}
 
@@ -1545,7 +1545,7 @@ static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, 
 		/* set sebclass offset 0x00 */
 		ret = bq27x00_write_i2c(di, 0x3f, offset, true);
 		if (ret) {
-			dev_warn(di->client->dev, "Failed to write (set subclass offset %d): %d\n", offset, ret);
+			dev_warn(&di->client->dev, "Failed to write (set subclass offset %d): %d\n", offset, ret);
 			goto error;
 		}
 
@@ -1554,7 +1554,7 @@ static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, 
 		/* read in subclass block */
 		ret = bq27x00_read_block_i2c(di, 0x40, data, count);
 		if (ret) {
-			dev_warn(di->client->dev, "Failed to read block count=%d: %d\n", count, ret);
+			dev_warn(&di->client->dev, "Failed to read block count=%d: %d\n", count, ret);
 			goto error;
 		}
 
@@ -1655,7 +1655,7 @@ static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
 	/* unseal device */
 	ret = bq27x00_write_i2c(di, 0x00, 0x0414, false);
 	if (ret) {
-		dev_err(di->client->dev, "Failed to write (unseal part 1): %d\n", ret);
+		dev_err(&di->client->dev, "Failed to write (unseal part 1): %d\n", ret);
 		goto error;
 	}
 
@@ -1663,7 +1663,7 @@ static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
 
 	ret = bq27x00_write_i2c(di, 0x00, 0x3672, false);
 	if (ret) {
-		dev_err(di->client->dev, "Failed to write (unseal part 2): %d\n", ret);
+		dev_err(&di->client->dev, "Failed to write (unseal part 2): %d\n", ret);
 		goto error;
 	}
 
@@ -1800,7 +1800,7 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 	struct bq27x00_device_info *di = arg;
 	int flags;
 
-	dev_info(di->client->dev, "soc_int\n");
+	dev_info(&di->client->dev, "soc_int\n");
 
 	/* the actual SysDown event is processed in the normal update path */
 
@@ -1809,14 +1809,14 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 	flags = bq27x00_read(di, BQ27x00_REG_FLAGS, false);
 
 	if (flags & SYSDOWN_BIT) {
-		dev_warn(di->client->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
+		dev_warn(&di->client->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
 		switch_set_state(&di->sdev, 0);
 		switch_set_state(&di->sdev, 1);
 		cancel_delayed_work(&di->work);
 		queue_delayed_work(system_power_efficient_wq,
 							&di->work, 0);
 	} else {
-		dev_info(di->client->dev, "SYSDOWN condition not detected\n");
+		dev_info(&di->client->dev, "SYSDOWN condition not detected\n");
 		switch_set_state(&di->sdev, 0);
 	}
 
@@ -1830,7 +1830,7 @@ static ssize_t show_dump_data_flash(struct device *dev,
 {
 	struct bq27x00_device_info *di = dev_get_drvdata(dev);
 
-	dev_warn(di->client->dev, "Dump data flash:\n");
+	dev_warn(&di->client->dev, "Dump data flash:\n");
 	bq27x00_dump_dataflash(di);
 
 	return sprintf(buf, "okay\n");
@@ -2010,7 +2010,7 @@ static int load_firmware(struct bq27x00_device_info *di,
 
 		if (token[0] == ';') {
 			firmware_data[i+LEN] = -2;
-			dev_dbg(di->client->dev, "filter the comment line %d\n", i);
+			dev_dbg(&di->client->dev, "filter the comment line %d\n", i);
 			continue;
 		}
 		for (j = 0, sp_str2 = token; ; j++) {
@@ -2212,10 +2212,10 @@ static int update_firmware(struct bq27x00_device_info *di)
 	}
 
 	version = simple_strtoul(pdata->fw_name[type], NULL, 16);
-	dev_info(di->client->dev, "id %d ver %lu, df_ver %x rom %d\n",
+	dev_info(&di->client->dev, "id %d ver %lu, df_ver %x rom %d\n",
 		type, version, di->df_ver, di->is_rom_mode);
 	if (di->is_rom_mode || version != di->df_ver)
-		error = _update_firmware(di->client->dev, pdata->fw_name[type]);
+		error = _update_firmware(&di->client->dev, pdata->fw_name[type]);
 	else
 		bq27x00_update(di);
 
@@ -2282,7 +2282,7 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di)
 	/* Get the fw version to determine the register mapping */
 	di->fw_ver = bq27x00_battery_read_fw_version(di);
 	di->df_ver = bq27x00_battery_read_dataflash_version(di);
-	dev_info(di->client->dev,
+	dev_info(&di->client->dev,
 		"Gas Gauge fw version 0x%04x; df version 0x%04x\n",
 		di->fw_ver, di->df_ver);
 
@@ -2293,7 +2293,7 @@ static void bq27x00_reset_registers(struct bq27x00_device_info *di)
 	else if (di->fw_ver == G4_FW_VERSION)
 		di->regs = bq27x00_fw_g4_regs;
 	else {
-		dev_err(di->client->dev,
+		dev_err(&di->client->dev,
 			"Unkown Gas Gauge fw version: 0x%04x\n", di->fw_ver);
 		di->regs = bq27x00_fw_g4_regs;
 	}
@@ -2524,10 +2524,10 @@ static int bq27x00_suspend(struct device *dev)
 
 	if (device_may_wakeup(&di->client->dev) && di->client->irq) {
 		enable_irq_wake(di->client->irq);
-		dev_err(di->client->dev, "irq wake enabled\n");
+		dev_err(&di->client->dev, "irq wake enabled\n");
 	}
 
-	dev_err(di->client->dev, "Qpassed suspend: %s. Current voltage: %dmV\n", 
+	dev_err(&di->client->dev, "Qpassed suspend: %s. Current voltage: %dmV\n", 
 				buf, di->cache.voltage);
 
 	return 0;
@@ -2540,7 +2540,7 @@ static int bq27x00_resume(struct device *dev)
 
 	if (device_may_wakeup(&di->client->dev) && di->client->irq) {
 		disable_irq_wake(di->client->irq);
-		dev_err(di->client->dev, "irq wake disabled\n");
+		dev_err(&di->client->dev, "irq wake disabled\n");
 	}
 
 	mutex_lock(&di->lock);
@@ -2553,7 +2553,7 @@ static int bq27x00_resume(struct device *dev)
 
 	mutex_unlock(&di->lock);
 
-	dev_err(di->client->dev, "Qpassed resume: %s. Current voltage: %dmV\n", 
+	dev_err(&di->client->dev, "Qpassed resume: %s. Current voltage: %dmV\n", 
 				buf, di->cache.voltage);
 
 	return 0;
