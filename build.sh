@@ -46,6 +46,10 @@ make_zip()
 	zip -r $zip_name *
 
 	if [[ -f "$PWD/$zip_name" ]]; then
+		if [[ ! -f "$OUTPUT_DIR" ]]; then
+			mkdir $OUTPUT_DIR
+		fi;
+
 		printf "\n$zip_name создан, перемещение в $OUTPUT_DIR"
 		mv "$PWD/$zip_name" $OUTPUT_DIR
 
@@ -55,7 +59,7 @@ make_zip()
 		fi
 	else
 		printf "\nНе удалось создать архив\n"
-		exit 0
+		return
 	fi
 	cd $KERNEL_DIR
 }
@@ -77,7 +81,7 @@ compile()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
 	else
-		exit 0
+		return
 	fi
 
 	printf "\nКомпиляция дерева устройства\n\n"
@@ -87,7 +91,7 @@ compile()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
 	else
-		exit 0
+		return
 	fi
 
 	local end=$(date +%s)
@@ -109,7 +113,7 @@ compile_dtb()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
 	else
-		exit 0
+		return
 	fi
 
 	make_zip
@@ -136,7 +140,7 @@ main()
 		1) clean_build=1;compile;;
 		2) compile;;
 		3) compile_dtb;;
-		4) exit 0;;
+		4) return;;
 		*) main;;
 	esac
 }
