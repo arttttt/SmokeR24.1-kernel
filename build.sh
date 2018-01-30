@@ -39,7 +39,12 @@ generate_version()
 
 make_zip()
 {
-	printf "\nСоздание zip архива\n\n"
+	if [[ -f "$KERNEL_DIR/anykernel" ]]; then
+		printf "\nСоздание zip архива\n\n"
+	else
+		printf "\nПапка $KERNEL_DIR/anykernel не существует\n\n"
+		return
+	fi;
 
 	cd $KERNEL_DIR/anykernel
 	local zip_name="$kernel_name($(date +'%d.%m.%Y-%H:%M')).zip"
@@ -140,7 +145,7 @@ main()
 		1) clean_build=1;compile;;
 		2) compile;;
 		3) compile_dtb;;
-		4) return;;
+		4) clear;return;;
 		*) main;;
 	esac
 }
