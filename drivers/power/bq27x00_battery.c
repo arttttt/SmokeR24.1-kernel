@@ -76,10 +76,6 @@
 #define MAX_DATA_LEN 200
 #define CTL_CMD_DELAY 100
 
-static char debug_1hz_buffer[500] = {0,};
-static char subclass_buffer[500] = {0,};
-
-
 enum bq27x00_reg_index {
 	BQ27x00_REG_TEMP = 0,
 	BQ27x00_REG_INT_TEMP,
@@ -259,8 +255,6 @@ struct bq27x00_access_methods {
 			bool single);
 };
 
-static int bq27x00_dump_dataflash(struct bq27x00_device_info *di);
-static int bq27x00_dump_partial_dataflash(struct bq27x00_device_info *di);
 static int bq27x00_control_cmd(struct bq27x00_device_info *di, u16 cmd);
 static void bq27x00_reset_registers(struct bq27x00_device_info *di);
 static int bq27x00_battery_read_control_reg(struct bq27x00_device_info *di);
@@ -270,13 +264,6 @@ static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 	union power_supply_propval *val);
 
 enum bq27x00_chip { BQ27000, BQ27500 };
-
-struct bq27x00_debug_info {
-	int voltage;
-	int avg_current;
-	int temperature;
-	struct timespec timestamp;
-};
 
 struct bq27x00_reg_cache {
 	int temperature;
@@ -352,17 +339,11 @@ struct bq27x00_device_info {
 	int (*translate_temp)(int temperature);
 
 	unsigned long last_update;
-	unsigned long data_flash_update_time;
 	struct delayed_work work;
-	struct delayed_work debug_work;
 
 	struct power_supply	bat;
 
 	struct bq27x00_access_methods bus;
-
-	struct bq27x00_debug_info debug_info[DEBUG_1HZ_MAX_COUNT];
-	int debug_index;
-	int debug_print_interval;
 
 	struct bq27x00_partial_data_flash partial_df;
 
@@ -405,8 +386,6 @@ static enum power_supply_property bq27x00_battery_props[] = {
 };
 
 static struct bq27x00_device_info *the_di;
-
-static unsigned int debug_dataflash_interval = 20*60*1000;
 
 static unsigned int poll_interval = 60;
 module_param(poll_interval, uint, 0644);
@@ -668,125 +647,6 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 		/* We only have to read charge design full once */
 		if (di->charge_design_full <= 0)
 			di->charge_design_full = bq27x00_battery_read_ilmd(di);
-	}
-
-	/*
-	 * For debugging use if debug_print_interval is non zero.
-	 */
-	if (di->debug_print_interval > 0) {
-		int count;
-		char dr_buf[200];
-
-		/* Dumps out Data Ram Info */
-		count = scnprintf(dr_buf, sizeof(dr_buf),
-		       "bq27x00 Ex DR: %ld.%ld,"
-		       "0x%04x,%d,%d,0x%04x,%d,%d,%d,%d,%d,%d%%,"
-		       "0x%02x,%d,%d%%,%d,%d,%d,%d,%d,%d%%,%d,%d,%u,%d",
-		       cache.timestamp.tv_sec,
-		       cache.timestamp.tv_nsec/100000000,
-		       cache.control,
-		       cache.temperature-2732,
-		       cache.voltage,
-		       cache.flags,
-		       cache.nom_avail_cap,
-		       cache.full_avail_cap,
-		       cache.remain_cap,
-		       cache.full_charge_cap,
-		       (short)cache.average_i,
-		       (cache.state_of_health & 0x00FF),
-		       (cache.state_of_health & 0xFF00) >> 8,
-		       cache.cycle_count,
-		       cache.capacity,
-		       (short)cache.instant_i,
-		       cache.internal_temp-2732,
-		       cache.r_scale,
-		       cache.true_cap,
-		       cache.true_fcc,
-		       cache.true_soc,
-		       cache.q_max,
-		       cache.q_passed,
-		       cache.DOD0,
-		       cache.q_start);
-
-		/* For Version 0x604, there is some extra info */
-		if (di->fw_ver >= L1_604_FW_VERSION) {
-			scnprintf(dr_buf+count, sizeof(dr_buf)-count,
-				",%d,%u,%u,0x%04x,0x%04x,%d,%d,%u,%d,%d,%d,%u,%d",
-				cache.delta_v,
-				cache.DODfinal,
-				cache.max_current,
-				cache.q_passed_hires_int,
-				cache.q_passed_hires_fraction,
-				cache.max_dod_diff,
-				cache.ambient_temp,
-				cache.regr_dod,
-				cache.regr_res,
-				cache.rnew,
-				cache.dod_diff,
-				cache.sleeptime,
-				cache.sim_temp);
-
-		}
-
-		pr_info("%s\n", dr_buf);
-
-		/*
-		 * Selectively records Data Flash and Data Ram periodically.
-		 * These cached values are dumped out on sysfs read.
-		 */
-		if (time_after_eq(jiffies, di->data_flash_update_time)) {
-			count = scnprintf(di->partial_df.data_ram,
-				sizeof(di->partial_df.data_ram),
-				"0x%04x %d %d 0x%04x %d %d %d %d %d %d "
-				"0x%02x %d %d %d %d %d %d %d %d %d %d %u %d",
-				cache.control,
-				cache.temperature-2732,
-				cache.voltage,
-				cache.flags,
-				cache.nom_avail_cap,
-				cache.full_avail_cap,
-				cache.remain_cap,
-				cache.full_charge_cap,
-				(short)cache.average_i,
-				(cache.state_of_health & 0x00FF),
-				(cache.state_of_health & 0xFF00) >> 8,
-				cache.cycle_count,
-				cache.capacity,
-				(short)cache.instant_i,
-				cache.internal_temp-2732,
-				cache.r_scale,
-				cache.true_cap,
-				cache.true_fcc,
-				cache.true_soc,
-				cache.q_max,
-				cache.q_passed,
-				cache.DOD0,
-				cache.q_start);
-
-			if (di->fw_ver >= L1_604_FW_VERSION) {
-				scnprintf(di->partial_df.data_ram+count,
-					sizeof(di->partial_df.data_ram)-count,
-					" %d %u %u 0x%04x 0x%04x %d %d %u %d %d %d %u %d",
-					cache.delta_v,
-					cache.DODfinal,
-					cache.max_current,
-					cache.q_passed_hires_int,
-					cache.q_passed_hires_fraction,
-					cache.max_dod_diff,
-					cache.ambient_temp,
-					cache.regr_dod,
-					cache.regr_res,
-					cache.rnew,
-					cache.dod_diff,
-					cache.sleeptime,
-					cache.sim_temp);
-
-			}
-
-			bq27x00_dump_partial_dataflash(di);
-			di->data_flash_update_time =
-				jiffies + msecs_to_jiffies(debug_dataflash_interval);
-		}
 	}
 
 	/* Ignore current_now which is a snapshot of the current battery state
@@ -1151,87 +1011,6 @@ static void bq27x00_external_power_changed(struct power_supply *psy)
 						&di->work, 0);
 }
 
-/*
- * Work to record voltage and current at 1Hz.
- */
-static void bq27x00_battery_debug_poll(struct work_struct *work)
-{
-	union power_supply_propval val;
-	struct timespec ts;
-	int i;
-	struct timespec first_ts, time_diff;
-
-	struct bq27x00_device_info *di =
-		container_of(work, struct bq27x00_device_info, debug_work.work);
-
-	mutex_lock(&di->lock);
-
-	getnstimeofday(&ts);
-
-	/* Get Voltage */
-	bq27x00_battery_voltage(di, &val);
-	di->debug_info[di->debug_index].voltage = val.intval;
-
-	/* Get Current */
-	bq27x00_battery_current(di, &val);
-	di->debug_info[di->debug_index].avg_current = val.intval;
-
-	/* Get Temperature */
-	bq27x00_battery_temperature(di, &val);
-	di->debug_info[di->debug_index].temperature = val.intval;
-
-	/* Record Time */
-	di->debug_info[di->debug_index].timestamp = ts;
-
-	if (di->debug_print_interval > 0)
-		queue_delayed_work(system_power_efficient_wq,
-							&di->debug_work, HZ);
-
-	/* Dumps out 1HZ recording of V, I and T at fixed interval */
-	if (di->debug_print_interval > 0 &&
-	    di->debug_index >= di->debug_print_interval-1) {
-		int buffer_used = 0;
-		const int num_samples = di->debug_index + 1;
-		bool first_sample = true;
-		for (i = 0; i < num_samples; i++) {
-			if (first_sample) {
-				buffer_used += scnprintf(
-				    debug_1hz_buffer+buffer_used,
-				    sizeof(debug_1hz_buffer) - buffer_used,
-				    "bq27x00 1-HZ: %ld.%ld,",
-				    di->debug_info[i].timestamp.tv_sec,
-				    di->debug_info[i].timestamp.tv_nsec/100000000);
-				first_sample = false;
-				first_ts = di->debug_info[i].timestamp;
-			} else {
-				time_diff =
-					timespec_sub(di->debug_info[i].timestamp, first_ts);
-				buffer_used += scnprintf(
-				    debug_1hz_buffer+buffer_used,
-				    sizeof(debug_1hz_buffer) - buffer_used,
-				    "%ld.%ld,",
-				    time_diff.tv_sec,
-				    time_diff.tv_nsec/100000000);
-			}
-			buffer_used += scnprintf(
-			    debug_1hz_buffer+buffer_used,
-			    sizeof(debug_1hz_buffer) - buffer_used,
-			    "%d,%d,%d;",
-			    di->debug_info[i].voltage/1000,
-			    di->debug_info[i].avg_current/1000,
-			    di->debug_info[i].temperature);
-		}
-		pr_info("%s\n", debug_1hz_buffer);
-		di->debug_index = 0;
-	} else {
-		di->debug_index++;
-	}
-
-	mutex_unlock(&di->lock);
-
-	return;
-}
-
 static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 {
 	int ret;
@@ -1243,7 +1022,6 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	di->bat.external_power_changed = bq27x00_external_power_changed;
 
 	INIT_DELAYED_WORK(&di->work, bq27x00_battery_poll);
-	INIT_DELAYED_WORK(&di->debug_work, bq27x00_battery_debug_poll);
 	mutex_init(&di->lock);
 
 	/*
@@ -1263,10 +1041,6 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	}
 
 	dev_info(&di->client->dev, "support ver. %s enabled\n", DRIVER_VERSION);
-
-	/* If debug is enabled, force a DR and DF dump on boot */
-	if (di->debug_print_interval > 0)
-		di->data_flash_update_time = jiffies;
 
 	return 0;
 }
@@ -1501,300 +1275,6 @@ static int bq27x00_battery_read_dataflash_version(struct bq27x00_device_info *di
 
 	return bq27x00_read_i2c(di, CONTROL_CMD, false);
 }
-#define SLAVE_LATENCY_DELAY 100
-
-static int dump_and_store_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len, char *buf)
-{
-	int ret;
-	size_t i, offset, remaining;
-	unsigned char data[64];
-	int buffer_used = 0;
-	int header_used = 0;
-	struct timespec ts;
-
-	getnstimeofday(&ts);
-
-	memset(data, 0x00, sizeof(data));
-
-	printk("%s: enter subclass=%02x len=%u\n", __func__, subclass, len);
-
-	/* enable block flash control */
-	ret = bq27x00_write_i2c(di, 0x61, 0x00, true);
-	if (ret) {
-		dev_warn(&di->client->dev, "Failed to write (enable block flash control): %d\n", ret);
-		goto error;
-	}
-
-	msleep(SLAVE_LATENCY_DELAY);
-
-	/* set subclass */
-	ret = bq27x00_write_i2c(di, 0x3e, subclass, true);
-	if (ret) {
-		dev_warn(&di->client->dev, "Failed to write (set subclass 0x%02x): %d\n", subclass, ret);
-		goto error;
-	}
-
-	offset = 0;
-	remaining = len;
-
-	while (remaining > 0) {
-		size_t count = remaining < 32 ? remaining : 32;
-		buffer_used = 0;
-
-		msleep(SLAVE_LATENCY_DELAY);
-
-		/* set sebclass offset 0x00 */
-		ret = bq27x00_write_i2c(di, 0x3f, offset, true);
-		if (ret) {
-			dev_warn(&di->client->dev, "Failed to write (set subclass offset %d): %d\n", offset, ret);
-			goto error;
-		}
-
-		msleep(SLAVE_LATENCY_DELAY);
-
-		/* read in subclass block */
-		ret = bq27x00_read_block_i2c(di, 0x40, data, count);
-		if (ret) {
-			dev_warn(&di->client->dev, "Failed to read block count=%d: %d\n", count, ret);
-			goto error;
-		}
-
-		header_used = scnprintf(
-			subclass_buffer+buffer_used,
-			sizeof(subclass_buffer) - buffer_used,
-			"bq27x00 DF: %ld.%ld subclass=0x%02x len=%02u blk=%u count=%02u: ",
-			ts.tv_sec, ts.tv_nsec/100000000,
-			subclass, len, offset, count);
-		buffer_used += header_used;
-
-		for (i = 0; i < count; i++) {
-			buffer_used += scnprintf(
-				subclass_buffer+buffer_used,
-				sizeof(subclass_buffer) - buffer_used,
-				"0x%02x ", data[i]);
-		}
-		printk("%s\n", subclass_buffer);
-
-		remaining -= count;
-		offset++;
-	}
-
-	/* Record the df dump for a subclass */
-	if (buffer_used > 0 && buf != NULL && len < 32) {
-		memcpy(buf, subclass_buffer+header_used, buffer_used-header_used);
-	}
-
-	return 0;
-
-error:
-	return ret;
-}
-
-static int dump_subclass(struct bq27x00_device_info *di, u8 subclass, size_t len)
-{
-	return dump_and_store_subclass(di, subclass, len, 0);
-}
-
-#define dump_value(name, reg_index) do { \
-	int value = bq27x00_read(di, reg_index, false); \
-	printk("bq27x00: %s=0x%04x\n", #name, value); \
-} while (0)
-
-static int bq27x00_dump_partial_dataflash(struct bq27x00_device_info *di)
-{
-	int ret;
-	struct timespec ts;
-
-	printk("bq27x00: fw version 0x%04x; df version 0x%04x\n",
-		di->fw_ver, di->df_ver);
-
-	if (di->fw_ver == L1_600_FW_VERSION || di->fw_ver == L1_604_FW_VERSION) {
-
-
-		getnstimeofday(&ts);
-		di->partial_df.timestamp = ts;
-
-		ret = dump_and_store_subclass(
-			di, 0x52, 28, di->partial_df.subclass_0x52);
-		ret = dump_and_store_subclass(
-			di, 0x57, 20, di->partial_df.subclass_0x57);
-		ret = dump_and_store_subclass(
-			di, 0x58, 20, di->partial_df.subclass_0x58);
-		ret = dump_and_store_subclass(
-			di, 0x5b, 20, di->partial_df.subclass_0x5b);
-		ret = dump_and_store_subclass(
-			di, 0x5c, 20, di->partial_df.subclass_0x5c);
-		ret = dump_and_store_subclass(
-			di, 0x5d, 20, di->partial_df.subclass_0x5d);
-		ret = dump_and_store_subclass(
-			di, 0x5e, 20, di->partial_df.subclass_0x5e);
-
-	}
-
-	return ret;
-
-}
-
-static int bq27x00_dump_dataflash(struct bq27x00_device_info *di)
-{
-	int ret;
-
-	printk("bq27x00: Control=0x%04x\n", bq27x00_control_cmd(di, 0x0000));
-	dump_value(Temperature, BQ27x00_REG_TEMP);
-	dump_value(Voltage, BQ27x00_REG_VOLT);
-	dump_value(Flags, BQ27x00_REG_FLAGS);
-	dump_value(NominalAvailableCapacity, BQ27x00_REG_NAC);
-	dump_value(FullAvailableCapacity, BQ27x00_REG_FAC);
-	dump_value(RemainingCapacity, BQ27x00_REG_RM);
-	dump_value(FullChargeCapacity, BQ27x00_REG_FCC);
-	dump_value(AverageCurrent, BQ27x00_REG_AI);
-	dump_value(StateOfHealth, BQ27x00_REG_SOH);
-	dump_value(CycleCount, BQ27x00_REG_CC);
-	dump_value(StateOfCharge, BQ27x00_REG_SOC);
-	dump_value(OperationConfiguration, BQ27x00_REG_OC);
-
-	/* unseal device */
-	ret = bq27x00_write_i2c(di, 0x00, 0x0414, false);
-	if (ret) {
-		dev_err(&di->client->dev, "Failed to write (unseal part 1): %d\n", ret);
-		goto error;
-	}
-
-	msleep(SLAVE_LATENCY_DELAY);
-
-	ret = bq27x00_write_i2c(di, 0x00, 0x3672, false);
-	if (ret) {
-		dev_err(&di->client->dev, "Failed to write (unseal part 2): %d\n", ret);
-		goto error;
-	}
-
-	msleep(SLAVE_LATENCY_DELAY);
-
-	if (di->fw_ver == G3_FW_VERSION) {
-		ret = dump_subclass(di, 0x02, 9);
-		ret = dump_subclass(di, 0x20, 5);
-		ret = dump_subclass(di, 0x22, 9);
-		ret = dump_subclass(di, 0x24, 14);
-		ret = dump_subclass(di, 0x30, 26);
-		ret = dump_subclass(di, 0x31, 24);
-		ret = dump_subclass(di, 0x38, 9);
-		ret = dump_subclass(di, 0x40, 17);
-		ret = dump_subclass(di, 0x44, 16);
-		ret = dump_subclass(di, 0x50, 90);
-		ret = dump_subclass(di, 0x51, 13);
-		ret = dump_subclass(di, 0x52, 27);
-		ret = dump_subclass(di, 0x53, 45);
-		ret = dump_subclass(di, 0x54, 45);
-		ret = dump_subclass(di, 0x55, 65);
-		ret = dump_subclass(di, 0x56, 65);
-		ret = dump_subclass(di, 0x57, 19);
-		ret = dump_subclass(di, 0x58, 19);
-		ret = dump_subclass(di, 0x59, 19);
-		ret = dump_subclass(di, 0x5a, 19);
-		ret = dump_subclass(di, 0x5b, 19);
-		ret = dump_subclass(di, 0x5c, 19);
-		ret = dump_subclass(di, 0x5d, 19);
-		ret = dump_subclass(di, 0x5e, 19);
-		ret = dump_subclass(di, 0x68, 15);
-		ret = dump_subclass(di, 0x69, 18);
-		ret = dump_subclass(di, 0x6a, 44);
-		ret = dump_subclass(di, 0x6b, 18);
-		ret = dump_subclass(di, 0x6c, 19);
-		ret = dump_subclass(di, 0x6d, 19);
-	} else if (di->fw_ver == G4_FW_VERSION) {
-		ret = dump_subclass(di, 0x02, 10);
-		ret = dump_subclass(di, 0x20, 6);
-		ret = dump_subclass(di, 0x22, 10);
-		ret = dump_subclass(di, 0x24, 15);
-		ret = dump_subclass(di, 0x30, 27);
-		ret = dump_subclass(di, 0x31, 25);
-		ret = dump_subclass(di, 0x39, 32);
-		ret = dump_subclass(di, 0x40, 15);
-		ret = dump_subclass(di, 0x44, 17);
-		ret = dump_subclass(di, 0x50, 89);
-		ret = dump_subclass(di, 0x51, 14);
-		ret = dump_subclass(di, 0x52, 28);
-		ret = dump_subclass(di, 0x53, 5);
-		ret = dump_subclass(di, 0x54, 5);
-		ret = dump_subclass(di, 0x57, 19);
-		ret = dump_subclass(di, 0x58, 19);
-		ret = dump_subclass(di, 0x5b, 19);
-		ret = dump_subclass(di, 0x5c, 19);
-		ret = dump_subclass(di, 0x5d, 19);
-		ret = dump_subclass(di, 0x5e, 19);
-		ret = dump_subclass(di, 0x68, 16);
-		ret = dump_subclass(di, 0x6a, 18);
-		ret = dump_subclass(di, 0x6b, 2);
-	} else if (di->fw_ver == L1_600_FW_VERSION || di->fw_ver == L1_604_FW_VERSION) {
-
-		ret = dump_subclass(di, 0x02, 10);
-		ret = dump_subclass(di, 0x20, 6);
-		ret = dump_subclass(di, 0x22, 10);
-		ret = dump_subclass(di, 0x24, 15);
-		ret = dump_subclass(di, 0x30, 26);
-		ret = dump_subclass(di, 0x31, 25);
-		ret = dump_subclass(di, 0x38, 10);
-		ret = dump_subclass(di, 0x40, 14);
-		ret = dump_subclass(di, 0x44, 17);
-		ret = dump_subclass(di, 0x50, 79);
-		ret = dump_subclass(di, 0x51, 14);
-		ret = dump_subclass(di, 0x52, 28);
-		ret = dump_subclass(di, 0x53, 46);
-		ret = dump_subclass(di, 0x54, 46);
-		ret = dump_subclass(di, 0x55, 66);
-		ret = dump_subclass(di, 0x56, 66);
-		ret = dump_subclass(di, 0x57, 20);
-		ret = dump_subclass(di, 0x58, 20);
-		ret = dump_subclass(di, 0x59, 20);
-		ret = dump_subclass(di, 0x5a, 20);
-		ret = dump_subclass(di, 0x5b, 20);
-		ret = dump_subclass(di, 0x5c, 20);
-		ret = dump_subclass(di, 0x5d, 20);
-		ret = dump_subclass(di, 0x5e, 20);
-		ret = dump_subclass(di, 0x68, 16);
-		ret = dump_subclass(di, 0x69, 19);
-		ret = dump_subclass(di, 0x6a, 45);
-		ret = dump_subclass(di, 0x6b, 19);
-		ret = dump_subclass(di, 0x6c, 20);
-		ret = dump_subclass(di, 0x6d, 20);
-	}
-
-	return 0;
-
-error:
-	return ret;
-}
-
-static ssize_t show_dump_partial_data_flash(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct bq27x00_device_info *di = dev_get_drvdata(dev);
-	int count = 0;
-
-	mutex_lock(&di->lock);
-
-	if (di->partial_df.timestamp.tv_sec != 0) {
-		count = sprintf(buf, "%d,%d\n%ld.%ld\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
-			di->fw_ver,
-			di->df_ver,
-			di->partial_df.timestamp.tv_sec,
-			di->partial_df.timestamp.tv_nsec/100000000,
-			di->partial_df.data_ram,
-			di->partial_df.subclass_0x52,
-			di->partial_df.subclass_0x57,
-			di->partial_df.subclass_0x58,
-			di->partial_df.subclass_0x5b,
-			di->partial_df.subclass_0x5c,
-			di->partial_df.subclass_0x5d,
-			di->partial_df.subclass_0x5e);
-	} else {
-		count = sprintf(buf, "none\n");
-	}
-
-	mutex_unlock(&di->lock);
-
-	return count;
-}
 
 static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 {
@@ -1824,17 +1304,6 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 	mutex_unlock(&di->lock);
 
 	return IRQ_HANDLED;
-}
-
-static ssize_t show_dump_data_flash(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct bq27x00_device_info *di = dev_get_drvdata(dev);
-
-	dev_warn(&di->client->dev, "Dump data flash:\n");
-	bq27x00_dump_dataflash(di);
-
-	return sprintf(buf, "okay\n");
 }
 
 static ssize_t show_firmware_version(struct device *dev,
@@ -1949,36 +1418,6 @@ static ssize_t show_battery_details(struct device *dev,
 			timestamp.tv_nsec/100000000,
 			DOD0, DODfinal, q_max, q_passed,
 			true_fcc, true_cap);
-	return count;
-}
-
-static ssize_t show_debug_print_interval(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct bq27x00_device_info *di = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%d\n", di->debug_print_interval);
-}
-
-static ssize_t set_debug_print_interval(struct device *dev,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	long val;
-	struct bq27x00_device_info *di = dev_get_drvdata(dev);
-
-	if (strict_strtol(buf, 10, &val) < 0)
-		return -EINVAL;
-
-	if (val < 0 || val > DEBUG_1HZ_MAX_COUNT)
-		return -EINVAL;
-	di->debug_print_interval = val;
-	di->debug_index = 0;
-
-	if (di->debug_print_interval)
-		queue_delayed_work(system_power_efficient_wq,
-							&di->debug_work, 0);
-
 	return count;
 }
 
@@ -2160,7 +1599,6 @@ static ssize_t _update_firmware(struct device *dev, const char *firmware_filenam
 	firmware.size = fw->size;
 
 	cancel_delayed_work_sync(&di->work);
-	cancel_delayed_work_sync(&di->debug_work);
 
 	mutex_lock(&battery_mutex);
 	error = load_firmware(di, &firmware);
@@ -2173,9 +1611,6 @@ static ssize_t _update_firmware(struct device *dev, const char *firmware_filenam
 
 	queue_delayed_work(system_power_efficient_wq,
 						&di->work, 5 * HZ);
-	if (di->debug_print_interval > 0)
-		queue_delayed_work(system_power_efficient_wq,
-							&di->debug_work, poll_interval * HZ);
 
 	release_firmware(fw);
 
@@ -2245,9 +1680,6 @@ static ssize_t bq27x00_update_firmware(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(dump_partial_data_flash, S_IRUGO,
-	show_dump_partial_data_flash, NULL);
-static DEVICE_ATTR(dump_data_flash, S_IRUGO, show_dump_data_flash, NULL);
 static DEVICE_ATTR(fw_version, S_IRUGO, show_firmware_version, NULL);
 static DEVICE_ATTR(df_version, S_IRUGO, show_dataflash_version, NULL);
 static DEVICE_ATTR(device_type, S_IRUGO, show_device_type, NULL);
@@ -2255,13 +1687,9 @@ static DEVICE_ATTR(reset, S_IRUGO, show_reset, NULL);
 static DEVICE_ATTR(qpassed, S_IRUGO, show_qpassed, NULL);
 static DEVICE_ATTR(qpassed_hires, S_IRUGO, show_hires_qpassed, NULL);
 static DEVICE_ATTR(battery_details, S_IRUGO, show_battery_details, NULL);
-static DEVICE_ATTR(debug_print_interval, S_IWUSR|S_IRUGO,
-		   show_debug_print_interval, set_debug_print_interval);
 static DEVICE_ATTR(update_fw, S_IWUSR|S_IRUSR , NULL, bq27x00_update_firmware);
 
 static struct attribute *bq27x00_attributes[] = {
-	&dev_attr_dump_partial_data_flash.attr,
-	&dev_attr_dump_data_flash.attr,
 	&dev_attr_fw_version.attr,
 	&dev_attr_df_version.attr,
 	&dev_attr_device_type.attr,
@@ -2269,7 +1697,6 @@ static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_qpassed.attr,
 	&dev_attr_qpassed_hires.attr,
 	&dev_attr_battery_details.attr,
-	&dev_attr_debug_print_interval.attr,
 	&dev_attr_update_fw.attr,
 	NULL
 };
@@ -2304,6 +1731,7 @@ static void of_bq27x00_parse_platform_data(struct i2c_client *client,
 				struct bq27x00_platform_data *pdata)
 {
 	char const *pstr;
+	u32 value;
 	struct device_node *np = client->dev.of_node;
 
 	if (!of_property_read_string(np, "ti,fw-lgc-name", &pstr))
@@ -2320,6 +1748,11 @@ static void of_bq27x00_parse_platform_data(struct i2c_client *client,
 		pdata->tz_name = pstr;
 	else
 		dev_warn(&client->dev, "Failed to read tz-name\n");
+
+	if (of_property_read_u32(np, "ti,critical-temp", &value))
+		pdata->critical_temp = value * 10;
+	else
+		dev_warn(&client->dev, "Failed to read critical-temp\n");
 }
 
 static int bq27x00_battery_probe(struct i2c_client *client,
@@ -2371,8 +1804,6 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	di->bat.name = "battery";
 	di->bus.read = &bq27x00_read_i2c;
 	di->bus.write = &bq27x00_write_i2c;
-	di->debug_print_interval = 0;
-	di->debug_index = 0;
 	di->bat_status = POWER_SUPPLY_STATUS_DISCHARGING;
 
 	if (di->pdata && di->pdata->translate_temp)
@@ -2422,18 +1853,6 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	retval = sysfs_create_group(&client->dev.kobj, &bq27x00_attr_group);
 	if (retval)
 		dev_err(&client->dev, "could not create sysfs files\n");
-
-	/* For Debugging:
-	 * 1) 1Hz sampling of V, I and T.
-	 * 2) Dump partial dataflash at debug_dataflash_interval
-	 * 3) Dump additional data ram
-	 */
-	if (di->debug_print_interval) {
-		queue_delayed_work(system_power_efficient_wq,
-							&di->debug_work, 0);
-		di->data_flash_update_time =
-			jiffies + msecs_to_jiffies(debug_dataflash_interval);
-	}
 
 	/* Update firmware */
 	update_firmware(di);
@@ -2501,8 +1920,6 @@ static void bq27x00_shutdown(struct i2c_client *client)
 	if (di->client->irq)
 		disable_irq(di->client->irq);
 
-	if (di->debug_print_interval > 0)
-		cancel_delayed_work_sync(&di->debug_work);
 	cancel_delayed_work_sync(&di->work);
 	dev_err(&di->client->dev, "At shutdown Voltage %dmV\n",
 			di->cache.voltage);
@@ -2516,9 +1933,6 @@ static int bq27x00_suspend(struct device *dev)
 	mutex_lock(&di->lock);
 
 	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
-
-	if (di->debug_print_interval > 0)
-		cancel_delayed_work_sync(&di->debug_work);
 	cancel_delayed_work_sync(&di->work);
 
 	mutex_unlock(&di->lock);
@@ -2547,9 +1961,6 @@ static int bq27x00_resume(struct device *dev)
 	mutex_lock(&di->lock);
 
 	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
-
-	if (di->debug_print_interval > 0)
-		queue_delayed_work(system_power_efficient_wq, &di->debug_work, HZ);
 	queue_delayed_work(system_power_efficient_wq, &di->work, 0);
 
 	mutex_unlock(&di->lock);
