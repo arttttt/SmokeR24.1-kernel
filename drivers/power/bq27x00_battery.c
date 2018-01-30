@@ -1280,10 +1280,6 @@ static void bq27x00_powersupply_unregister(struct bq27x00_device_info *di)
 	mutex_destroy(&di->lock);
 }
 
-
-/* i2c specific code */
-#ifdef CONFIG_BATTERY_BQ27X00_I2C
-
 /* If the system has several batteries we need a different name for each
  * of them...
  */
@@ -2605,13 +2601,6 @@ static inline void bq27x00_battery_i2c_exit(void)
 {
 	i2c_del_driver(&bq27x00_battery_driver);
 }
-
-#else
-
-static inline int bq27x00_battery_i2c_init(void) { return 0; }
-static inline void bq27x00_battery_i2c_exit(void) {};
-
-#endif
 
 /*
  * Module stuff
