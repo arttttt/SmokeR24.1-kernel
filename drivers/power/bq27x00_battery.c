@@ -9,6 +9,7 @@
  *
  * Based on a previous work by Copyright (C) 2008 Texas Instruments, Inc.
  * Copyright (C) 2016 XiaoMi, Inc.
+ * Copyright (C) 2018 Artyom Bambalov <artem-bambalov@yandex.ru>
  *
  * This package is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
