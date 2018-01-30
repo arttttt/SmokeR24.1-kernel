@@ -2506,6 +2506,8 @@ static void bq27x00_shutdown(struct i2c_client *client)
 	if (di->client->irq)
 		disable_irq(di->client->irq);
 
+	if (di->debug_print_interval > 0)
+		cancel_delayed_work_sync(&di->debug_work);
 	cancel_delayed_work_sync(&di->work);
 	dev_err(&di->client->dev, "At shutdown Voltage %dmV\n",
 			di->cache.voltage);
@@ -2519,6 +2521,9 @@ static int bq27x00_suspend(struct device *dev)
 	mutex_lock(&di->lock);
 
 	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
+
+	if (di->debug_print_interval > 0)
+		cancel_delayed_work_sync(&di->debug_work);
 	cancel_delayed_work_sync(&di->work);
 
 	mutex_unlock(&di->lock);
@@ -2547,7 +2552,10 @@ static int bq27x00_resume(struct device *dev)
 	mutex_lock(&di->lock);
 
 	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
-	queue_delayed_work(system_power_efficient_wq, &di->debug_work, HZ);
+
+	if (di->debug_print_interval > 0)
+		queue_delayed_work(system_power_efficient_wq, &di->debug_work, HZ);
+	queue_delayed_work(system_power_efficient_wq, &di->work, 0);
 
 	mutex_unlock(&di->lock);
 
