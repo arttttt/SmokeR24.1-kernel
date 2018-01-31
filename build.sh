@@ -39,19 +39,31 @@ generate_version()
 
 make_zip()
 {
-	if [[ -f "$KERNEL_DIR/anykernel" ]]; then
+	if [[ -d "$KERNEL_DIR/anykernel" ]]; then
 		printf "\nСоздание zip архива\n\n"
 	else
 		printf "\nПапка $KERNEL_DIR/anykernel не существует\n\n"
 		return
 	fi;
 
+	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
+		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
+	else
+		return
+	fi
+
+	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
+		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
+	else
+		return
+	fi
+
 	cd $KERNEL_DIR/anykernel
 	local zip_name="$kernel_name($(date +'%d.%m.%Y-%H:%M')).zip"
 	zip -r $zip_name *
 
 	if [[ -f "$PWD/$zip_name" ]]; then
-		if [[ ! -f "$OUTPUT_DIR" ]]; then
+		if [[ ! -d "$OUTPUT_DIR" ]]; then
 			mkdir $OUTPUT_DIR
 		fi;
 
@@ -83,21 +95,9 @@ compile()
 	make $config
 	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain zImage
 
-	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
-		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
-	else
-		return
-	fi
-
 	printf "\nКомпиляция дерева устройства\n\n"
 
 	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain tegra124-mocha.dtb
-
-	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
-		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
-	else
-		return
-	fi
 
 	local end=$(date +%s)
 	local comp_time=$((end-start))
