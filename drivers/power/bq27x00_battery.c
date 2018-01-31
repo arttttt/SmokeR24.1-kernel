@@ -914,7 +914,7 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 
 	mutex_lock(&di->lock);
 	if (time_is_before_jiffies(di->last_update + 5 * HZ)) {
-		cancel_delayed_work_sync(&di->work);
+		cancel_delayed_work(&di->work);
 		bq27x00_battery_poll(&di->work.work);
 	}
 	mutex_unlock(&di->lock);
@@ -1006,7 +1006,7 @@ static void bq27x00_external_power_changed(struct power_supply *psy)
 {
 	struct bq27x00_device_info *di = to_bq27x00_device_info(psy);
 
-	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work(&di->work);
 	queue_delayed_work(system_power_efficient_wq,
 						&di->work, 0);
 }
@@ -1047,7 +1047,7 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 
 static void bq27x00_powersupply_unregister(struct bq27x00_device_info *di)
 {
-	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work(&di->work);
 
 	power_supply_unregister(&di->bat);
 
@@ -1598,7 +1598,7 @@ static ssize_t _update_firmware(struct device *dev, const char *firmware_filenam
 	firmware.data = fw->data;
 	firmware.size = fw->size;
 
-	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work(&di->work);
 
 	mutex_lock(&battery_mutex);
 	error = load_firmware(di, &firmware);
@@ -1915,7 +1915,7 @@ static void bq27x00_shutdown(struct i2c_client *client)
 	if (di->client->irq)
 		disable_irq(di->client->irq);
 
-	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work(&di->work);
 	dev_err(&di->client->dev, "At shutdown Voltage %dmV\n",
 			di->cache.voltage);
 }
@@ -1928,7 +1928,7 @@ static int bq27x00_suspend(struct device *dev)
 	mutex_lock(&di->lock);
 
 	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
-	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work(&di->work);
 
 	mutex_unlock(&di->lock);
 
