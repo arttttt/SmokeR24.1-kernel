@@ -611,7 +611,7 @@ static struct actmon_dev actmon_dev_avp = {
 	},
 };
 
-#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+#if defined(CONFIG_ARCH_TEGRA_13x_SOC)
 #define CPU_AVG_ACT_THRESHOLD 2000
 /* EMC-cpu activity monitor: frequency sampling device:
  * activity counter is incremented every 256 memory transactions, and
@@ -647,7 +647,7 @@ static struct actmon_dev actmon_dev_cpu_emc = {
 static struct actmon_dev *actmon_devices[] = {
 	&actmon_dev_emc,
 	&actmon_dev_avp,
-#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+#if defined(CONFIG_ARCH_TEGRA_13x_SOC)
 	&actmon_dev_cpu_emc,
 #endif
 };
