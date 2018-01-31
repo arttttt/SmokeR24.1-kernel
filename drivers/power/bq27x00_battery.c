@@ -1748,11 +1748,6 @@ static void of_bq27x00_parse_platform_data(struct i2c_client *client,
 		pdata->tz_name = pstr;
 	else
 		dev_warn(&client->dev, "Failed to read tz-name\n");
-
-	if (of_property_read_u32(np, "ti,critical-temp", &value))
-		pdata->critical_temp = value * 10;
-	else
-		dev_warn(&client->dev, "Failed to read critical-temp\n");
 }
 
 static int bq27x00_battery_probe(struct i2c_client *client,
