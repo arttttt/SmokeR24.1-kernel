@@ -368,5 +368,13 @@
 		nvidia,vbus-oc-map = <4>;
 		nvidia,xcvr-setup-offset = <0>;
 	};
+
+	tegra_cec {
+		status = "disabled";
+	};
+
+	hdmi {
+		status = "disabled";
+	};
 };
 
