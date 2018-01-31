@@ -1932,10 +1932,8 @@ static int bq27x00_suspend(struct device *dev)
 
 	mutex_unlock(&di->lock);
 
-	if (device_may_wakeup(&di->client->dev) && di->client->irq) {
+	if (device_may_wakeup(&di->client->dev) && di->client->irq)
 		enable_irq_wake(di->client->irq);
-		dev_err(&di->client->dev, "irq wake enabled\n");
-	}
 
 	dev_err(&di->client->dev, "Qpassed suspend: %s. Current voltage: %dmV\n", 
 				buf, di->cache.voltage);
@@ -1948,10 +1946,8 @@ static int bq27x00_resume(struct device *dev)
 	char buf[100];
 	struct bq27x00_device_info *di = dev_get_drvdata(dev);
 
-	if (device_may_wakeup(&di->client->dev) && di->client->irq) {
+	if (device_may_wakeup(&di->client->dev) && di->client->irq)
 		disable_irq_wake(di->client->irq);
-		dev_err(&di->client->dev, "irq wake disabled\n");
-	}
 
 	mutex_lock(&di->lock);
 
