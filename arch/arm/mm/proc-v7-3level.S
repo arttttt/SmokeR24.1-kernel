@@ -62,6 +62,10 @@ ENTRY(cpu_v7_icinv_switch_mm)
 	mcr	p15, 0, r0, c7, c5, 0		@ ICIALLU
 	/* Fall through to switch_mm... */
 #endif
+ENTRY(cpu_v7_btbinv_switch_mm)
+#ifdef CONFIG_MMU
+	mcr	p15, 0, r0, c7, c5, 6			@ flush BTAC/BTB
+#endif
 ENTRY(cpu_v7_switch_mm)
 #ifdef CONFIG_MMU
 	mmid	r2, r2				@ get mm->context.id
@@ -73,6 +77,7 @@ ENTRY(cpu_v7_switch_mm)
 #endif
 	mov	pc, lr
 ENDPROC(cpu_v7_switch_mm)
+ENDPROC(cpu_v7_btbinv_switch_mm)
 ENDPROC(cpu_v7_icinv_switch_mm)
 
 #ifdef __ARMEB__

@@ -435,6 +435,26 @@ ENDPROC(cpu_v7_do_resume)
 	globl_equ	cpu_ca15_do_resume,	cpu_v7_do_resume
 #endif
 
+/*
+ * Cortex-A12/A17
+ */
+	globl_equ	cpu_ca17_proc_init,	cpu_v7_proc_init
+	globl_equ	cpu_ca17_proc_fin,	cpu_v7_proc_fin
+	globl_equ	cpu_ca17_reset,		cpu_v7_reset
+	globl_equ	cpu_ca17_do_idle,	cpu_v7_do_idle
+	globl_equ	cpu_ca17_dcache_clean_area, cpu_v7_dcache_clean_area
+	globl_equ	cpu_ca17_set_pte_ext,	cpu_v7_set_pte_ext
+	globl_equ	cpu_ca17_suspend_size,	cpu_v7_suspend_size
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+	globl_equ	cpu_ca17_switch_mm,	cpu_v7_btbinv_switch_mm
+#else
+	globl_equ	cpu_ca17_switch_mm,	cpu_v7_switch_mm
+#endif
+#ifdef CONFIG_ARM_CPU_SUSPEND
+	globl_equ	cpu_ca17_do_suspend,	cpu_v7_do_suspend
+	globl_equ	cpu_ca17_do_resume,	cpu_v7_do_resume
+#endif
+
 #ifdef CONFIG_CPU_PJ4B
 	globl_equ	cpu_pj4b_switch_mm,     cpu_v7_switch_mm
 	globl_equ	cpu_pj4b_set_pte_ext,	cpu_v7_set_pte_ext
