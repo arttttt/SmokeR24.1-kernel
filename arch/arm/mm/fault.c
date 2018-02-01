@@ -26,6 +26,7 @@
 #include <asm/system_misc.h>
 #include <asm/system_info.h>
 #include <asm/tlbflush.h>
+#include <asm/cputype.h>
 
 #include "fault.h"
 
@@ -401,6 +402,9 @@ do_pabt_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 #ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
 	if (addr > TASK_SIZE) {
 		switch (read_cpuid_part_number()) {
+		case ARM_CPU_PART_CORTEX_A15:
+			write_sysreg(0, ICIALLU);
+			break;
 		}
 	}
 #endif
