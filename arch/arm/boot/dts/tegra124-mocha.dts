@@ -299,11 +299,25 @@
 		tfa9890@34 {
 			compatible = "nxp,tfa9890";
 			reg = <0x34>;
+
+			nxt,fw-boot = "tfa9890_boot.patch";
+			nxt,fw-rom = "tfa9890_rom.patch";
+			nxt,fw-speaker = "tfa9890_left.speaker";
+			nxt,fw-config = "tfa9890.config";
+			nxt,fw-preset = "tfa9890_left_music.preset";
+			nxt,fw-eq = "tfa9890_left_music.eq";
 		};
 
 		tfa9890@37 {
 			compatible = "nxp,tfa9890";
 			reg = <0x37>;
+
+			nxt,fw-boot = "tfa9890_boot.patch";
+			nxt,fw-rom = "tfa9890_rom.patch";
+			nxt,fw-speaker = "tfa9890_right.speaker";
+			nxt,fw-config = "tfa9890.config";
+			nxt,fw-preset = "tfa9890_right_music.preset";
+			nxt,fw-eq = "tfa9890_right_music.eq";
 		};
 
 	};
