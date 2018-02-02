@@ -1731,7 +1731,6 @@ static void of_bq27x00_parse_platform_data(struct i2c_client *client,
 				struct bq27x00_platform_data *pdata)
 {
 	char const *pstr;
-	u32 value;
 	struct device_node *np = client->dev.of_node;
 
 	if (!of_property_read_string(np, "ti,fw-lgc-name", &pstr))
