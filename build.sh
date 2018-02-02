@@ -49,14 +49,14 @@ make_zip()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
 	else
-		printf "\Файл $ORIGINAL_OUTPUT_DIR/zImage не существует\n\n"
+		printf "Файл $ORIGINAL_OUTPUT_DIR/zImage не существует\n\n"
 		return
 	fi
 
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
 	else
-		printf "\Файл $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb не существует\n\n"
+		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb не существует\n\n"
 		return
 	fi
 
@@ -120,7 +120,7 @@ compile_dtb()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
 	else
-		printf "\Файл $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb не существует\n\n"
+		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb не существует\n\n"
 		return
 	fi
 
