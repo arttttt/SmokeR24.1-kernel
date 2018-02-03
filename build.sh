@@ -6,6 +6,7 @@ export KBUILD_BUILD_USER="arttttt"
 
 clean_build=0
 config="tegra12_android_defconfig"
+dtb_name="tegra124-mocha.dtb"
 kernel_name="SmokeR24.2"
 threads=5
 toolchain="$HOME/Android/toolchain/linaro-4.9.4/bin/arm-linux-gnueabihf-"
@@ -53,10 +54,10 @@ make_zip()
 		return
 	fi
 
-	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
-		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
+	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/$dtb_name" ]]; then
+		mv $ORIGINAL_OUTPUT_DIR/dts/$dtb_name $PWD/anykernel/kernel/dtb
 	else
-		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb не существует\n\n"
+		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n"
 		return
 	fi
 
@@ -99,7 +100,7 @@ compile()
 
 	printf "\nКомпиляция дерева устройства\n\n"
 
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain tegra124-mocha.dtb
+	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
 
 	local end=$(date +%s)
 	local comp_time=$((end-start))
@@ -115,12 +116,12 @@ compile_dtb()
 
 	generate_version
 	make $config
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain tegra124-mocha.dtb
+	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
 
-	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb" ]]; then
-		mv $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb $PWD/anykernel/kernel/dtb
+	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/$dtb_name" ]]; then
+		mv $ORIGINAL_OUTPUT_DIR/dts/$dtb_name $PWD/anykernel/kernel/dtb
 	else
-		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/tegra124-mocha.dtb не существует\n\n"
+		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n"
 		return
 	fi
 
