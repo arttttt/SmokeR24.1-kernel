@@ -8,6 +8,7 @@ clean_build=0
 config="tegra12_android_defconfig"
 dtb_name="tegra124-mocha.dtb"
 kernel_name="SmokeR24.2"
+build_log="build.log"
 threads=5
 toolchain="$HOME/Android/toolchain/linaro-4.9.4/bin/arm-linux-gnueabihf-"
 
@@ -96,7 +97,45 @@ compile()
 
 	generate_version
 	make $config
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain zImage
+	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain zImage 2> $build_log
+
+	local i=0
+	while read line; do 
+		error=$(echo "$line" | awk '/warning:/{print}')
+		if [[ "$error" != "" ]]; then
+			if [[ $i == 0 ]]; then
+				printf "\e[1;32m\n\nСписок предупреждений компилятора:\n\e[0m"
+				i+=1
+			fi;
+			printf "\e[1;35m$error\n\e[0m"
+			error=""
+		fi;
+	done < $KERNEL_DIR/$build_log
+
+	local error_status=0
+
+	local i=0
+	while read line; do 
+		error=$(echo "$line" | awk '/error:/{print}')
+		if [[ "$error" != "" ]]; then
+			if [[ $i == 0 ]]; then
+				printf "\e[1;32m\n\nСписок ошибок компиляции:\n\e[0m"
+				i+=1
+			fi;
+			printf "\e[1;31m$error\n\e[0m"
+			error=""
+			error_status=1
+		fi;
+	done < $KERNEL_DIR/$build_log
+
+	if [[ -f "$build_log" ]]; then
+		rm $build_log
+	fi;
+
+	if [[ "$error_status" == 1 ]]; then
+		printf "\e[1;31m\n\nСборка ядра прервана\n\e[0m"
+		return
+	fi;
 
 	printf "\nКомпиляция дерева устройства\n\n"
 
