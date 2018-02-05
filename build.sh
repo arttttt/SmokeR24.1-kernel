@@ -16,6 +16,25 @@ KERNEL_DIR=$PWD
 ORIGINAL_OUTPUT_DIR="$KERNEL_DIR/arch/$ARCH/boot"
 OUTPUT_DIR="$KERNEL_DIR/output"
 
+ERROR=0
+HEAD=1
+WARNING=2
+
+printfc() {
+	if [[ $2 == $ERROR ]]; then
+		printf "\e[1;31m$1\e[0m"
+		return
+	fi;
+	if [[ $2 == $HEAD ]]; then
+		printf "\e[1;32m$1\e[0m"
+		return
+	fi;
+	if [[ $2 == $WARNING ]]; then
+		printf "\e[1;35m$1\e[0m"
+		return
+	fi;
+}
+
 generate_version()
 {
 	if [[ -f "$KERNEL_DIR/.git/HEAD"  &&  -f "$KERNEL_DIR/anykernel/anykernel.sh" ]]; then
@@ -42,23 +61,23 @@ generate_version()
 make_zip()
 {
 	if [[ -d "$KERNEL_DIR/anykernel" ]]; then
-		printf "\nСоздание zip архива\n\n"
+		printfc "\nСоздание zip архива\n\n" $HEAD
 	else
-		printf "\nПапка $KERNEL_DIR/anykernel не существует\n\n"
+		printfc "\nПапка $KERNEL_DIR/anykernel не существует\n\n" $ERROR
 		return
 	fi;
 
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
 	else
-		printf "Файл $ORIGINAL_OUTPUT_DIR/zImage не существует\n\n"
+		printfc "Файл $ORIGINAL_OUTPUT_DIR/zImage не существует\n\n" $ERROR
 		return
 	fi
 
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/$dtb_name" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/$dtb_name $PWD/anykernel/kernel/dtb
 	else
-		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n"
+		printfc "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n" $ERROR
 		return
 	fi
 
@@ -71,15 +90,15 @@ make_zip()
 			mkdir $OUTPUT_DIR
 		fi;
 
-		printf "\n$zip_name создан, перемещение в $OUTPUT_DIR"
+		printfc "\n$zip_name создан, перемещение в $OUTPUT_DIR" $HEAD
 		mv "$PWD/$zip_name" $OUTPUT_DIR
 
 		if [[ -f "$OUTPUT_DIR/$zip_name" ]]; then
 			echo
-			printf "\nЗавершено\n"
+			printfc "\nЗавершено\n" $HEAD
 		fi
 	else
-		printf "\nНе удалось создать архив\n"
+		printfc "\nНе удалось создать архив\n" $ERROR
 		return
 	fi
 	cd $KERNEL_DIR
@@ -104,10 +123,10 @@ compile()
 		error=$(echo "$line" | awk '/warning:/{print}')
 		if [[ "$error" != "" ]]; then
 			if [[ $i == 0 ]]; then
-				printf "\e[1;32m\n\nСписок предупреждений компилятора:\n\e[0m"
+				printfc "\n\nСписок предупреждений компилятора:\n\n" $HEAD
 				i+=1
 			fi;
-			printf "\e[1;35m$error\n\e[0m"
+			printfc "$error\n" $WARNING
 			error=""
 		fi;
 	done < $KERNEL_DIR/$build_log
@@ -119,10 +138,10 @@ compile()
 		error=$(echo "$line" | awk '/error:/{print}')
 		if [[ "$error" != "" ]]; then
 			if [[ $i == 0 ]]; then
-				printf "\e[1;32m\n\nСписок ошибок компиляции:\n\e[0m"
+				printfc "\n\nСписок ошибок компиляции:\n\n" $HEAD
 				i+=1
 			fi;
-			printf "\e[1;31m$error\n\e[0m"
+			printfc "$error\n" $ERROR
 			error=""
 			error_status=1
 		fi;
@@ -133,18 +152,18 @@ compile()
 	fi;
 
 	if [[ "$error_status" == 1 ]]; then
-		printf "\e[1;31m\n\nСборка ядра прервана\n\e[0m"
+		printfc "\n\nСборка ядра прервана\n" $ERROR
 		return
 	fi;
 
-	printf "\nКомпиляция дерева устройства\n\n"
+	printfc "\nКомпиляция дерева устройства\n\n" $HEAD
 
 	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
 
 	local end=$(date +%s)
 	local comp_time=$((end-start))
-	printf "\nЯдро скомпилировано за %02d:%02d\n" $((($comp_time/60)%60)) $(($comp_time%60))
-	printf "Сборка номер %d в ветке %s" $current_build $current_branch
+	printf "\e[1;32m\nЯдро скомпилировано за %02d:%02d\n\e[0m" $((($comp_time/60)%60)) $(($comp_time%60))
+	printfc "Сборка номер $current_build в ветке $current_branch\n" $HEAD
 
 	make_zip
 }
@@ -160,7 +179,7 @@ compile_dtb()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/$dtb_name" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/$dtb_name $PWD/anykernel/kernel/dtb
 	else
-		printf "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n"
+		printfc "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n" $ERROR
 		return
 	fi
 
