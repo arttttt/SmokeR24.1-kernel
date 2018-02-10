@@ -19,7 +19,7 @@
 #include <dt-bindings/pinctrl/pinctrl-tegra.h>
 
 / {
-	pinmux: pinmux {
+	pinmux: pinmux@70000868 {
 		status = "okay";
 		pinctrl-names = "default", "drive", "unused";
 		pinctrl-0 = <&pinmux_default>;
