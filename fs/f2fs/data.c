@@ -1691,9 +1691,7 @@ static int f2fs_write_data_pages(struct address_space *mapping,
 {
 	struct inode *inode = mapping->host;
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
-#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
-#endif
 	int ret;
 
 	/* deal with chardevs and other special file */
@@ -1725,13 +1723,9 @@ static int f2fs_write_data_pages(struct address_space *mapping,
 	else if (atomic_read(&sbi->wb_sync_req))
 		goto skip_write;
 
-#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
-#endif
 	ret = f2fs_write_cache_pages(mapping, wbc);
-#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
-#endif
 
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		atomic_dec(&sbi->wb_sync_req);

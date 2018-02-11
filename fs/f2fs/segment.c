@@ -488,15 +488,11 @@ void f2fs_balance_fs_bg(struct f2fs_sb_info *sbi)
 			excess_dirty_nats(sbi) ||
 			f2fs_time_over(sbi, CP_TIME)) {
 		if (test_opt(sbi, DATA_FLUSH)) {
-#ifndef CONFIG_SSD_ONLY
 			struct blk_plug plug;
 
 			blk_start_plug(&plug);
-#endif
 			sync_dirty_inodes(sbi, FILE_INODE);
-#ifndef CONFIG_SSD_ONLY
 			blk_finish_plug(&plug);
-#endif
 		}
 		f2fs_sync_fs(sbi->sb, true);
 		stat_inc_bg_cp_count(sbi->stat_info);
@@ -1121,15 +1117,11 @@ static void __issue_discard_cmd(struct f2fs_sb_info *sbi, bool issue_cond)
 	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
 	struct list_head *pend_list;
 	struct discard_cmd *dc, *tmp;
-#ifndef CONFIG_SSD_ONLY
 	struct blk_plug plug;
-#endif
 	int i, iter = 0;
 
 	mutex_lock(&dcc->cmd_lock);
-#ifndef CONFIG_SSD_ONLY
 	blk_start_plug(&plug);
-#endif
 	for (i = MAX_PLIST_NUM - 1; i >= 0; i--) {
 		pend_list = &dcc->pend_list[i];
 		list_for_each_entry_safe(dc, tmp, pend_list, list) {
@@ -1142,9 +1134,7 @@ static void __issue_discard_cmd(struct f2fs_sb_info *sbi, bool issue_cond)
 		}
 	}
 out:
-#ifndef CONFIG_SSD_ONLY
 	blk_finish_plug(&plug);
-#endif
 	mutex_unlock(&dcc->cmd_lock);
 }
 
