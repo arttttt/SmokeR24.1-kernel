@@ -58,7 +58,7 @@ static int program_reboot_reason(const char *cmd)
 	/* Writing recovery kernel or Bootloader mode in SCRATCH0 31:30:1 */
 	if (!strcmp(cmd, "recovery"))
 		reg |= RECOVERY_MODE;
-	else if (!strcmp(cmd, "bootloader"))
+	else if (!strcmp(cmd, "bootloader") || !strcmp(cmd, "fastboot"))
 		reg |= BOOTLOADER_MODE;
 	else if (!strcmp(cmd, "forced-recovery"))
 		reg |= FORCED_RECOVERY_MODE;
