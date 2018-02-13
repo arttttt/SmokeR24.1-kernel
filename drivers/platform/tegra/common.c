@@ -1850,9 +1850,11 @@ static void __init tegra_reserve_ramoops_memory(unsigned long reserve_size)
 	ramoops_data.pmsg_size = PMSG_MEM_SIZE;
 #endif
 	ramoops_data.dump_oops = 1;
-	if (memblock_remove(ramoops_data.mem_address, ramoops_data.mem_size))
-		pr_err("Failed to remove carveout %08lx@%08llx from memory map\n",
-			reserve_size, (u64)ramoops_data.mem_address);
+	// Reserve an extra 1M before ramoops to store kexec stuff
+	pr_err("Hardboot page reserved at 0x%lX\n", ramoops_data.mem_address - SZ_1M);
+ 	if (memblock_remove(ramoops_data.mem_address - SZ_1M, ramoops_data.mem_size + SZ_1M))
+   		pr_err("Failed to remove carveout %08lx@%08llx from memory map\n",
+   			reserve_size, (u64)ramoops_data.mem_address);
 }
 
 static int __init tegra_register_ramoops_device(void)
