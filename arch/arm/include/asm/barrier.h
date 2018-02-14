@@ -79,5 +79,9 @@ do {									\
 
 #define set_mb(var, value)	do { var = value; smp_mb(); } while (0)
 
+#define speculation_barrier()                                           \
+	asm volatile(   "dsb sy\n"                                      \
+		"isb\n" : : : "memory")
+
 #endif /* !__ASSEMBLY__ */
 #endif /* __ASM_BARRIER_H */
