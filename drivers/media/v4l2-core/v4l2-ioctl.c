@@ -28,6 +28,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-chip-ident.h>
 #include <media/videobuf2-core.h>
+#include <asm/barrier.h>
 
 /* Zero out the end of the struct pointed to by p.  Everything after, but
  * not including, the specified field is cleared. */
@@ -2256,6 +2257,7 @@ bool v4l2_is_known_ioctl(unsigned int cmd)
 {
 	if (_IOC_NR(cmd) >= V4L2_IOCTLS)
 		return false;
+	speculation_barrier();
 	return v4l2_ioctls[_IOC_NR(cmd)].ioctl == cmd;
 }
 
@@ -2265,6 +2267,7 @@ struct mutex *v4l2_ioctl_get_lock(struct video_device *vdev, unsigned cmd)
 		return vdev->lock;
 	if (test_bit(_IOC_NR(cmd), vdev->disable_locking))
 		return NULL;
+	speculation_barrier();
 	if (vdev->queue && vdev->queue->lock &&
 			(v4l2_ioctls[_IOC_NR(cmd)].flags & INFO_FL_QUEUE))
 		return vdev->queue->lock;
