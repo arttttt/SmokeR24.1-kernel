@@ -48,6 +48,7 @@
 		status = "okay";
 		fw_path = "/system/vendor/firmware/mocha_fw_bcmdhd.bin";
 		nv_path = "/system/etc/mocha_nvram.txt";
+		mac-address-file = "/system/etc/mocha_macaddr.txt";
 
 		country_code_map {
 
