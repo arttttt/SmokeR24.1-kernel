@@ -856,33 +856,13 @@ static DEVICE_ATTR(pilot_tone, 0444, tfa98xx_pilot_tone_show, NULL);
 
 static int tfa98xx_firmware_put(struct tfa98xx_priv *tfa98xx, unsigned long id, const char *name);
 
-static void tfa98xx_container_loaded(const struct firmware *cont, void *context) {
-	int i;
-	struct tfa98xx_priv *tfa98xx = context;
-
-	release_firmware(cont);
-
-	for (i = 0; i < TFA98XX_FW_NUMBER; i++)
-		tfa98xx_firmware_put(tfa98xx, i, tfa98xx->fw_name[i]);
-}
-
-static int tfa98xx_load_container(struct tfa98xx_priv *tfa98xx)
-{
-	return request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
-									tfa98xx->fw_name[TFA98XX_FW_BOOT], 
-									tfa98xx->codec->dev, GFP_KERNEL,
-									tfa98xx, tfa98xx_container_loaded);
-}
-
 static int tfa98xx_probe(struct snd_soc_codec *codec)
 {
 	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
-	int ret;
+	int ret, i;
 
 	tfa98xx->codec = codec;
 	mutex_init(&tfa98xx->fw_lock);
-
-	tfa98xx_load_container(tfa98xx);
 
 	INIT_DELAYED_WORK(&tfa98xx->monitor_work, tfa98xx_monitor);
 	INIT_DELAYED_WORK(&tfa98xx->download_work, tfa98xx_download);
@@ -905,6 +885,9 @@ static int tfa98xx_probe(struct snd_soc_codec *codec)
 
 	device_create_file(codec->dev, &dev_attr_dsp_crash);
 	device_create_file(codec->dev, &dev_attr_pilot_tone);
+
+	for (i = 0; i < TFA98XX_FW_NUMBER; i++)
+		tfa98xx_firmware_put(tfa98xx, i, tfa98xx->fw_name[i]);
 
 	return ret;
 
@@ -1051,7 +1034,7 @@ static int tfa98xx_recalib_put(struct snd_kcontrol *kcontrol,
 
 static int tfa98xx_firmware_put(struct tfa98xx_priv *tfa98xx, unsigned long id, const char *name)
 {
-        struct snd_soc_codec *codec;
+	struct snd_soc_codec *codec;
 	const struct firmware *fw;
 	int ret;
 
