@@ -4207,75 +4207,6 @@ xhci_bus_resume_failed:
 }
 #endif
 
-#ifdef CONFIG_TEGRA_XHCI_ENABLE_CDP_PORT
-static void set_port_cdp(struct tegra_xhci_hcd *tegra, bool enable, int pad)
-{
-	const struct tegra_xusb_padctl_regs *padregs = tegra->padregs;
-	u32 __iomem bchrg_otgpad_reg =
-				padregs->usb2_bchrg_otgpadX_ctlY_0[pad][0];
-	u32 __iomem otg_pad_reg = padregs->usb2_otg_padX_ctlY_0[pad][0];
-	long val;
-
-	if (enable) {
-		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
-		val &= ~(PD_CHG);
-		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
-		val = tegra_usb_pad_reg_read(otg_pad_reg);
-		val |= (PD2);
-		tegra_usb_pad_reg_write(otg_pad_reg, val);
-		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
-		val |= (ON_SRC_EN);
-		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
-	} else {
-		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
-		val |= (PD_CHG);
-		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
-		val = tegra_usb_pad_reg_read(otg_pad_reg);
-		val &= ~(PD2);
-		tegra_usb_pad_reg_write(otg_pad_reg, val);
-		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
-		val &= ~(ON_SRC_EN);
-		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
-	}
-}
-
-void tegra_xhci_free_dev(struct usb_hcd *hcd, struct usb_device *udev)
-{
-	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
-	int pad;
-
-	pad = udev->portnum - 1;
-	xhci_free_dev(hcd, udev);
-	set_port_cdp(tegra, true, pad);
-}
-
-int tegra_xhci_alloc_dev(struct usb_hcd *hcd, struct usb_device *udev)
-{
-	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
-	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
-	int usb2_utmi_port_start, usb2_utmi_port_end;
-	int port; int pad;
-	u32 reg;
-
-	usb2_utmi_port_start = XUSB_SS_PORT_COUNT;
-	usb2_utmi_port_end = XUSB_SS_PORT_COUNT + XUSB_UTMI_COUNT - 1;
-
-	for (port = usb2_utmi_port_start; port <= usb2_utmi_port_end; port++) {
-		reg = xhci_read_portsc(xhci, port);
-		pad = port - XUSB_SS_PORT_COUNT;
-		if (reg & PORT_CONNECT)
-			set_port_cdp(tegra, false, pad);
-	}
-
-	return xhci_alloc_dev(hcd, udev);
-}
-
-#else
-static void set_port_cdp(struct tegra_xhci_hcd *tegra, bool enable, int pad)
-{
-	return;
-}
-
 static void tegra_xhci_downgrade_check_to_disable(struct usb_hcd *hcd,
 	struct usb_device *udev, bool restore_usb3_power)
 {
@@ -4353,6 +4284,75 @@ static void tegra_xhci_downgrade_check_to_disable(struct usb_hcd *hcd,
 		}
 	}
 	mutex_unlock(&tegra->sync_lock);
+}
+
+#ifdef CONFIG_TEGRA_XHCI_ENABLE_CDP_PORT
+static void set_port_cdp(struct tegra_xhci_hcd *tegra, bool enable, int pad)
+{
+	const struct tegra_xusb_padctl_regs *padregs = tegra->padregs;
+	u32 __iomem bchrg_otgpad_reg =
+				padregs->usb2_bchrg_otgpadX_ctlY_0[pad][0];
+	u32 __iomem otg_pad_reg = padregs->usb2_otg_padX_ctlY_0[pad][0];
+	long val;
+
+	if (enable) {
+		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
+		val &= ~(PD_CHG);
+		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
+		val = tegra_usb_pad_reg_read(otg_pad_reg);
+		val |= (PD2);
+		tegra_usb_pad_reg_write(otg_pad_reg, val);
+		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
+		val |= (ON_SRC_EN);
+		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
+	} else {
+		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
+		val |= (PD_CHG);
+		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
+		val = tegra_usb_pad_reg_read(otg_pad_reg);
+		val &= ~(PD2);
+		tegra_usb_pad_reg_write(otg_pad_reg, val);
+		val = tegra_usb_pad_reg_read(bchrg_otgpad_reg);
+		val &= ~(ON_SRC_EN);
+		tegra_usb_pad_reg_write(bchrg_otgpad_reg, val);
+	}
+}
+
+void tegra_xhci_free_dev(struct usb_hcd *hcd, struct usb_device *udev)
+{
+	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
+	int pad;
+
+	pad = udev->portnum - 1;
+	xhci_free_dev(hcd, udev);
+	set_port_cdp(tegra, true, pad);
+}
+
+int tegra_xhci_alloc_dev(struct usb_hcd *hcd, struct usb_device *udev)
+{
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct tegra_xhci_hcd *tegra = hcd_to_tegra_xhci(hcd);
+	int usb2_utmi_port_start, usb2_utmi_port_end;
+	int port; int pad;
+	u32 reg;
+
+	usb2_utmi_port_start = XUSB_SS_PORT_COUNT;
+	usb2_utmi_port_end = XUSB_SS_PORT_COUNT + XUSB_UTMI_COUNT - 1;
+
+	for (port = usb2_utmi_port_start; port <= usb2_utmi_port_end; port++) {
+		reg = xhci_read_portsc(xhci, port);
+		pad = port - XUSB_SS_PORT_COUNT;
+		if (reg & PORT_CONNECT)
+			set_port_cdp(tegra, false, pad);
+	}
+
+	return xhci_alloc_dev(hcd, udev);
+}
+
+#else
+static void set_port_cdp(struct tegra_xhci_hcd *tegra, bool enable, int pad)
+{
+	return;
 }
 
 static void tegra_xhci_free_dev(struct usb_hcd *hcd, struct usb_device *udev)
