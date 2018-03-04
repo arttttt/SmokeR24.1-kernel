@@ -464,7 +464,11 @@ advance:
 
 	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
 
-	/* reset data interface */
+	/* Reset data interface. Some devices will not reset properly
+	 * unless they are configured first.  Toggle the altsetting to
+	 * force a reset
+	 */
+	usb_set_interface(dev->udev, iface_no, data_altsetting);
 	temp = usb_set_interface(dev->udev, iface_no, 0);
 	if (temp)
 		goto error2;
@@ -472,6 +476,13 @@ advance:
 	/* initialize data interface */
 	if (cdc_ncm_setup(ctx))
 		goto error2;
+
+	/* Some firmwares need a pause here or they will silently fail
+	 * to set up the interface properly.  This value was decided
+	 * empirically on a Sierra Wireless MC7455 running 02.08.02.00
+	 * firmware.
+	 */
+	usleep_range(10000, 20000);
 
 	/* configure data interface */
 	temp = usb_set_interface(dev->udev, iface_no, data_altsetting);
@@ -1158,25 +1169,11 @@ static const struct driver_info cdc_ncm_info = {
 	.tx_fixup = cdc_ncm_tx_fixup,
 };
 
-/* Same as cdc_ncm_info, but with FLAG_RMNET */
-static const struct driver_info cdc_mbm_info = {
-	.description = "CDC NCM",
-	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET
-			| FLAG_RMNET,
-	.bind = cdc_ncm_bind,
-	.unbind = cdc_ncm_unbind,
-	.check_connect = cdc_ncm_check_connect,
-	.manage_power = usbnet_manage_power,
-	.status = cdc_ncm_status,
-	.rx_fixup = cdc_ncm_rx_fixup,
-	.tx_fixup = cdc_ncm_tx_fixup,
-};
-
 /* Same as cdc_ncm_info, but with FLAG_WWAN */
 static const struct driver_info wwan_info = {
 	.description = "Mobile Broadband Network Device",
 	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET
-			| FLAG_LINK_INTR | FLAG_WWAN | FLAG_RMNET,
+			| FLAG_LINK_INTR | FLAG_WWAN,
 	.bind = cdc_ncm_bind,
 	.unbind = cdc_ncm_unbind,
 	.check_connect = cdc_ncm_check_connect,
