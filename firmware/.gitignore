@@ -5,3 +5,7 @@
 *.dsp
 ihex2fw
 *.dffs
+*.config
+*.speaker
+*.eq
+*.preset
