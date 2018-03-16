@@ -385,8 +385,6 @@ static enum power_supply_property bq27x00_battery_props[] = {
 	POWER_SUPPLY_PROP_ENERGY_NOW
 };
 
-static struct bq27x00_device_info *the_di;
-
 static unsigned int poll_interval = 60;
 module_param(poll_interval, uint, 0644);
 MODULE_PARM_DESC(poll_interval, "battery poll interval in seconds - " \
@@ -1663,23 +1661,6 @@ static int update_firmware(struct bq27x00_device_info *di)
 	return error;
 }
 
-static ssize_t bq27x00_update_firmware(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	int val, version;
-	sscanf(buf, "%du", &val);
-
-	if (val == 1 && the_di) {
-		/* forced update */
-		version = the_di->df_ver;
-		the_di->df_ver = 0;
-		update_firmware(the_di);
-		the_di->df_ver = version;
-	}
-
-	return count;
-}
-
 static DEVICE_ATTR(fw_version, S_IRUGO, show_firmware_version, NULL);
 static DEVICE_ATTR(df_version, S_IRUGO, show_dataflash_version, NULL);
 static DEVICE_ATTR(device_type, S_IRUGO, show_device_type, NULL);
@@ -1687,7 +1668,6 @@ static DEVICE_ATTR(reset, S_IRUGO, show_reset, NULL);
 static DEVICE_ATTR(qpassed, S_IRUGO, show_qpassed, NULL);
 static DEVICE_ATTR(qpassed_hires, S_IRUGO, show_hires_qpassed, NULL);
 static DEVICE_ATTR(battery_details, S_IRUGO, show_battery_details, NULL);
-static DEVICE_ATTR(update_fw, S_IWUSR|S_IRUSR , NULL, bq27x00_update_firmware);
 
 static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_fw_version.attr,
@@ -1697,7 +1677,6 @@ static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_qpassed.attr,
 	&dev_attr_qpassed_hires.attr,
 	&dev_attr_battery_details.attr,
-	&dev_attr_update_fw.attr,
 	NULL
 };
 
@@ -1850,8 +1829,6 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 
 	/* Update firmware */
 	update_firmware(di);
-
-	the_di = di;
 
 	return 0;
 
