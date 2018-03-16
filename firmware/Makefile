@@ -124,8 +124,8 @@ fw-shipped-$(CONFIG_TOUCHSCREEN_ATMEL_MXT) += mxt1664t_config_no_dummy.fw \
 						mxt1664t.fw
 fw-shipped-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX) += synaptics_7040_firmware.fw \
 				              synaptics_7040_test_data.fw
-fw-shipped-$(CONFIG_BATTERY_BQ27x00) += 0105_lgc.dffs \
-					0205_atl.dffs
+fw-shipped-$(CONFIG_BATTERY_BQ27x00) += 0104_lgc.dffs \
+					0204_atl.dffs
 fw-shipped-$(CONFIG_SND_SOC_TFA98XX) += tfa9890.config \
 					tfa9890_boot.patch \
 					tfa9890_left.speaker \
