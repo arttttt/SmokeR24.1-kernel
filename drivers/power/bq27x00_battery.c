@@ -1648,7 +1648,7 @@ static int update_firmware(struct bq27x00_device_info *di)
 	version = simple_strtoul(pdata->fw_name[type], NULL, 16);
 	dev_info(&di->client->dev, "id %d ver %lu, df_ver %x rom %d\n",
 		type, version, di->df_ver, di->is_rom_mode);
-	if (di->is_rom_mode || version != di->df_ver)
+	if (di->is_rom_mode)
 		error = _update_firmware(&di->client->dev, pdata->fw_name[type]);
 	else
 		bq27x00_update(di);
