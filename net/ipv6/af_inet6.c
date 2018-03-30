@@ -293,17 +293,13 @@ out_rcu_unlock:
 }
 
 
+int __inet6_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len,
+                 bool force_bind_address_no_port, bool with_lock);
+
 /* bind for INET6 API */
 int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
-	struct sockaddr_in6 *addr = (struct sockaddr_in6 *)uaddr;
 	struct sock *sk = sock->sk;
-	struct inet_sock *inet = inet_sk(sk);
-	struct ipv6_pinfo *np = inet6_sk(sk);
-	struct net *net = sock_net(sk);
-	__be32 v4addr = 0;
-	unsigned short snum;
-	int addr_type = 0;
 	int err = 0;
 
 	/* If the socket has its own bind function then use it. */
@@ -320,18 +316,37 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (err)
 		return err;
 
+	return __inet6_bind(sk, uaddr, addr_len, false, true);
+}
+
+EXPORT_SYMBOL(inet6_bind);
+
+int __inet6_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len,
+		 bool force_bind_address_no_port, bool with_lock)
+{
+	struct sockaddr_in6 *addr = (struct sockaddr_in6 *)uaddr;
+	struct inet_sock *inet = inet_sk(sk);
+	struct ipv6_pinfo *np = inet6_sk(sk);
+	struct net *net = sock_net(sk);
+	__be32 v4addr = 0;
+	unsigned short snum;
+	bool saved_ipv6only;
+	int addr_type = 0;
+	int err = 0;
+
 	if (addr->sin6_family != AF_INET6)
 		return -EAFNOSUPPORT;
 
 	addr_type = ipv6_addr_type(&addr->sin6_addr);
-	if ((addr_type & IPV6_ADDR_MULTICAST) && sock->type == SOCK_STREAM)
+	if ((addr_type & IPV6_ADDR_MULTICAST) && sk->sk_type == SOCK_STREAM)
 		return -EINVAL;
 
 	snum = ntohs(addr->sin6_port);
 	if (snum && snum < PROT_SOCK && !net_bind_service_capable(net->user_ns))
 		return -EACCES;
 
-	lock_sock(sk);
+	if (with_lock)
+		lock_sock(sk);
 
 	/* Check these errors (active socket, double bind). */
 	if (sk->sk_state != TCP_CLOSE || inet->inet_num) {
@@ -414,7 +429,7 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		np->saddr = addr->sin6_addr;
 
 	/* Make sure we are allowed to bind here. */
-	if (sk->sk_prot->get_port(sk, snum)) {
+	if (sk->sk_prot->get_port(sk, snum) || force_bind_address_no_port) {
 		inet_reset_saddr(sk);
 		err = -EADDRINUSE;
 		goto out;
@@ -431,13 +446,13 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	inet->inet_dport = 0;
 	inet->inet_daddr = 0;
 out:
-	release_sock(sk);
+	if (with_lock)
+		release_sock(sk);
 	return err;
 out_unlock:
 	rcu_read_unlock();
 	goto out;
 }
-EXPORT_SYMBOL(inet6_bind);
 
 int inet6_release(struct socket *sock)
 {
@@ -877,6 +892,10 @@ static struct pernet_operations inet6_net_ops = {
 	.exit = inet6_net_exit,
 };
 
+static const struct ipv6_bpf_stub ipv6_bpf_stub_impl = {
+	.inet6_bind = __inet6_bind,
+};
+
 static int __init inet6_init(void)
 {
 	struct list_head *r;
@@ -1014,6 +1033,10 @@ static int __init inet6_init(void)
 	if (err)
 		goto sysctl_fail;
 #endif
+
+	/* ensure that ipv6 stubs are visible only after ipv6 is ready */
+	wmb();
+	ipv6_bpf_stub = &ipv6_bpf_stub_impl;
 out:
 	return err;
 
