@@ -19,7 +19,7 @@
 
 #ifdef CONFIG_KEXEC_HARDBOOT
    #define KEXEC_HB_PAGE_MAGIC 0x4a5db007
-   #define KEXEC_HB_PAGE_ADDR  0xFB100000
+   #define KEXEC_HB_PAGE_ADDR  0xfd300000
 #endif
 
 #ifndef __ASSEMBLY__
