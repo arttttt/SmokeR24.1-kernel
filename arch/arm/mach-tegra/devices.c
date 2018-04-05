@@ -974,6 +974,12 @@ struct platform_device baseband_dit_device = {
 	.id = 2,
 };
 
+struct platform_device bcm_ldisc_device = {
+    .name = "bcm_ldisc",
+    .id = -1,
+    .dev = { },
+};
+
 struct platform_device fm_dit_device = {
  	.name = "spdif-dit",
  	.id = 3,
