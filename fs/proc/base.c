@@ -46,8 +46,7 @@
  *  Paul Mundt <paul.mundt@nokia.com>:
  *  Overall revision about smaps.
  *
- * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
- *
+ * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
  */
 
 #include <asm/uaccess.h>
