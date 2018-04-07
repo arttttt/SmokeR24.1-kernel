@@ -231,7 +231,7 @@ config CMA
 	  If unsure, say "n".
 
 config DMA_CMA
-	bool "CMA config for forward compatibility
+	bool "CMA config for forward compatibility"
 	default n
 	depends on CMA
 	help
