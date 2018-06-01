@@ -134,4 +134,4 @@ static struct fsr_info ifsr_info[] = {
 };
 #else
 #define ifsr_info	fsr_info
-+#endif
+#endif
