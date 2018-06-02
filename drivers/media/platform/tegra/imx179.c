@@ -2,6 +2,7 @@
  * imx179.c - imx179 sensor driver
  *
  * Copyright (c) 2014, NVIDIA CORPORATION, All Rights Reserved.
+ * Copyright (C) 2016 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -13,7 +14,7 @@
  * more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <http:
  */
 
 #include <linux/delay.h>
@@ -28,6 +29,7 @@
 #include <media/imx179.h>
 #include <linux/gpio.h>
 #include <linux/module.h>
+#include <linux/sysedp.h>
 
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
@@ -46,6 +48,7 @@ struct imx179_info {
 	struct miscdevice		miscdev_info;
 	int				mode;
 	struct imx179_power_rail	power;
+	struct imx179_otp               otp_data;
 	struct imx179_sensordata	sensor_data;
 	struct i2c_client		*i2c_client;
 	struct imx179_platform_data	*pdata;
@@ -53,6 +56,7 @@ struct imx179_info {
 	struct regmap			*regmap;
 	struct mutex			imx179_camera_lock;
 	atomic_t			in_use;
+	struct sysedp_consumer *sysedpc;
 };
 
 static const struct regmap_config sensor_regmap_config = {
@@ -73,7 +77,7 @@ static const struct regmap_config sensor_regmap_config = {
 #define IMX179_COARSE_TIME_ADDR_LSB 0x0203
 #define IMX179_GAIN_ADDR 0x0205
 
-static struct imx179_reg mode_3280x2464[] = {
+static struct imx179_reg mode_3280x2460[] = {
 	/* software reset */
 	{0x0100, 0x00},
 	{IMX179_TABLE_WAIT_MS, IMX179_WAIT_MS},
@@ -81,7 +85,7 @@ static struct imx179_reg mode_3280x2464[] = {
 	/* global settings */
 	{0x0101, 0x00},
 	{0x0202, 0x09},
-	{0x0203, 0xC7},
+	{0x0203, 0xCA},
 	{0x0301, 0x05},
 	{0x0303, 0x01},
 	{0x0305, 0x06},
@@ -90,21 +94,21 @@ static struct imx179_reg mode_3280x2464[] = {
 	{0x030C, 0x00},
 	{0x030D, 0xA2},
 	{0x0340, 0x09},
-	{0x0341, 0xCB},
+	{0x0341, 0xCE},
 	{0x0342, 0x0D},
 	{0x0343, 0x70},
 	{0x0344, 0x00},
 	{0x0345, 0x00},
 	{0x0346, 0x00},
-	{0x0347, 0x00},
+	{0x0347, 0x02},
 	{0x0348, 0x0C},
 	{0x0349, 0xCF},
 	{0x034A, 0x09},
-	{0x034B, 0x9F},
+	{0x034B, 0x9D},
 	{0x034C, 0x0C},
 	{0x034D, 0xD0},
 	{0x034E, 0x09},
-	{0x034F, 0xA0},
+	{0x034F, 0x9C},
 	{0x0383, 0x01},
 	{0x0387, 0x01},
 	{0x0390, 0x00},
@@ -135,7 +139,150 @@ static struct imx179_reg mode_3280x2464[] = {
 	{0x33D4, 0x0C},
 	{0x33D5, 0xD0},
 	{0x33D6, 0x09},
-	{0x33D7, 0xA0},
+	{0x33D7, 0x9C},
+	{0x4100, 0x0E},
+	{0x4108, 0x01},
+	{0x4109, 0x7C},
+
+	{0x0100, 0x01},
+	{IMX179_TABLE_WAIT_MS, IMX179_WAIT_MS},
+	{IMX179_TABLE_END, 0x00}
+};
+
+static struct imx179_reg mode_1920x1080[] = {
+	/* software reset */
+	{0x0100, 0x00},
+	{IMX179_TABLE_WAIT_MS, IMX179_WAIT_MS},
+
+	/* global settings */
+	{0x0101, 0x00},
+	{0x0202, 0x09},
+	{0x0203, 0xCA},
+	{0x0301, 0x05},
+	{0x0303, 0x01},
+	{0x0305, 0x06},
+	{0x0309, 0x05},
+	{0x030B, 0x01},
+	{0x030C, 0x00},
+	{0x030D, 0xA2},
+	{0x0340, 0x09},
+	{0x0341, 0xCE},
+	{0x0342, 0x0D},
+	{0x0343, 0x70},
+	{0x0344, 0x00},
+	{0x0345, 0x14},
+	{0x0346, 0x01},
+	{0x0347, 0x40},
+	{0x0348, 0x0C},
+	{0x0349, 0xBB},
+	{0x034A, 0x08},
+	{0x034B, 0x5F},
+	{0x034C, 0x07},
+	{0x034D, 0x80},
+	{0x034E, 0x04},
+	{0x034F, 0x38},
+	{0x0383, 0x01},
+	{0x0387, 0x01},
+	{0x0390, 0x00},
+	{0x0401, 0x02},
+	{0x0405, 0x1B},
+	{0x3020, 0x10},
+	{0x3041, 0x15},
+	{0x3042, 0x87},
+	{0x3089, 0x4F},
+	{0x3302, 0x01},
+	{0x3309, 0x9A},
+	{0x3344, 0x57},
+	{0x3345, 0x1F},
+	{0x3362, 0x0A},
+	{0x3363, 0x0A},
+	{0x3364, 0x00},
+	{0x3368, 0x18},
+	{0x3369, 0x00},
+	{0x3370, 0x77},
+	{0x3371, 0x2F},
+	{0x3372, 0x4F},
+	{0x3373, 0x2F},
+	{0x3374, 0x2F},
+	{0x3375, 0x37},
+	{0x3376, 0x9F},
+	{0x3377, 0x37},
+	{0x33C8, 0x00},
+	{0x33D4, 0x0C},
+	{0x33D5, 0xA8},
+	{0x33D6, 0x07},
+	{0x33D7, 0x20},
+	{0x4100, 0x0E},
+	{0x4108, 0x01},
+	{0x4109, 0x7C},
+
+	{0x0100, 0x01},
+	{IMX179_TABLE_WAIT_MS, IMX179_WAIT_MS},
+	{IMX179_TABLE_END, 0x00}
+};
+static struct imx179_reg mode_1280x720_90fps[] = {
+	/* software reset */
+	{0x0100, 0x00},
+	{IMX179_TABLE_WAIT_MS, IMX179_WAIT_MS},
+
+	/* global settings */
+	{0x0101, 0x00},
+	{0x0202, 0x03},
+	{0x0203, 0x41},
+	{0x0301, 0x05},
+	{0x0303, 0x01},
+	{0x0305, 0x06},
+	{0x0309, 0x05},
+	{0x030B, 0x01},
+	{0x030C, 0x00},
+	{0x030D, 0xA2},
+	{0x0340, 0x03},
+	{0x0341, 0x45},
+	{0x0342, 0x0D},
+	{0x0343, 0x70},
+	{0x0344, 0x01},
+	{0x0345, 0x68},
+	{0x0346, 0x02},
+	{0x0347, 0x00},
+	{0x0348, 0x0B},
+	{0x0349, 0x67},
+	{0x034A, 0x07},
+	{0x034B, 0x9F},
+	{0x034C, 0x05},
+	{0x034D, 0x00},
+	{0x034E, 0x02},
+	{0x034F, 0xD0},
+	{0x0383, 0x01},
+	{0x0387, 0x01},
+	{0x0390, 0x01},
+	{0x0401, 0x00},
+	{0x0405, 0x10},
+	{0x3020, 0x10},
+	{0x3041, 0x15},
+	{0x3042, 0x87},
+	{0x3089, 0x4F},
+	{0x3302, 0x01},
+	{0x3309, 0x9A},
+	{0x3344, 0x57},
+	{0x3345, 0x1F},
+	{0x3362, 0x0A},
+	{0x3363, 0x0A},
+	{0x3364, 0x00},
+	{0x3368, 0x18},
+	{0x3369, 0x00},
+	{0x3370, 0x77},
+	{0x3371, 0x2F},
+	{0x3372, 0x4F},
+	{0x3373, 0x2F},
+	{0x3374, 0x2F},
+	{0x3375, 0x37},
+	{0x3376, 0x9F},
+	{0x3377, 0x37},
+	{0x33C8, 0x00},
+	{0x33D4, 0x05},
+	{0x33D5, 0x00},
+	{0x33D6, 0x02},
+	{0x33D7, 0xD0},
 	{0x4100, 0x0E},
 	{0x4108, 0x01},
 	{0x4109, 0x7C},
@@ -146,11 +293,15 @@ static struct imx179_reg mode_3280x2464[] = {
 };
 
 enum {
-	IMX179_MODE_3280X2464,
+	IMX179_MODE_3280X2460,
+	IMX179_MODE_1920X1080,
+	IMX179_MODE_1280X720_90FPS,
 };
 
 static struct imx179_reg *mode_table[] = {
-	[IMX179_MODE_3280X2464] = mode_3280x2464,
+	[IMX179_MODE_3280X2460] = mode_3280x2460,
+	[IMX179_MODE_1920X1080] = mode_1920x1080,
+	[IMX179_MODE_1280X720_90FPS] = mode_1280x720_90fps,
 };
 
 static inline void
@@ -195,8 +346,6 @@ imx179_write_reg(struct imx179_info *info, u16 addr, u8 val)
 {
 	int err;
 
-		pr_err("%s:i2c write, %x = %x\n",
-			__func__, addr, val);
 	err = regmap_write(info->regmap, addr, val);
 
 	if (err)
@@ -283,13 +432,19 @@ imx179_set_mode(struct imx179_info *info, struct imx179_mode *mode)
 			 __func__, mode->xres, mode->yres, mode->frame_length,
 			 mode->coarse_time, mode->gain);
 
-	if (mode->xres == 3280 && mode->yres == 2464) {
-		sensor_mode = IMX179_MODE_3280X2464;
+	if (mode->xres == 3280 && mode->yres == 2460) {
+		sensor_mode = IMX179_MODE_3280X2460;
+	} else if (mode->xres == 1920 && mode->yres == 1080) {
+		sensor_mode = IMX179_MODE_1920X1080;
+	} else if (mode->xres == 1280 && mode->yres == 720) {
+		sensor_mode = IMX179_MODE_1280X720_90FPS;
 	} else {
 		pr_err("%s: invalid resolution supplied to set mode %d %d\n",
 			 __func__, mode->xres, mode->yres);
 		return -EINVAL;
 	}
+
+	sysedp_set_state(info->sysedpc, 1);
 
 	/* get a list of override regs for the asking frame length, */
 	/* coarse integration time, and gain.                       */
@@ -302,6 +457,9 @@ imx179_set_mode(struct imx179_info *info, struct imx179_mode *mode)
 				reg_list, 5);
 	if (err)
 		return err;
+	if (err)
+		return err;
+
 	info->mode = sensor_mode;
 	pr_info("[IMX179]: stream on.\n");
 	return 0;
@@ -323,7 +481,6 @@ imx179_set_frame_length(struct imx179_info *info, u32 frame_length,
 	int ret;
 
 	imx179_get_frame_length_regs(reg_list, frame_length);
-
 	if (group_hold) {
 		ret = imx179_write_reg(info, 0x0104, 0x01);
 		if (ret)
@@ -356,7 +513,6 @@ imx179_set_coarse_time(struct imx179_info *info, u32 coarse_time,
 	int i = 0;
 
 	imx179_get_coarse_time_regs(reg_list, coarse_time);
-
 	if (group_hold) {
 		ret = imx179_write_reg(info, 0x104, 0x01);
 		if (ret)
@@ -411,6 +567,7 @@ imx179_set_group_hold(struct imx179_info *info, struct imx179_ae *ae)
 	int count = 0;
 	bool group_hold_enabled = false;
 
+
 	if (ae->gain_enable)
 		count++;
 	if (ae->coarse_time_enable)
@@ -450,20 +607,108 @@ static int imx179_get_sensor_id(struct imx179_info *info)
 	if (info->sensor_data.fuse_id_size)
 		return 0;
 
-	/* Note 1: If the sensor does not have power at this point
-	Need to supply the power, e.g. by calling power on function */
+	return ret;
+}
 
-	/*ret |= imx179_write_reg(info, 0x3B02, 0x00);
-	ret |= imx179_write_reg(info, 0x3B00, 0x01);
-	for (i = 0; i < 9; i++) {
-		ret |= imx179_read_reg(info, 0x3B24 + i, &bak);
-		info->sensor_data.fuse_id[i] = bak;
+static int imx179_get_otp_vendor(struct imx179_info *info)
+{
+	int i;
+	u8 bak = 0;
+	u8 baj = 0;
+	u8 *otp = info->otp_data.otp_data;
+	info->otp_data.otp_size = 0;
+	otp[0] = 0;
+
+	imx179_write_reg(info, 0x0100, 0x00);
+	imx179_write_reg(info, 0x3382, 0x05);
+	imx179_write_reg(info, 0x3383, 0xa0);
+	imx179_write_reg(info, 0x3368, 0x24);
+	imx179_write_reg(info, 0x3369, 0x00);
+
+
+	imx179_write_reg(info, 0x3380, 0x08);
+	imx179_write_reg(info, 0x3400, 0x01);
+	imx179_write_reg(info, 0x3402, 0x00);
+	udelay(10);
+	for (i = 0x3411; i >= 0x340B; i -= 0x06) {
+		imx179_read_reg(info, i, &bak);
+		imx179_read_reg(info, i+1, &baj);
+		if (bak != 0)
+			break;
+	}
+	pr_info("imx179 module vendor ID: 0x%02x %02x\n", bak, baj);
+	if ((bak == 0x08) && (baj == 0x06)) {
+		otp[0] = 0;
+	} else if ((bak == 0x18) && (baj == 0x06)) {
+		otp[0] = 1;
+	} else if ((bak == 0x88) && (baj == 0x88)) {
+		otp[0] = 2;
+	}
+	info->otp_data.otp_size = 1;
+	return 0;
+}
+
+static int imx179_get_otp_data(struct imx179_info *info)
+{
+	int ret = 0;
+	int i, j;
+	u8 bak = 0;
+	u8 *otp = info->otp_data.otp_data;
+	info->otp_data.otp_size = 0;
+
+	imx179_write_reg(info, 0x0100, 0x00);
+	imx179_write_reg(info, 0x3382, 0x05);
+	imx179_write_reg(info, 0x3383, 0xa0);
+	imx179_write_reg(info, 0x3368, 0x24);
+	imx179_write_reg(info, 0x3369, 0x00);
+
+
+	imx179_write_reg(info, 0x3380, 0x08);
+	imx179_write_reg(info, 0x3400, 0x01);
+	imx179_write_reg(info, 0x3402, 0x12);
+	udelay(10);
+	for (i = 0x3443; i >= 0x3442; i--) {
+		imx179_read_reg(info, i, &bak);
+		if ((bak == 0x11) || (bak == 0xEE))
+			break;
+	}
+	pr_info("imx179 otp write result: 0x%02x", bak);
+
+	if (bak == 0xEE)
+		return ret;
+
+
+	imx179_write_reg(info, 0x3380, 0x08);
+	imx179_write_reg(info, 0x3400, 0x01);
+	imx179_write_reg(info, 0x3402, 0);
+	udelay(10);
+	for (i = 0; i < 45 ; i++) {
+		ret |= imx179_read_reg(info, 0x3417 + i, otp);
+		otp++;
 	}
 
-	if (!ret)
-		info->sensor_data.fuse_id_size = i;*/
 
-	/* Note 2: Need to clean up any action carried out in Note 1 */
+	for (j = 1; j <= 11; j++) {
+		imx179_write_reg(info, 0x3380, 0x08);
+		imx179_write_reg(info, 0x3400, 0x01);
+		imx179_write_reg(info, 0x3402, j);
+		udelay(10);
+		for (i = 0; i < 64 ; i++) {
+			ret |= imx179_read_reg(info, 0x3404 + i, otp);
+			otp++;
+		}
+	}
+
+	imx179_write_reg(info, 0x3380, 0x08);
+	imx179_write_reg(info, 0x3400, 0x01);
+	imx179_write_reg(info, 0x3402, 12);
+	udelay(10);
+	for (i = 0; i < 54 ; i++) {
+		ret |= imx179_read_reg(info, 0x3404 + i, otp);
+		otp++;
+	}
+	pr_info("%s imx179 module otp data size:%d", __func__, otp - info->otp_data.otp_data);
+	info->otp_data.otp_size = 803;
 
 	return ret;
 }
@@ -509,6 +754,7 @@ imx179_ioctl(struct file *file,
 		if (!arg && info->pdata->power_off) {
 			info->pdata->power_off(&info->power);
 			imx179_mclk_disable(info);
+			sysedp_set_state(info->sysedpc, 0);
 		}
 		break;
 	case IMX179_IOCTL_SET_MODE:
@@ -551,6 +797,33 @@ imx179_ioctl(struct file *file,
 		if (copy_to_user((void __user *)arg, &info->sensor_data,
 				sizeof(struct imx179_sensordata))) {
 			pr_info("%s:Failed to copy fuse id to user space\n",
+				__func__);
+			return -EFAULT;
+		}
+		return 0;
+	}
+	case IMX179_IOCTL_GET_OTPDATA:
+	{
+		err = imx179_get_otp_data(info);
+
+		if (err) {
+			pr_err("%s:Failed to get otp data.\n", __func__);
+			return err;
+		}
+		if (copy_to_user((void __user *)arg, &info->otp_data,
+				sizeof(struct imx179_otp))) {
+			pr_info("%s:Failed to copy otp data to user space\n",
+				__func__);
+			return -EFAULT;
+		}
+		return 0;
+	}
+	case IMX179_IOCTL_GET_OTPVEND:
+	{
+		err = imx179_get_otp_vendor(info);
+		if (copy_to_user((void __user *)arg, &info->otp_data,
+				sizeof(struct imx179_otp))) {
+			pr_info("%s:Failed to copy otp data to user space\n",
 				__func__);
 			return -EFAULT;
 		}
@@ -697,6 +970,7 @@ static int imx179_power_off(struct imx179_power_rail *pw)
 		regulator_disable(pw->ext_reg1);
 		regulator_disable(pw->ext_reg2);
 	}
+	sysedp_set_state(info->sysedpc, 0);
 
 	return 0;
 }
@@ -904,7 +1178,10 @@ imx179_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, info);
 
+	info->sysedpc = sysedp_create_consumer("imx179", "imx179");
+
 	mutex_init(&info->imx179_camera_lock);
+
 	pr_err("[IMX179]: end of probing sensor.\n");
 	return 0;
 
@@ -919,6 +1196,7 @@ imx179_remove(struct i2c_client *client)
 {
 	struct imx179_info *info;
 	info = i2c_get_clientdata(client);
+	sysedp_free_consumer(info->sysedpc);
 	misc_deregister(&imx179_device);
 	mutex_destroy(&info->imx179_camera_lock);
 
