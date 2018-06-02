@@ -2557,6 +2557,27 @@ static const struct bpf_func_proto bpf_skb_under_cgroup_proto = {
 	.arg3_type	= ARG_ANYTHING,
 };
 
+#ifdef CONFIG_SOCK_CGROUP_DATA
+BPF_CALL_1(bpf_skb_cgroup_id, const struct sk_buff *, skb)
+{
+	struct sock *sk = skb->sk;
+	struct cgroup *cgrp;
+
+	if (!sk || !sk_fullsock(sk))
+		return 0;
+
+	cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
+	return cgrp->kn->id.id;
+}
+
+static const struct bpf_func_proto bpf_skb_cgroup_id_proto = {
+	.func           = bpf_skb_cgroup_id,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_PTR_TO_CTX,
+};
+#endif
+
 static unsigned long bpf_xdp_copy(void *dst_buff, const void *src_buff,
 				  unsigned long off, unsigned long len)
 {
@@ -2751,6 +2772,10 @@ tc_cls_act_func_proto(enum bpf_func_id func_id)
 		return &bpf_sk_storage_get_proto;
 	case BPF_FUNC_sk_storage_delete:
 		return &bpf_sk_storage_delete_proto;
+#ifdef CONFIG_SOCK_CGROUP_DATA
+	case BPF_FUNC_skb_cgroup_id:
+		return &bpf_skb_cgroup_id_proto;
+#endif
 	default:
 		return sk_filter_func_proto(func_id);
 	}
