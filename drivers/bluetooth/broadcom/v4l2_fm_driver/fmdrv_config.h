@@ -46,7 +46,7 @@
 
 /* Set default Audio path */
 #ifndef DEF_V4L2_FM_AUDIO_PATH
-#define DEF_V4L2_FM_AUDIO_PATH FM_AUDIO_DAC
+#define DEF_V4L2_FM_AUDIO_PATH FM_AUDIO_I2S
 #endif
 
 /*Make this TRUE if FM I2S audio to be routed over */
