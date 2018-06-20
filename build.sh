@@ -7,6 +7,7 @@ export KBUILD_BUILD_USER="arttttt"
 clean_build=0
 config="tegra12_android_defconfig"
 dtb_name="tegra124-mocha.dtb"
+dtb_only=0
 kernel_name="SmokeR24.1"
 build_log="build.log"
 threads=5
@@ -70,15 +71,19 @@ make_zip()
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
 	else
-		printfc "Файл $ORIGINAL_OUTPUT_DIR/zImage не существует\n\n" $ERROR
-		return
+		if [[ $dtb_only == 0 ]]; then
+			printfc "Файл $ORIGINAL_OUTPUT_DIR/zImage не существует\n\n" $ERROR
+			return
+		fi
 	fi
 
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/$dtb_name" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/$dtb_name $PWD/anykernel/kernel/dtb
 	else
-		printfc "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n" $ERROR
-		return
+		if [[ $dtb_only == 0 ]]; then
+			printfc "Файл $ORIGINAL_OUTPUT_DIR/dts/$dtb_name не существует\n\n" $ERROR
+			return
+		fi
 	fi
 
 	cd $KERNEL_DIR/anykernel
@@ -172,6 +177,7 @@ compile_dtb()
 {
 	clear
 
+	dtb_only=1
 	generate_version
 	make $config
 	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
