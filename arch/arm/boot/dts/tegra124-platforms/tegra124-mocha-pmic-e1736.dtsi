@@ -86,6 +86,8 @@
 				compatible = "ti,palmas-gpio";
 				gpio-controller;
 				#gpio-cells = <2>;
+				ti,enable-boost-bypass;
+				v_boost_bypass_gpio = <4>;
 			};
 
 			rtc {

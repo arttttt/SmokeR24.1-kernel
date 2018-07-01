@@ -27,10 +27,14 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/syscore_ops.h>
 
 struct palmas_gpio {
 	struct gpio_chip gpio_chip;
 	struct palmas *palmas;
+	bool enable_boost_bypass;
+	int v_boost_bypass_gpio;
 };
 
 static struct palmas_gpio *tps65910_gpio;
@@ -210,16 +214,80 @@ static int palmas_gpio_probe(struct platform_device *pdev)
 	else
 		palmas_gpio->gpio_chip.base = -1;
 
+	ret = of_property_read_u32(pdev->dev.of_node, "v_boost_bypass_gpio",
+		&palmas_gpio->v_boost_bypass_gpio);
+	if (ret < 0) {
+		palmas_gpio->v_boost_bypass_gpio = -1;
+		dev_err(&pdev->dev, "%s: Could not find boost_bypass gpio\n",
+			__func__);
+	}
+
 	ret = gpiochip_add(&palmas_gpio->gpio_chip);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
 		return ret;
 	}
 
+	if (pdev->dev.of_node) {
+		palmas_gpio->enable_boost_bypass = of_property_read_bool(
+			pdev->dev.of_node, "ti,enable-boost-bypass");
+	}
+
+	/* Set Boost Bypass */
+	if (palmas_gpio->enable_boost_bypass &&
+		palmas_gpio->v_boost_bypass_gpio != -1) {
+		dev_dbg(&pdev->dev,
+			"%s: Enabling boost bypass feature, set PMIC GPIO_%d as output high\n",
+			__func__, palmas_gpio->v_boost_bypass_gpio);
+		ret = palmas_gpio_output(&(palmas_gpio->gpio_chip),
+			palmas_gpio->v_boost_bypass_gpio, 1);
+		if (ret < 0) {
+			dev_err(&pdev->dev,
+			"Could not enable boost bypass feature, ret: %d\n", ret);
+		}
+	}
+
+
 	platform_set_drvdata(pdev, palmas_gpio);
 	tps65910_gpio = palmas_gpio;
 	return ret;
 }
+
+#ifdef CONFIG_PM_SLEEP
+static int palmas_gpio_resume(struct platform_device *pdev)
+{
+	struct palmas_gpio *palmas_gpio = platform_get_drvdata(pdev);
+	int ret = 0;
+
+	if (palmas_gpio->enable_boost_bypass &&
+		palmas_gpio->v_boost_bypass_gpio != -1) {
+		ret = palmas_gpio_output(&(palmas_gpio->gpio_chip),
+			palmas_gpio->v_boost_bypass_gpio, 1);
+		dev_dbg(&pdev->dev,
+			"%s: Enable boost bypass, set PMIC GPIO_%d as high: %d\n",
+			__func__, palmas_gpio->v_boost_bypass_gpio, ret);
+	}
+
+	return ret;
+}
+
+static int palmas_gpio_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct palmas_gpio *palmas_gpio = platform_get_drvdata(pdev);
+	int ret = 0;
+
+	if (palmas_gpio->enable_boost_bypass &&
+		palmas_gpio->v_boost_bypass_gpio != -1) {
+		ret = palmas_gpio_output(&(palmas_gpio->gpio_chip),
+			palmas_gpio->v_boost_bypass_gpio, 0);
+		dev_dbg(&pdev->dev,
+			"%s: Disable boost bypass, set PMIC GPIO_%d as low: %d\n",
+			__func__, palmas_gpio->v_boost_bypass_gpio, ret);
+	}
+
+	return ret;
+}
+#endif
 
 static int palmas_gpio_remove(struct platform_device *pdev)
 {
@@ -243,6 +311,10 @@ static struct platform_driver palmas_gpio_driver = {
 	.driver.of_match_table = of_palmas_gpio_match,
 	.probe		= palmas_gpio_probe,
 	.remove		= palmas_gpio_remove,
+#ifdef CONFIG_PM_SLEEP
+	.suspend	= palmas_gpio_suspend,
+	.resume		= palmas_gpio_resume,
+#endif
 };
 
 static int __init palmas_gpio_init(void)
