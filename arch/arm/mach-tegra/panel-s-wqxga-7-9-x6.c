@@ -34,44 +34,66 @@
 #include "gpio-names.h"
 #include "tegra11_host1x_devices.h"
 
-#define TEGRA_DSI_GANGED_MODE	1
+struct dsi_s_wqxga_7_9_regulator {
+	char *reg_name;
+	struct regulator *reg;
+};
 
-#define DSI_PANEL_RESET		1
-
-#define DC_CTRL_MODE	(TEGRA_DC_OUT_CONTINUOUS_MODE | \
-						TEGRA_DC_OUT_INITIALIZED_MODE)
-
-static bool reg_requested;
-static struct regulator *avdd_lcd_vsp_5v5;
-static struct regulator *avdd_lcd_vsn_5v5;
-static struct regulator *dvdd_lcd_1v8;
-static u16 en_panel_rst;
+static struct dsi_s_wqxga_7_9_data {
+	struct dsi_s_wqxga_7_9_regulator avdd_lcd_vsp_5v5;
+	struct dsi_s_wqxga_7_9_regulator avdd_lcd_vsn_5v5;
+	struct dsi_s_wqxga_7_9_regulator dvdd_lcd_1v8;
+	bool reg_requested;
+	int rst_gpio;
+} wqxga_7_9_mocha = {
+	.avdd_lcd_vsp_5v5 = {
+		.reg_name = "avdd_lcd",
+	},
+	.avdd_lcd_vsn_5v5 = {
+		.reg_name = "bvdd_lcd",
+	},
+	.dvdd_lcd_1v8 = {
+		.reg_name = "dvdd_lcdio",
+	},
+	.rst_gpio = TEGRA_GPIO_PH3,
+};
 
 static int ardbeg_dsi_regulator_get(struct device *dev)
 {
 	int err = 0;
+	char *reg_name;
+	struct regulator *reg;
 
-	if (reg_requested)
+	if (wqxga_7_9_mocha.reg_requested)
 		return 0;
-	dvdd_lcd_1v8 = regulator_get(dev, "dvdd_lcdio");
-	if (IS_ERR_OR_NULL(dvdd_lcd_1v8)) {
-		err = PTR_ERR(dvdd_lcd_1v8);
-		dvdd_lcd_1v8 = NULL;
-	}
-	avdd_lcd_vsp_5v5 = regulator_get(dev, "avdd_lcd");
-	if (IS_ERR_OR_NULL(avdd_lcd_vsp_5v5)) {
-		pr_err("avdd_lcd regulator get failed\n");
-		err = PTR_ERR(avdd_lcd_vsp_5v5);
-		avdd_lcd_vsp_5v5 = NULL;
-	}
-	avdd_lcd_vsn_5v5 = regulator_get(dev, "bvdd_lcd");
-	if (IS_ERR_OR_NULL(avdd_lcd_vsn_5v5)) {
-		pr_err("avdd_lcd regulator get failed\n");
-		err = PTR_ERR(avdd_lcd_vsn_5v5);
-		avdd_lcd_vsn_5v5 = NULL;
-	}
 
-	reg_requested = true;
+	reg_name = wqxga_7_9_mocha.dvdd_lcd_1v8.reg_name;
+	reg = regulator_get(dev, reg_name);
+	if (IS_ERR_OR_NULL(reg)) {
+		err = PTR_ERR(reg);
+		reg = NULL;
+	}
+	wqxga_7_9_mocha.dvdd_lcd_1v8.reg = reg;
+
+	reg_name = wqxga_7_9_mocha.avdd_lcd_vsp_5v5.reg_name;
+	reg = regulator_get(dev, reg_name);
+	if (IS_ERR_OR_NULL(reg)) {
+		pr_err("avdd_lcd regulator get failed\n");
+		err = PTR_ERR(reg);
+		reg = NULL;
+	}
+	wqxga_7_9_mocha.avdd_lcd_vsp_5v5.reg = reg;
+
+	reg_name = wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg_name;
+	reg = regulator_get(dev, reg_name);
+	if (IS_ERR_OR_NULL(reg)) {
+		pr_err("avdd_lcd regulator get failed\n");
+		err = PTR_ERR(reg);
+		reg = NULL;
+	}
+	wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg = reg;
+
+	wqxga_7_9_mocha.reg_requested = true;
 	return 0;
 }
 
@@ -89,49 +111,37 @@ static int dsi_s_wqxga_7_9_enable(struct device *dev)
 		pr_err("dsi regulator get failed\n");
 	}
 
-	err = tegra_panel_gpio_get_dt("s,wqxga-7-9-x6", &panel_of);
+	err = gpio_request(wqxga_7_9_mocha.rst_gpio, NULL);
 	if (err < 0) {
 		pr_err("dsi gpio request failed\n");
 	}
 
-	if (gpio_is_valid(panel_of.panel_gpio[TEGRA_GPIO_RESET]))
-		en_panel_rst = panel_of.panel_gpio[TEGRA_GPIO_RESET];
-
-	if (dvdd_lcd_1v8) {
-		err = regulator_enable(dvdd_lcd_1v8);
+	if (wqxga_7_9_mocha.dvdd_lcd_1v8.reg) {
+		err = regulator_enable(wqxga_7_9_mocha.dvdd_lcd_1v8.reg);
 		if (err < 0) {
 			pr_err("dvdd_lcd regulator enable failed\n");
 		}
 		msleep(12);
 	}
 
-	if (avdd_lcd_vsp_5v5) {
-		err = regulator_enable(avdd_lcd_vsp_5v5);
+	if (wqxga_7_9_mocha.avdd_lcd_vsp_5v5.reg) {
+		err = regulator_enable(wqxga_7_9_mocha.avdd_lcd_vsp_5v5.reg);
 		if (err < 0) {
 			pr_err("avdd_lcd regulator enable failed\n");
 		}
 		msleep(12);
 	}
 
-	if (avdd_lcd_vsn_5v5) {
-		err = regulator_enable(avdd_lcd_vsn_5v5);
+	if (wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg) {
+		err = regulator_enable(wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg);
 		if (err < 0) {
 			pr_err("bvdd_lcd regulator enable failed\n");
 		}
 	}
 
-#if DSI_PANEL_RESET
-	pr_err("panel: gpio value %d\n", gpio_get_value(en_panel_rst));
-	if (gpio_get_value(en_panel_rst) == 0) {
-		pr_info("panel: %s\n", __func__);
-		gpio_direction_output(en_panel_rst, 1);
-		usleep_range(1000, 3000);
-		gpio_set_value(en_panel_rst, 0);
-		usleep_range(1000, 3000);
-		gpio_set_value(en_panel_rst, 1);
-		msleep(32);
-	}
-#endif
+	gpio_direction_output(wqxga_7_9_mocha.rst_gpio, 1);
+	msleep(10);
+
 	return 0;
 }
 
@@ -139,28 +149,25 @@ static int dsi_s_wqxga_7_9_disable(struct device *dev)
 {
 	int err = 0;
 	
-	err = tegra_panel_gpio_get_dt("s,wqxga-7-9-x6", &panel_of);
+	err = gpio_request(wqxga_7_9_mocha.rst_gpio, NULL);
 	if (err < 0) {
 		pr_err("dsi gpio request failed\n");
 	}
 
-	/* If panel rst gpio is specified in device tree,
-	 * use that.
-	 */
-	if (gpio_is_valid(panel_of.panel_gpio[TEGRA_GPIO_RESET]))
-		en_panel_rst = panel_of.panel_gpio[TEGRA_GPIO_RESET];
-		
-	pr_info("panel: %s\n", __func__);
-	gpio_set_value(en_panel_rst, 0);
+	if (gpio_get_value(wqxga_7_9_mocha.rst_gpio) != 0)
+		gpio_set_value(wqxga_7_9_mocha.rst_gpio, 0);
+
+	gpio_free(wqxga_7_9_mocha.rst_gpio);
+
 	msleep(10);
-	if (avdd_lcd_vsn_5v5)
-		regulator_disable(avdd_lcd_vsn_5v5);
+	if (wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg)
+		regulator_disable(wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg);
 	msleep(10);
-	if (avdd_lcd_vsp_5v5)
-		regulator_disable(avdd_lcd_vsp_5v5);
+	if (wqxga_7_9_mocha.avdd_lcd_vsp_5v5.reg)
+		regulator_disable(wqxga_7_9_mocha.avdd_lcd_vsp_5v5.reg);
 	msleep(10);
-	if (dvdd_lcd_1v8)
-		regulator_disable(dvdd_lcd_1v8);
+	if (wqxga_7_9_mocha.dvdd_lcd_1v8.reg)
+		regulator_disable(wqxga_7_9_mocha.dvdd_lcd_1v8.reg);
 
 	return 0;
 }
@@ -168,19 +175,16 @@ static int dsi_s_wqxga_7_9_disable(struct device *dev)
 static int dsi_s_wqxga_7_9_postsuspend(void)
 {
 	int err = 0;
-	err = tegra_panel_gpio_get_dt("s,wqxga-7-9-x6", &panel_of);
+	err = gpio_request(wqxga_7_9_mocha.rst_gpio, NULL);
 	if (err < 0) {
 		pr_err("dsi gpio request failed\n");
 	}
 
-	/* If panel rst gpio is specified in device tree,
-	 * use that.
-	 */
-	if (gpio_is_valid(panel_of.panel_gpio[TEGRA_GPIO_RESET]))
-		en_panel_rst = panel_of.panel_gpio[TEGRA_GPIO_RESET];
-		
-	pr_info("%s\n", __func__);
-	gpio_set_value(en_panel_rst, 0);
+	if (gpio_get_value(wqxga_7_9_mocha.rst_gpio) != 0)
+		gpio_set_value(wqxga_7_9_mocha.rst_gpio, 0);
+
+	gpio_free(wqxga_7_9_mocha.rst_gpio);
+
 	return 0;
 }
 
