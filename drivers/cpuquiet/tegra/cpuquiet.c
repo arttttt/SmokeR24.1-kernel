@@ -19,7 +19,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#include <linux/fb.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/sched.h>
@@ -41,10 +40,9 @@
 #include <linux/platform/tegra/clock.h>
 
 #define INITIAL_STATE		TEGRA_CPQ_DISABLED
-#define UP_DELAY_MS			70
+#define UP_DELAY_MS		70
 #define DOWN_DELAY_MS		2000
 #define HOTPLUG_DELAY_MS	100
-#define CPUS_DOWN_DELAY		10000
 
 static struct mutex *tegra_cpu_lock;
 static DEFINE_MUTEX(tegra_cpq_lock_stats);
@@ -60,17 +58,6 @@ static struct kobject *tegra_auto_sysfs_kobject;
 static wait_queue_head_t wait_no_lp;
 static wait_queue_head_t wait_enable;
 static wait_queue_head_t wait_cpu;
-
-static struct screen_state_data {
-	unsigned long long 		last_wake_time;
-	struct notifier_block 	notif;
-	unsigned int 			online_cpus_count;
-	bool 					suspended;
-	struct delayed_work 	work;
-} screen_state = {
-	.last_wake_time = 0,
-	.online_cpus_count = 0
-};
 
 /*
  * no_lp can be used to set what cluster cpuquiet uses
@@ -836,50 +823,6 @@ late_initcall(tegra_cpuquiet_debug_init);
 
 #endif /* CONFIG_DEBUG_FS */
 
-static int fb_notifier_callback(struct notifier_block *this,
-				unsigned long event, void *data)
-{
-	struct fb_event *evdata = data;
-	int *blank;
-
-	if (evdata && evdata->data && event == FB_EVENT_BLANK) {
-		blank = evdata->data;
-		switch (*blank) {
-			case FB_BLANK_UNBLANK:
-				//display on
-				cancel_delayed_work(&screen_state.work);
-				screen_state.suspended = false;
-				screen_state.last_wake_time = jiffies;
-				schedule_delayed_work(&screen_state.work, CPUS_DOWN_DELAY);
-				break;
-			case FB_BLANK_POWERDOWN:
-			case FB_BLANK_HSYNC_SUSPEND:
-			case FB_BLANK_VSYNC_SUSPEND:
-			case FB_BLANK_NORMAL:
-				//display off
-				cancel_delayed_work(&screen_state.work);
-				screen_state.suspended = true;
-				if (jiffies - screen_state.last_wake_time >= CPUS_DOWN_DELAY)
-					screen_state.online_cpus_count = num_online_cpus();
-				schedule_delayed_work(&screen_state.work, CPUS_DOWN_DELAY);
-				break;
-		}
-	}
-
-	return NOTIFY_OK;
-}
-
-static void screen_state_work_func(struct work_struct *work) {
-	unsigned int i;
-	unsigned int online_cpus = screen_state.online_cpus_count;
-	if (screen_state.suspended) {
-		for (i = 1; i < online_cpus; i++)
-			cpu_down(i);
-	} else {
-		for (i = 1; i < online_cpus; i++)
-			cpu_up(i);
-	}
-}
 
 int __cpuinit tegra_auto_hotplug_init(struct mutex *cpulock)
 {
@@ -909,12 +852,7 @@ int __cpuinit tegra_auto_hotplug_init(struct mutex *cpulock)
 	if (!cpuquiet_wq)
 		return -ENOMEM;
 
-	screen_state.notif.notifier_call = fb_notifier_callback;
-	if (fb_register_client(&screen_state.notif))
-		pr_err("%s: Failed to register fb_notifier\n", __func__);
-
 	INIT_WORK(&cpuquiet_work, tegra_cpuquiet_work_func);
-	INIT_DELAYED_WORK(&screen_state.work, screen_state_work_func);
 #ifdef CONFIG_TEGRA_CLUSTER_CONTROL
 	init_timer(&updown_timer);
 	updown_timer.function = updown_handler;
