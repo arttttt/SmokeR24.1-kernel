@@ -5,7 +5,7 @@ export KBUILD_BUILD_HOST="eOS-0.4.1-Loki"
 export KBUILD_BUILD_USER="arttttt"
 
 clean_build=0
-config="tegra12_android_defconfig"
+config="tegra12_defconfig"
 dtb_name="tegra124-mocha.dtb"
 dtb_only=0
 kernel_name="SmokeR24.1"
@@ -121,7 +121,7 @@ compile()
 
 	generate_version
 	make $config
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain zImage 2> $build_log
+	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain zImage
 
 	local i=0
 	while read line; do 
