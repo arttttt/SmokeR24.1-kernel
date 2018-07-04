@@ -4155,8 +4155,10 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 	struct device *dev = &data->client->dev;
 	struct input_dev *input_dev;
 	int ret;
+#ifdef CONFIG_ANDROID
 	int i;
 	int index = data->current_index;
+#endif
 
 	/* Initialize input device */
 	input_dev = input_allocate_device();
