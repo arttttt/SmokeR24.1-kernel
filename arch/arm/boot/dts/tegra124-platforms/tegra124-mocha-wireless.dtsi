@@ -46,9 +46,9 @@
 		interrupts = <TEGRA_GPIO(U, 5) 0x14>;
 		wlan-pwr-gpio = <&gpio TEGRA_GPIO(X, 7) 0>;
 		status = "okay";
-		fw_path = "/vendor/firmware/mocha_fw_bcmdhd.bin";
-		nv_path = "/vendor/etc/mocha_nvram.txt";
-		mac-address-file = "/vendor/etc/mocha_macaddr.txt";
+		fw_path = "/lib/firmware/fw_bcmdhd.bin";
+		nv_path = "/lib/firmware/nvram.txt";
+		mac-address-file = "/lib/firmware/macaddr.txt";
 
 		country_code_map {
 
