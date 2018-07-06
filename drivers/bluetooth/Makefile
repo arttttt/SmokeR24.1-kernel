@@ -32,7 +32,5 @@ hci_uart-$(CONFIG_BT_HCIUART_ATH3K)	+= hci_ath.o
 hci_uart-$(CONFIG_BT_HCIUART_3WIRE)	+= hci_h5.o
 hci_uart-objs				:= $(hci_uart-y)
 
-obj-y += broadcom/
-
 obj-$(CONFIG_SD8897) += sd8897/
 obj-$(CONFIG_SD8797) += sd8797/
