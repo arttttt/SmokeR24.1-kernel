@@ -183,7 +183,6 @@ static struct platform_device *ardbeg_devices[] __initdata = {
 	&tegra_spdif_device,
 	&spdif_dit_device,
 	&bluetooth_dit_device,
-	&bcm_ldisc_device,
 	&baseband_dit_device,
 	&tegra_offload_device,
 	&tegra30_avp_audio_device,
