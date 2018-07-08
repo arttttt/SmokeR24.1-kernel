@@ -339,7 +339,7 @@
 	sound {
 		compatible = "nvidia,tegra-audio-rt5671";
 		nvidia,hp-mute-gpios = <&gpio 185 0>;
-		nvidia,i2s-param-hifi = <0 0 2 16 2 48000>;
+		nvidia,i2s-param-hifi = <0 0 2 16 2 44100>;
 	};
 
 	udc@7d000000 {
