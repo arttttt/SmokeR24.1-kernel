@@ -11,7 +11,7 @@ dtb_only=0
 kernel_name="SmokeR24.1"
 build_log="build.log"
 threads=5
-toolchain="$HOME/Android/toolchain/linaro-4.9.4/bin/arm-linux-gnueabihf-"
+toolchain="$HOME/PROJECTS/MIPAD/linaro-4.9.4/bin/arm-linux-gnueabihf-"
 
 KERNEL_DIR=$PWD
 ORIGINAL_OUTPUT_DIR="$KERNEL_DIR/arch/$ARCH/boot"
