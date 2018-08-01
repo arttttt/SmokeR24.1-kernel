@@ -156,12 +156,6 @@ static struct dvfs_rail *tegra12_dvfs_rails[] = {
 	&tegra12_dvfs_rail_vdd_gpu,
 };
 
-void __init tegra12x_vdd_cpu_align(int step_uv, int offset_uv)
-{
-	tegra12_dvfs_rail_vdd_cpu.alignment.step_uv = step_uv;
-	tegra12_dvfs_rail_vdd_cpu.alignment.offset_uv = offset_uv;
-}
-
 /* CPU DVFS tables */
 static unsigned long cpu_max_freq[] = {
 /* speedo_id	0	 1	  2	   3	    4	     5	      6		7	 8*/
