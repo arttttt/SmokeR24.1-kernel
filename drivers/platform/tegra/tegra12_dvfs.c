@@ -1591,6 +1591,28 @@ static int __init get_core_nominal_mv_index(int speedo_id)
 		}							       \
 	} while (0)
 
+static int __init of_rails_init(struct device_node *dn)
+{
+	int i;
+
+	if (!of_device_is_available(dn))
+		return 0;
+
+	for (i = 0; i < ARRAY_SIZE(tegra12_dvfs_rails); i++) {
+		struct dvfs_rail *rail = tegra12_dvfs_rails[i];
+		if (!of_tegra_dvfs_rail_node_parse(dn, rail)) {
+			rail->stats.bin_uV = rail->alignment.step_uv;
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+
+static __initdata struct of_device_id tegra12_dvfs_rail_of_match[] = {
+	{ .compatible = "nvidia,tegra124-dvfs-rail", .data = of_rails_init, },
+	{ },
+};
+
 void __init tegra12x_init_dvfs(void)
 {
 	int cpu_speedo_id = tegra_cpu_speedo_id();
@@ -1651,6 +1673,9 @@ void __init tegra12x_init_dvfs(void)
 			}
 		}
 	}
+
+	of_tegra_dvfs_init(tegra12_dvfs_rail_of_match);
+
 	/*
 	 * Find nominal voltages for core (1st) and cpu rails before rail
 	 * init. Nominal voltage index in core scaling ladder can also be
