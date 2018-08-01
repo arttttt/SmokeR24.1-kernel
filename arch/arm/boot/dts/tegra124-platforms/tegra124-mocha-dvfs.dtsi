@@ -44,7 +44,7 @@
 			reg = <3>;
 			compatible = "nvidia,tegra124-dvfs-rail";
 			vdd_gpu-supply = <&vdd_gpu>;
-//			scaling-cdev = <&gpu_scaling_cdev>;
+			scaling-cdev = <&gpu_scaling_cdev>;
 //			vmax-cdev = <&gpu_vmax_cdev>;
 		};
 
@@ -55,6 +55,46 @@
 			vdd_core-supply = <&vdd_core>;
 //			vmin-cdev = <&core_vmin_cdev>;
 //			vmax-cdev = <&core_vmax_cdev>;
+		};
+	};
+};
+
+/ {
+	dvfs_rails {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gpu_scaling_cdev: vdd-gpu-scaling-cdev@7 {
+			status = "okay";
+			reg = <7>;
+			cooling-min-state = <0>;
+			cooling-max-state = <5>;
+			#cooling-cells = <2>;
+			compatible = "nvidia,tegra124-rail-scaling-cdev";
+			cdev-type = "gpu_scaling";
+			nvidia,constraint;
+			nvidia,trips = <&gpu_scaling0 950 &gpu_scaling1 0
+					&gpu_scaling2 0 &gpu_scaling3 0
+					&gpu_scaling4 0 &gpu_scaling5 0>;
+		};
+	};
+
+	thermal-zones {
+		GPU-therm {
+			trips {
+				/* Reference only trip, not mapped */
+				gpu_scaling0: gpu-scaling0 {
+					temperature = <(-40000)>;
+					hysteresis = <0>;
+					type = "active";
+				};
+			};
+			SET_MAP_TRIP(gpu, gpu, scaling, 1, 15000);
+			SET_MAP_TRIP(gpu, gpu, scaling, 2, 30000);
+			SET_MAP_TRIP(gpu, gpu, scaling, 3, 50000);
+			SET_MAP_TRIP(gpu, gpu, scaling, 4, 70000);
+			SET_MAP_TRIP(gpu, gpu, scaling, 5, 105000);
 		};
 	};
 };
