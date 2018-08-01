@@ -89,7 +89,7 @@ static struct tegra_cooling_device gpu_vmin_cdev = {
 };
 
 static struct tegra_cooling_device gpu_vts_cdev = {
-	.cdev_type = "gpu_scaling",
+	.compatible = "nvidia,tegra124-rail-scaling-cdev",
 };
 
 /* Used for CPU clock switch between PLLX and DFLL */
@@ -804,7 +804,6 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 			{  780000, {  }, {1448720, -10250,  -421, 1130000,      0,    0 }, },
 			{       0, {  }, { }, },
 		},
-		.vts_trips_table = { -40, 34, },
 	},
 	{
 		/* Embedded SKU CD575M Always On*/
@@ -836,7 +835,6 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 		.cvb_vmin =  {  0, {  }, { 1180000, -18900,    0,     0,  -6110,    0}, },
 		.vmin_trips_table = { 15, },
 		.therm_floors_table = { 900, },
-		.vts_trips_table = { -10, 10, 30, 50, 70, },
 	},
 	{
 		/* Embedded SKU CD575MI Always On*/
@@ -865,7 +863,6 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 			{       0, {  }, { }, },
 		},
 		.cvb_vmin =  { 0, { } , { 950000, }, },
-		.vts_trips_table = { -40, 0,},
 	},
 	{
 		/* Embedded SKU CD575MI */
@@ -892,11 +889,10 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 			{  708000, {  }, { 1415522, -17497, -274,  }, },
 			{  756000, {  }, { 1494061, -18331, -274,  }, },
 			{  804000, {  }, { 1524225, -20064, -254,  }, },
-                        {  852000, {  }, { 1608418, -21643, -269,  }, },
+			{  852000, {  }, { 1608418, -21643, -269,  }, },
 			{       0, {  }, { }, },
 		},
 		.cvb_vmin =  { 0, { } , { 950000, }, },
-		.vts_trips_table = { -40, 0,},
 	},
 	{
 		.speedo_id =  -1,
@@ -933,7 +929,6 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 		.cvb_vmin =  {  0, {  }, { 1180000, -18900,    0,     0,  -6110,    0}, },
 		.vmin_trips_table = { 15, },
 		.therm_floors_table = { 900, },
-		.vts_trips_table = { -10, 10, 30, 50, 70, },
 	}
 };
 
@@ -1238,6 +1233,45 @@ static int __init set_cpu_dvfs_data(unsigned long max_freq,
 	return 0;
 }
 
+/*
+ * Init thermal trips, find number of thermal ranges; note that the first
+ * trip-point is used for voltage calculations within the lowest range, but
+ * should not be actually set. Hence, at least 2 trip-points must be specified.
+ *
+ * Failure to get/configure trips may not be fatal for boot - let it try,
+ * anyway, with appropriate WARNING. It must not happen with production DT, of
+ * course.
+ */
+static int __init init_gpu_rail_thermal_profile(struct dvfs_rail *rail,
+						struct gpu_cvb_dvfs *d)
+{
+	int thermal_ranges = 1;	/* No thermal depndencies */
+
+ 	if (!rail->vts_cdev)
+		return 1;
+
+ 	thermal_ranges = of_tegra_dvfs_rail_get_cdev_trips(
+		rail->vts_cdev, d->vts_trips_table, d->therm_floors_table,
+		&rail->alignment, true);
+
+ 	if (thermal_ranges < 0) {
+		WARN(1, "tegra12_dvfs: %s: failed to get trips from DT\n",
+		     rail->reg_id);
+		return 1;
+	}
+
+ 	if (thermal_ranges < 2) {
+		WARN(1, "tegra12_dvfs: %s: only %d trip (must be at least 2)\n",
+		     rail->reg_id, thermal_ranges);
+		return 1;
+	}
+
+ 	rail->vts_cdev->trip_temperatures_num = thermal_ranges - 1;
+	rail->vts_cdev->trip_temperatures = d->vts_trips_table;
+
+	return thermal_ranges;
+}
+
 /* Automotive gpu_dvfs specific
  * GPU voltage (mV) = c0 + c1*speedo + c2*speedo*speedo if T > Tlimit
  * GPU voltage (mV) = c3 if T < Tlimit
@@ -1255,19 +1289,12 @@ static int __init set_atomtv_gpu_dvfs_data(unsigned long max_freq,
 	d->max_mv = round_voltage(d->max_mv, align, false);
 
 	/*
-	 * Init thermal trips, find number of thermal ranges; note that the
-	 * first trip-point is used for voltage calculations within the lowest
-	 * range, but should not be actually set. Hence, at least 2 trip-points
-	 * must be specified.
+	 * Get scaling thermal ranges; 1 range implies no thermal dependency.
+	 * Invalidate scaling cooling device in the latter case.
 	 */
-	if (tegra_dvfs_rail_init_thermal_dvfs_trips(d->vts_trips_table, rail))
-		return -ENOENT;
-	thermal_ranges = rail->vts_cdev->trip_temperatures_num;
-	rail->vts_cdev->trip_temperatures_num--;
-
-	if (thermal_ranges < 2)
-		WARN(1, "tegra12_dvfs: %d gpu trip: thermal dvfs is broken\n",
-		     thermal_ranges);
+	thermal_ranges = init_gpu_rail_thermal_profile(rail, d);
+	if (thermal_ranges == 1)
+		rail->vts_cdev = NULL;
 
 	/*
 	 * Use CVB table to fill in gpu dvfs frequencies and voltages. Each
@@ -1371,19 +1398,12 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 	simon_offs = rail->simon_vmin_offsets ? rail->simon_vmin_offsets[1] : 0;
 
 	/*
-	 * Init thermal trips, find number of thermal ranges; note that the
-	 * first trip-point is used for voltage calculations within the lowest
-	 * range, but should not be actually set. Hence, at least 2 trip-points
-	 * must be specified.
+	 * Get scaling thermal ranges; 1 range implies no thermal dependency.
+	 * Invalidate scaling cooling device in the latter case.
 	 */
-	if (tegra_dvfs_rail_init_thermal_dvfs_trips(d->vts_trips_table, rail))
-		return -ENOENT;
-	thermal_ranges = rail->vts_cdev->trip_temperatures_num;
-	rail->vts_cdev->trip_temperatures_num--;
-
-	if (thermal_ranges < 2)
-		WARN(1, "tegra12_dvfs: %d gpu trip: thermal dvfs is broken\n",
-		     thermal_ranges);
+	thermal_ranges = init_gpu_rail_thermal_profile(rail, d);
+	if (thermal_ranges == 1)
+		rail->vts_cdev = NULL;
 
 	/*
 	 * Use CVB table to calculate Vmin for each temperature range
@@ -1392,7 +1412,8 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 		speedo, d->speedo_scale, &d->cvb_vmin.cvb_pll_param);
 	for (j = 0; j < thermal_ranges; j++) {
 		int mvj = mv;
-		int t = rail->vts_cdev->trip_temperatures[j];
+		int t = thermal_ranges == 1 ? 0 :
+			rail->vts_cdev->trip_temperatures[j];
 
 		/* add Vmin thermal offset for this trip-point */
 		mvj += get_cvb_t_voltage(speedo, d->speedo_scale,
@@ -1431,7 +1452,8 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 
 		for (j = 0; j < thermal_ranges; j++) {
 			int mvj_offs, mvj = mv;
-			int t = rail->vts_cdev->trip_temperatures[j];
+			int t = thermal_ranges == 1 ? 0 :
+				rail->vts_cdev->trip_temperatures[j];
 
 			/* get thermal offset for this trip-point */
 			if ((d->speedo_id == 5 || d->speedo_id == 6) && (j == 0)) {
@@ -1451,9 +1473,13 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 					break;
 			}
 
-			/* update voltage for adjacent ranges bounded by this
-			   trip-point (cvb & dvfs are transpose matrices) */
-			gpu_millivolts[j][i] = mvj;
+			/*
+			 * Apply fixed thermal floor, and  update voltage for
+			 * adjacent ranges bounded by this trip-point (cvb &
+			 * dvfs are transpose matrices)
+			 */
+			gpu_millivolts[j][i] = max(mvj,
+						   d->therm_floors_table[j]);
 			if (j && (gpu_millivolts[j-1][i] < mvj))
 				gpu_millivolts[j-1][i] = mvj;
 
