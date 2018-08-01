@@ -1078,6 +1078,15 @@ static int round_voltage(int mv, struct rail_alignment *align, bool up)
 	return mv;
 }
 
+/*
+ * Setup cpu dvfs and dfll tables from cvb data, determine nominal voltage
+ * for cpu rail, and cpu maximum frequency. Note that entire frequency range
+ * is guaranteed only when dfll is used as cpu clock source. Reaching maximum
+ * frequency with pll as cpu clock source * may not be possible within nominal
+ * voltage range (dvfs mechanism * would automatically fail frequency request
+ * in this case, so that voltage limit is not violated). Error when cpu dvfs
+ * table can not be constructed must never happen.
+ */
 static int __init set_cpu_dvfs_data(unsigned long max_freq,
 	struct cpu_cvb_dvfs *d, struct dvfs *cpu_dvfs, int *max_freq_index)
 {
@@ -1381,6 +1390,31 @@ static unsigned long __init find_gpu_fmax_at_vmin(
 	return fmax;
 }
 
+static void __init init_cpu_dvfs_table(int *cpu_max_freq_index)
+{
+	int i, ret;
+	int cpu_speedo_id = tegra_cpu_speedo_id();
+	int cpu_process_id = tegra_cpu_process_id();
+	
+ 	BUG_ON(cpu_speedo_id >= ARRAY_SIZE(cpu_max_freq));
+	for (ret = 0, i = 0; i <  ARRAY_SIZE(cpu_cvb_dvfs_table); i++) {
+		struct cpu_cvb_dvfs *d = &cpu_cvb_dvfs_table[i];
+		unsigned long max_freq = cpu_max_freq[cpu_speedo_id];
+		if (match_dvfs_one("cpu cvb", d->speedo_id, d->process_id,
+				   cpu_speedo_id, cpu_process_id)) {
+			ret = set_cpu_dvfs_data(max_freq,
+				d, &cpu_dvfs, cpu_max_freq_index);
+			break;
+		}
+	}
+	BUG_ON((i == ARRAY_SIZE(cpu_cvb_dvfs_table)) || ret);
+}
+
+ /*
+ * Setup gpu dvfs tables from cvb data, determine nominal voltage for gpu rail,
+ * and gpu maximum frequency. Error when gpu dvfs table can not be constructed
+ * must never happen.
+ */
 static int __init set_gpu_dvfs_data(unsigned long max_freq,
 	struct gpu_cvb_dvfs *d, struct dvfs *gpu_dvfs, int *max_freq_index)
 {
@@ -1576,6 +1610,34 @@ static int __init tegra12_register_gpu_simon_notifier(void)
 }
 late_initcall(tegra12_register_gpu_simon_notifier);
 
+static void __init init_gpu_dvfs_table(int *gpu_max_freq_index)
+{
+	int i, ret;
+	int gpu_speedo_id = tegra_gpu_speedo_id();
+	int gpu_process_id = tegra_gpu_process_id();
+	
+ 	BUG_ON(gpu_speedo_id >= ARRAY_SIZE(gpu_max_freq));
+	for (ret = 0, i = 0; i < ARRAY_SIZE(gpu_cvb_dvfs_table); i++) {
+		struct gpu_cvb_dvfs *d = &gpu_cvb_dvfs_table[i];
+		unsigned long max_freq = gpu_max_freq[gpu_speedo_id];
+		if (match_dvfs_one("gpu cvb", d->speedo_id, d->process_id,
+				   gpu_speedo_id, gpu_process_id)) {
+			if (!tegra_is_soc_automotive_speedo())
+				ret = set_gpu_dvfs_data(max_freq,
+					d, &gpu_dvfs, gpu_max_freq_index);
+			else
+				/* Automotive gpu_dvfs specific */
+				ret = set_atomtv_gpu_dvfs_data(max_freq,
+					d, &gpu_dvfs, gpu_max_freq_index);
+			break;
+		}
+	}
+	BUG_ON((i == ARRAY_SIZE(gpu_cvb_dvfs_table)) || ret);
+}
+
+ /*
+ * Clip sku-based core nominal voltage to core DVFS voltage ladder
+ */
 static int __init get_core_nominal_mv_index(int speedo_id)
 {
 	int i;
@@ -1642,14 +1704,11 @@ static __initdata struct of_device_id tegra12_dvfs_rail_of_match[] = {
 void __init tegra12x_init_dvfs(void)
 {
 	int cpu_speedo_id = tegra_cpu_speedo_id();
-	int cpu_process_id = tegra_cpu_process_id();
 	int soc_speedo_id = tegra_soc_speedo_id();
 	int core_process_id = tegra_core_process_id();
-	int gpu_speedo_id = tegra_gpu_speedo_id();
-	int gpu_process_id = tegra_gpu_process_id();
 	int chip_personality = tegra_get_chip_personality();
 
-	int i, ret;
+	int i;
 	int core_nominal_mv_index;
 	int gpu_max_freq_index = 0;
 	int cpu_max_freq_index = 0;
@@ -1721,50 +1780,16 @@ void __init tegra12x_init_dvfs(void)
 	tegra12_dvfs_rail_vdd_core.resolve_override = resolve_core_override;
 
 	/*
-	 * Setup cpu dvfs and dfll tables from cvb data, determine nominal
-	 * voltage for cpu rail, and cpu maximum frequency. Note that entire
-	 * frequency range is guaranteed only when dfll is used as cpu clock
-	 * source. Reaching maximum frequency with pll as cpu clock source
-	 * may not be possible within nominal voltage range (dvfs mechanism
-	 * would automatically fail frequency request in this case, so that
-	 * voltage limit is not violated). Error when cpu dvfs table can not
-	 * be constructed must never happen.
+	 * Construct CPU DVFS table from CVB data; find CPU maximum frequency,
+	 * and nominal voltage.
 	 */
-	BUG_ON(cpu_speedo_id >= ARRAY_SIZE(cpu_max_freq));
-	for (ret = 0, i = 0; i <  ARRAY_SIZE(cpu_cvb_dvfs_table); i++) {
-		struct cpu_cvb_dvfs *d = &cpu_cvb_dvfs_table[i];
-		unsigned long max_freq = cpu_max_freq[cpu_speedo_id];
-		if (match_dvfs_one("cpu cvb", d->speedo_id, d->process_id,
-				   cpu_speedo_id, cpu_process_id)) {
-			ret = set_cpu_dvfs_data(max_freq,
-				d, &cpu_dvfs, &cpu_max_freq_index);
-			break;
-		}
-	}
-	BUG_ON((i == ARRAY_SIZE(cpu_cvb_dvfs_table)) || ret);
+	init_cpu_dvfs_table(&cpu_max_freq_index);
 
 	/*
-	 * Setup gpu dvfs tables from cvb data, determine nominal voltage for
-	 * gpu rail, and gpu maximum frequency. Error when gpu dvfs table can
-	 * not be constructed must never happen.
+	 * Construct GPU DVFS table from CVB data; find GPU maximum frequency,
+	 * and nominal voltage.
 	 */
-	BUG_ON(gpu_speedo_id >= ARRAY_SIZE(gpu_max_freq));
-	for (ret = 0, i = 0; i < ARRAY_SIZE(gpu_cvb_dvfs_table); i++) {
-		struct gpu_cvb_dvfs *d = &gpu_cvb_dvfs_table[i];
-		unsigned long max_freq = gpu_max_freq[gpu_speedo_id];
-		if (match_dvfs_one("gpu cvb", d->speedo_id, d->process_id,
-				   gpu_speedo_id, gpu_process_id)) {
-			if (!tegra_is_soc_automotive_speedo())
-				ret = set_gpu_dvfs_data(max_freq,
-					d, &gpu_dvfs, &gpu_max_freq_index);
-			else
-				/* Automotive gpu_dvfs specific */
-				ret = set_atomtv_gpu_dvfs_data(max_freq,
-					d, &gpu_dvfs, &gpu_max_freq_index);
-			break;
-		}
-	}
-	BUG_ON((i == ARRAY_SIZE(gpu_cvb_dvfs_table)) || ret);
+	init_gpu_dvfs_table(&gpu_max_freq_index);
 
 	/* Init core thermal profile */
 	if (soc_speedo_id == 3) {
