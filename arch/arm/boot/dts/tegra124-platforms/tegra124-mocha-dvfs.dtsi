@@ -1,0 +1,60 @@
+/*
+ * Copyright (c) 2014-2015 NVIDIA CORPORATION. All rights reserved.
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
+
+#define SET_MAP_TRIP(tdomain, cdomain, vtype, num, temp)		\
+	trips {								\
+		tdomain##_##vtype##num: tdomain-vtype##num {		\
+			temperature = <temp>;				\
+			hysteresis = <1000>;				\
+			type = "active";				\
+		};							\
+	};								\
+	cooling-maps {							\
+		tdomain-vtype-map##num {				\
+			trip = <&tdomain##_##vtype##num>;		\
+			cooling-device = <&cdomain##_##vtype##_cdev num num>; \
+		};							\
+	}
+
+/ {
+	dvfs_rails {
+
+		vdd-cpu-rail@2 {
+			status = "okay";
+			reg = <2>;
+			compatible = "nvidia,tegra124-dvfs-rail";
+			vdd_cpu-supply = <&vdd_cpu>;
+//			vmin-cdev = <&cpu_vmin_cdev>;
+//			vmax-cdev = <&cpu_vmax_cdev>;
+		};
+
+		vdd-gpu-rail@3 {
+			status = "okay";
+			reg = <3>;
+			compatible = "nvidia,tegra124-dvfs-rail";
+			vdd_gpu-supply = <&vdd_gpu>;
+//			scaling-cdev = <&gpu_scaling_cdev>;
+//			vmax-cdev = <&gpu_vmax_cdev>;
+		};
+
+		vdd-core-rail@4 {
+			status = "okay";
+			reg = <4>;
+			compatible = "nvidia,tegra124-dvfs-rail";
+			vdd_core-supply = <&vdd_core>;
+//			vmin-cdev = <&core_vmin_cdev>;
+//			vmax-cdev = <&core_vmax_cdev>;
+		};
+	};
+};

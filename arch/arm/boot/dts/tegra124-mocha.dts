@@ -31,6 +31,7 @@
 #include "tegra124-platforms/tegra124-mocha-wireless.dtsi"
 #include "tegra124-platforms/tegra124-mocha-dfll.dtsi"
 #include "tegra124-platforms/tegra124-mocha-thermal.dtsi"
+#include "tegra124-platforms/tegra124-mocha-dvfs.dtsi"
 #include "panel-s-wqxga-7-9-x6.dtsi"
 
 / {
