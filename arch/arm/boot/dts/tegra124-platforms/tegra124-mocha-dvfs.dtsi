@@ -36,7 +36,7 @@
 			compatible = "nvidia,tegra124-dvfs-rail";
 			vdd_cpu-supply = <&vdd_cpu>;
 			vmin-cdev = <&cpu_vmin_cdev>;
-//			vmax-cdev = <&cpu_vmax_cdev>;
+			vmax-cdev = <&cpu_vmax_cdev>;
 		};
 
 		vdd-gpu-rail@3 {
@@ -102,10 +102,25 @@
 					&gpu_scaling2 0 &gpu_scaling3 0
 					&gpu_scaling4 0 &gpu_scaling5 0>;
 		};
+
+		cpu_vmax_cdev: vdd-cpu-vmax-cdev@8 {
+			status = "okay";
+			reg = <8>;
+			cooling-min-state = <0>;
+			cooling-max-state = <1>;
+			#cooling-cells = <2>;
+			compatible = "nvidia,tegra124-rail-vmax-cdev";
+			cdev-type = "cpu_hot";
+			nvidia,constraint;
+			nvidia,trips = <&cpu_vmax1 1230 &cpu_vmax2 1210 &cpu_vmax3 1180>;
+		};
 	};
 
 	thermal-zones {
 		CPU-therm {
+			SET_MAP_TRIP(cpu, cpu, vmax, 1, 62000);
+			SET_MAP_TRIP(cpu, cpu, vmax, 2, 72000);
+			SET_MAP_TRIP(cpu, cpu, vmax, 3, 82000);
 			SET_MAP_TRIP(cpu, cpu, vmin, 1, 15000);
 		};
 		GPU-therm {
