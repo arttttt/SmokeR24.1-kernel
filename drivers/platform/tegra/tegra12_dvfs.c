@@ -1663,12 +1663,6 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 
 	*max_freq_index = i - 1;
 
-	/* Init thermal floors */
-
-	if (d->therm_floors_table[0]) /* if table contains at least one entry */
-		tegra_dvfs_rail_init_vmin_thermal_profile(d->vmin_trips_table,
-			d->therm_floors_table, &tegra12_dvfs_rail_vdd_gpu, NULL);
-
 	return 0;
 }
 
