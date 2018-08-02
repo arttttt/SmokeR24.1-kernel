@@ -1230,6 +1230,25 @@ static int __init set_cpu_dvfs_data(unsigned long max_freq,
 }
 
 /*
+ * Determine minimum voltage safe at maximum frequency across all temperature
+ * ranges.
+ */
+static int __init find_gpu_vmin_at_fmax(
+	struct dvfs *gpu_dvfs, int thermal_ranges, int freqs_num)
+{
+	int j, vmin;
+	
+ 	/*
+	 * For voltage scaling row in each temperature range find minimum
+	 * voltage at maximum frequency and return max Vmin across ranges.
+	 */
+	for (vmin = 0, j = 0; j < thermal_ranges; j++)
+		vmin = max(vmin, gpu_millivolts[j][freqs_num-1]);
+		
+ 	return vmin;
+}
+
+/*
  * Init thermal scaling trips, find number of thermal ranges; note that the 1st
  * trip-point is used for voltage calculations within the lowest range, but
  * should not be actually set. Hence, at least 2 scaling trip-points must be
@@ -1337,9 +1356,11 @@ static int __init set_atomtv_gpu_dvfs_data(unsigned long max_freq,
 	gpu_dvfs->speedo_id = d->speedo_id;
 	gpu_dvfs->process_id = d->process_id;
 	gpu_dvfs->freqs_mult = d->freqs_mult;
-	gpu_dvfs->dvfs_rail->nominal_millivolts = d->max_mv;
-
+	
 	*max_freq_index = i - 1;
+	
+	gpu_dvfs->dvfs_rail->nominal_millivolts = min(d->max_mv,
+		find_gpu_vmin_at_fmax(gpu_dvfs, thermal_ranges, i));
 
 	return 0;
 }
@@ -1652,7 +1673,9 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 	gpu_dvfs->speedo_id = d->speedo_id;
 	gpu_dvfs->process_id = d->process_id;
 	gpu_dvfs->freqs_mult = d->freqs_mult;
-	gpu_dvfs->dvfs_rail->nominal_millivolts = d->max_mv;
+	
+	gpu_dvfs->dvfs_rail->nominal_millivolts = min(d->max_mv,
+		find_gpu_vmin_at_fmax(gpu_dvfs, thermal_ranges, i));
 
 	/*Populate gpu fmax at vmin*/
 	gpu_dvfs->fmax_at_vmin_safe_t = d->freqs_mult *
