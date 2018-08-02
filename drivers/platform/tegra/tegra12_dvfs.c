@@ -67,8 +67,12 @@ static struct tegra_cooling_device core_vmin_cdev = {
 	.compatible = "nvidia,tegra124-rail-vmin-cdev",
 };
 
-static struct tegra_cooling_device gpu_vmin_cdev = {
-	.cdev_type = "gpu_cold",
+static struct clk *vgpu_cap_clk;
+static unsigned long gpu_cap_rates[MAX_THERMAL_LIMITS];
+static int vdd_gpu_vmax_trips_table[MAX_THERMAL_LIMITS];
+static int vdd_gpu_therm_caps_table[MAX_THERMAL_LIMITS];
+static struct tegra_cooling_device gpu_vmax_cdev = {
+	.compatible = "nvidia,tegra124-rail-vmax-cdev",
 };
 
 static struct tegra_cooling_device gpu_vts_cdev = {
@@ -122,7 +126,7 @@ static struct dvfs_rail tegra12_dvfs_rail_vdd_gpu = {
 	.step_up = 1350,
 	.in_band_pm = true,
 	.vts_cdev = &gpu_vts_cdev,
-	.vmin_cdev = &gpu_vmin_cdev,
+	.vmax_cdev = &gpu_vmax_cdev,
 	.alignment = {
 		.step_uv = 10000, /* 10mV */
 	},
@@ -1219,15 +1223,17 @@ static int __init set_cpu_dvfs_data(unsigned long max_freq,
 }
 
 /*
- * Init thermal trips, find number of thermal ranges; note that the first
+ * Init thermal scaling trips, find number of thermal ranges; note that the 1st
  * trip-point is used for voltage calculations within the lowest range, but
- * should not be actually set. Hence, at least 2 trip-points must be specified.
+ * should not be actually set. Hence, at least 2 scaling trip-points must be
+ * specified in DT; number of scaling ranges = number of trips in DT; number
+ * of scaling trips bound to scaling cdev is number of trips in DT minus one.
  *
  * Failure to get/configure trips may not be fatal for boot - let it try,
  * anyway, with appropriate WARNING. It must not happen with production DT, of
  * course.
  */
-static int __init init_gpu_rail_thermal_profile(struct dvfs_rail *rail,
+static int __init init_gpu_rail_thermal_scaling(struct dvfs_rail *rail,
 						struct gpu_cvb_dvfs *d)
 {
 	int thermal_ranges = 1;	/* No thermal depndencies */
@@ -1277,7 +1283,7 @@ static int __init set_atomtv_gpu_dvfs_data(unsigned long max_freq,
 	 * Get scaling thermal ranges; 1 range implies no thermal dependency.
 	 * Invalidate scaling cooling device in the latter case.
 	 */
-	thermal_ranges = init_gpu_rail_thermal_profile(rail, d);
+	thermal_ranges = init_gpu_rail_thermal_scaling(rail, d);
 	if (thermal_ranges == 1)
 		rail->vts_cdev = NULL;
 
@@ -1437,7 +1443,66 @@ static int __init tegra12_dvfs_register_cpu_vmax_cdev(void)
 }
 late_initcall(tegra12_dvfs_register_cpu_vmax_cdev);
 
- /* Setup GPU */
+/*
+ * Initialize thermal capping trips and rates: for each cap point (Tk, Vk) find
+ * min{ maxF(V <= Vk, j), j >= j0 }, where j0 is index for minimum scaling
+ * trip-point above Tk with margin: j0 = min{ j, Tj >= Tk - margin }.
+ */
+#define CAP_TRIP_ON_SCALING_MARGIN	5
+static int __init init_gpu_cap_rates(struct dvfs *gpu_dvfs,
+	struct dvfs_rail *rail, int thermal_ranges, int freqs_num)
+{
+	int i, j, k;
+	const char *cap_clk_name = "cap.vgpu.gbus";
+
+	vgpu_cap_clk = tegra_get_clock_by_name(cap_clk_name);
+
+ 	if (!rail->vts_cdev || !rail->vmax_cdev)
+		return -ENOENT;
+
+ 	if (!vgpu_cap_clk) {
+		WARN(1, "tegra12_dvfs: %s: failed to get cap clock %s\n",
+		     rail->reg_id, cap_clk_name);
+		return -ENODEV;
+	}
+
+ 	for (k = 0; k < rail->vmax_cdev->trip_temperatures_num; k++) {
+		int cap_tempr = vdd_gpu_vmax_trips_table[k];
+		int cap_level = vdd_gpu_therm_caps_table[k];
+		unsigned long cap_freq = clk_get_max_rate(vgpu_cap_clk);
+
+ 		for (j = 0; j < thermal_ranges; j++) {
+			if ((j < thermal_ranges - 1) &&	/* vts trips=ranges-1 */
+			    (rail->vts_cdev->trip_temperatures[j] +
+			    CAP_TRIP_ON_SCALING_MARGIN < cap_tempr))
+				continue;
+
+ 			for (i = 1; i < freqs_num; i++) {
+				if (gpu_millivolts[j][i] > cap_level)
+					break;
+			}
+			cap_freq = min(cap_freq, gpu_dvfs->freqs[i - 1]);
+		}
+		gpu_cap_rates[k] = cap_freq * gpu_dvfs->freqs_mult;
+	}
+
+	return 0;
+}
+
+static int __init init_gpu_rail_thermal_caps(struct dvfs *gpu_dvfs,
+	struct dvfs_rail *rail, int thermal_ranges, int freqs_num)
+{
+	if (rail->vmax_cdev) {
+		if (tegra_dvfs_rail_of_init_vmax_thermal_profile(
+			vdd_gpu_vmax_trips_table, vdd_gpu_therm_caps_table,
+			rail, NULL) ||
+		    init_gpu_cap_rates(
+			    gpu_dvfs, rail, thermal_ranges, freqs_num))
+			rail->vmax_cdev = NULL;
+	}
+
+	return 0;
+}
 
  /*
  * Setup gpu dvfs tables from cvb data, determine nominal voltage for gpu rail,
@@ -1464,7 +1529,7 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 	 * Get scaling thermal ranges; 1 range implies no thermal dependency.
 	 * Invalidate scaling cooling device in the latter case.
 	 */
-	thermal_ranges = init_gpu_rail_thermal_profile(rail, d);
+	thermal_ranges = init_gpu_rail_thermal_scaling(rail, d);
 	if (thermal_ranges == 1)
 		rail->vts_cdev = NULL;
 
@@ -1584,6 +1649,9 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 	gpu_dvfs->fmax_at_vmin_safe_t = d->freqs_mult *
 			find_gpu_fmax_at_vmin(gpu_dvfs, thermal_ranges, i);
 
+	/* Initialize thermal capping */
+	init_gpu_rail_thermal_caps(gpu_dvfs, rail, thermal_ranges, i);
+
 	*max_freq_index = i - 1;
 
 	/* Init thermal floors */
@@ -1663,6 +1731,60 @@ static void __init init_gpu_dvfs_table(int *gpu_max_freq_index)
 	}
 	BUG_ON((i == ARRAY_SIZE(gpu_cvb_dvfs_table)) || ret);
 }
+
+/*
+ * GPU Vmax cooling device registration:
+ * - Use tegra12 GPU capping method that applies pre-populated cap rates
+ *   adjusted for each voltage cap trip-point (in case when GPU thermal
+ *   scaling initialization failed, fall back on using WC rate limit across all
+ *   thermal ranges).
+ * - Skip registration if most aggressive cap is above maximum voltage
+ */
+static int tegra12_gpu_volt_cap_apply(int *cap_idx, int new_idx, int level)
+{
+	int ret = -EINVAL;
+	unsigned long flags;
+	unsigned long cap_rate;
+
+ 	if (!cap_idx)
+		return 0;
+
+ 	clk_lock_save(vgpu_cap_clk, &flags);
+	*cap_idx = new_idx;
+
+ 	if (level) {
+		if (gpu_dvfs.dvfs_rail->vts_cdev && gpu_dvfs.therm_dvfs)
+			cap_rate = gpu_cap_rates[new_idx - 1];
+		else
+			cap_rate = tegra_dvfs_predict_hz_at_mv_max_tfloor(
+				clk_get_parent(vgpu_cap_clk), level);
+	} else {
+		cap_rate = clk_get_max_rate(vgpu_cap_clk);
+	}
+
+ 	if (!IS_ERR_VALUE(cap_rate))
+		ret = clk_set_rate_locked(vgpu_cap_clk, cap_rate);
+
+ 	clk_unlock_restore(vgpu_cap_clk, &flags);
+
+	return ret;
+}
+ static int __init tegra12_dvfs_register_gpu_vmax_cdev(void)
+{
+	struct dvfs_rail *rail;
+
+ 	rail = &tegra12_dvfs_rail_vdd_gpu;
+	rail->apply_vmax_cap = tegra12_gpu_volt_cap_apply;
+
+	if (rail->vmax_cdev) {
+		int i = rail->vmax_cdev->trip_temperatures_num;
+		if (i && rail->therm_mv_caps[i-1] < rail->nominal_millivolts)
+			tegra_dvfs_rail_register_vmax_cdev(rail);
+	}
+
+	return 0;
+}
+late_initcall(tegra12_dvfs_register_gpu_vmax_cdev);
 
  /*
  * Clip sku-based core nominal voltage to core DVFS voltage ladder
