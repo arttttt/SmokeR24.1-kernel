@@ -118,8 +118,8 @@ static struct dvfs_rail tegra12_dvfs_rail_vdd_core = {
 	.step_up = 1400,
 	.vmin_cdev = &core_vmin_cdev,
 	.vmax_cdev = &core_vmax_cdev,
-	.stats = {
-		.bin_uV = 10000, /* 10mV */
+	.alignment = {
+		.step_uv = 12500, /* 12.5mV */
 	},
 	.version = "P4v40",
 };
