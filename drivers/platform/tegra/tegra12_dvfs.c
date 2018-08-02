@@ -45,23 +45,8 @@ static bool tegra_dvfs_gpu_disabled;
 static int cpu_vmin_offsets[] = { 0, -30, };
 static int gpu_vmin_offsets[] = { 0, -20, };
 
-static int vdd_core_vmin_trips_table[MAX_THERMAL_LIMITS] = { 20, };
-static int vdd_core_therm_floors_table[MAX_THERMAL_LIMITS] = { 950, };
-
-static int vdd_core_vmin_trips_table_sku80[MAX_THERMAL_LIMITS] = { 0, };
-static int vdd_core_therm_floors_table_sku80[MAX_THERMAL_LIMITS] = { 1100, };
-
-static int vdd_core_vmin_trips_table_sku80_alwayson[MAX_THERMAL_LIMITS] = { 0, };
-static int vdd_core_therm_floors_table_sku80_alwayson[MAX_THERMAL_LIMITS] = { 1000, };
-
-static int vdd_core_vmax_trips_table[MAX_THERMAL_LIMITS] = { 62,   72,   82, };
-static int vdd_core_therm_caps_table[MAX_THERMAL_LIMITS] = { 1130, 1100, 1060, };
-
-static int vdd_core_vmax_trips_table_sku80_alwayson[] = { -40, 0, };
-static int vdd_core_therm_caps_table_sku80_alwayson[] = { 950, 1000, };
-
-static int vdd_core_vmax_trips_table_sku80[] = { -40, 0, 70};
-static int vdd_core_therm_caps_table_sku80[] = { 1050, 1100, 1050};
+static int vdd_core_vmin_trips_table[MAX_THERMAL_LIMITS];
+static int vdd_core_therm_floors_table[MAX_THERMAL_LIMITS];
 
 #ifndef CONFIG_TEGRA_CPU_VOLT_CAP
 static int vdd_cpu_vmax_trips_table[MAX_THERMAL_LIMITS] = { 62,   72,   82, };
@@ -72,16 +57,14 @@ static struct tegra_cooling_device cpu_vmax_cdev = {
 };
 #endif
 
+static int vdd_cpu_vmin_trips_table[MAX_THERMAL_LIMITS];
+static int vdd_cpu_therm_floors_table[MAX_THERMAL_LIMITS];
 static struct tegra_cooling_device cpu_vmin_cdev = {
-	.cdev_type = "cpu_cold",
-};
-
-static struct tegra_cooling_device core_vmax_cdev = {
-	.cdev_type = "core_hot",
+	.compatible = "nvidia,tegra124-rail-vmin-cdev",
 };
 
 static struct tegra_cooling_device core_vmin_cdev = {
-	.cdev_type = "core_cold",
+	.compatible = "nvidia,tegra124-rail-vmin-cdev",
 };
 
 static struct tegra_cooling_device gpu_vmin_cdev = {
@@ -124,7 +107,6 @@ static struct dvfs_rail tegra12_dvfs_rail_vdd_core = {
 	.step = VDD_SAFE_STEP,
 	.step_up = 1400,
 	.vmin_cdev = &core_vmin_cdev,
-	.vmax_cdev = &core_vmax_cdev,
 	.stats = {
 		.bin_uV = 10000, /* 10mV */
 	},
@@ -1404,6 +1386,25 @@ static void __init init_cpu_dvfs_table(int *cpu_max_freq_index)
 	BUG_ON((i == ARRAY_SIZE(cpu_cvb_dvfs_table)) || ret);
 }
 
+static int __init init_cpu_rail_thermal_profile(struct dvfs *cpu_dvfs)
+{
+	struct dvfs_rail *rail = &tegra12_dvfs_rail_vdd_cpu;
+
+ 	/*
+	 * Failure to get/configure trips may not be fatal for boot - let it
+	 * boot, even with partial configuration with appropriate WARNING, and
+	 * invalidate cdev. It must not happen with production DT, of course.
+	 */
+	if (rail->vmin_cdev) {
+		if (tegra_dvfs_rail_of_init_vmin_thermal_profile(
+			vdd_cpu_vmin_trips_table, vdd_cpu_therm_floors_table,
+			rail, &cpu_dvfs->dfll_data))
+			rail->vmin_cdev = NULL;
+	}
+
+ 	return 0;
+}
+
  /*
  * Setup gpu dvfs tables from cvb data, determine nominal voltage for gpu rail,
  * and gpu maximum frequency. Error when gpu dvfs table can not be constructed
@@ -1673,6 +1674,23 @@ static int __init get_core_nominal_mv_index(int speedo_id)
 		}							       \
 	} while (0)
 
+static int __init init_core_rail_thermal_profile(void)
+{
+	struct dvfs_rail *rail = &tegra12_dvfs_rail_vdd_core;
+ 	/*
+	 * Failure to get/configure trips may not be fatal for boot - let it
+	 * boot, even with partial configuration with appropriate WARNING, and
+	 * invalidate cdev. It must not happen with production DT, of course.
+	 */
+	if (rail->vmin_cdev) {
+		if (tegra_dvfs_rail_of_init_vmin_thermal_profile(
+			vdd_core_vmin_trips_table, vdd_core_therm_floors_table,
+			rail, NULL))
+			rail->vmin_cdev = NULL;
+	}
+ 	return 0;
+}
+
 static int __init of_rails_init(struct device_node *dn)
 {
 	int i;
@@ -1779,6 +1797,9 @@ void __init tegra12x_init_dvfs(void)
 	 */
 	init_cpu_dvfs_table(&cpu_max_freq_index);
 
+	/* Init cpu thermal profile */
+	init_cpu_rail_thermal_profile(&cpu_dvfs);
+
 	/*
 	 * Construct GPU DVFS table from CVB data; find GPU maximum frequency,
 	 * and nominal voltage.
@@ -1786,32 +1807,7 @@ void __init tegra12x_init_dvfs(void)
 	init_gpu_dvfs_table(&gpu_max_freq_index);
 
 	/* Init core thermal profile */
-	if (soc_speedo_id == 3) {
-		tegra_dvfs_rail_init_vmin_thermal_profile(vdd_core_vmin_trips_table_sku80_alwayson,
-				vdd_core_therm_floors_table_sku80_alwayson, &tegra12_dvfs_rail_vdd_core, NULL);
-		tegra12_dvfs_rail_vdd_core.therm_mv_caps = vdd_core_therm_caps_table_sku80_alwayson;
-		tegra12_dvfs_rail_vdd_core.therm_mv_caps_num = ARRAY_SIZE(vdd_core_therm_caps_table_sku80_alwayson);
-		if (tegra12_dvfs_rail_vdd_core.vmax_cdev) {
-			tegra12_dvfs_rail_vdd_core.vmax_cdev->trip_temperatures_num =
-				ARRAY_SIZE(vdd_core_vmax_trips_table_sku80_alwayson);
-			tegra12_dvfs_rail_vdd_core.vmax_cdev->trip_temperatures = vdd_core_vmax_trips_table_sku80_alwayson;
-		}
-	} else if (soc_speedo_id == 4) {
-		tegra_dvfs_rail_init_vmin_thermal_profile(vdd_core_vmin_trips_table_sku80,
-				vdd_core_therm_floors_table_sku80, &tegra12_dvfs_rail_vdd_core, NULL);
-		tegra12_dvfs_rail_vdd_core.therm_mv_caps = vdd_core_therm_caps_table_sku80;
-		tegra12_dvfs_rail_vdd_core.therm_mv_caps_num = ARRAY_SIZE(vdd_core_therm_caps_table_sku80);
-		if (tegra12_dvfs_rail_vdd_core.vmax_cdev) {
-			tegra12_dvfs_rail_vdd_core.vmax_cdev->trip_temperatures_num =
-				ARRAY_SIZE(vdd_core_vmax_trips_table_sku80);
-			tegra12_dvfs_rail_vdd_core.vmax_cdev->trip_temperatures = vdd_core_vmax_trips_table_sku80;
-		}
-	} else {
-		tegra_dvfs_rail_init_vmin_thermal_profile(vdd_core_vmin_trips_table,
-				vdd_core_therm_floors_table, &tegra12_dvfs_rail_vdd_core, NULL);
-		tegra_dvfs_rail_init_vmax_thermal_profile(vdd_core_vmax_trips_table,
-				vdd_core_therm_caps_table, &tegra12_dvfs_rail_vdd_core, NULL);
-	}
+	init_core_rail_thermal_profile();
 
 	/* Init rail structures and dependencies */
 	tegra_dvfs_init_rails(tegra12_dvfs_rails,
@@ -1965,11 +1961,6 @@ static int __init tegra12_dvfs_init_core_cap(void)
 		kobject_del(cap_kobj);
 		return 0;
 	}
-
-	/* core cap must be initialized for vmax cdev operations */
-	tegra12_dvfs_rail_vdd_core.apply_vmax_cap =
-		tegra_dvfs_therm_vmax_core_cap_apply;
-	tegra_dvfs_rail_register_vmax_cdev(&tegra12_dvfs_rail_vdd_core);
 
 	tegra_core_cap_debug_init();
 	pr_info("tegra dvfs: tegra sysfs cap interface is initialized\n");
