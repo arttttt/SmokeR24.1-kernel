@@ -2053,15 +2053,13 @@ void __init tegra12x_init_dvfs(void)
 	if (tegra_dvfs_gpu_disabled)
 		tegra_dvfs_rail_disable(&tegra12_dvfs_rail_vdd_gpu);
 
-	pr_info("tegra dvfs: VDD_CPU nominal %dmV, scaling %s\n",
-		tegra12_dvfs_rail_vdd_cpu.nominal_millivolts,
-		tegra_dvfs_cpu_disabled ? "disabled" : "enabled");
-	pr_info("tegra dvfs: VDD_CORE nominal %dmV, scaling %s\n",
-		tegra12_dvfs_rail_vdd_core.nominal_millivolts,
-		tegra_dvfs_core_disabled ? "disabled" : "enabled");
-	pr_info("tegra dvfs: VDD_GPU nominal %dmV, scaling %s\n",
-		tegra12_dvfs_rail_vdd_gpu.nominal_millivolts,
-		tegra_dvfs_gpu_disabled ? "disabled" : "enabled");
+	for (i = 0; i < ARRAY_SIZE(tegra12_dvfs_rails); i++) {
+		struct dvfs_rail *rail = tegra12_dvfs_rails[i];
+		pr_info("tegra dvfs: %s: nominal %dmV, offset %duV, step %duV, scaling %s\n",
+			rail->reg_id, rail->nominal_millivolts,
+			rail->alignment.offset_uv, rail->alignment.step_uv,
+			rail->disabled ? "disabled" : "enabled");
+	}
 }
 
 int tegra_dvfs_rail_disable_prepare(struct dvfs_rail *rail)
