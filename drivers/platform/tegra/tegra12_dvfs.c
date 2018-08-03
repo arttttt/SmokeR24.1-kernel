@@ -32,7 +32,6 @@
 #include "board.h"
 #include "pm.h"
 #include "tegra_core_sysfs_limits.h"
-#include "tegra_simon.h"
 
 static bool tegra_dvfs_cpu_disabled;
 static bool tegra_dvfs_core_disabled;
@@ -42,9 +41,6 @@ static bool tegra_dvfs_gpu_disabled;
 #define MHZ 1000000
 
 #define VDD_SAFE_STEP			100
-
-static int cpu_vmin_offsets[] = { 0, -30, };
-static int gpu_vmin_offsets[] = { 0, -20, };
 
 static int vdd_core_vmin_trips_table[MAX_THERMAL_LIMITS];
 static int vdd_core_therm_floors_table[MAX_THERMAL_LIMITS];
@@ -93,7 +89,6 @@ static struct tegra_cooling_device cpu_clk_switch_cdev = {
 static struct dvfs_rail tegra12_dvfs_rail_vdd_cpu = {
 	.reg_id = "vdd_cpu",
 	.max_millivolts = 1300,
-	.simon_domain = TEGRA_SIMON_DOMAIN_CPU,
 	.step = VDD_SAFE_STEP,
 	.jmp_to_zero = true,
 	.vmin_cdev = &cpu_vmin_cdev,
@@ -125,7 +120,6 @@ static struct dvfs_rail tegra12_dvfs_rail_vdd_core = {
 static struct dvfs_rail tegra12_dvfs_rail_vdd_gpu = {
 	.reg_id = "vdd_gpu",
 	.max_millivolts = 1350,
-	.simon_domain = TEGRA_SIMON_DOMAIN_GPU,
 	.step = VDD_SAFE_STEP,
 	.in_band_pm = true,
 	.vts_cdev = &gpu_vts_cdev,
@@ -925,8 +919,6 @@ static struct dvfs gpu_dvfs = {
 	.dvfs_rail	= &tegra12_dvfs_rail_vdd_gpu,
 };
 
-static struct notifier_block gpu_simon_grade_nb;
-
 int tegra_dvfs_disable_core_set(const char *arg, const struct kernel_param *kp)
 {
 	int ret;
@@ -1198,23 +1190,6 @@ static int __init set_cpu_dvfs_data(unsigned long max_freq,
 				d->clk_switch_trips, rail);
 		if (ret)
 			return ret;
-	}
-
-	/* Init cpu Vmin SiMon offsets */
-	tegra_dvfs_rail_init_simon_vmin_offsets(cpu_vmin_offsets,
-		ARRAY_SIZE(cpu_vmin_offsets), rail);
-
-	/* check Vmin SiMon offset: ignore SiMon if it pushes too low */
-	if (rail->therm_mv_floors && rail->simon_vmin_offsets) {
-		mv = rail->therm_mv_floors[rail->therm_mv_floors_num - 1];
-		mv += rail->simon_vmin_offsets[rail->simon_vmin_offs_num - 1];
-		mv = round_voltage(mv, align, true);
-		if (mv < min_dfll_mv) {
-			WARN(1, "tegra12_dvfs: cpu simon min %dmV below dfll min %dmV\n",
-			     mv, min_dfll_mv);
-			rail->simon_vmin_offsets = NULL;
-			rail->simon_vmin_offs_num = 0;
-		}
 	}
 
 	/*
@@ -1542,18 +1517,13 @@ static int __init init_gpu_rail_thermal_caps(struct dvfs *gpu_dvfs,
 static int __init set_gpu_dvfs_data(unsigned long max_freq,
 	struct gpu_cvb_dvfs *d, struct dvfs *gpu_dvfs, int *max_freq_index)
 {
-	int i, j, thermal_ranges, simon_offs, mv;
+	int i, j, thermal_ranges, mv;
 	struct cvb_dvfs_table *table = NULL;
 	int speedo = tegra_gpu_speedo_value();
 	struct dvfs_rail *rail = &tegra12_dvfs_rail_vdd_gpu;
 	struct rail_alignment *align = &rail->alignment;
 
 	d->max_mv = round_voltage(d->max_mv, align, false);
-
-	/* Init gpu Vmin SiMon offsets (Tegra12 has exactly 2 offsests) */
-	BUILD_BUG_ON(ARRAY_SIZE(gpu_vmin_offsets) != 2);
-	tegra_dvfs_rail_init_simon_vmin_offsets(gpu_vmin_offsets, 2, rail);
-	simon_offs = rail->simon_vmin_offsets ? rail->simon_vmin_offsets[1] : 0;
 
 	/*
 	 * Get scaling thermal ranges; 1 range implies no thermal dependency.
@@ -1581,15 +1551,6 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 			WARN(1, "tegra12_dvfs: gpu min %dmV below rail min %dmV\n",
 			     mvj, rail->min_millivolts);
 			mvj = rail->min_millivolts;
-		}
-
-		/* check Vmin SiMon offset: ignore SiMon if it pushes too low */
-		if (mvj + simon_offs < rail->min_millivolts) {
-			WARN(1, "tegra12_dvfs: gpu simon min %dmV below rail min %dmV\n",
-			     mvj + simon_offs, rail->min_millivolts);
-			rail->simon_vmin_offsets = NULL;
-			rail->simon_vmin_offs_num = 0;
-			simon_offs = 0;
 		}
 
 		gpu_vmin[j] = mvj;
@@ -1624,7 +1585,7 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 			mvj = round_cvb_voltage(mvj, d->voltage_scale, align);
 
 			/* clip to minimum, abort if above maximum */
-			mvj_offs = max(mvj, gpu_vmin[j] + simon_offs);
+			mvj_offs = max(mvj, gpu_vmin[j]);
 			mvj = max(mvj, gpu_vmin[j]);
 			if ((d->speedo_id != 5) || (j != 0)) {
 				if (mvj > d->max_mv)
@@ -1688,50 +1649,6 @@ static int __init set_gpu_dvfs_data(unsigned long max_freq,
 
 	return 0;
 }
-
-static int gpu_simon_grade_notify_cb(struct notifier_block *nb,
-				     unsigned long grade, void *v)
-{
-	struct dvfs_rail *rail = &tegra12_dvfs_rail_vdd_gpu;
-	int curr_domain = (int)v;
-	int ret;
-
-	if (curr_domain != rail->simon_domain)
-		return NOTIFY_DONE;
-
-	/* Only 2 grades are supported; both voltage tables must be valid */
-	ret = tegra_dvfs_replace_voltage_table(&gpu_dvfs,
-		grade ? &gpu_millivolts_offs[0][0] : &gpu_millivolts[0][0]);
-
-	if (!WARN_ON(ret == -EINVAL))
-		pr_info("tegra_dvfs: set %s simon grade %lu\n",
-			rail->reg_id, grade);
-
-	return NOTIFY_OK;
-};
-
-static int __init tegra12_register_gpu_simon_notifier(void)
-{
-	int ret;
-	struct dvfs_rail *rail = &tegra12_dvfs_rail_vdd_gpu;
-
-	/* Stay at default if no simon offsets or thermal dvfs is broken */
-	if (!gpu_dvfs.therm_dvfs || !rail->simon_vmin_offsets)
-		return 0;
-
-	gpu_simon_grade_nb.notifier_call = gpu_simon_grade_notify_cb;
-
-	ret = tegra_register_simon_notifier(&gpu_simon_grade_nb);
-	if (ret) {
-		pr_err("tegra12_dvfs: failed to register %s simon notifier\n",
-		       rail->reg_id);
-		return ret;
-	}
-
-	pr_info("tegra dvfs: registered %s simon notifier\n", rail->reg_id);
-	return 0;
-}
-late_initcall(tegra12_register_gpu_simon_notifier);
 
 static void __init init_gpu_dvfs_table(int *gpu_max_freq_index)
 {
