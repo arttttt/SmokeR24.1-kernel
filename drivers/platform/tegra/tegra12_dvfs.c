@@ -107,7 +107,6 @@ static struct dvfs_rail tegra12_dvfs_rail_vdd_cpu = {
 static struct dvfs_rail tegra12_dvfs_rail_vdd_core = {
 	.reg_id = "vdd_core",
 	.max_millivolts = 1400,
-	.min_millivolts = 800,
 	.step = VDD_SAFE_STEP,
 	.vmin_cdev = &core_vmin_cdev,
 	.vmax_cdev = &core_vmax_cdev,
@@ -1900,6 +1899,9 @@ void __init tegra12x_init_dvfs(void)
 	}
 	tegra12_dvfs_rail_vdd_core.nominal_millivolts =
 		core_millivolts[core_nominal_mv_index];
+	tegra12_dvfs_rail_vdd_core.min_millivolts =
+		max(tegra12_dvfs_rail_vdd_core.min_millivolts,
+		core_millivolts[0]);
 
 	tegra12_dvfs_rail_vdd_core.resolve_override = resolve_core_override;
 
