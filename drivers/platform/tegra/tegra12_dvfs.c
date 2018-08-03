@@ -93,7 +93,6 @@ static struct tegra_cooling_device cpu_clk_switch_cdev = {
 static struct dvfs_rail tegra12_dvfs_rail_vdd_cpu = {
 	.reg_id = "vdd_cpu",
 	.max_millivolts = 1300,
-	.min_millivolts = 700,
 	.simon_domain = TEGRA_SIMON_DOMAIN_CPU,
 	.step = VDD_SAFE_STEP,
 	.jmp_to_zero = true,
@@ -126,7 +125,6 @@ static struct dvfs_rail tegra12_dvfs_rail_vdd_core = {
 static struct dvfs_rail tegra12_dvfs_rail_vdd_gpu = {
 	.reg_id = "vdd_gpu",
 	.max_millivolts = 1350,
-	.min_millivolts = 650,
 	.simon_domain = TEGRA_SIMON_DOMAIN_GPU,
 	.step = VDD_SAFE_STEP,
 	.in_band_pm = true,
@@ -1086,10 +1084,14 @@ static int __init set_cpu_dvfs_data(unsigned long max_freq,
 	struct rail_alignment *align = &rail->alignment;
 
 	min_dfll_mv = d->dfll_tune_data.min_millivolts;
+	if (min_dfll_mv < rail->min_millivolts) {
+		pr_debug("tegra12_dvfs: dfll min %dmV below rail min %dmV\n",
+		     min_dfll_mv, rail->min_millivolts);
+		min_dfll_mv = rail->min_millivolts;
+	}
 	min_dfll_mv =  round_voltage(min_dfll_mv, align, true);
 	d->max_mv = round_voltage(d->max_mv, align, false);
 	BUG_ON(min_dfll_mv < rail->min_millivolts);
-
 
 	/*
 	 * Use CVB table to fill in CPU dvfs frequencies and voltages. Each
