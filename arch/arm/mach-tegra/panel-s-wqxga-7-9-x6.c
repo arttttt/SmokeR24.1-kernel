@@ -55,7 +55,6 @@ static struct dsi_s_wqxga_7_9_data {
 	.dvdd_lcd_1v8 = {
 		.reg_name = "dvdd_lcdio",
 	},
-	.rst_gpio = TEGRA_GPIO_PH3,
 };
 
 static int ardbeg_dsi_regulator_get(struct device *dev)
@@ -111,10 +110,13 @@ static int dsi_s_wqxga_7_9_enable(struct device *dev)
 		pr_err("dsi regulator get failed\n");
 	}
 
-	err = gpio_request(wqxga_7_9_mocha.rst_gpio, NULL);
+	err = tegra_panel_gpio_get_dt("s,wqxga-7-9-x6", &panel_of);
 	if (err < 0) {
 		pr_err("dsi gpio request failed\n");
 	}
+
+	if (gpio_is_valid(panel_of.panel_gpio[TEGRA_GPIO_RESET]))
+		wqxga_7_9_mocha.rst_gpio = panel_of.panel_gpio[TEGRA_GPIO_RESET];
 
 	if (wqxga_7_9_mocha.dvdd_lcd_1v8.reg) {
 		err = regulator_enable(wqxga_7_9_mocha.dvdd_lcd_1v8.reg);
@@ -149,15 +151,19 @@ static int dsi_s_wqxga_7_9_disable(struct device *dev)
 {
 	int err = 0;
 	
-	err = gpio_request(wqxga_7_9_mocha.rst_gpio, NULL);
+	err = tegra_panel_gpio_get_dt("s,wqxga-7-9-x6", &panel_of);
 	if (err < 0) {
 		pr_err("dsi gpio request failed\n");
 	}
+
+	if (gpio_is_valid(panel_of.panel_gpio[TEGRA_GPIO_RESET]))
+		wqxga_7_9_mocha.rst_gpio = panel_of.panel_gpio[TEGRA_GPIO_RESET];
 
 	if (gpio_get_value(wqxga_7_9_mocha.rst_gpio) != 0)
 		gpio_set_value(wqxga_7_9_mocha.rst_gpio, 0);
 
 	gpio_free(wqxga_7_9_mocha.rst_gpio);
+	panel_of.panel_gpio_populated = false;
 
 	msleep(10);
 	if (wqxga_7_9_mocha.avdd_lcd_vsn_5v5.reg)
@@ -175,7 +181,7 @@ static int dsi_s_wqxga_7_9_disable(struct device *dev)
 static int dsi_s_wqxga_7_9_postsuspend(void)
 {
 	int err = 0;
-	err = gpio_request(wqxga_7_9_mocha.rst_gpio, NULL);
+	err = tegra_panel_gpio_get_dt("s,wqxga-7-9-x6", &panel_of);
 	if (err < 0) {
 		pr_err("dsi gpio request failed\n");
 	}
@@ -184,6 +190,7 @@ static int dsi_s_wqxga_7_9_postsuspend(void)
 		gpio_set_value(wqxga_7_9_mocha.rst_gpio, 0);
 
 	gpio_free(wqxga_7_9_mocha.rst_gpio);
+	panel_of.panel_gpio_populated = false;
 
 	return 0;
 }
