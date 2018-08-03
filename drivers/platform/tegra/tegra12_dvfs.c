@@ -215,8 +215,6 @@ static struct cpu_cvb_dvfs cpu_cvb_dvfs_table[] = {
 			{1912500,	{2003687, -51145, 402}, {1200000, 0, 0}},
 			{      0 , 	{      0,      0,   0}, {}},
 		},
-		.vmin_trips_table = { 20, 35, 55, 75, 120 },
-		.therm_floors_table = { 900, 800, 790, 770, 750, },
 	},
 	/* Entry for Embedded SKU CD575MI Always On*/
 	{
@@ -351,8 +349,6 @@ static struct cpu_cvb_dvfs cpu_cvb_dvfs_table[] = {
 			{2499000,	{2537299, -62735, 449}, {1400000, 0, 0} },
 			{      0 , 	{      0,      0,   0}, {      0, 0, 0}},
 		},
-		.vmin_trips_table = { 20, 35, 55, 75, 120 },
-		.therm_floors_table = { 900, 800, 790, 770, 750, },
 	},
 };
 
@@ -811,8 +807,6 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 			{  804000, {  }, { 1524225, -20064, -254,  -119,   4272, -155}, },
 			{       0, {  }, { }, },
 		},
-		.vmin_trips_table = { 15, },
-		.therm_floors_table = { 900, },
 	},
 	{
 		/* Embedded SKU CD575MI Always On*/
@@ -911,8 +905,6 @@ static struct gpu_cvb_dvfs gpu_cvb_dvfs_table[] = {
 			{ 1008000, {  }, { 2015834, -44439,  271,  -596,   4730, 1222}, },
 			{       0, {  }, { }, },
 		},
-		.vmin_trips_table = { 15, },
-		.therm_floors_table = { 900, },
 	}
 };
 
@@ -1176,12 +1168,6 @@ static int __init set_cpu_dvfs_data(unsigned long max_freq,
 	cpu_dvfs->dfll_data.use_dfll_rate_min = fmin_use_dfll * d->freqs_mult;
 	cpu_dvfs->dfll_data.min_millivolts = min_dfll_mv;
 	cpu_dvfs->dfll_data.is_bypass_down = is_lp_cluster;
-
-	/* Init cpu thermal floors */
-	if (d->therm_floors_table[0]) /* if table contains at least one entry */
-		tegra_dvfs_rail_init_vmin_thermal_profile(
-				d->vmin_trips_table, d->therm_floors_table,
-				rail, &d->dfll_tune_data);
 
 	/* Init cpu thermal caps */
 #ifndef CONFIG_TEGRA_CPU_VOLT_CAP
