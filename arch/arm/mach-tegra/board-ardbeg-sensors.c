@@ -814,13 +814,14 @@ int __init ardbeg_sensors_init(void)
 	ardbeg_camera_init();
 
 	if (board_info.board_id == BOARD_P1761 ||
+		board_info.board_id == BOARD_E1780 ||
 		board_info.board_id == BOARD_E1784 ||
 		board_info.board_id == BOARD_E1971 ||
 		board_info.board_id == BOARD_E1991 ||
 		board_info.board_id == BOARD_E1922 ||
 		of_machine_is_compatible("nvidia,green-arrow")) {
 		/* Sensor is on DT */
-		pr_err("Temp sensor are from DT\n");
+		pr_warn("Temp sensor are from DT\n");
 	} else
 		ardbeg_nct72_init();
 
