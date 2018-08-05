@@ -21,9 +21,10 @@
 	};
 
 	therm_est_sensor {
-		status = "disabled";
-		use_activator = <0>;
+		status = "okay";
+		use_activator = <1>;
 		subdev {
+			subdev_names = "Tdiode_tegra", "Tboard_tegra";
 			coeff_set@0 {
 				toffset = <3543>;
 				coeffs = <
@@ -206,7 +207,7 @@
 		};
 
 		therm_est {
-			status = "disabled";
+			status = "okay";
 			trips {
 				skin_trip {
 					temperature = <47000>;
