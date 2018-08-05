@@ -76,7 +76,9 @@
 				MAKE_EDP_TRIP(gpu, 20);
 				MAKE_EDP_TRIP(gpu, 50);
 				MAKE_EDP_TRIP(gpu, 70);
+				MAKE_EDP_TRIP(gpu, 75);
 				MAKE_EDP_TRIP(gpu, 80);
+				MAKE_EDP_TRIP(gpu, 85);
 				MAKE_EDP_TRIP(gpu, 90);
 				MAKE_EDP_TRIP(gpu, 95);
 				MAKE_EDP_TRIP(gpu, 100);
@@ -86,7 +88,9 @@
 				MAP_GPU_EDP(20);
 				MAP_GPU_EDP(50);
 				MAP_GPU_EDP(70);
+				MAP_GPU_EDP(75);
 				MAP_GPU_EDP(80);
+				MAP_GPU_EDP(85);
 				MAP_GPU_EDP(90);
 				MAP_GPU_EDP(95);
 				MAP_GPU_EDP(100);
