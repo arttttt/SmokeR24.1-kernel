@@ -74,6 +74,12 @@
 		};
 	};
 
+	i2c@7000c000 {
+		onsemi,nct72@4c {
+			vdd-supply = <&palmas_smps8>;
+		};
+	};
+
 	sound {
 		ldoen-supply = <&ldoen>;
 	};
