@@ -759,6 +759,27 @@ enum bpf_func_id {
 	 */
 	BPF_FUNC_skb_cgroup_id = 79,
 
+	/**
+	 * u64 bpf_skb_ancestor_cgroup_id(struct sk_buff *skb, int ancestor_level)
+	 *	Description
+	 *		Return id of cgroup v2 that is ancestor of cgroup associated
+	 *		with the *skb* at the *ancestor_level*.  The root cgroup is at
+	 *		*ancestor_level* zero and each step down the hierarchy
+	 *		increments the level. If *ancestor_level* == level of cgroup
+	 *		associated with *skb*, then return value will be same as that
+	 *		of **bpf_skb_cgroup_id**\ ().
+	 *
+	 *		The helper is useful to implement policies based on cgroups
+	 *		that are upper in hierarchy than immediate cgroup associated
+	 *		with *skb*.
+	 *
+	 *		The format of returned id and helper limitations are same as in
+	 *		**bpf_skb_cgroup_id**\ ().
+	 *	Return
+	 *		The id is returned or 0 in case the id could not be retrieved.
+	 */
+	BPF_FUNC_skb_ancestor_cgroup_id = 83,
+
 	BPF_FUNC_sk_fullsock = 95,
 
 	/**
