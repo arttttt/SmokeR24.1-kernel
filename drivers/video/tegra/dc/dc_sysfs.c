@@ -490,16 +490,16 @@ static ssize_t color_filter_rgb_store(struct device *dev,
 
 	sscanf(buf, "%d %d %d", &r, &g, &b);
 
-	cmu->csc.krr = r;
-	cmu->csc.kgg = g;
-	cmu->csc.kbb = b;
-
 	if (r < 0)
 		goto fail;
 	if (g < 0)
 		goto fail;
 	if (b < 0)
 		goto fail;
+
+	cmu->csc.krr = r;
+	cmu->csc.kgg = g;
+	cmu->csc.kbb = b;
 
 	tegra_dc_update_cmu(dc, cmu);
 
