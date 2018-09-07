@@ -8,7 +8,7 @@ clean_build=0
 config="tegra12_android_defconfig"
 dtb_name="tegra124-mocha.dtb"
 dtb_only=0
-kernel_name="SmokeR24.1"
+kernel_name=$(git rev-parse --abbrev-ref HEAD)
 build_log="build.log"
 threads=5
 toolchain="$HOME/PROJECTS/MIPAD/linaro-4.9.4/bin/arm-linux-gnueabihf-"
@@ -21,7 +21,7 @@ ERROR=0
 HEAD=1
 WARNING=2
 
-printfc() {
+function printfc() {
 	if [[ $2 == $ERROR ]]; then
 		printf "\e[1;31m$1\e[0m"
 		return
@@ -36,12 +36,12 @@ printfc() {
 	fi;
 }
 
-generate_version()
+function generate_version()
 {
 	if [[ -f "$KERNEL_DIR/.git/HEAD"  &&  -f "$KERNEL_DIR/anykernel/anykernel.sh" ]]; then
 		local updated_kernel_name
 		eval "$(awk -F"="  '/kernel.string/{print "anykernel_name="$2}' $KERNEL_DIR/anykernel/anykernel.sh)"
-		eval "$(awk -F"-"  '{print "current_branch="$2}' $KERNEL_DIR/.git/HEAD)"
+		eval "$(echo $kernel_name | awk -F"-"  '{print "current_branch="$2}')"
 		if [[ "$current_branch" != "stable" ]]; then
 			if [[ ! -f "$KERNEL_DIR/version" ]]; then
 				echo "build_number=0" > $KERNEL_DIR/version
@@ -51,15 +51,15 @@ generate_version()
 			mv tmpfile $KERNEL_DIR/version
 			eval "$(awk -F"="  '{print "current_build="$2}' $KERNEL_DIR/version)"
 			export LOCALVERSION="-build$current_build"
-			updated_kernel_name=$kernel_name"-"$current_branch"-build"$current_build
+			updated_kernel_name=$kernel_name"-build"$current_build
 		else
-			updated_kernel_name=$kernel_name"-"$current_branch
+			updated_kernel_name=$kernel_name
 		fi;
 			sed -i s/$anykernel_name/$updated_kernel_name/ $KERNEL_DIR/anykernel/anykernel.sh
 	fi;
 }
 
-make_zip()
+function make_zip()
 {
 	if [[ -d "$KERNEL_DIR/anykernel" ]]; then
 		printfc "\nСоздание zip архива\n\n" $HEAD
@@ -109,7 +109,7 @@ make_zip()
 	cd $KERNEL_DIR
 }
 
-compile()
+function compile()
 {
 	local start=$(date +%s)
 	clear
@@ -173,7 +173,7 @@ compile()
 	make_zip
 }
 
-compile_dtb()
+function compile_dtb()
 {
 	clear
 
@@ -192,7 +192,7 @@ compile_dtb()
 	make_zip
 }
 
-main()
+function main()
 {
 	clear
 	echo "---------------------------------------------------"
