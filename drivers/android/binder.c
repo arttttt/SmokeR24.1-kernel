@@ -3870,7 +3870,7 @@ static void print_binder_node(struct seq_file *m, struct binder_node *node)
 		hlist_for_each_entry(ref, &node->refs, node_entry)
 			seq_printf(m, " %d", ref->proc->pid);
 	}
-	seq_puts(m, "\n");
+	seq_putc(m, '\n');
 	list_for_each_entry(w, &node->async_todo, entry)
 		print_binder_work(m, "    ",
 				  "    pending async transaction", w);
