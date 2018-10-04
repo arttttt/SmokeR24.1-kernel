@@ -31,7 +31,6 @@
 #include <linux/of_gpio.h>
 #ifdef CONFIG_CUSTOM_DT2W
 #include <linux/input/dt2w.h>
-#include <linux/fb.h>
 #endif
 
 /* Version */
@@ -1251,9 +1250,9 @@ static void mxt_proc_t9_messages(struct mxt_data *data, u8 *message)
 
 #ifdef CONFIG_CUSTOM_DT2W
 		if (detect_dt2w_event(x, y) && data->wakeup_gesture_mode) {
-			input_event(input_dev, EV_KEY, KEY_POWER, 1);
+			input_report_key(input_dev, KEY_WAKEUP, 1);
 			input_sync(input_dev);
-			input_event(input_dev, EV_KEY, KEY_POWER, 0);
+			input_report_key(input_dev, KEY_WAKEUP, 0);
 			input_sync(input_dev);
 		}
 #endif
@@ -1380,9 +1379,9 @@ static void mxt_proc_t100_messages(struct mxt_data *data, u8 *message)
 
 #ifdef CONFIG_CUSTOM_DT2W
 			if (detect_dt2w_event(x, y) && data->wakeup_gesture_mode) {
-				input_event(input_dev, EV_KEY, KEY_POWER, 1);
+				input_report_key(input_dev, KEY_WAKEUP, 1);
 				input_sync(input_dev);
-				input_event(input_dev, EV_KEY, KEY_POWER, 0);
+				input_report_key(input_dev, KEY_WAKEUP, 0);
 				input_sync(input_dev);
 			}
 #endif
@@ -4234,6 +4233,11 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 							data->pdata->config_array[index].key_codes[i]);
 		}
 	}
+#endif
+
+#ifdef CONFIG_CUSTOM_DT2W
+	__set_bit(KEY_WAKEUP, input_dev->evbit);
+	input_set_capability(input_dev, EV_KEY, KEY_WAKEUP);
 #endif
 
 	input_set_drvdata(input_dev, data);
