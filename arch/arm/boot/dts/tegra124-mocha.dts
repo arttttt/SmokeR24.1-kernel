@@ -121,7 +121,7 @@
 			synaptics,reset-delay-ms = <100>;
 			synaptics,reset-active-ms = <20>;
 			synaptics,pwr-reg-name = "vdd-touch";
-			synaptics,cap-button-codes = <139 102 158 116>;
+			synaptics,cap-button-codes = <139 102 158>;
 		};
 
 		atmel_mxt_ts@4a {
@@ -148,7 +148,7 @@
 				atmel,mxt-cfg-name = "mxt1664t_config.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1664t.fw";
-				atmel,key-codes = <158 102 139 116>;
+				atmel,key-codes = <158 102 139>;
 			};
 			atmel,cfg_2 {
 				atmel,family-id = <0xA4>;
@@ -159,7 +159,7 @@
 				atmel,mxt-cfg-name = "mxt1066t_config.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1066t.fw";
-				atmel,key-codes = <139 102 158 116>;
+				atmel,key-codes = <139 102 158>;
 			};
 		};
 	};
