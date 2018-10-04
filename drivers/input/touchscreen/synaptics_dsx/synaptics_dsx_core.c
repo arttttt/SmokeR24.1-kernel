@@ -39,6 +39,7 @@
 #include <linux/input.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
+#include <linux/proc_fs.h>
 #include <linux/regulator/consumer.h>
 #include <linux/input/synaptics_dsx.h>
 #include "synaptics_dsx_core.h"
@@ -4144,6 +4145,48 @@ exit:
 }
 EXPORT_SYMBOL(synaptics_rmi4_new_function);
 
+static int synaptics_rmi4_proc_init()
+{
+	int ret = 0;
+	char *buf, *path = NULL;
+	char *key_disabler_sysfs_node = NULL;
+	struct proc_dir_entry *proc_entry_tp = NULL;
+	struct proc_dir_entry *proc_symlink_tmp  = NULL;
+
+ 	buf = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (!buf)
+		goto alloc_error;
+	
+	path = "/sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input0/0dbutton";
+
+ 	proc_entry_tp = proc_mkdir("touchpanel", NULL);
+
+	if (proc_entry_tp == NULL) {
+		ret = -ENOMEM;
+		pr_err("%s: Couldn't create touchpanel\n", __func__);
+
+		goto exit;
+	}
+
+ 	key_disabler_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+	proc_symlink_tmp = proc_symlink("capacitive_keys_enable",
+			proc_entry_tp, path);
+
+	if (proc_symlink_tmp == NULL) {
+		ret = -ENOMEM;
+		pr_err("%s: Couldn't create capacitive_keys_enable symlink\n", __func__);
+
+		goto exit;
+	}
+
+exit:
+	kfree(buf);
+
+alloc_error:
+ 	return ret;
+}
+
 static int synaptics_rmi4_probe(struct platform_device *pdev)
 {
 	int retval;
@@ -4328,6 +4371,8 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 	INIT_WORK(&rmi4_data->reset_work, synaptics_rmi4_reset_work);
 	queue_work(rmi4_data->reset_workqueue, &rmi4_data->reset_work);
 #endif
+
+	synaptics_rmi4_proc_init();
 
 	return retval;
 
