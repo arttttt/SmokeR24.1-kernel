@@ -50,7 +50,7 @@ function generate_version()
 			awk -F"="  '{$2+=1; print $1"="$2}' $KERNEL_DIR/version > tmpfile
 			mv tmpfile $KERNEL_DIR/version
 			eval "$(awk -F"="  '{print "current_build="$2}' $KERNEL_DIR/version)"
-			export LOCALVERSION="-build$current_build"
+			export LOCALVERSION="-$current_branch-build$current_build"
 			updated_kernel_name=$kernel_name"-build"$current_build
 		else
 			updated_kernel_name=$kernel_name
@@ -87,7 +87,7 @@ function make_zip()
 	fi
 
 	cd $KERNEL_DIR/anykernel
-	local zip_name="$kernel_name($(date +'%d.%m.%Y-%H:%M')).zip"
+	local zip_name="$kernel_name($(date +'%d.%m.%Y-%H.%M')).zip"
 	zip -r $zip_name *
 
 	if [[ -f "$PWD/$zip_name" ]]; then
