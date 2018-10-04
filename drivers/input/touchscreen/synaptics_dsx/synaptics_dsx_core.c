@@ -3436,6 +3436,7 @@ static void synaptics_rmi4_set_params(struct synaptics_rmi4_data *rmi4_data)
 		}
 	}
 
+#ifdef CONFIG_ANDROID
 	if (f1a) {
 		for (ii = 0; ii < f1a->valid_button_count; ii++) {
 			set_bit(f1a->button_map[ii],
@@ -3456,6 +3457,8 @@ static void synaptics_rmi4_set_params(struct synaptics_rmi4_data *rmi4_data)
 					EV_KEY, vir_button_map->map[ii * 5]);
 		}
 	}
+#endif
+
 #ifdef CONFIG_CUSTOM_DT2W
 	set_bit(KEY_WAKEUP, rmi4_data->input_dev->keybit);
 	input_set_capability(rmi4_data->input_dev, EV_KEY, KEY_WAKEUP);
