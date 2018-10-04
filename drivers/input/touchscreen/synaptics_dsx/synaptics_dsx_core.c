@@ -4179,7 +4179,7 @@ exit:
 }
 EXPORT_SYMBOL(synaptics_rmi4_new_function);
 
-static int synaptics_rmi4_proc_init()
+static int synaptics_rmi4_proc_init(void)
 {
 	int ret = 0;
 	char *buf, *path = NULL;
