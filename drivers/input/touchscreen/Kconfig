@@ -12,7 +12,7 @@ menuconfig INPUT_TOUCHSCREEN
 if INPUT_TOUCHSCREEN
 
 config CUSTOM_DT2W
-	tristate
+	bool "Custom dt2w implementation"
 	default n
 
 config TOUCHSCREEN_LR388K7
