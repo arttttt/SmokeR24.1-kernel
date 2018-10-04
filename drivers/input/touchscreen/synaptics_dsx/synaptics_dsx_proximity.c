@@ -1,11 +1,10 @@
 /*
  * Synaptics DSX touchscreen driver
  *
- * Copyright (C) 2012 Synaptics Incorporated
+ * Copyright (C) 2012-2016 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
- * Copyright (C) 2016 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,7 +15,22 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION DOES
+ * NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES, SYNAPTICS'
+ * TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT EXCEED ONE HUNDRED U.S.
+ * DOLLARS.
  */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -26,7 +40,6 @@
 #include <linux/platform_device.h>
 #include <linux/input/synaptics_dsx.h>
 #include "synaptics_dsx_core.h"
-#include <asm/bootinfo.h>
 
 #define PROX_PHYS_NAME "synaptics_dsx/proximity"
 
@@ -338,7 +351,7 @@ static int prox_scan_pdt(void)
 				break;
 			}
 
-			intr_count += (fd.intr_src_count & MASK_3BIT);
+			intr_count += fd.intr_src_count;
 		}
 	}
 
@@ -365,8 +378,7 @@ f12_found:
 	intr_src = fd.intr_src_count;
 	intr_off = intr_count % 8;
 	for (ii = intr_off;
-			ii < ((intr_src & MASK_3BIT) +
-			intr_off);
+			ii < (intr_src + intr_off);
 			ii++) {
 		prox->intr_mask |= 1 << ii;
 	}
@@ -464,6 +476,13 @@ static int synaptics_rmi4_prox_init(struct synaptics_rmi4_data *rmi4_data)
 	int retval;
 	unsigned char attr_count;
 
+	if (prox) {
+		dev_dbg(rmi4_data->pdev->dev.parent,
+				"%s: Handle already exists\n",
+				__func__);
+		return 0;
+	}
+
 	prox = kzalloc(sizeof(*prox), GFP_KERNEL);
 	if (!prox) {
 		dev_err(rmi4_data->pdev->dev.parent,
@@ -503,7 +522,7 @@ static int synaptics_rmi4_prox_init(struct synaptics_rmi4_data *rmi4_data)
 		goto exit_free_finger_data;
 	}
 
-	prox->prox_dev->name = PLATFORM_DRIVER_NAME;
+	prox->prox_dev->name = PROXIMITY_DRIVER_NAME;
 	prox->prox_dev->phys = PROX_PHYS_NAME;
 	prox->prox_dev->id.product = SYNAPTICS_DSX_DRIVER_PRODUCT;
 	prox->prox_dev->id.version = SYNAPTICS_DSX_DRIVER_VERSION;
@@ -601,8 +620,6 @@ static void synaptics_rmi4_prox_reset(struct synaptics_rmi4_data *rmi4_data)
 
 	prox_set_hover_finger_en();
 
-	prox_set_params();
-
 	return;
 }
 
@@ -653,9 +670,6 @@ static struct synaptics_rmi4_exp_fn proximity_module = {
 
 static int __init rmi4_proximity_module_init(void)
 {
-	if (get_hw_version_major() >= 5)
-		return 0;
-
 	synaptics_rmi4_new_function(&proximity_module, true);
 
 	return 0;
