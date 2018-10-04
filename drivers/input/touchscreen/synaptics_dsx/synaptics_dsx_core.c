@@ -41,10 +41,18 @@
 #include <linux/platform_device.h>
 #include <linux/proc_fs.h>
 #include <linux/regulator/consumer.h>
+#ifdef CONFIG_CUSTOM_DT2W
+#include <linux/input/dt2w.h>
+#endif
 #include <linux/input/synaptics_dsx.h>
 #include "synaptics_dsx_core.h"
 #ifdef KERNEL_ABOVE_2_6_38
 #include <linux/input/mt.h>
+#endif
+
+#ifdef CONFIG_CUSTOM_DT2W
+struct notifier_block fb_notif_synaptics;
+static bool custom_wakeup_enable;
 #endif
 
 #define INPUT_PHYS_NAME "synaptics_dsx/touch_input"
@@ -871,25 +879,34 @@ static ssize_t synaptics_rmi4_suspend_store(struct device *dev,
 static ssize_t synaptics_rmi4_wake_gesture_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
+#ifdef CONFIG_CUSTOM_DT2W
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+			custom_wakeup_enable);
+#else
 	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
 
 	return snprintf(buf, PAGE_SIZE, "%u\n",
 			rmi4_data->enable_wakeup_gesture);
+#endif
 }
 
 static ssize_t synaptics_rmi4_wake_gesture_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned int input;
+#ifndef CONFIG_CUSTOM_DT2W
 	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
-
+#endif
 	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	input = input > 0 ? 1 : 0;
-
+#ifdef CONFIG_CUSTOM_DT2W
+	custom_wakeup_enable = input;
+#else
 	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture)
 		rmi4_data->enable_wakeup_gesture = input;
+#endif
 
 	return count;
 }
@@ -1058,8 +1075,8 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 	unsigned char detected_gestures;
 	unsigned short data_addr;
 	unsigned short data_offset;
-	int x;
-	int y;
+	int x = 0;
+	int y = 0;
 	int wx;
 	int wy;
 	int temp;
@@ -1194,6 +1211,15 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		input_mt_sync(rmi4_data->input_dev);
 #endif
 	}
+
+#ifdef CONFIG_CUSTOM_DT2W
+	if (touch_count == 0 && detect_dt2w_event(x, y) && custom_wakeup_enable) {
+		input_report_key(rmi4_data->input_dev, KEY_WAKEUP, 1);
+		input_sync(rmi4_data->input_dev);
+		input_report_key(rmi4_data->input_dev, KEY_WAKEUP, 0);
+		input_sync(rmi4_data->input_dev);
+	}
+#endif
 
 	input_sync(rmi4_data->input_dev);
 
@@ -3430,11 +3456,16 @@ static void synaptics_rmi4_set_params(struct synaptics_rmi4_data *rmi4_data)
 					EV_KEY, vir_button_map->map[ii * 5]);
 		}
 	}
-
+#ifdef CONFIG_CUSTOM_DT2W
+	set_bit(KEY_WAKEUP, rmi4_data->input_dev->keybit);
+	input_set_capability(rmi4_data->input_dev, EV_KEY, KEY_WAKEUP);
+#else
 	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture) {
+
 		set_bit(KEY_WAKEUP, rmi4_data->input_dev->keybit);
 		input_set_capability(rmi4_data->input_dev, EV_KEY, KEY_WAKEUP);
 	}
+#endif
 
 	return;
 }
@@ -4149,16 +4180,16 @@ static int synaptics_rmi4_proc_init()
 {
 	int ret = 0;
 	char *buf, *path = NULL;
-	char *key_disabler_sysfs_node = NULL;
+	char *key_disabler_sysfs_node = NULL, *double_tap_sysfs_node = NULL;
 	struct proc_dir_entry *proc_entry_tp = NULL;
 	struct proc_dir_entry *proc_symlink_tmp  = NULL;
 
  	buf = kzalloc(PATH_MAX, GFP_KERNEL);
 
 	if (!buf)
-		goto alloc_error;
+		goto buf_alloc_error;
 	
-	path = "/sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input0/0dbutton";
+	path = "/sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input0";
 
  	proc_entry_tp = proc_mkdir("touchpanel", NULL);
 
@@ -4169,21 +4200,39 @@ static int synaptics_rmi4_proc_init()
 		goto exit;
 	}
 
+	double_tap_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (double_tap_sysfs_node)
+		sprintf(double_tap_sysfs_node, "%s/%s", path, "wake_gesture");
+
+	proc_symlink_tmp = proc_symlink("double_tap_enable",
+			proc_entry_tp, double_tap_sysfs_node);
+
+	if (proc_symlink_tmp == NULL) {
+		ret = -ENOMEM;
+		pr_err("%s: Couldn't create double_tap_enable symlink\n", __func__);
+	}
+
  	key_disabler_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (key_disabler_sysfs_node)
+		sprintf(key_disabler_sysfs_node, "%s/%s", path, "0dbutton");
+
 	proc_symlink_tmp = proc_symlink("capacitive_keys_enable",
-			proc_entry_tp, path);
+			proc_entry_tp, key_disabler_sysfs_node);
 
 	if (proc_symlink_tmp == NULL) {
 		ret = -ENOMEM;
 		pr_err("%s: Couldn't create capacitive_keys_enable symlink\n", __func__);
-
-		goto exit;
 	}
+
+	kfree(double_tap_sysfs_node);
+	kfree(key_disabler_sysfs_node);
 
 exit:
 	kfree(buf);
 
-alloc_error:
+buf_alloc_error:
  	return ret;
 }
 
@@ -4374,6 +4423,13 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 
 	synaptics_rmi4_proc_init();
 
+#ifdef CONFIG_CUSTOM_DT2W
+	if (fb_notifier_register(&fb_notif_synaptics))
+		dev_err(&pdev->dev, "%s: failed to register fb notifier\n", __func__);
+	else
+		dev_err(&pdev->dev, "%s: fb notifier registered\n", __func__);
+#endif
+
 	return retval;
 
 err_sysfs:
@@ -4426,6 +4482,11 @@ err_enable_reg:
 
 err_get_reg:
 	kfree(rmi4_data);
+
+#ifdef CONFIG_CUSTOM_DT2W
+	fb_notifier_unregister(&fb_notif_synaptics);
+	dev_err(&pdev->dev, "%s: fb notifier unregistered\n", __func__);
+#endif
 
 	return retval;
 }
@@ -4641,6 +4702,15 @@ static int synaptics_rmi4_suspend(struct device *dev)
 	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
 	unsigned char device_ctrl;
 
+#ifdef CONFIG_CUSTOM_DT2W
+	if (custom_wakeup_enable) {
+		dev_err(rmi4_data->pdev->dev.parent, "touch enable irq wake\n");
+		enable_irq_wake(rmi4_data->irq);
+
+		return 0;
+	}
+#endif
+
 	if (rmi4_data->stay_awake)
 		return 0;
 
@@ -4703,6 +4773,15 @@ static int synaptics_rmi4_resume(struct device *dev)
 #endif
 	struct synaptics_rmi4_exp_fhandler *exp_fhandler;
 	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
+
+#ifdef CONFIG_CUSTOM_DT2W
+	if (custom_wakeup_enable) {
+		dev_err(rmi4_data->pdev->dev.parent, "touch disable irq wake\n");
+		disable_irq_wake(rmi4_data->irq);
+
+		return 0;
+	}
+#endif
 
 	if (rmi4_data->stay_awake)
 		return 0;
