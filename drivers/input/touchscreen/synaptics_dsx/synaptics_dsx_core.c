@@ -4529,6 +4529,10 @@ static int synaptics_rmi4_remove(struct platform_device *pdev)
 	fb_unregister_client(&rmi4_data->fb_notifier);
 #endif
 
+#ifdef CONFIG_CUSTOM_DT2W
+	fb_notifier_unregister(&fb_notif_synaptics);
+#endif
+
 #ifdef USE_EARLYSUSPEND
 	unregister_early_suspend(&rmi4_data->early_suspend);
 #endif
