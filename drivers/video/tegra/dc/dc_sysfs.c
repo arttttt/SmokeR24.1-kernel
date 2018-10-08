@@ -471,7 +471,7 @@ static ssize_t color_filter_show(struct device *dev,
 	struct tegra_dc *dc = platform_get_drvdata(ndev);
 	struct tegra_dc_cmu *cmu = &dc->cmu;
 
-	return snprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d %d %d %d", 
+	return snprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d %d %d %d\n", 
 					cmu->csc.krr, cmu->csc.kgr, cmu->csc.kbr, 
 					cmu->csc.krg, cmu->csc.kgg, cmu->csc.kbg, 
 					cmu->csc.krb, cmu->csc.kgb, cmu->csc.kbb);
@@ -516,7 +516,7 @@ static ssize_t color_filter_rgb_show(struct device *dev,
 	struct tegra_dc *dc = platform_get_drvdata(ndev);
 	struct tegra_dc_cmu *cmu = &dc->cmu;
 
-	return snprintf(buf, PAGE_SIZE, "%d %d %d", cmu->csc.krr, cmu->csc.kgg, cmu->csc.kbb);
+	return snprintf(buf, PAGE_SIZE, "%d %d %d\n", cmu->csc.krr, cmu->csc.kgg, cmu->csc.kbb);
 }
 
 static DEVICE_ATTR(color_filter_rgb,
