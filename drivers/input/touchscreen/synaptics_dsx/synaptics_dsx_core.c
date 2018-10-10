@@ -4179,63 +4179,65 @@ exit:
 }
 EXPORT_SYMBOL(synaptics_rmi4_new_function);
 
-static int synaptics_rmi4_proc_init(void)
+static ssize_t synaptics_rmi4_proc_init(struct synaptics_rmi4_data *rmi4_data)
 {
+	char *driver_path, *double_tap_sysfs_node, *key_disabler_sysfs_node;
+	struct proc_dir_entry *proc_symlink_tmp;
 	int ret = 0;
-	char *buf, *path = NULL;
-	char *key_disabler_sysfs_node = NULL, *double_tap_sysfs_node = NULL;
-	struct proc_dir_entry *proc_entry_tp = NULL;
-	struct proc_dir_entry *proc_symlink_tmp  = NULL;
 
- 	buf = kzalloc(PATH_MAX, GFP_KERNEL);
-
-	if (!buf)
-		goto buf_alloc_error;
-	
-	path = "/sys/devices/platform/7000c700.i2c/i2c-3/3-0020/input/input0";
-
- 	proc_entry_tp = proc_mkdir("touchpanel", NULL);
-
-	if (proc_entry_tp == NULL) {
-		ret = -ENOMEM;
-		pr_err("%s: Couldn't create touchpanel\n", __func__);
-
-		goto exit;
+ 	if (rmi4_data->input_proc) {
+		proc_remove(rmi4_data->input_proc);
+		rmi4_data->input_proc = NULL;
 	}
+
+ 	driver_path = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (!driver_path) {
+		pr_err("%s: failed to allocate memory\n", __func__);
+
+		return -ENOMEM;
+	}
+
+ 	sprintf(driver_path, "/sys%s",
+			kobject_get_path(&rmi4_data->input_dev->dev.kobj, GFP_KERNEL));
+
+ 	pr_debug("%s: driver_path=%s\n", __func__, driver_path);
+
+	rmi4_data->input_proc = proc_mkdir("touchpanel", NULL);
+
+	if (!rmi4_data->input_proc)
+		return -ENOMEM;
 
 	double_tap_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
 
 	if (double_tap_sysfs_node)
-		sprintf(double_tap_sysfs_node, "%s/%s", path, "wake_gesture");
+		sprintf(double_tap_sysfs_node, "%s/%s", driver_path, "wakeup_mode");
 
 	proc_symlink_tmp = proc_symlink("double_tap_enable",
-			proc_entry_tp, double_tap_sysfs_node);
+			rmi4_data->input_proc, double_tap_sysfs_node);
 
 	if (proc_symlink_tmp == NULL) {
 		ret = -ENOMEM;
 		pr_err("%s: Couldn't create double_tap_enable symlink\n", __func__);
 	}
 
- 	key_disabler_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+	key_disabler_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
 
 	if (key_disabler_sysfs_node)
-		sprintf(key_disabler_sysfs_node, "%s/%s", path, "0dbutton");
+		sprintf(key_disabler_sysfs_node, "%s/%s", driver_path, "enable_keys");
 
 	proc_symlink_tmp = proc_symlink("capacitive_keys_enable",
-			proc_entry_tp, key_disabler_sysfs_node);
+			rmi4_data->input_proc, key_disabler_sysfs_node);
 
 	if (proc_symlink_tmp == NULL) {
 		ret = -ENOMEM;
 		pr_err("%s: Couldn't create capacitive_keys_enable symlink\n", __func__);
 	}
 
+ 	kfree(driver_path);
 	kfree(double_tap_sysfs_node);
 	kfree(key_disabler_sysfs_node);
 
-exit:
-	kfree(buf);
-
-buf_alloc_error:
  	return ret;
 }
 
@@ -4277,6 +4279,7 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 	rmi4_data->suspend = false;
 	rmi4_data->irq_enabled = false;
 	rmi4_data->fingers_on_2d = false;
+	rmi4_data->input_proc = NULL;
 
 	rmi4_data->reset_device = synaptics_rmi4_reset_device;
 	rmi4_data->irq_enable = synaptics_rmi4_irq_enable;
@@ -4424,7 +4427,7 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 	queue_work(rmi4_data->reset_workqueue, &rmi4_data->reset_work);
 #endif
 
-	synaptics_rmi4_proc_init();
+	synaptics_rmi4_proc_init(rmi4_data);
 
 #ifdef CONFIG_CUSTOM_DT2W
 	if (fb_notifier_register(&fb_notif_synaptics))

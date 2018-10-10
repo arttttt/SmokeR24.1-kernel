@@ -630,6 +630,8 @@ struct mxt_data {
 #ifdef CONFIG_FB
 	struct notifier_block fb_notifier;
 #endif
+
+	struct proc_dir_entry *input_proc;
 };
 
 static struct mxt_suspend mxt_save[] = {
@@ -3877,49 +3879,65 @@ static const struct attribute_group mxt_attr_group = {
 	.attrs = mxt_attrs,
 };
 
-static int mxt_proc_init(void)
-{
-	int ret;
-	char *buf, *path;
-	char *double_tap_sysfs_node, *key_disabler_sysfs_node;
-	struct proc_dir_entry *proc_entry_tp;
+static ssize_t mxt_proc_init(struct mxt_data *data) {
+	char *driver_path, *double_tap_sysfs_node, *key_disabler_sysfs_node;
 	struct proc_dir_entry *proc_symlink_tmp;
+	int ret = 0;
 
-	buf = kzalloc(PATH_MAX, GFP_KERNEL);
-	if (buf)
-		path = "/sys/devices/platform/7000c700.i2c/i2c-3/3-004a";
-
-	proc_entry_tp = proc_mkdir("touchpanel", NULL);
-	if (proc_entry_tp == NULL) {
-		ret = -ENOMEM;
-		pr_err("%s: Couldn't create touchpanel\n", __func__);
+ 	if (data->input_proc) {
+		proc_remove(data->input_proc);
+		data->input_proc = NULL;
 	}
 
+ 	driver_path = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (!driver_path) {
+		pr_err("%s: failed to allocate memory\n", __func__);
+
+		return -ENOMEM;
+	}
+
+ 	sprintf(driver_path, "/sys%s",
+			kobject_get_path(&data->client->dev.kobj, GFP_KERNEL));
+
+ 	pr_debug("%s: driver_path=%s\n", __func__, driver_path);
+
+	data->input_proc = proc_mkdir("touchpanel", NULL);
+
+	if (!data->input_proc)
+		return -ENOMEM;
+
 	double_tap_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+
 	if (double_tap_sysfs_node)
-		sprintf(double_tap_sysfs_node, "%s/%s", path, "wakeup_mode");
+		sprintf(double_tap_sysfs_node, "%s/%s", driver_path, "wakeup_mode");
+
 	proc_symlink_tmp = proc_symlink("double_tap_enable",
-			proc_entry_tp, double_tap_sysfs_node);
+			data->input_proc, double_tap_sysfs_node);
+
 	if (proc_symlink_tmp == NULL) {
 		ret = -ENOMEM;
 		pr_err("%s: Couldn't create double_tap_enable symlink\n", __func__);
 	}
 
 	key_disabler_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+
 	if (key_disabler_sysfs_node)
-		sprintf(key_disabler_sysfs_node, "%s/%s", path, "enable_keys");
+		sprintf(key_disabler_sysfs_node, "%s/%s", driver_path, "enable_keys");
+
 	proc_symlink_tmp = proc_symlink("capacitive_keys_enable",
-			proc_entry_tp, key_disabler_sysfs_node);
+			data->input_proc, key_disabler_sysfs_node);
+
 	if (proc_symlink_tmp == NULL) {
 		ret = -ENOMEM;
 		pr_err("%s: Couldn't create capacitive_keys_enable symlink\n", __func__);
 	}
 
-	kfree(buf);
+ 	kfree(driver_path);
 	kfree(double_tap_sysfs_node);
 	kfree(key_disabler_sysfs_node);
 
-	return ret;
+ 	return ret;
 }
 
 static void mxt_set_t7_for_gesture(struct mxt_data *data, bool enable)
@@ -4608,7 +4626,9 @@ retry:
 		goto err_free_irq;
 	}
 
-	mxt_proc_init();
+	data->input_proc = NULL;
+
+	mxt_proc_init(data);
 
 	sysfs_bin_attr_init(&data->mem_access_attr);
 	data->mem_access_attr.attr.name = "mem_access";

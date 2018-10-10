@@ -372,6 +372,7 @@ struct synaptics_rmi4_data {
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
+	struct proc_dir_entry *input_proc;
 	unsigned char current_page;
 	unsigned char button_0d_enabled;
 	unsigned char num_of_tx;
