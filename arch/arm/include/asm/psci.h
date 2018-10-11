@@ -35,15 +35,6 @@ struct psci_operations {
 };
 
 extern struct psci_operations psci_ops;
-extern struct smp_operations psci_smp_ops;
-
-#ifdef CONFIG_ARM_PSCI
-void psci_init(void);
-bool psci_smp_available(void);
-#else
-static inline void psci_init(void) { }
-static inline bool psci_smp_available(void) { return false; }
-#endif
 
 #ifdef CONFIG_ARM_PSCI
 int psci_init(void);
