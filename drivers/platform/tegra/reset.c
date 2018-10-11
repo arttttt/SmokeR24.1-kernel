@@ -56,6 +56,7 @@ static void tegra_cpu_reset_handler_enable(void)
 			tegra_cpu_reset_handler_offset);
 	} else {
 #endif
+
 		/* NOTE: This must be the one and only write to the EVP CPU
 		 * reset vector in the entire system. */
 		writel(TEGRA_RESET_HANDLER_BASE +
