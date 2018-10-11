@@ -58,10 +58,6 @@
 #include <linux/of_address.h>
 #include <linux/tegra-timer.h>
 
-#ifdef CONFIG_TRUSTED_LITTLE_KERNEL
-#include <linux/ote_protocol.h>
-#endif
-
 #if defined(CONFIG_TEGRA_AVP_KERNEL_ON_MMU)
 #include "../avp/headavp.h"
 #endif
@@ -2799,12 +2795,6 @@ static int tegra_nvavp_resume(struct device *dev)
 
 	nvavp_halt_avp(nvavp);
 	tegra_nvavp_runtime_resume(dev);
-
-#ifdef CONFIG_TRUSTED_LITTLE_KERNEL
-	nvavp_clks_enable(nvavp);
-	te_restore_keyslots();
-	nvavp_clks_disable(nvavp);
-#endif
 
 	return 0;
 }
