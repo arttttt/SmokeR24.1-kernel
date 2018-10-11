@@ -68,6 +68,8 @@ void __ref psci_cpu_die(unsigned int cpu)
        /* We should never return */
        panic("psci: cpu %d failed to shutdown\n", cpu);
 }
+#else
+#define psci_cpu_die NULL
 #endif
 
 bool __init psci_smp_available(void)
@@ -78,7 +80,5 @@ bool __init psci_smp_available(void)
 
 struct smp_operations __initdata psci_smp_ops = {
 	.smp_boot_secondary	= psci_boot_secondary,
-#ifdef CONFIG_HOTPLUG_CPU
 	.cpu_die		= psci_cpu_die,
-#endif
 };
