@@ -14,6 +14,7 @@
  */
 
 #include <linux/init.h>
+#include <linux/irqchip/arm-gic.h>
 #include <linux/smp.h>
 #include <linux/of.h>
 
