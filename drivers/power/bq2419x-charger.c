@@ -47,6 +47,7 @@
 #include <linux/workqueue.h>
 #include <linux/extcon.h>
 #include <linux/power_supply.h>
+#include <linux/proc_fs.h>
 
 #define MAX_STR_PRINT 50
 
@@ -146,6 +147,7 @@ struct bq2419x_chip {
 	int				wdt_time_sec;
 	int				charge_hw_current_limit;
 	bool			disabled_by_user;
+	struct proc_dir_entry *charger_proc;
 };
 
 static int current_to_reg(const unsigned int *tbl,
@@ -2090,6 +2092,53 @@ vbus_node:
 	return pdata;
 }
 
+static ssize_t bq2419x_proc_init(struct bq2419x_chip *bq2419x) {
+	char *driver_path, *disabled_by_user_sysfs_node;
+	struct proc_dir_entry *proc_symlink_tmp;
+	int ret = 0;
+
+ 	if (bq2419x->charger_proc) {
+		proc_remove(bq2419x->charger_proc);
+		bq2419x->charger_proc = NULL;
+	}
+
+	driver_path = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (!driver_path) {
+		pr_err("%s: failed to allocate memory\n", __func__);
+
+		return -ENOMEM;
+	}
+
+ 	sprintf(driver_path, "/sys%s",
+			kobject_get_path(&bq2419x->dev->kobj, GFP_KERNEL));
+
+ 	pr_debug("%s: driver_path=%s\n", __func__, driver_path);
+
+	bq2419x->charger_proc = proc_mkdir("charger", NULL);
+
+	if (!bq2419x->charger_proc)
+		return -ENOMEM;
+
+	disabled_by_user_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (disabled_by_user_sysfs_node)
+		sprintf(disabled_by_user_sysfs_node, "%s/%s", driver_path, "disabled_by_user");
+
+	proc_symlink_tmp = proc_symlink("force_disable",
+			bq2419x->charger_proc, disabled_by_user_sysfs_node);
+
+	if (proc_symlink_tmp == NULL) {
+		ret = -ENOMEM;
+		pr_err("%s: Couldn't create force_disable symlink\n", __func__);
+	}
+
+ 	kfree(driver_path);
+	kfree(disabled_by_user_sysfs_node);
+
+	return ret;
+}
+
 static int bq2419x_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
@@ -2289,6 +2338,9 @@ skip_bcharger_init:
 
 	INIT_DELAYED_WORK(&bq2419x->otg_reset_work,
 				bq2419x_otg_reset_work_handler);
+
+	bq2419x->charger_proc = NULL;
+	bq2419x_proc_init(bq2419x);
 
 	return 0;
 scrub_vbus_reg:
