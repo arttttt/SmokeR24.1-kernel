@@ -145,6 +145,7 @@ struct bq2419x_chip {
 	int				wdt_refresh_timeout;
 	int				wdt_time_sec;
 	int				charge_hw_current_limit;
+	bool			disabled_by_user;
 };
 
 static int current_to_reg(const unsigned int *tbl,
@@ -163,19 +164,30 @@ static int bq2419x_charger_enable(struct bq2419x_chip *bq2419x)
 	int ret;
 
 	if (bq2419x->battery_presense) {
-		dev_info(bq2419x->dev, "Charging enabled\n");
-		/* set default Charge regulation voltage */
-		ret = regmap_update_bits(bq2419x->regmap, BQ2419X_VOLT_CTRL_REG,
-			bq2419x->chg_voltage_control.mask,
-			bq2419x->chg_voltage_control.val);
-		if (ret < 0) {
-			dev_err(bq2419x->dev,
-				"VOLT_CTRL_REG update failed %d\n", ret);
-			return ret;
+		if (bq2419x->disabled_by_user) {
+			ret = regmap_update_bits(bq2419x->regmap, BQ2419X_PWR_ON_REG,
+				BQ2419X_ENABLE_CHARGE_MASK, BQ2419X_DISABLE_CHARGE);
+			dev_info(bq2419x->dev, "Charging disabled by user\n");
+			if (ret < 0) {
+				dev_err(bq2419x->dev,
+					"Manual charging disable failed %d\n", ret);
+				return ret;
+			}
+		} else {
+			dev_info(bq2419x->dev, "Charging enabled\n");
+			/* set default Charge regulation voltage */
+			ret = regmap_update_bits(bq2419x->regmap, BQ2419X_VOLT_CTRL_REG,
+				bq2419x->chg_voltage_control.mask,
+				bq2419x->chg_voltage_control.val);
+			if (ret < 0) {
+				dev_err(bq2419x->dev,
+					"VOLT_CTRL_REG update failed %d\n", ret);
+				return ret;
+			}
+			ret = regmap_update_bits(bq2419x->regmap, BQ2419X_PWR_ON_REG,
+					BQ2419X_ENABLE_CHARGE_MASK,
+					BQ2419X_ENABLE_CHARGE);
 		}
-		ret = regmap_update_bits(bq2419x->regmap, BQ2419X_PWR_ON_REG,
-				BQ2419X_ENABLE_CHARGE_MASK,
-				BQ2419X_ENABLE_CHARGE);
 	} else {
 		dev_info(bq2419x->dev, "Charging disabled\n");
 		ret = regmap_update_bits(bq2419x->regmap, BQ2419X_PWR_ON_REG,
@@ -1592,6 +1604,37 @@ static ssize_t bq2419x_show_output_charging_current_values(struct device *dev,
 	return ret;
 }
 
+static ssize_t bq2419x_show_disabled_by_user(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", bq2419x->disabled_by_user);
+}
+
+static ssize_t bq2419x_set_disabled_by_user(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
+	int val;
+
+	sscanf(buf, "%d", &val);
+
+	bq2419x->disabled_by_user = val;
+
+	bq2419x_charger_enable(bq2419x);
+
+	return count;
+}
+
+static DEVICE_ATTR(disabled_by_user, (S_IRUGO | (S_IWUSR | S_IWGRP)),
+		bq2419x_show_disabled_by_user,
+		bq2419x_set_disabled_by_user);
+
 static DEVICE_ATTR(output_charging_current, (S_IRUGO | (S_IWUSR | S_IWGRP)),
 		bq2419x_show_output_charging_current,
 		bq2419x_set_output_charging_current);
@@ -1610,6 +1653,7 @@ static DEVICE_ATTR(input_cable_state, (S_IRUGO | (S_IWUSR | S_IWGRP)),
 		bq2419x_show_input_cable_state, bq2419x_set_input_cable_state);
 
 static struct attribute *bq2419x_attributes[] = {
+	&dev_attr_disabled_by_user.attr,
 	&dev_attr_output_charging_current.attr,
 	&dev_attr_output_current_allowed_values.attr,
 	&dev_attr_input_charging_current_mA.attr,
