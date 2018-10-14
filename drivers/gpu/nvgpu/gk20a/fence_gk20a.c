@@ -155,7 +155,7 @@ struct gk20a_fence *gk20a_fence_from_semaphore(
 #ifdef CONFIG_SYNC
 	sync_fence = gk20a_sync_fence_create(timeline, semaphore,
 						dependency, "f-gk20a-0x%04llx",
-						((u64)(void *)semaphore->value) &
+						((u32)(void *)semaphore->value) &
 						0xffff);
 	if (!sync_fence)
 		return NULL;
