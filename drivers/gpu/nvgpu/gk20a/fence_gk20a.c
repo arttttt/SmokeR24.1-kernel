@@ -164,6 +164,7 @@ struct gk20a_fence *gk20a_fence_from_semaphore(
 	f  = alloc_fence(&gk20a_semaphore_fence_ops, sync_fence, wfi);
 	if (!f) {
 #ifdef CONFIG_SYNC
+	if (sync_fence)
 		sync_fence_put(sync_fence);
 #endif
 		return NULL;
