@@ -3,7 +3,7 @@
  *
  * GK20A Channel Synchronization Abstraction
  *
- * Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -60,6 +60,7 @@ static int gk20a_channel_syncpt_wait_syncpt(struct gk20a_channel_sync *s,
 	struct gk20a_channel_syncpt *sp =
 		container_of(s, struct gk20a_channel_syncpt, ops);
 	struct priv_cmd_entry *wait_cmd = NULL;
+	int err = 0;
 
 	if (!nvhost_syncpt_is_valid_pt_ext(sp->host1x_pdev, id)) {
 		dev_warn(dev_from_gk20a(sp->c->g),
@@ -70,11 +71,12 @@ static int gk20a_channel_syncpt_wait_syncpt(struct gk20a_channel_sync *s,
 	if (nvhost_syncpt_is_expired_ext(sp->host1x_pdev, id, thresh))
 		return 0;
 
-	gk20a_channel_alloc_priv_cmdbuf(sp->c, 4, &wait_cmd);
-	if (wait_cmd == NULL) {
+	err = gk20a_channel_alloc_priv_cmdbuf(sp->c, 4, &wait_cmd);
+	if (err) {
 		gk20a_err(dev_from_gk20a(sp->c->g),
 				"not enough priv cmd buffer space");
-		return -EAGAIN;
+
+		return err;
 	}
 
 	add_wait_cmd(&wait_cmd->ptr[0], id, thresh);
@@ -97,6 +99,7 @@ static int gk20a_channel_syncpt_wait_fd(struct gk20a_channel_sync *s, int fd,
 	struct gk20a_channel_syncpt *sp =
 		container_of(s, struct gk20a_channel_syncpt, ops);
 	struct channel_gk20a *c = sp->c;
+	int err = 0;
 
 	sync_fence = nvhost_sync_fdget(fd);
 	if (!sync_fence)
@@ -118,12 +121,13 @@ static int gk20a_channel_syncpt_wait_fd(struct gk20a_channel_sync *s, int fd,
 		return 0;
 	}
 
-	gk20a_channel_alloc_priv_cmdbuf(c, 4 * num_wait_cmds, &wait_cmd);
-	if (wait_cmd == NULL) {
+	err = gk20a_channel_alloc_priv_cmdbuf(c, 4 * num_wait_cmds, &wait_cmd);
+	if (err) {
 		gk20a_err(dev_from_gk20a(c->g),
 				"not enough priv cmd buffer space");
 		sync_fence_put(sync_fence);
-		return -EAGAIN;
+
+		return err;
 	}
 
 	i = 0;
@@ -184,8 +188,12 @@ static int __gk20a_channel_syncpt_incr(struct gk20a_channel_sync *s,
 		incr_cmd_size += 2;
 
 	err = gk20a_channel_alloc_priv_cmdbuf(c, incr_cmd_size, &incr_cmd);
-	if (err)
+	if (err) {
+		gk20a_err(dev_from_gk20a(c->g),
+					"not enough priv cmd buffer space");
+
 		return err;
+	}
 
 	/* WAR for hw bug 1491360: syncpt needs to be incremented twice */
 
@@ -470,18 +478,18 @@ static int gk20a_channel_semaphore_wait_fd(
 	w->sema = gk20a_semaphore_alloc(sema->pool);
 	if (!w->sema) {
 		gk20a_err(dev_from_gk20a(c->g), "ran out of semaphores");
-		err = -EAGAIN;
+		err = -ENOMEM;
 		goto fail;
 	}
 
 	/* worker takes one reference */
 	gk20a_semaphore_get(w->sema);
 
-	gk20a_channel_alloc_priv_cmdbuf(c, 8, &wait_cmd);
-	if (wait_cmd == NULL) {
+	err = gk20a_channel_alloc_priv_cmdbuf(c, 8, &wait_cmd);
+	if (err) {
 		gk20a_err(dev_from_gk20a(c->g),
 				"not enough priv cmd buffer space");
-		err = -EAGAIN;
+
 		goto fail;
 	}
 
@@ -535,21 +543,22 @@ static int __gk20a_channel_semaphore_incr(
 		container_of(s, struct gk20a_channel_semaphore, ops);
 	struct channel_gk20a *c = sp->c;
 	struct gk20a_semaphore *semaphore;
+	int err = 0;
 
 	semaphore = gk20a_semaphore_alloc(sp->pool);
 	if (!semaphore) {
 		gk20a_err(dev_from_gk20a(c->g),
 				"ran out of semaphores");
-		return -EAGAIN;
+		return -ENOMEM;
 	}
 
 	incr_cmd_size = 10;
-	gk20a_channel_alloc_priv_cmdbuf(c, incr_cmd_size, &incr_cmd);
-	if (incr_cmd == NULL) {
+	err = gk20a_channel_alloc_priv_cmdbuf(c, incr_cmd_size, &incr_cmd);
+	if (err) {
 		gk20a_err(dev_from_gk20a(c->g),
 				"not enough priv cmd buffer space");
 		gk20a_semaphore_put(semaphore);
-		return -EAGAIN;
+		return err;
 	}
 
 	/* Release the completion semaphore. */
