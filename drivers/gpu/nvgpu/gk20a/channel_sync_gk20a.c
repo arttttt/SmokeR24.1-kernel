@@ -504,7 +504,7 @@ static int gk20a_channel_semaphore_wait_fd(
 	   semaphore while the job is in flight. */
 	*fence = gk20a_fence_from_semaphore(sema->timeline, w->sema,
 					    &c->semaphore_wq,
-					    NULL, false);
+					    NULL, false, false);
 	*entry = wait_cmd;
 	return 0;
 fail:
@@ -559,7 +559,8 @@ static int __gk20a_channel_semaphore_incr(
 
 	*fence = gk20a_fence_from_semaphore(sp->timeline, semaphore,
 					    &c->semaphore_wq,
-					    dependency, wfi_cmd);
+					    dependency, wfi_cmd,
+						need_sync_fence);
 	*entry = incr_cmd;
 	return 0;
 }
