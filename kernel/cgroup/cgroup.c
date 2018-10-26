@@ -5014,10 +5014,8 @@ static struct cgroup *cgroup_create(struct cgroup *parent)
 	}
 
 	ret = cgroup_bpf_inherit(cgrp);
-	if (ret) {
-		cgroup_idr_remove(&root->cgroup_idr, cgrp->id);
-		goto out_cancel_ref;
-	}
+	if (ret)
+		goto out_psi_free;
 
 	for (tcgrp = cgrp; tcgrp; tcgrp = cgroup_parent(tcgrp)) {
 		cgrp->ancestor_ids[tcgrp->level] = tcgrp->id;
@@ -5056,6 +5054,9 @@ static struct cgroup *cgroup_create(struct cgroup *parent)
 
 	return cgrp;
 
+out_psi_free:
+	if (cgroup_on_dfl(cgrp))
+		psi_cgroup_free(cgrp);
 out_idr_free:
 	cgroup_idr_remove(&root->cgroup_idr, cgrp->id);
 out_cancel_ref:
