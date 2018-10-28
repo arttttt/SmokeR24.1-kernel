@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -28,20 +28,26 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 
-#include "t124/t124.h"
 #include <media/ad5823.h>
 #include <media/camera.h>
+
+#include "t124/t124.h"
+#include "camera_platform.h"
+#include "tegra_camera_dev_mfi.h"
 
 #define AD5823_ACTUATOR_RANGE	1023
 #define AD5823_POS_LOW_DEFAULT	(0)
 #define AD5823_POS_HIGH_DEFAULT	(1023)
-#define AD5823_FOCUS_MACRO	(640)
-#define AD5823_FOCUS_INFINITY	(140)
+#define AD5823_FOCUS_MACRO	(568)
+#define AD5823_FOCUS_INFINITY	(146)
 
 #define SETTLETIME_MS	(15)
-#define FOCAL_LENGTH	(0x4060A3D7)
-#define FNUMBER	(0x40000000)
-#define	AD5823_MOVE_TIME_VALUE	(0x5F)
+/* define FOCAL_LENGTH/MAX_APERTURE/FNUMBER as integer with granularity of 10000
+   instead of previous float type -- bug 1519258 */
+#define FOCAL_LENGTH	(29500)
+#define MAX_APERTURE	(25261)	/* in APEX unit = 2 * log2(fnumber) */
+#define FNUMBER		(24000)
+#define	AD5823_MOVE_TIME_VALUE	(0x43)
 
 #define AD5823_MAX_RETRIES (3)
 
@@ -52,13 +58,14 @@ struct ad5823_info {
 	struct ad5823_platform_data *pdata;
 	struct miscdevice miscdev;
 	struct regmap *regmap;
-	struct camera_sync_dev *csync_dev;
+	struct camera_mfi_dev *cmfi_dev;
+	u32 active_features;
+	u32 supported_features;
 };
 
 static int ad5823_set_position(struct ad5823_info *info, u32 position)
 {
 	int ret = 0;
-
 	if (position < info->config.pos_actual_low ||
 		position > info->config.pos_actual_high) {
 		dev_err(&info->i2c_client->dev,
@@ -71,15 +78,29 @@ static int ad5823_set_position(struct ad5823_info *info, u32 position)
 			position = info->config.pos_actual_high;
 	}
 
-	ret |= regmap_write(info->regmap, AD5823_VCM_MOVE_TIME,
+	if (info->active_features|CAMDEV_USE_MFI) {
+		ret = tegra_camera_dev_mfi_clear(info->cmfi_dev);
+		ret |= tegra_camera_dev_mfi_wr_add(info->cmfi_dev,
+				AD5823_VCM_MOVE_TIME,
 				AD5823_MOVE_TIME_VALUE);
-	ret |= regmap_write(info->regmap, AD5823_MODE, 0);
-	ret |= regmap_write(info->regmap, AD5823_VCM_CODE_MSB,
-		((position >> 8) & 0x3) | (1 << 2));
-	ret |= regmap_write(info->regmap, AD5823_VCM_CODE_LSB,
-		position & 0xFF);
-
-        pr_err("Focuser position: %d\n", position);
+		ret |= tegra_camera_dev_mfi_wr_add(info->cmfi_dev,
+				AD5823_MODE,
+				0);
+		ret |= tegra_camera_dev_mfi_wr_add(info->cmfi_dev,
+				AD5823_VCM_CODE_MSB,
+				((position >> 8) & 0x3) | (1 << 2));
+		ret |= tegra_camera_dev_mfi_wr_add(info->cmfi_dev,
+				AD5823_VCM_CODE_LSB,
+				position & 0xFF);
+	} else {
+		ret |= regmap_write(info->regmap, AD5823_VCM_MOVE_TIME,
+					AD5823_MOVE_TIME_VALUE);
+		ret |= regmap_write(info->regmap, AD5823_MODE, 0);
+		ret |= regmap_write(info->regmap, AD5823_VCM_CODE_MSB,
+			((position >> 8) & 0x3) | (1 << 2));
+		ret |= regmap_write(info->regmap, AD5823_VCM_CODE_LSB,
+			position & 0xFF);
+	}
 
 	return ret;
 }
@@ -104,6 +125,21 @@ static long ad5823_ioctl(struct file *file,
 
 		break;
 	}
+	case _IOC_NR(AD5823_IOCTL_SET_FEATURES):
+		info->active_features = arg;
+		break;
+
+	case _IOC_NR(AD5823_IOCTL_GET_FEATURES):
+		if (copy_to_user((void __user *) arg,
+				 &info->supported_features,
+				 sizeof(info->supported_features))) {
+			dev_err(&info->i2c_client->dev, "%s: 0x%x\n",
+				__func__, __LINE__);
+			return -EFAULT;
+		}
+
+		break;
+
 	case _IOC_NR(AD5823_IOCTL_SET_POSITION):
 		if (info->pdata->pwr_dev == AD5823_PWR_DEV_OFF
 				&& info->pdata->power_on) {
@@ -173,7 +209,7 @@ static int ad5823_open(struct inode *inode, struct file *file)
 	return err;
 }
 
-int ad5823_release(struct inode *inode, struct file *file)
+static int ad5823_release(struct inode *inode, struct file *file)
 {
 	struct ad5823_info *info = file->private_data;
 
@@ -244,6 +280,7 @@ static struct ad5823_platform_data *ad5823_parse_dt(struct i2c_client *client)
 		dev_err(&client->dev, "Invalid af-pwdn-gpios\n");
 		return ERR_PTR(-EINVAL);
 	}
+	pdata->support_mfi = of_property_read_bool(np, "support_mfi");
 	pdata->power_on = ad5823_power_on;
 	pdata->power_off = ad5823_power_off;
 
@@ -261,7 +298,7 @@ static int ad5823_probe(struct i2c_client *client,
 	};
 
 
-	pr_err("[AD5823]: probing sensor.\n");
+	dev_dbg(&client->dev, "ad5823: probing sensor.\n");
 
 	info = devm_kzalloc(&client->dev, sizeof(*info), GFP_KERNEL);
 	if (!info) {
@@ -318,12 +355,21 @@ static int ad5823_probe(struct i2c_client *client,
 		goto ERROR_RET;
 	}
 
+	err = tegra_camera_dev_mfi_add_regmap(&info->cmfi_dev,
+						"ad5823", info->regmap);
+	if (err < 0) {
+		dev_err(&client->dev,
+			"%s unable to add to mfi regmap\n",
+			__func__);
+		goto ERROR_RET;
+	}
+
 	if (info->regulator)
 		regulator_disable(info->regulator);
 
 	info->config.focal_length = FOCAL_LENGTH;
 	info->config.fnumber = FNUMBER;
-	info->config.max_aperture = FNUMBER;
+	info->config.max_aperture = MAX_APERTURE;
 	info->config.range_ends_reversed = 0;
 
 	info->config.pos_working_low = AD5823_FOCUS_INFINITY;
@@ -339,8 +385,12 @@ static int ad5823_probe(struct i2c_client *client,
 
 	info->miscdev   = ad5823_device;
 
+	info->active_features = 0;
+	info->supported_features = 0;
+	info->supported_features |=
+		(info->pdata->support_mfi) ? CAMDEV_USE_MFI : 0;
+
 	i2c_set_clientdata(client, info);
-	pr_err("[AD5823]: end of probing sensor.\n");
 
 	return 0;
 

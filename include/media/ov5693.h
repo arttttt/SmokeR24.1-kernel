@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2013-2015, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -41,14 +41,45 @@
 						struct ov5693_cal_data)
 #define OV5693_IOCTL_GET_EEPROM_DATA        _IOR('o', 20, __u8 *)
 #define OV5693_IOCTL_SET_EEPROM_DATA        _IOW('o', 21, __u8 *)
+#define OV5693_IOCTL_GET_CAPS               _IOR('o', 22, struct nvc_imager_cap)
+#define OV5693_IOCTL_SET_POWER              _IOW('o', 23, __u32)
 
 #define OV5693_INVALID_COARSE_TIME  -1
 
-#define OV5693_EEPROM_ADDRESS	0x50
-#define OV5693_EEPROM_SIZE	1024
+#define OV5693_EEPROM_ADDRESS		0x50
+#define OV5693_EEPROM_SIZE		1024
+#define OV5693_EEPROM_STR_SIZE		(OV5693_EEPROM_SIZE * 2)
 #define OV5693_EEPROM_BLOCK_SIZE	(1 << 8)
 #define OV5693_EEPROM_NUM_BLOCKS \
 	(OV5693_EEPROM_SIZE / OV5693_EEPROM_BLOCK_SIZE)
+
+#define OV5693_OTP_LOAD_CTRL_ADDR	0x3D81
+#define OV5693_OTP_BANK_SELECT_ADDR	0x3D84
+#define OV5693_OTP_BANK_START_ADDR	0x3D00
+#define OV5693_OTP_BANK_END_ADDR	0x3D0F
+#define OV5693_OTP_NUM_BANKS		(32)
+#define OV5693_OTP_BANK_SIZE \
+	 (OV5693_OTP_BANK_END_ADDR - OV5693_OTP_BANK_START_ADDR + 1)
+#define OV5693_OTP_SIZE \
+	 (OV5693_OTP_BANK_SIZE * OV5693_OTP_NUM_BANKS)
+#define OV5693_OTP_STR_SIZE (OV5693_OTP_SIZE * 2)
+
+#define OV5693_FUSE_ID_OTP_START_ADDR	0x3D00
+#define OV5693_FUSE_ID_OTP_BANK	0
+#define OV5693_FUSE_ID_SIZE		8
+#define OV5693_FUSE_ID_STR_SIZE	(OV5693_FUSE_ID_SIZE * 2)
+
+#define OV5693_FRAME_LENGTH_ADDR_MSB		0x380E
+#define OV5693_FRAME_LENGTH_ADDR_LSB		0x380F
+#define OV5693_COARSE_TIME_ADDR_1		0x3500
+#define OV5693_COARSE_TIME_ADDR_2		0x3501
+#define OV5693_COARSE_TIME_ADDR_3		0x3502
+#define OV5693_COARSE_TIME_SHORT_ADDR_1	0x3506
+#define OV5693_COARSE_TIME_SHORT_ADDR_2	0x3507
+#define OV5693_COARSE_TIME_SHORT_ADDR_3	0x3508
+#define OV5693_GAIN_ADDR_MSB			0x350A
+#define OV5693_GAIN_ADDR_LSB			0x350B
+#define OV5693_GROUP_HOLD_ADDR			0x3208
 
 struct ov5693_mode {
 	int res_x;
@@ -98,6 +129,7 @@ struct ov5693_cal_data {
 /* See notes in the nvc.h file on the GPIO usage */
 enum ov5693_gpio_type {
 	OV5693_GPIO_TYPE_PWRDN = 0,
+	OV5693_GPIO_TYPE_RESET,
 };
 
 struct ov5693_eeprom_data {
@@ -113,22 +145,28 @@ struct ov5693_power_rail {
 	struct regulator *dovdd;
 };
 
+struct ov5693_regulators {
+	const char *avdd;
+	const char *dvdd;
+	const char *dovdd;
+};
+
 struct ov5693_platform_data {
 	unsigned cfg;
 	unsigned num;
 	const char *dev_name;
 	unsigned gpio_count; /* see nvc.h GPIO notes */
 	struct nvc_gpio_pdata *gpio; /* see nvc.h GPIO notes */
-	unsigned lens_focal_length; /* / _INT2FLOAT_DIVISOR */
-	unsigned lens_max_aperture; /* / _INT2FLOAT_DIVISOR */
-	unsigned lens_fnumber; /* / _INT2FLOAT_DIVISOR */
-	unsigned lens_view_angle_h; /* / _INT2FLOAT_DIVISOR */
-	unsigned lens_view_angle_v; /* / _INT2FLOAT_DIVISOR */
+	struct nvc_imager_static_nvc *static_info;
 	bool use_vcm_vdd;
 	int (*probe_clock)(unsigned long);
 	int (*power_on)(struct ov5693_power_rail *);
 	int (*power_off)(struct ov5693_power_rail *);
 	const char *mclk_name;
+	struct nvc_imager_cap *cap;
+	struct ov5693_regulators regulators;
+	bool has_eeprom;
+	bool use_cam_gpio;
 };
 
 #endif  /* __OV5693_H__ */
