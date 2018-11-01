@@ -78,9 +78,8 @@ static int fb_notifier_callback(struct notifier_block *nb,
 		 */
 		if (delayed_work_pending(&sleep_sched))
 			cancel_delayed_work_sync(&sleep_sched);
-		queue_delayed_work(system_power_efficient_wq,
- 			&restore_prev,
-			msecs_to_jiffies(RESTORE_DELAY_MS));
+		schedule_delayed_work(&restore_prev,
+				msecs_to_jiffies(RESTORE_DELAY_MS));
 		break;
 	default:
 		/*
@@ -90,7 +89,7 @@ static int fb_notifier_callback(struct notifier_block *nb,
 		 */
 		if (delayed_work_pending(&restore_prev))
 			cancel_delayed_work_sync(&restore_prev);
-		queue_delayed_work(system_power_efficient_wq, &sleep_sched,
+		schedule_delayed_work(&sleep_sched,
 				msecs_to_jiffies(RESTORE_DELAY_MS));
 	}
 
