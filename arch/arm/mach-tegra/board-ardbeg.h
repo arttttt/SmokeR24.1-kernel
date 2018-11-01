@@ -27,6 +27,7 @@ int ardbeg_emc_init(void);
 int ardbeg_display_init(void);
 int ardbeg_panel_init(void);
 int ardbeg_sensors_init(void);
+int ardbeg_suspend_init(void);
 int ardbeg_edp_init(void);
 void shield_sysedp_dynamic_capping_init(void);
 void ardbeg_camera_auxdata(void *);
