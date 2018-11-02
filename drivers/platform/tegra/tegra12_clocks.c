@@ -5668,6 +5668,11 @@ static long tegra12_clk_cbus_round_updown(struct clk *c, unsigned long rate,
 			}
 		}
 		BUG_ON(!c->min_rate);
+
+		if (c->stats.histogram) {
+			c->stats.histogram->rates_num = c->dvfs->num_freqs;
+			tegra_shared_bus_stats_allocate(c, c->stats.histogram);
+		}
 	}
 	rate = max(rate, c->min_rate);
 
@@ -5679,6 +5684,10 @@ static long tegra12_clk_cbus_round_updown(struct clk *c, unsigned long rate,
 			break;
 		}
 	}
+
+	if (c->stats.histogram)
+		c->stats.histogram->new_rate_idx = i;
+
 	return c->dvfs->freqs[i];
 }
 
@@ -6014,6 +6023,11 @@ static unsigned long tegra12_clk_shared_bus_update(struct clk *bus,
 	u32 usage_flags = 0;
 	bool rate_set = false;
 
+	struct clk *crit_cap = NULL;
+	struct clk *crit_cap_but_iso = NULL;
+	struct clk *crit_floor = NULL;
+	struct clk *override_clk = NULL;
+
 	list_for_each_entry(c, &bus->shared_bus_list,
 			u.shared_bus_user.node) {
 		bool cap_user = (c->u.shared_bus_user.mode == SHARED_CEILING) ||
@@ -6046,21 +6060,33 @@ static unsigned long tegra12_clk_shared_bus_update(struct clk *bus,
 					bw = bus->max_rate;
 				break;
 			case SHARED_CEILING_BUT_ISO:
-				ceiling_but_iso =
-					min(request_rate, ceiling_but_iso);
+				if (ceiling_but_iso > request_rate) {
+					ceiling_but_iso = request_rate;
+					crit_cap_but_iso = c;
+				}
 				break;
 			case SHARED_CEILING:
-				ceiling = min(request_rate, ceiling);
+				if (ceiling > request_rate) {
+					ceiling = request_rate;
+					crit_cap = c;
+				}
 				break;
 			case SHARED_OVERRIDE:
-				if (override_rate == 0)
+				if (override_rate == 0) {
 					override_rate = request_rate;
+					override_clk = c;
+				}
 				break;
 			case SHARED_AUTO:
 				break;
 			case SHARED_FLOOR:
 			default:
-				rate = max(request_rate, rate);
+				if (rate <= request_rate) {
+					if (!(c->flags & BUS_RATE_LIMIT) ||
+					    (rate < request_rate))
+						crit_floor = c;
+					rate = request_rate;
+				}
 				if (c->u.shared_bus_user.client
 							&& request_rate) {
 					if (top_rate < request_rate) {
@@ -6087,10 +6113,39 @@ static unsigned long tegra12_clk_shared_bus_update(struct clk *bus,
 		ceiling_but_iso = max(ceiling_but_iso, iso_bw_min);
 	}
 
-	rate = override_rate ? : max(rate, bw);
-	ceiling = min(ceiling, ceiling_but_iso);
-	ceiling = override_rate ? bus->max_rate : ceiling;
+	if (rate < bw) {
+		rate = bw;
+		crit_floor = NULL;
+	}
+
+	rate = override_rate ? : rate;
+
+ 	if (ceiling > ceiling_but_iso) {
+		ceiling = ceiling_but_iso;
+		crit_cap = crit_cap_but_iso;
+	}
+
+ 	if (override_rate) {
+		ceiling = bus->max_rate;
+		crit_cap = NULL;
+		crit_floor = override_clk;
+	}
+
 	bus->override_rate = override_rate;
+
+	if (bus->stats.histogram) {
+		struct bus_stats *stats = bus->stats.histogram;
+
+ 		if (!rate_set) {
+			crit_cap = NULL;
+			crit_floor = NULL;
+		}
+
+		stats->new_cap_idx = !crit_cap ? stats->users_num :
+			crit_cap->u.shared_bus_user.stats_idx;
+		stats->new_floor_idx = !crit_floor ? stats->users_num :
+			crit_floor->u.shared_bus_user.stats_idx;
+	}
 
 	if (bus_top && bus_slow && rate_cap) {
 		/* If dynamic bus dvfs table, let the caller to complete
@@ -6115,13 +6170,29 @@ static unsigned long tegra12_clk_shared_bus_update(struct clk *bus,
 static unsigned long tegra12_clk_cap_shared_bus(struct clk *bus,
 	unsigned long rate, unsigned long ceiling)
 {
+	bool capped;
+	struct bus_stats *stats = bus->stats.histogram;
+
 	if (bus->ops && bus->ops->round_rate_updown)
 		ceiling = bus->ops->round_rate_updown(bus, ceiling, false);
 
-	rate = min(rate, ceiling);
+	capped = rate > ceiling;
+
+	if (capped) {
+		rate = ceiling;
+
+		if (stats)
+			tegra_shared_bus_stats_update(stats,
+				stats->new_cap_idx, stats->new_rate_idx);
+	}
 
 	if (bus->ops && bus->ops->round_rate)
 		rate = bus->ops->round_rate(bus, rate);
+
+	if (!capped && stats) {
+		tegra_shared_bus_stats_update(stats,
+			stats->new_floor_idx, stats->new_rate_idx);
+	}
 
 	return rate;
 }
@@ -6148,6 +6219,13 @@ static void tegra_clk_shared_bus_user_init(struct clk *c)
 	    (c->u.shared_bus_user.mode == SHARED_CEILING_BUT_ISO)) {
 		c->state = ON;
 		c->refcnt++;
+	}
+
+	if (c->parent->stats.histogram) {
+		int i = c->parent->stats.histogram->users_num++;
+		c->u.shared_bus_user.stats_idx = i;
+		if (i < STATS_USERS_LIST_SIZE)
+			c->parent->stats.histogram->users_list[i] = c;
 	}
 
 	if (c->u.shared_bus_user.client_id) {
@@ -8036,6 +8114,7 @@ static struct clk_ops tegra_clk_gbus_ops = {
 
 static struct raw_notifier_head gbus_rate_change_nh;
 static wait_queue_head_t gbus_poll_rate;
+struct bus_stats gpu_histogram;
 
 static struct clk tegra_clk_gbus = {
 	.name      = "gbus",
@@ -8043,6 +8122,9 @@ static struct clk tegra_clk_gbus = {
 	.parent    = &tegra_clk_gpu,
 	.max_rate  = 1032000000,
 	.shared_bus_flags = SHARED_BUS_RETENTION,
+	.stats = {
+		.histogram = &gpu_histogram,
+	},
 	.rate_change_nh = &gbus_rate_change_nh,
 	.debug_poll_qh  = &gbus_poll_rate,
 };
@@ -8478,6 +8560,7 @@ struct clk tegra_list_clks[] = {
 	SHARED_CLK("gk20a.gbus",   "tegra_gk20a.0",	"gpu",	&tegra_clk_gbus, NULL,  0, 0),
 	SHARED_LIMIT("cap.gbus",	"cap.gbus",	NULL,	&tegra_clk_gbus, NULL,  0, SHARED_CEILING),
 	SHARED_LIMIT("edp.gbus",	"edp.gbus",	NULL,	&tegra_clk_gbus, NULL,  0, SHARED_CEILING),
+	SHARED_LIMIT("cap.vgpu.gbus",	"cap.vgpu.gbus",	NULL,	&tegra_clk_gbus, NULL,  0, SHARED_CEILING),
 	SHARED_LIMIT("battery.gbus",	"battery_edp",	"gpu",	&tegra_clk_gbus, NULL,  0, SHARED_CEILING),
 	SHARED_LIMIT("cap.throttle.gbus", "cap_throttle", NULL,	&tegra_clk_gbus, NULL,  0, SHARED_CEILING),
 	SHARED_LIMIT("cap.profile.gbus", "profile.gbus", "cap",	&tegra_clk_gbus, NULL,  0, SHARED_CEILING),

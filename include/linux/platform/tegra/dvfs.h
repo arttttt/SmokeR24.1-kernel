@@ -331,7 +331,6 @@ void tegra11x_init_dvfs(void);
 void tegra12x_init_dvfs(void);
 void tegra13x_init_dvfs(void);
 void tegra21x_init_dvfs(void);
-void tegra12x_vdd_cpu_align(int step_uv, int offset_uv);
 void tegra13x_vdd_cpu_align(int step_uv, int offset_uv);
 void tegra_init_dvfs_one(struct dvfs *d, int max_freq_index);
 int dvfs_debugfs_init(struct dentry *clk_debugfs_root);

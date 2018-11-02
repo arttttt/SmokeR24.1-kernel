@@ -1,0 +1,103 @@
+/*
+ * arch/arm64/boot/dts/tegra210-platforms/tegra210-thermal-Tboard-Tdiode.dtsi
+ *
+ * Copyright (c) 2014 - 2016, NVIDIA CORPORATION. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include <dt-bindings/thermal/thermal.h>
+
+/ {
+	dummy_cool_dev: dummy-cool-dev {
+			compatible = "dummy-cooling-dev";
+			#cooling-cells = <2>; /* min followed by max */
+	};
+
+	thermal-zones {
+		Tboard_tegra {
+			status = "okay";
+			polling-delay = <0>;
+			polling-delay-passive = <0>;
+			thermal-sensors = <&tegra_nct72 0>;
+
+			thermal-zone-params {
+				governor-name = "pid_thermal_gov";
+			};
+
+			trips {
+				therm_est_trip: therm_est_trip {
+					temperature = <40000>;
+					type = "active";
+					hysteresis = <1000>;
+					writable;
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&therm_est_trip>;
+					cooling-device = <&dummy_cool_dev 1 1>;
+					contribution = <100>;
+					cdev-type = "therm_est_activ";
+				};
+			};
+		};
+
+		Tdiode_tegra {
+			status = "okay";
+			polling-delay = <0>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&tegra_nct72 1>;
+
+			thermal-zone-params {
+				governor-name = "pid_thermal_gov";
+			};
+
+			tdiode_shutdown_warn_cool_dev: shutdown-warn-cool-dev {
+				#cooling-cells = <2>; /* min followed by max */
+			};
+
+			trips {
+				tdiode_shutdown_warn: shutdown-warn-throttle {
+					temperature = <93000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+
+				cpu_throttle {
+					temperature = <83000>;
+					hysteresis = <0>;
+					type = "passive";
+					writable;
+				};
+			};
+
+			cooling-maps {
+				map-shutdown-warn {
+					trip = <&tdiode_shutdown_warn>;
+					cdev-type = "shutdown_warning";
+					cooling-device = <&tdiode_shutdown_warn_cool_dev
+							THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+
+				map0 {
+					trip = <&{/thermal-zones/Tdiode_tegra/trips/cpu_throttle}>;
+					cdev-type = "cpu-balanced";
+					cooling-device = <&{/bthrot_cdev/cpu_balanced}
+						THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+	};
+};

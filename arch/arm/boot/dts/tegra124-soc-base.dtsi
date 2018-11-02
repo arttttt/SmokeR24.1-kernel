@@ -1021,8 +1021,10 @@
 	};
 
 	psci {
-		compatible = "arm,psci-0.2";
+		compatible = "arm,psci";
 		method = "smc";
+		cpu_suspend = <0x84000001>;
+		cpu_on = <0x84000003>;
 		status = "disabled";
 	};
 
@@ -1140,7 +1142,7 @@
 		status = "disabled";
 	};
 
-	gpu_edp {
+	gpu_edp: gpu_edp {
 		compatible = "nvidia,tegra124-gpu-edp-capping";
 		status = "disabled";
 		nvidia,freq_step = <12000000>;
@@ -1166,7 +1168,7 @@
 			(    12192546) (  -10880741) (   2632212) (  -161404)
 			(    -5328587) (    4953756) (  -1215038) (    64556)
 			>;
-
+		#cooling-cells = <2>;
 	};
 
 	intc: interrupt-controller@50041000 {
@@ -1399,7 +1401,7 @@
 		interrupts = <0 123 0x4>; /* or, alternatively, use-wdt-irq; */
 	};
 
-	cpu_edp {
+	cpu_edp: cpu_edp {
 		compatible = "nvidia,tegra124-cpu-edp-capping";
 		status = "disabled";
 		nvidia,freq_step = <12750000>;
@@ -1425,7 +1427,7 @@
 			  (  177626357) ( -185996541) (  43029384) ( -2638283)
 			  (  -58587547) (   61075322) ( -14145853) (   865351)
 			>;
-
+		#cooling-cells = <2>;
 	};
 
 };

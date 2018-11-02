@@ -27,6 +27,7 @@ int ardbeg_emc_init(void);
 int ardbeg_display_init(void);
 int ardbeg_panel_init(void);
 int ardbeg_sensors_init(void);
+int ardbeg_suspend_init(void);
 int ardbeg_edp_init(void);
 void shield_sysedp_dynamic_capping_init(void);
 void ardbeg_camera_auxdata(void *);
@@ -55,7 +56,6 @@ void ardbeg_camera_auxdata(void *);
 #define CAM_RSTN TEGRA_GPIO_PBB3
 #define CAM_FLASH_STROBE TEGRA_GPIO_PBB4
 #define CAM2_PWDN TEGRA_GPIO_PBB6
-#define CAM2_RSTN TEGRA_GPIO_PCC1
 #define CAM1_PWDN TEGRA_GPIO_PBB5
 #define CAM_AF_PWDN TEGRA_GPIO_PBB7
 #define CAM_BOARD_E1806

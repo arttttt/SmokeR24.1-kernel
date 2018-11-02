@@ -31,6 +31,10 @@
 #include "tegra124-platforms/tegra124-mocha-wireless.dtsi"
 #include "tegra124-platforms/tegra124-mocha-dfll.dtsi"
 #include "tegra124-platforms/tegra124-mocha-thermal.dtsi"
+#include "tegra124-platforms/tegra124-mocha-dvfs.dtsi"
+#include "tegra124-platforms/tegra124-mocha-edp.dtsi"
+#include "tegra124-platforms/tegra124-mocha-nct72.dtsi"
+#include "tegra124-platforms/tegra124-mocha-Tboard-Tdiode.dtsi"
 #include "panel-s-wqxga-7-9-x6.dtsi"
 
 / {
@@ -105,27 +109,19 @@
 			compatible = "synaptics,dsx-i2c";
 			status = "okay";
 			reg = <0x20>;
-
-			synaptics,x-flip = <0>;
-			synaptics,y-flip = <0>;
-			synaptics,swap-axes = <0>;
-			synaptics,irq-gpio = <&gpio 143 0>;
+			
+			interrupt-parent = <&gpio>;
+			interrupts = <143 0x2008>;
+			synaptics,irq-gpio = <&gpio 143 0x2008>;
+			synaptics,reset-gpio = <&gpio 84 0x2008>;
 			synaptics,irq-on-state = <0>;
 			synaptics,power-on-state = <1>;
-			synaptics,reset-gpio = <&gpio 84 0>;
 			synaptics,reset-on-state = <0>;
-			synaptics,irq-flags = <0x2008>;
-			synaptics,fw-name = "synaptics_7040_firmware.fw";
-			synaptics,self-test-name = "synaptics_7040_test_data.fw";
-			synaptics,panel-x = <1536>;
-			synaptics,panel-y = <2048>;
 			synaptics,power-delay-ms = <160>;
 			synaptics,reset-delay-ms = <100>;
 			synaptics,reset-active-ms = <20>;
-			synaptics,byte-delay-us = <30>;
-			synaptics,block-delay-us = <30>;
-			synaptics,regulator-name = "vdd-touch";
-			synaptics,cap-button-map = <139 102 158 116>;
+			synaptics,pwr-reg-name = "vdd-touch";
+			synaptics,cap-button-codes = <139 102 158>;
 		};
 
 		atmel_mxt_ts@4a {
@@ -152,7 +148,7 @@
 				atmel,mxt-cfg-name = "mxt1664t_config.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1664t.fw";
-				atmel,key-codes = <158 102 139 116>;
+				atmel,key-codes = <158 102 139>;
 			};
 			atmel,cfg_2 {
 				atmel,family-id = <0xA4>;
@@ -163,7 +159,7 @@
 				atmel,mxt-cfg-name = "mxt1066t_config.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1066t.fw";
-				atmel,key-codes = <139 102 158 116>;
+				atmel,key-codes = <139 102 158>;
 			};
 		};
 	};
@@ -389,35 +385,6 @@
 
 	hdmi {
 		status = "disabled";
-	};
-
-	cpus {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		cpu@0 {
-			device_type = "cpu";
-			compatible = "arm,cortex-a15";
-			reg = <0>;
-		};
-
-		cpu@1 {
-			device_type = "cpu";
-			compatible = "arm,cortex-a15";
-			reg = <1>;
-		};
-
-		cpu@2 {
-			device_type = "cpu";
-			compatible = "arm,cortex-a15";
-			reg = <2>;
-		};
-
-		cpu@3 {
-			device_type = "cpu";
-			compatible = "arm,cortex-a15";
-			reg = <3>;
-		};
 	};
 };
 

@@ -2,8 +2,7 @@
  * Dummy Virtual Machine - does what it says on the tin.
  *
  * Copyright (C) 2012 ARM Ltd
- * Authors: Will Deacon <will.deacon@arm.com>,
- *          Marc Zyngier <marc.zyngier@arm.com>
+ * Author: Will Deacon <will.deacon@arm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -18,29 +17,34 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/irqchip.h>
-#include <linux/of_irq.h>
-#include <linux/of_platform.h>
+#include <linux/init.h>
 #include <linux/smp.h>
+#include <linux/of.h>
 
-#include <asm/mach/arch.h>
+#include <asm/psci.h>
+#include <asm/smp_plat.h>
 
-static void __init virt_init(void)
+extern void secondary_startup(void);
+
+static void __init virt_smp_init_cpus(void)
 {
-	of_platform_populate(NULL, of_default_bus_match_table, NULL, NULL);
 }
 
-static const char *virt_dt_match[] = {
-	"linux,dummy-virt",
-	"xen,xenvm",
-	NULL
+static void __init virt_smp_prepare_cpus(unsigned int max_cpus)
+{
+}
+
+static int __cpuinit virt_boot_secondary(unsigned int cpu,
+					 struct task_struct *idle)
+{
+	if (psci_ops.cpu_on)
+		return psci_ops.cpu_on(cpu_logical_map(cpu),
+				       __pa(secondary_startup));
+	return -ENODEV;
+}
+
+struct smp_operations __initdata virt_smp_ops = {
+	.smp_init_cpus		= virt_smp_init_cpus,
+	.smp_prepare_cpus	= virt_smp_prepare_cpus,
+	.smp_boot_secondary	= virt_boot_secondary,
 };
-
-extern struct smp_operations virt_smp_ops;
-
-DT_MACHINE_START(VIRT, "Dummy Virtual Machine")
-	.init_irq	= irqchip_init,
-	.init_machine	= virt_init,
-	.smp		= smp_ops(virt_smp_ops),
-	.dt_compat	= virt_dt_match,
-MACHINE_END

@@ -20,7 +20,7 @@ ERROR=0
 HEAD=1
 WARNING=2
 
-printfc() {
+function printfc() {
 	if [[ $2 == $ERROR ]]; then
 		printf "\e[1;31m$1\e[0m"
 		return
@@ -35,7 +35,7 @@ printfc() {
 	fi;
 }
 
-make_img()
+function make_img()
 {
 	if [[ -d "$KERNEL_DIR/Initramfs" ]]; then
 		printfc "\nСоздание boot.img\n\n" $HEAD
@@ -69,7 +69,7 @@ make_img()
 	cd $KERNEL_DIR
 }
 
-compile()
+function compile()
 {
 	local start=$(date +%s)
 	clear
@@ -131,7 +131,7 @@ compile()
 	make_img
 }
 
-compile_dtb()
+function compile_dtb()
 {
 	clear
 
@@ -149,7 +149,7 @@ compile_dtb()
 	make_img
 }
 
-main()
+function main()
 {
 	clear
 	echo "---------------------------------------------------"

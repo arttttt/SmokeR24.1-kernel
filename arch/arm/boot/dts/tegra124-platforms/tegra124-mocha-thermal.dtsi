@@ -21,9 +21,10 @@
 	};
 
 	therm_est_sensor {
-		status = "disabled";
-		use_activator = <0>;
+		status = "okay";
+		use_activator = <1>;
 		subdev {
+			subdev_names = "Tdiode_tegra", "Tboard_tegra";
 			coeff_set@0 {
 				toffset = <3543>;
 				coeffs = <
@@ -58,7 +59,7 @@
 					writable;
 				};
 				cpu_heavy {
-					temperature = <90000>;
+					temperature = <94000>;
 					hysteresis = <0>;
 					type = "hot";
 					writable;
@@ -115,13 +116,13 @@
 					writable;
 				};
 				gpu_heavy {
-					temperature = <86500>;
+					temperature = <91000>;
 					hysteresis = <0>;
 					type = "hot";
 					writable;
 				};
 				gpu_throttle {
-					temperature = <80000>;
+					temperature = <81000>;
 					hysteresis = <0>;
 					type = "passive";
 					writable;
@@ -206,7 +207,7 @@
 		};
 
 		therm_est {
-			status = "disabled";
+			status = "okay";
 			trips {
 				skin_trip {
 					temperature = <47000>;

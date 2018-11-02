@@ -197,7 +197,7 @@
 				smps10-out2-supply = <&palmas_smps10_out2>;
 
 				regulators {
-					smps123 {
+					vdd_cpu: smps123 {
 						regulator-name = "vdd-cpu";
 						regulator-min-microvolt = <700000>;
 						regulator-max-microvolt = <1400000>;
@@ -213,7 +213,7 @@
 						};
 					};
 
-					smps45 {
+					vdd_gpu: smps45 {
 						regulator-name = "vdd-gpu";
 						regulator-min-microvolt = <700000>;
 						regulator-max-microvolt = <1400000>;
@@ -250,7 +250,7 @@
 						};
 					};
 
-					smps7 {
+					vdd_core: smps7 {
 						regulator-name = "vdd-core";
 						regulator-min-microvolt = <700000>;
 						regulator-max-microvolt = <1400000>;

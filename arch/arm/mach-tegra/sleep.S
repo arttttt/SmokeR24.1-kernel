@@ -52,7 +52,7 @@
 #define TEGRA_FLOW_CTRL_VIRT (TEGRA_FLOW_CTRL_BASE - IO_PPSB_PHYS \
 					+ IO_PPSB_VIRT)
 
-#define TEGRA_REGISTER_LP0_IRAM_VECTOR	0x82000013
+#define TEGRA_SMC_RESTART (60 << 24)
 
 /*
  * tegra_pen_lock
@@ -320,23 +320,20 @@ ENTRY(tegra_cpu_pllp)
 	str	r0, [r5, #CLK_RESET_CCLK_DIVIDER]
 	mov	pc, lr
 ENDPROC(tegra_cpu_pllp)
+#endif
 
 /*
- * tegra_register_suspend_vectors
+ * tegra_restart_prev_smc
  *
- * r1 = IRAM MC_CLK_STOP handler address
- * r2 = IRAM CORE_STOP handler address
- *
- * registers the IRAM LP0 vector
+ * issues TEGRA_SMC_RESTART, to restart execution of the previous SMC
  */
-ENTRY(tegra_register_suspend_vectors)
+ENTRY(tegra_restart_prev_smc)
 	stmfd	sp!, { r1-r3 }
-	mov	r2, r1
-	mov	r1, r0
+	mov	r0, #TEGRA_SMC_RESTART
+	mov	r1, #0
+	mov	r2, #0
 	mov	r3, #0
-	ldr	r0, =TEGRA_REGISTER_LP0_IRAM_VECTOR
 	smc	#0
 	ldmia	sp!, { r1-r3 }
 	mov	pc, lr
-ENDPROC(tegra_register_suspend_vectors)
-#endif
+ENDPROC(tegra_restart_prev_smc)

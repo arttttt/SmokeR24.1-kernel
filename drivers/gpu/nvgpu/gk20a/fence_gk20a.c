@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -85,7 +85,7 @@ int gk20a_fence_install_fd(struct gk20a_fence *f)
 	if (!f->sync_fence)
 		return -EINVAL;
 
-	fd = get_unused_fd();
+	fd = get_unused_fd_flags(O_RDWR);
 	if (fd < 0)
 		return fd;
 
@@ -147,21 +147,26 @@ struct gk20a_fence *gk20a_fence_from_semaphore(
 		struct gk20a_semaphore *semaphore,
 		wait_queue_head_t *semaphore_wq,
 		struct sync_fence *dependency,
-		bool wfi)
+		bool wfi, bool need_sync_fence)
 {
 	struct gk20a_fence *f;
 	struct sync_fence *sync_fence = NULL;
 
 #ifdef CONFIG_SYNC
-	sync_fence = gk20a_sync_fence_create(timeline, semaphore,
-					     dependency, "fence");
-	if (!sync_fence)
-		return NULL;
+	if (need_sync_fence) {
+		sync_fence = gk20a_sync_fence_create(timeline, semaphore,
+						dependency, "f-gk20a-0x%04llx",
+						((u32)(void *)semaphore->value) &
+						0xffff);
+		if (!sync_fence)
+			return NULL;
+	}
 #endif
 
 	f  = alloc_fence(&gk20a_semaphore_fence_ops, sync_fence, wfi);
 	if (!f) {
 #ifdef CONFIG_SYNC
+	if (sync_fence)
 		sync_fence_put(sync_fence);
 #endif
 		return NULL;
@@ -217,6 +222,7 @@ struct gk20a_fence *gk20a_fence_from_syncpt(struct platform_device *host1x_pdev,
 	f = alloc_fence(&gk20a_syncpt_fence_ops, sync_fence, wfi);
 	if (!f) {
 #ifdef CONFIG_SYNC
+	if (sync_fence)
 		sync_fence_put(sync_fence);
 #endif
 		return NULL;

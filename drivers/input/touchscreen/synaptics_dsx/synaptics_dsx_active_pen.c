@@ -1,11 +1,10 @@
 /*
  * Synaptics DSX touchscreen driver
  *
- * Copyright (C) 2012 Synaptics Incorporated
+ * Copyright (C) 2012-2016 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
- * Copyright (C) 2016 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,7 +15,22 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION DOES
+ * NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES, SYNAPTICS'
+ * TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT EXCEED ONE HUNDRED U.S.
+ * DOLLARS.
  */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -51,6 +65,28 @@ struct synaptics_rmi4_f12_query_8 {
 	};
 };
 
+struct apen_data_8b_pressure {
+	union {
+		struct {
+			unsigned char status_pen:1;
+			unsigned char status_invert:1;
+			unsigned char status_barrel:1;
+			unsigned char status_reserved:5;
+			unsigned char x_lsb;
+			unsigned char x_msb;
+			unsigned char y_lsb;
+			unsigned char y_msb;
+			unsigned char pressure_msb;
+			unsigned char battery_state;
+			unsigned char pen_id_0_7;
+			unsigned char pen_id_8_15;
+			unsigned char pen_id_16_23;
+			unsigned char pen_id_24_31;
+		} __packed;
+		unsigned char data[11];
+	};
+};
+
 struct apen_data {
 	union {
 		struct {
@@ -64,20 +100,27 @@ struct apen_data {
 			unsigned char y_msb;
 			unsigned char pressure_lsb;
 			unsigned char pressure_msb;
+			unsigned char battery_state;
+			unsigned char pen_id_0_7;
+			unsigned char pen_id_8_15;
+			unsigned char pen_id_16_23;
+			unsigned char pen_id_24_31;
 		} __packed;
-		unsigned char data[7];
+		unsigned char data[12];
 	};
 };
 
 struct synaptics_rmi4_apen_handle {
 	bool apen_present;
 	unsigned char intr_mask;
+	unsigned char battery_state;
 	unsigned short query_base_addr;
 	unsigned short control_base_addr;
 	unsigned short data_base_addr;
 	unsigned short command_base_addr;
 	unsigned short apen_data_addr;
 	unsigned short max_pressure;
+	unsigned int pen_id;
 	struct input_dev *apen_dev;
 	struct apen_data *apen_data;
 	struct synaptics_rmi4_data *rmi4_data;
@@ -94,8 +137,6 @@ static void apen_lift(void)
 	input_report_key(apen->apen_dev, BTN_TOOL_RUBBER, 0);
 	input_sync(apen->apen_dev);
 	apen->apen_present = false;
-
-	return;
 }
 
 static void apen_report(void)
@@ -105,6 +146,7 @@ static void apen_report(void)
 	int y;
 	int pressure;
 	static int invert = -1;
+	struct apen_data_8b_pressure *apen_data_8b;
 	struct synaptics_rmi4_data *rmi4_data = apen->rmi4_data;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
@@ -119,10 +161,8 @@ static void apen_report(void)
 	}
 
 	if (apen->apen_data->status_pen == 0) {
-		if (apen->apen_present) {
+		if (apen->apen_present)
 			apen_lift();
-			invert = -1;
-		}
 
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: No active pen data\n",
@@ -135,11 +175,18 @@ static void apen_report(void)
 	y = (apen->apen_data->y_msb << 8) | (apen->apen_data->y_lsb);
 
 	if ((x == -1) && (y == -1)) {
+		if (apen->apen_present)
+			apen_lift();
+
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: Active pen in range but no valid x & y\n",
 				__func__);
+
 		return;
 	}
+
+	if (!apen->apen_present)
+		invert = -1;
 
 	if (invert != -1 && invert != apen->apen_data->status_invert)
 		apen_lift();
@@ -149,8 +196,19 @@ static void apen_report(void)
 	if (apen->max_pressure == ACTIVE_PEN_MAX_PRESSURE_16BIT) {
 		pressure = (apen->apen_data->pressure_msb << 8) |
 				apen->apen_data->pressure_lsb;
+		apen->battery_state = apen->apen_data->battery_state;
+		apen->pen_id = (apen->apen_data->pen_id_24_31 << 24) |
+				(apen->apen_data->pen_id_16_23 << 16) |
+				(apen->apen_data->pen_id_8_15 << 8) |
+				apen->apen_data->pen_id_0_7;
 	} else {
-		pressure = apen->apen_data->pressure_lsb;
+		apen_data_8b = (struct apen_data_8b_pressure *)apen->apen_data;
+		pressure = apen_data_8b->pressure_msb;
+		apen->battery_state = apen_data_8b->battery_state;
+		apen->pen_id = (apen_data_8b->pen_id_24_31 << 24) |
+				(apen_data_8b->pen_id_16_23 << 16) |
+				(apen_data_8b->pen_id_8_15 << 8) |
+				apen_data_8b->pen_id_0_7;
 	}
 
 	input_report_key(apen->apen_dev, BTN_TOUCH, pressure > 0 ? 1 : 0);
@@ -167,13 +225,7 @@ static void apen_report(void)
 	input_sync(apen->apen_dev);
 
 	dev_dbg(rmi4_data->pdev->dev.parent,
-			"%s: Active pen:\n"
-			"status = %d\n"
-			"invert = %d\n"
-			"barrel = %d\n"
-			"x = %d\n"
-			"y = %d\n"
-			"pressure = %d\n",
+			"%s: Active pen: status = %d, invert = %d, barrel = %d, x = %d, y = %d, pressure = %d\n",
 			__func__,
 			apen->apen_data->status_pen,
 			apen->apen_data->status_invert,
@@ -181,8 +233,6 @@ static void apen_report(void)
 			x, y, pressure);
 
 	apen->apen_present = true;
-
-	return;
 }
 
 static void apen_set_params(void)
@@ -261,7 +311,7 @@ static int apen_reg_init(void)
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			apen->query_base_addr + 8,
 			query_8.data,
-			size_of_query8);
+			sizeof(query_8.data));
 	if (retval < 0)
 		return retval;
 
@@ -318,12 +368,12 @@ static int apen_scan_pdt(void)
 				switch (fd.fn_number) {
 				case SYNAPTICS_RMI4_F12:
 					goto f12_found;
-					break;
 				}
-			} else
+			} else {
 				break;
+			}
 
-			intr_count += (fd.intr_src_count & MASK_3BIT);
+			intr_count += fd.intr_src_count;
 		}
 	}
 
@@ -350,8 +400,7 @@ f12_found:
 	intr_src = fd.intr_src_count;
 	intr_off = intr_count % 8;
 	for (ii = intr_off;
-			ii < ((intr_src & MASK_3BIT) +
-			intr_off);
+			ii < (intr_src + intr_off);
 			ii++) {
 		apen->intr_mask |= 1 << ii;
 	}
@@ -390,6 +439,13 @@ static int synaptics_rmi4_apen_init(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
 
+	if (apen) {
+		dev_dbg(rmi4_data->pdev->dev.parent,
+				"%s: Handle already exists\n",
+				__func__);
+		return 0;
+	}
+
 	apen = kzalloc(sizeof(*apen), GFP_KERNEL);
 	if (!apen) {
 		dev_err(rmi4_data->pdev->dev.parent,
@@ -423,7 +479,7 @@ static int synaptics_rmi4_apen_init(struct synaptics_rmi4_data *rmi4_data)
 		goto exit_free_apen_data;
 	}
 
-	apen->apen_dev->name = PLATFORM_DRIVER_NAME;
+	apen->apen_dev->name = ACTIVE_PEN_DRIVER_NAME;
 	apen->apen_dev->phys = APEN_PHYS_NAME;
 	apen->apen_dev->id.product = SYNAPTICS_DSX_DRIVER_PRODUCT;
 	apen->apen_dev->id.version = SYNAPTICS_DSX_DRIVER_VERSION;
@@ -478,8 +534,6 @@ static void synaptics_rmi4_apen_remove(struct synaptics_rmi4_data *rmi4_data)
 
 exit:
 	complete(&apen_remove_complete);
-
-	return;
 }
 
 static void synaptics_rmi4_apen_reset(struct synaptics_rmi4_data *rmi4_data)
@@ -492,10 +546,6 @@ static void synaptics_rmi4_apen_reset(struct synaptics_rmi4_data *rmi4_data)
 	apen_lift();
 
 	apen_scan_pdt();
-
-	apen_set_params();
-
-	return;
 }
 
 static void synaptics_rmi4_apen_reinit(struct synaptics_rmi4_data *rmi4_data)
@@ -504,8 +554,6 @@ static void synaptics_rmi4_apen_reinit(struct synaptics_rmi4_data *rmi4_data)
 		return;
 
 	apen_lift();
-
-	return;
 }
 
 static void synaptics_rmi4_apen_e_suspend(struct synaptics_rmi4_data *rmi4_data)
@@ -514,8 +562,6 @@ static void synaptics_rmi4_apen_e_suspend(struct synaptics_rmi4_data *rmi4_data)
 		return;
 
 	apen_lift();
-
-	return;
 }
 
 static void synaptics_rmi4_apen_suspend(struct synaptics_rmi4_data *rmi4_data)
@@ -524,8 +570,6 @@ static void synaptics_rmi4_apen_suspend(struct synaptics_rmi4_data *rmi4_data)
 		return;
 
 	apen_lift();
-
-	return;
 }
 
 static struct synaptics_rmi4_exp_fn active_pen_module = {
@@ -553,8 +597,6 @@ static void __exit rmi4_active_pen_module_exit(void)
 	synaptics_rmi4_new_function(&active_pen_module, false);
 
 	wait_for_completion(&apen_remove_complete);
-
-	return;
 }
 
 module_init(rmi4_active_pen_module_init);

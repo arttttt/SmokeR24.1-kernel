@@ -72,6 +72,16 @@
 		atmel_mxt_ts@4a {
 			vdd-touch-supply = <&ldo3_reg>;
 		};
+
+		synaptics_dsi_i2c@20 {
+			vdd-touch-supply = <&ldo3_reg>;
+		};
+	};
+
+	i2c@7000c000 {
+		onsemi,nct72@4c {
+			vdd-supply = <&palmas_smps8>;
+		};
 	};
 
 	sound {

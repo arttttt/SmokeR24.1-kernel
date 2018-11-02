@@ -41,13 +41,8 @@ enum {
 	FLAT_BINDER_FLAG_ACCEPTS_FDS = 0x100,
 };
 
-#ifdef BINDER_IPC_32BIT
-typedef __u32 binder_size_t;
-typedef __u32 binder_uintptr_t;
-#else
 typedef __u64 binder_size_t;
 typedef __u64 binder_uintptr_t;
-#endif
 
 /**
  * struct binder_object_header - header shared by all binder metadata objects.
@@ -131,7 +126,6 @@ enum {
 
 /* struct binder_fd_array_object - object describing an array of fds in a buffer
  * @hdr:		common header structure
- * @pad:                padding to ensure correct alignment
  * @num_fds:		number of file descriptors in the buffer
  * @parent:		index in offset array to buffer holding the fd array
  * @parent_offset:	start offset of fd array in the buffer
@@ -152,7 +146,6 @@ enum {
  */
 struct binder_fd_array_object {
 	struct binder_object_header	hdr;
-	__u32                           pad;
 	binder_size_t			num_fds;
 	binder_size_t			parent;
 	binder_size_t			parent_offset;
@@ -179,11 +172,7 @@ struct binder_version {
 };
 
 /* This is the current protocol version. */
-#ifdef BINDER_IPC_32BIT
-#define BINDER_CURRENT_PROTOCOL_VERSION 7
-#else
 #define BINDER_CURRENT_PROTOCOL_VERSION 8
-#endif
 
 #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
 #define	BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, __s64)
