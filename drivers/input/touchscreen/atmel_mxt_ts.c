@@ -4473,23 +4473,6 @@ static int mxt_probe(struct i2c_client *client,
 		return -ENOMEM;
 	}
 
-#ifdef CONFIG_CUSTOM_DT2W
-	if (fb_notifier_register(&fb_notif_atm))
-		dev_err(&client->dev, "%s: failed to register fb notifier\n", __func__);
-	else
-		dev_err(&client->dev, "%s: fb notifier registered\n", __func__);
-#endif
-
-#ifdef CONFIG_FB
-	data->fb_notifier.notifier_call = mxt_fb_notifier_cb;
-	error = fb_register_client(&data->fb_notifier);
-	if (error < 0) {
-		dev_err(&client->dev,
-				"%s: Failed to register fb notifier client\n",
-				__func__);
-	}
-#endif
-
 	mutex_init(&data->input_mutex);
 	mutex_init(&data->calib_mutex);
 
@@ -4649,6 +4632,23 @@ retry:
 		queue_work(system_power_efficient_wq, &data->self_tuning_work);
 
 	mxt_auto_return(data->client);
+
+#ifdef CONFIG_CUSTOM_DT2W
+	if (fb_notifier_register(&fb_notif_atm))
+		dev_err(&client->dev, "%s: failed to register fb notifier\n", __func__);
+	else
+		dev_err(&client->dev, "%s: fb notifier registered\n", __func__);
+#endif
+
+#ifdef CONFIG_FB
+	data->fb_notifier.notifier_call = mxt_fb_notifier_cb;
+	error = fb_register_client(&data->fb_notifier);
+	if (error < 0) {
+		dev_err(&client->dev,
+				"%s: Failed to register fb notifier client\n",
+				__func__);
+	}
+#endif
 
 	return 0;
 
