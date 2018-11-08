@@ -906,7 +906,6 @@ static int mxt_get_descriptor(struct mxt_data *data)
 	int ret;
 	u8 cmd[2] = {0, 0};
 	u8 recv_buf[HID_DESC_LENGTH];
-	int i = 0;
 	pdata = client->dev.platform_data;
 
 	xfer[0].addr = client->addr;
@@ -925,9 +924,6 @@ static int mxt_get_descriptor(struct mxt_data *data)
 				__func__, ret);
 		return -EIO;
 	}
-
-	for (i = 0; i < HID_DESC_LENGTH; i++)
-		pr_info("recv[%d] = 0x%x\n", i, recv_buf[i]);
 
 	data->vendor_info = (recv_buf[21] << 8) | recv_buf[20];
 	data->product_info = (recv_buf[23] << 8) | recv_buf[22];
@@ -4416,6 +4412,7 @@ static int mxt_parse_dt(struct device *dev, struct mxt_platform_data *pdata)
 		of_property_read_u32(temp, "atmel,variant-id", (unsigned int *) &info->variant_id);
 		of_property_read_u32(temp, "atmel,version", (unsigned int *) &info->version);
 		of_property_read_u32(temp, "atmel,build", (unsigned int *) &info->build);
+		of_property_read_u32(temp, "atmel,user-id", (unsigned int *) &info->user_id);
 		of_property_read_u32(temp, "atmel,bootldr-id", (unsigned int *) &info->bootldr_id);
 		of_property_read_string(temp, "atmel,mxt-cfg-name", &info->mxt_cfg_name);
 		of_property_read_u32(temp, "atmel,vendor-id", (unsigned int *) &info->vendor_id);
@@ -4461,6 +4458,7 @@ static int mxt_probe(struct i2c_client *client,
 		error = mxt_parse_dt(&client->dev, pdata);
 		if (error)
 			return error;
+		dev_info(&client->dev, "successful init from device tree\n");
 	} else
 		pdata = client->dev.platform_data;
 
