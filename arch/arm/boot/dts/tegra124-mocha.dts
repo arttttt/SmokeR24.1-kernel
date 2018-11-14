@@ -137,7 +137,7 @@
 			atmel,gpio-mask = <0xc>;
 			atmel,vendor-info = <0x03eb>;
 			atmel,product-info = <0x214f>;
-			atmel,config-array-size = <2>;
+			atmel,config-array-size = <3>;
 
 			atmel,cfg_1 {
 				atmel,family-id = <0xA4>;
