@@ -632,37 +632,38 @@ void psi_cgroup_free(struct cgroup *cgroup)
  */
 void cgroup_move_task(struct task_struct *task, struct css_set *to)
 {
-	bool move_psi = !psi_disabled;
 	unsigned int task_flags = 0;
 	struct rq *rq;
 
-	if (move_psi) {
-		rq = __task_rq_lock(task);
-
-		if (task->on_rq == 1)
-			task_flags = TSK_RUNNING;
-		else if (task->in_iowait)
-			task_flags = TSK_IOWAIT;
-
-		if (task->flags & PF_MEMSTALL)
-			task_flags |= TSK_MEMSTALL;
-
-		if (task_flags)
-			psi_task_change(task, task_flags, 0);
+	if (psi_disabled) {
+		/*
+		 * Lame to do this here, but the scheduler cannot be locked
+		 * from the outside, so we move cgroups from inside sched/.
+		 */
+		rcu_assign_pointer(task->cgroups, to);
+		return;
 	}
 
-	/*
-	 * Lame to do this here, but the scheduler cannot be locked
-	 * from the outside, so we move cgroups from inside sched/.
-	 */
+	rq = __task_rq_lock(task);
+
+	if (task->on_rq == 1)
+		task_flags = TSK_RUNNING;
+	else if (task->in_iowait)
+		task_flags = TSK_IOWAIT;
+
+	if (task->flags & PF_MEMSTALL)
+		task_flags |= TSK_MEMSTALL;
+
+	if (task_flags)
+		psi_task_change(task, task_flags, 0);
+
+	/* See comment above */
 	rcu_assign_pointer(task->cgroups, to);
 
-	if (move_psi) {
-		if (task_flags)
-			psi_task_change(task, 0, task_flags);
+	if (task_flags)
+		psi_task_change(task, 0, task_flags);
 
-		__task_rq_unlock(rq);
-	}
+	__task_rq_unlock(rq);
 }
 #endif /* CONFIG_CGROUPS */
 
