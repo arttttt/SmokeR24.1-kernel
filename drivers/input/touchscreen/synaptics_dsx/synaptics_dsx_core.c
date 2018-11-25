@@ -4211,7 +4211,7 @@ static ssize_t synaptics_rmi4_proc_init(struct synaptics_rmi4_data *rmi4_data)
 	double_tap_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
 
 	if (double_tap_sysfs_node)
-		sprintf(double_tap_sysfs_node, "%s/%s", driver_path, "wakeup_mode");
+		sprintf(double_tap_sysfs_node, "%s/%s", driver_path, "wake_gesture");
 
 	proc_symlink_tmp = proc_symlink("double_tap_enable",
 			rmi4_data->input_proc, double_tap_sysfs_node);
@@ -4224,7 +4224,7 @@ static ssize_t synaptics_rmi4_proc_init(struct synaptics_rmi4_data *rmi4_data)
 	key_disabler_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
 
 	if (key_disabler_sysfs_node)
-		sprintf(key_disabler_sysfs_node, "%s/%s", driver_path, "enable_keys");
+		sprintf(key_disabler_sysfs_node, "%s/%s", driver_path, "0dbutton");
 
 	proc_symlink_tmp = proc_symlink("capacitive_keys_enable",
 			rmi4_data->input_proc, key_disabler_sysfs_node);
