@@ -12,7 +12,6 @@
  */
 
 #include <linux/cpu.h>
-#include <linux/cpuquiet.h>
 #include <linux/fb.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
@@ -29,45 +28,6 @@ static struct cpuquiet_lite_data {
 	bool					suspended;
 	struct delayed_work 	panel_work;
 } cpuquiet_l_data;
-
-static struct kobject *cpuquiet_lite_auto_sysfs_kobject;
-static bool enable = true;
-
-CPQ_BASIC_ATTRIBUTE(enable, 0644, bool);
-
-static struct attribute *tegra_auto_attributes[] = {
-	&enable_attr.attr,
-	NULL,
-};
-
-static const struct sysfs_ops tegra_auto_sysfs_ops = {
-	.show = cpuquiet_auto_sysfs_show,
-	.store = cpuquiet_auto_sysfs_store,
-};
-
-static struct kobj_type ktype_sysfs = {
-	.sysfs_ops = &tegra_auto_sysfs_ops,
-	.default_attrs = tegra_auto_attributes,
-};
-
-static int cpuquiet_lite_auto_sysfs(void)
-{
-	int err;
-
- 	cpuquiet_lite_auto_sysfs_kobject = kzalloc(sizeof(*cpuquiet_lite_auto_sysfs_kobject),
-					GFP_KERNEL);
-
- 	if (!cpuquiet_lite_auto_sysfs_kobject)
-		return -ENOMEM;
-
- 	err = cpuquiet_kobject_init(cpuquiet_lite_auto_sysfs_kobject, &ktype_sysfs,
-				"cpuquiet_lite");
-
- 	if (err)
-		kfree(cpuquiet_lite_auto_sysfs_kobject);
-
- 	return err;
-}
 
 static void __cpuinit tegra_cpuquiet_lite_work_func(struct work_struct *work)
 {
@@ -96,13 +56,6 @@ static int fb_notifier_callback_func(struct notifier_block *nb,
 {
 	struct fb_event *evdata = data;
 	int *blank = evdata->data;
-
-	if (!enable) {
-		if (delayed_work_pending(&cpuquiet_l_data.panel_work))
-			cancel_delayed_work_sync(&cpuquiet_l_data.panel_work);
-
-		return NOTIFY_OK;
-	}
 
 	if (action != FB_EARLY_EVENT_BLANK)
 		return NOTIFY_OK;
@@ -141,9 +94,6 @@ static int cpuquiet_lite_init(void)
 		"cpuquiet_lite", WQ_NON_REENTRANT | WQ_FREEZABLE, 1);
 
 	if (!cpuquiet_l_data.cpuquiet_lite_wq)
-		return -ENOMEM;
-
-	if (cpuquiet_lite_auto_sysfs())
 		return -ENOMEM;
 
 	INIT_DELAYED_WORK(&cpuquiet_l_data.panel_work, panel_state_work__func);
