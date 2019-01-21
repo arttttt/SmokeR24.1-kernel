@@ -347,49 +347,21 @@ static const struct super_operations binderfs_super_ops = {
 	.statfs         = simple_statfs,
 };
 
-/*
- * We really don't want to look at inode->i_op->lookup
- * when we don't have to. So we keep a cache bit in
- * the inode ->i_opflags field that says "yes, we can
- * do lookup on this inode".
- */
-static inline int can_lookup(struct inode *inode)
+static inline bool is_binderfs_control_device(const struct dentry *dentry)
 {
-	if (likely(inode->i_opflags & IOP_LOOKUP))
-		return 1;
-	if (likely(!inode->i_op->lookup))
-		return 0;
-
-	/* We do this once for the lifetime of the inode */
-	spin_lock(&inode->i_lock);
-	inode->i_opflags |= IOP_LOOKUP;
-	spin_unlock(&inode->i_lock);
-	return 1;
+	struct binderfs_info *info = dentry->d_sb->s_fs_info;
+	return info->control_dentry == dentry;
 }
 
 static int binderfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			   struct inode *new_dir, struct dentry *new_dentry,
 			   unsigned int flags)
 {
-	struct inode *inode = d_inode(old_dentry);
-
-	/* binderfs doesn't support directories. */
-	if (can_lookup(inode))
+	if (is_binderfs_control_device(old_dentry) ||
+	    is_binderfs_control_device(new_dentry))
 		return -EPERM;
 
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
-
-	if (!simple_empty(new_dentry))
-		return -ENOTEMPTY;
-
-	if (new_dentry->d_inode != NULL)
-		simple_unlink(new_dir, new_dentry);
-
-	old_dir->i_ctime = old_dir->i_mtime = new_dir->i_ctime =
-		new_dir->i_mtime = inode->i_ctime = current_time(old_dir);
-
-	return 0;
+	return simple_rename(old_dir, old_dentry, new_dir, new_dentry, flags);
 }
 
 static int binderfs_unlink(struct inode *dir, struct dentry *dentry)
