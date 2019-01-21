@@ -401,8 +401,6 @@ static int binderfs_binder_ctl_create(struct super_block *sb)
 	if (!device)
 		return -ENOMEM;
 
-	mutex_lock(&d_inode(root)->i_mutex);
-
 	/* If we have already created a binder-control node, return. */
 	if (info->control_dentry) {
 		ret = 0;
@@ -442,13 +440,10 @@ static int binderfs_binder_ctl_create(struct super_block *sb)
 	inode->i_private = device;
 	info->control_dentry = dentry;
 	d_add(dentry, inode);
-	mutex_unlock(&d_inode(root)->i_mutex);
 
 	return 0;
 
 out:
-        mutex_unlock(&d_inode(root)->i_mutex);
-
 	kfree(device);
 	iput(inode);
 
