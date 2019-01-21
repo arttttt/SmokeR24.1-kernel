@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/dcache.h>
 #include <linux/list.h>
+#include <linux/namei.h>
 #include <linux/magic.h>
 #include <linux/major.h>
 #include <linux/miscdevice.h>
@@ -107,7 +108,7 @@ bool is_binderfs_device(const struct inode *inode)
  * @userp:     buffer to copy information about new device for userspace to
  * @req:       struct binderfs_device as copied from userspace
  *
- * This function allocated a new binder_device and reserves a new minor
+ * This function allocates a new binder_device and reserves a new minor
  * number for it.
  * Minor numbers are limited and tracked globally in binderfs_minors. The
  * function will stash a struct binder_device for the specific binder
@@ -123,10 +124,10 @@ static int binderfs_binder_device_create(struct inode *ref_inode,
 					 struct binderfs_device *req)
 {
 	int minor, ret;
-	struct dentry *dentry, *dup, *root;
+	struct dentry *dentry, *root;
 	struct binder_device *device;
-	size_t name_len = BINDERFS_MAX_NAME + 1;
 	char *name = NULL;
+	size_t name_len;
 	struct inode *inode = NULL;
 	struct super_block *sb = ref_inode->i_sb;
 	struct binderfs_info *info = sb->s_fs_info;
@@ -169,11 +170,12 @@ static int binderfs_binder_device_create(struct inode *ref_inode,
 	inode->i_uid = info->root_uid;
 	inode->i_gid = info->root_gid;
 
-	name = kmalloc(name_len, GFP_KERNEL);
+	req->name[BINDERFS_MAX_NAME] = '\0'; /* NUL-terminate */
+	name_len = strlen(req->name);
+	/* Make sure to include terminating NUL byte */
+	name = kmemdup(req->name, name_len + 1, GFP_KERNEL);
 	if (!name)
 		goto err;
-
-	strscpy(name, req->name, name_len);
 
 	device->binderfs_inode = inode;
 	device->context.binder_context_mgr_uid = INVALID_UID;
@@ -193,24 +195,21 @@ static int binderfs_binder_device_create(struct inode *ref_inode,
 
 	root = sb->s_root;
 	mutex_lock(&d_inode(root)->i_mutex);
-	dentry = d_alloc_name(root, name);
-	if (!dentry) {
+
+	/* look it up */
+	dentry = lookup_one_len(name, root, name_len);
+	if (IS_ERR(dentry)) {
 		mutex_unlock(&d_inode(root)->i_mutex);
-		ret = -ENOMEM;
+		ret = PTR_ERR(dentry);
 		goto err;
 	}
 
-	/* Verify that the name userspace gave us is not already in use. */
-	dup = d_lookup(root, &dentry->d_name);
-	if (dup) {
-		if (dup->d_inode != NULL) {
-			dput(dup);
-			dput(dentry);
-	                mutex_unlock(&d_inode(root)->i_mutex);
-			ret = -EEXIST;
-			goto err;
-		}
-		dput(dup);
+	if (dentry->d_inode != NULL) {
+		/* already exists */
+		dput(dentry);
+                mutex_unlock(&d_inode(root)->i_mutex);
+		ret = -EEXIST;
+		goto err;
 	}
 
 	inode->i_private = device;
