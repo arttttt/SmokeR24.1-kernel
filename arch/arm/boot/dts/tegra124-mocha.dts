@@ -126,7 +126,7 @@
 
 		atmel_mxt_ts@4a {
 			compatible = "atmel,maxtouch-ts";
-			status = "disabled";
+			status = "okay";
 			reg = <0x4a>;
 
 			interrupt-parent = <&gpio>;
@@ -137,24 +137,38 @@
 			atmel,gpio-mask = <0xc>;
 			atmel,vendor-info = <0x03eb>;
 			atmel,product-info = <0x214f>;
-			atmel,config-array-size = <2>;
+			atmel,config-array-size = <3>;
 
 			atmel,cfg_1 {
 				atmel,family-id = <0xA4>;
 				atmel,variant-id = <0x04>;
 				atmel,version = <0x10>;
 				atmel,build = <0xAA>;
+				atmel,user-id = <0x00>;
 				atmel,bootldr-id = <0x48>;
-				atmel,mxt-cfg-name = "mxt1664t_config.fw";
+				atmel,mxt-cfg-name = "mxt1664t_config_no_dummy.fw";
 				atmel,vendor-id = <0x4>;
 				atmel,mxt-fw-name = "mxt1664t.fw";
 				atmel,key-codes = <158 102 139>;
 			};
 			atmel,cfg_2 {
 				atmel,family-id = <0xA4>;
+				atmel,variant-id = <0x04>;
+				atmel,version = <0x10>;
+				atmel,build = <0xAA>;
+				atmel,user-id = <0xAA>;
+				atmel,bootldr-id = <0x48>;
+				atmel,mxt-cfg-name = "mxt1664t_config_with_dummy.fw";
+				atmel,vendor-id = <0x4>;
+				atmel,mxt-fw-name = "mxt1664t.fw";
+				atmel,key-codes = <158 102 139>;
+			};
+			atmel,cfg_3 {
+				atmel,family-id = <0xA4>;
 				atmel,variant-id = <0x0B>;
 				atmel,version = <0x12>;
-				atmel,build = <0xAC>;
+				atmel,build = <0xAA>;
+				atmel,user-id = <0x00>;
 				atmel,bootldr-id = <0x51>;
 				atmel,mxt-cfg-name = "mxt1066t_config.fw";
 				atmel,vendor-id = <0x4>;
