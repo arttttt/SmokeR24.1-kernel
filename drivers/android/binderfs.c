@@ -569,7 +569,7 @@ static struct file_system_type binder_fs_type = {
 	.fs_flags	= FS_USERNS_MOUNT,
 };
 
-static int __init init_binderfs(void)
+int __init init_binderfs(void)
 {
 	int ret;
 
@@ -587,5 +587,3 @@ static int __init init_binderfs(void)
 
 	return ret;
 }
-
-device_initcall(init_binderfs);
