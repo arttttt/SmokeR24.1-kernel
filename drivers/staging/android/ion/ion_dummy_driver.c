@@ -36,11 +36,6 @@ struct ion_platform_heap dummy_heaps[] = {
 			.name	= "system",
 		},
 		{
-			.id	= ION_HEAP_TYPE_SYSTEM_CONTIG,
-			.type	= ION_HEAP_TYPE_SYSTEM_CONTIG,
-			.name	= "system contig",
-		},
-		{
 			.id	= ION_HEAP_TYPE_CARVEOUT,
 			.type	= ION_HEAP_TYPE_CARVEOUT,
 			.name	= "carveout",
