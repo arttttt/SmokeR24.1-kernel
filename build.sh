@@ -9,7 +9,7 @@ config="tegra12_android_defconfig"
 dtb_name="tegra124-mocha.dtb"
 dtb_only=0
 kernel_name=$(git rev-parse --abbrev-ref HEAD)
-threads=5
+cpus_count=$(grep -c ^processor /proc/cpuinfo)
 toolchain="$HOME/PROJECTS/MIPAD/linaro-4.9.4/bin/arm-linux-gnueabihf-"
 
 KERNEL_DIR=$PWD
@@ -120,11 +120,11 @@ function compile()
 
 	generate_version
 	make $config
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain zImage
+	make -j$cpus_count ARCH=$ARCH CROSS_COMPILE=$toolchain zImage
 
 	printfc "\nКомпиляция дерева устройства\n\n" $HEAD
 
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
+	make -j$cpus_count ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
 
 	local end=$(date +%s)
 	local comp_time=$((end-start))
@@ -141,7 +141,7 @@ function compile_dtb()
 	dtb_only=1
 	generate_version
 	make $config
-	make -j$threads ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
+	make -j$cpus_count ARCH=$ARCH CROSS_COMPILE=$toolchain $dtb_name
 
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/dts/$dtb_name" ]]; then
 		mv $ORIGINAL_OUTPUT_DIR/dts/$dtb_name $PWD/anykernel/kernel/dtb
