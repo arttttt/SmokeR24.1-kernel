@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export ARCH="arm"
-export KBUILD_BUILD_HOST="eOS-5.0-Juno"
+export KBUILD_BUILD_HOST=$(lsb_release -d | awk -F":"  '{print $2}' | sed -e 's/^[ \t]*//' | sed -r 's/[ ]+/-/g')
 export KBUILD_BUILD_USER="arttttt"
 
 clean_build=0
