@@ -273,6 +273,7 @@ enum
 	LINUX_MIB_TCPACKSKIPPEDCHALLENGE,	/* TCPACKSkippedChallenge */
 	LINUX_MIB_TCPWINPROBE,			/* TCPWinProbe */
 	LINUX_MIB_TCPKEEPALIVE,			/* TCPKeepAlive */
+	LINUX_MIB_TCPWQUEUETOOBIG,              /* TCPWqueueTooBig */
 	__LINUX_MIB_MAX
 };
 
