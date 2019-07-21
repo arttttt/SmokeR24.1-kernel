@@ -41,7 +41,9 @@ function generate_version()
 		local updated_kernel_name
 		eval "$(awk -F"="  '/kernel.string/{print "anykernel_name="$2}' $KERNEL_DIR/anykernel/anykernel.sh)"
 		eval "$(echo $kernel_name | awk -F"-"  '{print "current_branch="$2}')"
-		if [[ "$current_branch" != "stable" ] || [ "$current_branch" != "staging" ]]; then
+		if [[ ("$current_branch" == "stable" || "$current_branch" == "staging") ]]; then
+			updated_kernel_name=$kernel_name
+		else
 			if [[ ! -f "$KERNEL_DIR/version" ]]; then
 				echo "build_number=0" > $KERNEL_DIR/version
 			fi;
@@ -51,8 +53,6 @@ function generate_version()
 			eval "$(awk -F"="  '{print "current_build="$2}' $KERNEL_DIR/version)"
 			export LOCALVERSION="-$current_branch-build$current_build"
 			updated_kernel_name=$kernel_name"-build"$current_build
-		else
-			updated_kernel_name=$kernel_name
 		fi;
 			sed -i s/$anykernel_name/$updated_kernel_name/ $KERNEL_DIR/anykernel/anykernel.sh
 	fi;
