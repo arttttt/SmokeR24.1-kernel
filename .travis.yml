@@ -5,10 +5,6 @@ dist: bionic
 git:
   depth: 1
 
-branches:
-  only:
-  - SmokeR24.1-stable
-
 before_install:
 
   - export KERNEL_ZIP="$PWD/output/SmokeR24.1.zip"
