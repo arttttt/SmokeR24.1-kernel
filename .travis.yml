@@ -1,0 +1,31 @@
+sudo: required
+language: c
+dist: bionic
+
+git:
+  depth: 1
+
+branches:
+  only:
+  - SmokeR24.1-stable
+
+before_install:
+
+  - export KERNEL_ZIP="$PWD/output/SmokeR24.1.zip"
+  - sudo apt-get update -qq
+  - wget -c https://releases.linaro.org/components/toolchain/binaries/latest-4/arm-linux-gnueabihf/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf.tar.xz
+  - tar xf gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf.tar.xz
+  - export PATH=$PATH:$PWD/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin/
+
+script:
+
+  - bash build.sh
+
+deploy:
+  provider: releases
+  api_key: $GITHUB_TOKEN
+  file: $KERNEL_ZIP
+  skip_cleanup: true
+  on:
+    all_branches: true
+    tags: true
