@@ -51,7 +51,14 @@
  *  }
  *  rcu_read_unlock();
  *
- * See also the comment on struct slab_rcu in mm/slab.c.
+ * This is useful if we need to approach a kernel structure obliquely,
+ * from its address obtained without the usual locking. We can lock
+ * the structure to stabilize it and check it's still at the given address,
+ * only if we can be sure that the memory has not been meanwhile reused
+ * for some other kind of object (which our subsystem's lock might corrupt).
+ *
+ * rcu_read_lock before reading the address, then rcu_read_unlock after
+ * taking the spinlock within the structure expected at that address.
  */
 #define SLAB_DESTROY_BY_RCU	0x00080000UL	/* Defer freeing slabs to RCU */
 #define SLAB_MEM_SPREAD		0x00100000UL	/* Spread some memory over cpuset */
@@ -169,11 +176,7 @@ struct kmem_cache {
 	struct list_head list;	/* List of all slab caches on the system */
 };
 
-#define KMALLOC_MAX_SIZE (1UL << 30)
-
-#include <linux/slob_def.h>
-
-#else /* CONFIG_SLOB */
+#endif /* CONFIG_SLOB */
 
 /*
  * Kmalloc array related definitions
@@ -195,13 +198,28 @@ struct kmem_cache {
 #ifndef KMALLOC_SHIFT_LOW
 #define KMALLOC_SHIFT_LOW	5
 #endif
-#else
+#endif
+
+#ifdef CONFIG_SLUB
 /*
  * SLUB allocates up to order 2 pages directly and otherwise
  * passes the request to the page allocator.
  */
 #define KMALLOC_SHIFT_HIGH	(PAGE_SHIFT + 1)
 #define KMALLOC_SHIFT_MAX	(MAX_ORDER + PAGE_SHIFT)
+#ifndef KMALLOC_SHIFT_LOW
+#define KMALLOC_SHIFT_LOW	3
+#endif
+#endif
+
+#ifdef CONFIG_SLOB
+/*
+ * SLOB passes all page size and larger requests to the page allocator.
+ * No kmalloc array is necessary since objects of different sizes can
+ * be allocated from the same page.
+ */
+#define KMALLOC_SHIFT_MAX	30
+#define KMALLOC_SHIFT_HIGH	PAGE_SHIFT
 #ifndef KMALLOC_SHIFT_LOW
 #define KMALLOC_SHIFT_LOW	3
 #endif
@@ -221,6 +239,18 @@ struct kmem_cache {
 #define KMALLOC_MIN_SIZE (1 << KMALLOC_SHIFT_LOW)
 #endif
 
+/*
+ * This restriction comes from byte sized index implementation.
+ * Page size is normally 2^12 bytes and, in this case, if we want to use
+ * byte sized index which can represent 2^8 entries, the size of the object
+ * should be equal or greater to 2^12 / 2^8 = 2^4 = 16.
+ * If minimum size of kmalloc is less than 16, we use it as minimum object
+ * size and give up to use byte sized index.
+ */
+#define SLAB_OBJ_MIN_SIZE      (KMALLOC_MIN_SIZE < 16 ? \
+                               (KMALLOC_MIN_SIZE) : 16)
+
+#ifndef CONFIG_SLOB
 extern struct kmem_cache *kmalloc_caches[KMALLOC_SHIFT_HIGH + 1];
 #ifdef CONFIG_ZONE_DMA
 extern struct kmem_cache *kmalloc_dma_caches[KMALLOC_SHIFT_HIGH + 1];
@@ -275,13 +305,18 @@ static __always_inline int kmalloc_index(size_t size)
 	/* Will never be reached. Needed because the compiler may complain */
 	return -1;
 }
+#endif /* !CONFIG_SLOB */
 
 #ifdef CONFIG_SLAB
 #include <linux/slab_def.h>
-#elif defined(CONFIG_SLUB)
+#endif
+
+#ifdef CONFIG_SLUB
 #include <linux/slub_def.h>
-#else
-#error "Unknown slab allocator"
+#endif
+
+#ifdef CONFIG_SLOB
+#include <linux/slob_def.h>
 #endif
 
 /*
@@ -291,6 +326,7 @@ static __always_inline int kmalloc_index(size_t size)
  */
 static __always_inline int kmalloc_size(int n)
 {
+#ifndef CONFIG_SLOB
 	if (n > 2)
 		return 1 << n;
 
@@ -299,10 +335,9 @@ static __always_inline int kmalloc_size(int n)
 
 	if (n == 2 && KMALLOC_MIN_SIZE <= 64)
 		return 192;
-
+#endif
 	return 0;
 }
-#endif /* !CONFIG_SLOB */
 
 /*
  * Setting ARCH_SLAB_MINALIGN in arch headers allows a different alignment.
