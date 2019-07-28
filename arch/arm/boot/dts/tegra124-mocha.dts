@@ -126,7 +126,7 @@
 
 		atmel_mxt_ts@4a {
 			compatible = "atmel,maxtouch-ts";
-			status = "okay";
+			status = "disabled";
 			reg = <0x4a>;
 
 			interrupt-parent = <&gpio>;
