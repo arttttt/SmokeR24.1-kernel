@@ -92,7 +92,7 @@ function make_zip()
 	cd $KERNEL_DIR/anykernel
 
 	if [[ $CI == true ]]; then
-		zip_name="SmokeR24.1.zip"
+		zip_name=$KERNEL_ZIP
 	else
 		zip_name="$kernel_name($(date +'%d.%m.%Y-%H.%M')).zip"
 	fi
