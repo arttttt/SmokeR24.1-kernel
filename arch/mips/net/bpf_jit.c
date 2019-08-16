@@ -1328,8 +1328,6 @@ jmp_cmp:
 	return 0;
 }
 
-int bpf_jit_enable __read_mostly;
-
 void bpf_jit_compile(struct bpf_prog *fp)
 {
 	struct jit_ctx ctx;
