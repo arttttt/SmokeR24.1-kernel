@@ -49,16 +49,6 @@ static dev_t binderfs_dev;
 static DEFINE_MUTEX(binderfs_minors_mutex);
 static DEFINE_IDA(binderfs_minors);
 
-/**
- * binderfs_mount_opts - mount options for binderfs
- * @max: maximum number of allocatable binderfs binder devices
- * @stats_mode: enable binder stats in binderfs.
- */
-struct binderfs_mount_opts {
-	int max;
-	int stats_mode;
-};
-
 enum {
 	Opt_max,
 	Opt_stats_mode,
@@ -74,27 +64,6 @@ static const match_table_t tokens = {
 	{ Opt_max, "max=%d" },
 	{ Opt_stats_mode, "stats=%s" },
 	{ Opt_err, NULL     }
-};
-
-/**
- * binderfs_info - information about a binderfs mount
- * @ipc_ns:         The ipc namespace the binderfs mount belongs to.
- * @control_dentry: This records the dentry of this binderfs mount
- *                  binder-control device.
- * @root_uid:       uid that needs to be used when a new binder device is
- *                  created.
- * @root_gid:       gid that needs to be used when a new binder device is
- *                  created.
- * @mount_opts:     The mount options in use.
- * @device_count:   The current number of allocated binder devices.
- */
-struct binderfs_info {
-	struct ipc_namespace *ipc_ns;
-	struct dentry *control_dentry;
-	kuid_t root_uid;
-	kgid_t root_gid;
-	struct binderfs_mount_opts mount_opts;
-	int device_count;
 };
 
 static inline struct binderfs_info *BINDERFS_I(const struct inode *inode)
@@ -526,7 +495,7 @@ static struct dentry *binderfs_create_dentry(struct dentry *parent,
 		return dentry;
 
 	/* Return error if the file/dir already exists. */
-	if (d_really_is_positive(dentry)) {
+	if (dentry->d_inode != NULL) {
 		dput(dentry);
 		return ERR_PTR(-EEXIST);
 	}
@@ -534,17 +503,31 @@ static struct dentry *binderfs_create_dentry(struct dentry *parent,
 	return dentry;
 }
 
-static struct dentry *binderfs_create_file(struct dentry *parent,
-					   const char *name,
-					   const struct file_operations *fops,
-					   void *data)
+void binderfs_remove_file(struct dentry *dentry)
+{
+	struct inode *parent_inode;
+
+	parent_inode = d_inode(dentry->d_parent);
+	mutex_lock(&parent_inode->i_mutex);
+	if (dentry->d_inode != NULL && !d_unhashed(dentry)) {
+		dget(dentry);
+		simple_unlink(parent_inode, dentry);
+		d_delete(dentry);
+		dput(dentry);
+	}
+	mutex_unlock(&parent_inode->i_mutex);
+}
+
+struct dentry *binderfs_create_file(struct dentry *parent, const char *name,
+				    const struct file_operations *fops,
+				    void *data)
 {
 	struct dentry *dentry;
 	struct inode *new_inode, *parent_inode;
 	struct super_block *sb;
 
 	parent_inode = d_inode(parent);
-	inode_lock(parent_inode);
+	mutex_lock(&parent_inode->i_mutex);
 
 	dentry = binderfs_create_dentry(parent, name);
 	if (IS_ERR(dentry))
@@ -564,7 +547,7 @@ static struct dentry *binderfs_create_file(struct dentry *parent,
 	fsnotify_create(parent_inode, dentry);
 
 out:
-	inode_unlock(parent_inode);
+	mutex_unlock(&parent_inode->i_mutex);
 	return dentry;
 }
 
@@ -576,7 +559,7 @@ static struct dentry *binderfs_create_dir(struct dentry *parent,
 	struct super_block *sb;
 
 	parent_inode = d_inode(parent);
-	inode_lock(parent_inode);
+	mutex_lock(&parent_inode->i_mutex);
 
 	dentry = binderfs_create_dentry(parent, name);
 	if (IS_ERR(dentry))
@@ -599,13 +582,14 @@ static struct dentry *binderfs_create_dir(struct dentry *parent,
 	fsnotify_mkdir(parent_inode, dentry);
 
 out:
-	inode_unlock(parent_inode);
+	mutex_unlock(&parent_inode->i_mutex);
 	return dentry;
 }
 
 static int init_binder_logs(struct super_block *sb)
 {
-	struct dentry *binder_logs_root_dir, *dentry;
+	struct dentry *binder_logs_root_dir, *dentry, *proc_log_dir;
+	struct binderfs_info *info;
 	int ret = 0;
 
 	binder_logs_root_dir = binderfs_create_dir(sb->s_root,
@@ -649,8 +633,18 @@ static int init_binder_logs(struct super_block *sb)
 				      "failed_transaction_log",
 				      &binder_transaction_log_fops,
 				      &binder_transaction_log_failed);
-	if (IS_ERR(dentry))
+	if (IS_ERR(dentry)) {
 		ret = PTR_ERR(dentry);
+		goto out;
+	}
+
+	proc_log_dir = binderfs_create_dir(binder_logs_root_dir, "proc");
+	if (IS_ERR(proc_log_dir)) {
+		ret = PTR_ERR(proc_log_dir);
+		goto out;
+	}
+	info = sb->s_fs_info;
+	info->proc_log_dir = proc_log_dir;
 
 out:
 	return ret;
