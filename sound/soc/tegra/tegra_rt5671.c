@@ -462,7 +462,7 @@ static int tegra_rt5671_init(struct snd_soc_pcm_runtime *rtd)
 
 static const struct snd_soc_pcm_stream tegra_rt5671_spk_params = {
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rate_min = 48000,
+	.rate_min = 8000,
 	.rate_max = 48000,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -480,7 +480,7 @@ static const struct snd_soc_pcm_stream tegra_rt5671_bt_params = {
 
 static const struct snd_soc_pcm_stream tegra_rt5671_fm_params = {
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rate_min = 48000,
+	.rate_min = 8000,
 	.rate_max = 48000,
 	.channels_min = 2,
 	.channels_max = 2,
