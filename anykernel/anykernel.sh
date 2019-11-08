@@ -4,7 +4,7 @@
 ## AnyKernel setup
 # begin properties
 properties() {
-kernel.string=SmokeR24.1-travis-ci-build1
+kernel.string=SmokeR24.1-stable
 do.devicecheck=1
 do.modules=0
 do.cleanup=1
