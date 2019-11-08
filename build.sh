@@ -72,6 +72,9 @@ function make_zip()
 	fi;
 
 	if [[ -f "$ORIGINAL_OUTPUT_DIR/zImage" ]]; then
+		if [[ ! -d "$PWD/anykernel/kernel/" ]]; then
+			mkdir $PWD/anykernel/kernel/
+		fi;
 		mv $ORIGINAL_OUTPUT_DIR/zImage $PWD/anykernel/kernel/
 	else
 		if [[ $dtb_only == 0 ]]; then
