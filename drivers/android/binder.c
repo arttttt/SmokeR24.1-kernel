@@ -3503,7 +3503,6 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 		goto err_alloc_small_buf_failed;
 	}
 	buffer = proc->buffer;
-	INIT_LIST_HEAD(&proc->buffers);
 	list_add(&buffer->entry, &proc->buffers);
 	buffer->free = 1;
 	binder_insert_free_buffer(proc, buffer);
@@ -3551,6 +3550,7 @@ static int binder_open(struct inode *nodp, struct file *filp)
 	binder_dev = container_of(filp->private_data, struct binder_device,
 				  miscdev);
 	proc->context = &binder_dev->context;
+	INIT_LIST_HEAD(&proc->buffers);
 
 	binder_lock(__func__);
 
