@@ -357,8 +357,8 @@
 		nvidia,id-detection-type = <0x1>;
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,enable-aca-rid-detection;
-		nvidia,qc2-input-voltage = <TEGRA_USB_QC2_12V>;
-		nvidia,qc2-current-limit-ua = <1300000>;
+		nvidia,qc2-input-voltage = <TEGRA_USB_QC2_9V>;
+		nvidia,qc2-current-limit-ua = <2000000>;
 		extcon-cables = <&extcon_cable_xlate 0 &extcon_cable_xlate 2 &extcon_cable_xlate 5>;
 		extcon-cable-names = "vbus", "aca-rb", "aca-rc";
 		#extcon-cells = <0x1>;
@@ -401,4 +401,5 @@
 		status = "disabled";
 	};
 };
+
 
