@@ -112,7 +112,7 @@ config PNFS_FILE_LAYOUT
 config PNFS_BLOCK
 	tristate
 	depends on NFS_V4_1 && BLK_DEV_DM
-	default m
+	default y
 
 config PNFS_OBJLAYOUT
 	tristate
