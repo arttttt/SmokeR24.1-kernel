@@ -44,7 +44,6 @@
 #include <linux/oom.h>
 #include <linux/prefetch.h>
 #include <linux/debugfs.h>
-#include <linux/simple_lmk.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -2759,8 +2758,6 @@ loop_again:
 
 	do {
 		unsigned long lru_pages = 0;
-
-		simple_lmk_decide_reclaim(sc.priority);
 
 		/*
 		 * Scan in the highmem->dma direction for the highest
