@@ -197,6 +197,6 @@ if [[ $CI == true ]]; then
 	toolchain="arm-linux-gnueabihf-"
 	compile
 else
-	toolchain="$HOME/PROJECTS/MIPAD/linaro-4.9.4/bin/arm-linux-gnueabihf-"
+	toolchain="../linaro-4.9.4/bin/arm-linux-gnueabihf-"
 	main
 fi
