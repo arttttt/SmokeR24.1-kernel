@@ -1637,7 +1637,6 @@ int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct inode *inode = mapping->host;
 	pgoff_t offset = vmf->pgoff;
 	struct page *page;
-	bool memcg_oom;
 	pgoff_t size;
 	int ret = 0;
 
@@ -1658,14 +1657,10 @@ int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		 * We found the page, so try async readahead before
 		 * waiting for the lock.
 		 */
-		mem_cgroup_oom_disable();
 		do_async_mmap_readahead(vma, ra, file, page, offset);
-		mem_cgroup_oom_enable();
 	} else if (!page) {
 		/* No page in the page cache at all */
-		mem_cgroup_oom_disable();
 		do_sync_mmap_readahead(vma, ra, file, offset);
-		mem_cgroup_oom_enable();
 		count_vm_event(PGMAJFAULT);
 		mem_cgroup_count_vm_event(vma->vm_mm, PGMAJFAULT);
 		ret = VM_FAULT_MAJOR;
