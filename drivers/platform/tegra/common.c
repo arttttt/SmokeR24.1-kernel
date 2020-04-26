@@ -966,9 +966,8 @@ void __init tegra11x_init_early(void)
 #ifdef CONFIG_ARCH_TEGRA_12x_SOC
 void __init tegra12x_init_early(void)
 {
-	if (of_find_compatible_node(NULL, NULL, "arm,psci") ||
-	    of_find_compatible_node(NULL, NULL, "arm,psci-0.2"))
-			tegra_with_secure_firmware = 1;
+	if (of_find_compatible_node(NULL, NULL, "arm,psci-0.2"))
+		tegra_with_secure_firmware = 1;
 
 	display_tegra_dt_info();
 	tegra_apb_io_init();

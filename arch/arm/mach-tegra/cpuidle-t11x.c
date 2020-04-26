@@ -3,7 +3,7 @@
  *
  * CPU idle driver for Tegra11x CPUs
  *
- * Copyright (c) 2012-2014, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2012-2015, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -44,12 +44,14 @@
 #include <linux/tegra-timer.h>
 #include <linux/tegra-cpuidle.h>
 #include <linux/irqchip/tegra.h>
+#include <uapi/linux/psci.h>
 
 #include <asm/cacheflush.h>
 #include <asm/localtimer.h>
 #include <asm/suspend.h>
 #include <asm/cputype.h>
 #include <asm/psci.h>
+#include <asm/smp_plat.h>
 
 #include <mach/irqs.h>
 
@@ -57,6 +59,7 @@
 
 #include <linux/platform/tegra/clock.h>
 #include <linux/platform/tegra/dvfs.h>
+#include <linux/platform/tegra/common.h>
 #include "iomap.h"
 #include "pm.h"
 #include <linux/platform/tegra/reset.h>
@@ -416,6 +419,27 @@ static void tegra11x_restore_vmin(void)
 	spin_unlock(&vmin_lock);
 }
 
+static inline int tegra_cpu_core_power_down_fin(unsigned long v2p)
+{
+#if defined(CONFIG_ARM_PSCI)
+	struct psci_power_state pps = {
+		.id = TEGRA_ID_CPU_SUSPEND_STDBY,
+		.type = PSCI_POWER_STATE_TYPE_POWER_DOWN,
+	};
+
+	/* the monitor takes care of CPU suspend */
+	if (tegra_cpu_is_secure()) {
+		psci_ops.cpu_suspend(pps, __pa(cpu_resume));
+
+		/* we must never reach here */
+		BUG();
+	}
+#endif
+
+	tegra3_sleep_cpu_secondary_finish(v2p);
+	return 0;
+}
+
 static int tegra_cpu_core_power_down(struct cpuidle_device *dev,
 			   struct cpuidle_state *state, s64 request)
 {
@@ -427,15 +451,7 @@ static int tegra_cpu_core_power_down(struct cpuidle_device *dev,
 	bool sleep_completed = false;
 	struct tick_sched *ts = tick_get_tick_sched(dev->cpu);
 	unsigned int cpu = cpu_number(dev->cpu);
-#if defined(CONFIG_ARM_PSCI)
-	int psci_ret = -EPERM;
-	unsigned long entry_point = TEGRA_RESET_HANDLER_BASE +
-		tegra_cpu_reset_handler_offset;
-	struct psci_power_state pps = {
-		TEGRA_ID_CPU_SUSPEND_STDBY,
-		PSCI_POWER_STATE_TYPE_POWER_DOWN
-	};
-#endif
+
 	if ((tegra_cpu_timer_get_remain(&request) == -ETIME) ||
 		(request <= state->target_residency) || (!ts) ||
 		(ts->nohz_mode == NOHZ_MODE_INACTIVE) ||
@@ -467,17 +483,8 @@ static int tegra_cpu_core_power_down(struct cpuidle_device *dev,
 	tegra_cpu_wake_by_time[dev->cpu] = ktime_to_us(entry_time) + request;
 	smp_wmb();
 
-#if defined(CONFIG_ARM_PSCI)
-	if ((cpu == 0) || (cpu == 4)) {
-		if (psci_ops.cpu_suspend) {
-			psci_ret = psci_ops.cpu_suspend(pps, entry_point);
-			while (psci_ret == -EPERM)
-				psci_ret = tegra_restart_prev_smc();
-		}
-	}
-#endif
-
-	cpu_suspend(0, tegra3_sleep_cpu_secondary_finish);
+	/* enter power down state */
+	cpu_suspend(0, tegra_cpu_core_power_down_fin);
 
 	tegra11x_restore_vmin();
 

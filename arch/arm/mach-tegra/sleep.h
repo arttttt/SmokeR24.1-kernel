@@ -360,6 +360,8 @@ extern unsigned int lp1_register_i2c_base_addr;
 extern unsigned int lp1_register_core_lowvolt;
 extern unsigned int lp1_register_core_highvolt;
 #endif
+void tegra3_tear_down_core(void);
+void tegra3_stop_mc_clk(void);
 int tegra3_sleep_core_finish(unsigned long int);
 int tegra3_sleep_cpu_secondary_finish(unsigned long int);
 int tegra3_stop_mc_clk_finish(unsigned long int);

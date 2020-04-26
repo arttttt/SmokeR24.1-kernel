@@ -228,6 +228,6 @@ void tegra_smp_clear_power_mask(void);
 static inline void tegra_smp_clear_power_mask(void){}
 #endif
 
-u32 tegra_restart_prev_smc(void);
+u32 tegra_register_suspend_vectors(u32, u32);
 
 #endif /* _MACH_TEGRA_PM_H_ */
