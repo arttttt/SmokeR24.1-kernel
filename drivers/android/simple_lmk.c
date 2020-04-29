@@ -10,7 +10,59 @@
 #include <linux/moduleparam.h>
 #include <linux/oom.h>
 #include <linux/sort.h>
+#include <linux/version.h>
 #include <linux/vmpressure.h>
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0)
+#define reinit_completion(x) INIT_COMPLETION(*(x))
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#include <linux/atomic.h>
+#ifndef atomic_read_acquire
+#definei atomic_read_acquire(v) ({ int __compat_p1 = atomic_read(v); smp_rmb(); __compat_p1; })
+#endif
+#ifndef atomic_set_release
+#define atomic_set_release(v, i) ({ smp_wmb(); atomic_set(v, i); })
+#endif
+#endif
+
+#ifndef atomic_inc_return_relaxed
+#define atomic_inc_return_relaxed atomic_inc_return
+#define atomic_inc_return_acquire atomic_inc_return
+#define atomic_inc_return_release atomic_inc_return
+#endif
+
+#ifndef atomic_cmpxchg_relaxed
+#define atomic_cmpxchg_relaxed atomic_cmpxchg
+#define atomic_cmpxchg_acquire atomic_cmpxchg
+#define atomic_cmpxchg_release atomic_cmpxchg
+#endif
+
+/* MIN_NICE isn't present and MAX_RT_PRIO is elsewhere in older kernels */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#include <linux/sched/rt.h>
+#define MIN_NICE -20
+#endif
+
+/* The sched_param struct is located elsewhere in newer kernels */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
+#include <uapi/linux/sched/types.h>
+#endif
+
+/* SEND_SIG_FORCED isn't present in newer kernels */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+#define SIG_INFO_TYPE SEND_SIG_FORCED
+#else
+#define SIG_INFO_TYPE SEND_SIG_PRIV
+#endif
+
+/* The group argument to do_send_sig_info is different in newer kernels */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+#define KILL_GROUP_TYPE true
+#else
+#define KILL_GROUP_TYPE PIDTYPE_TGID
+#endif
 
 /* The minimum number of pages to free per reclaim */
 #define MIN_FREE_PAGES (CONFIG_ANDROID_SIMPLE_LMK_MINFREE * SZ_1M / PAGE_SIZE)
@@ -299,7 +351,7 @@ static int simple_lmk_init_set(const char *val, const struct kernel_param *kp)
 	struct task_struct *thread;
 
 	if (!atomic_cmpxchg(&init_done, 0, 1)) {
-		thread = kthread_run_perf_critical(simple_lmk_reclaim_thread,
+		thread = kthread_run(simple_lmk_reclaim_thread,
 						   NULL, "simple_lmkd");
 		BUG_ON(IS_ERR(thread));
 		BUG_ON(vmpressure_notifier_register(&vmpressure_notif));

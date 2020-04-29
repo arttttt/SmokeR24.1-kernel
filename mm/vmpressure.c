@@ -88,12 +88,12 @@ static struct vmpressure *work_to_vmpressure(struct work_struct *work)
 	return container_of(work, struct vmpressure, work);
 }
 
+#ifdef CONFIG_MEMCG
 static struct vmpressure *cg_to_vmpressure(struct cgroup *cg)
 {
 	return css_to_vmpressure(cgroup_subsys_state(cg, mem_cgroup_subsys_id));
 }
 
-#ifdef CONFIG_MEMCG
 static struct vmpressure *vmpressure_parent(struct vmpressure *vmpr)
 {
 	struct cgroup *cg = vmpressure_to_css(vmpr)->cgroup;
@@ -224,12 +224,12 @@ static void vmpressure_work_fn(struct work_struct *work)
 	if (!vmpr->scanned)
 		return;
 
-	mutex_lock(&vmpr->sr_lock);
+	spin_lock(&vmpr->sr_lock);
 	scanned = vmpr->scanned;
 	reclaimed = vmpr->reclaimed;
 	vmpr->scanned = 0;
 	vmpr->reclaimed = 0;
-	mutex_unlock(&vmpr->sr_lock);
+	spin_unlock(&vmpr->sr_lock);
 
 	do {
 		if (vmpressure_event(vmpr, scanned, reclaimed))
@@ -283,11 +283,11 @@ static void vmpressure_memcg(gfp_t gfp, struct mem_cgroup *memcg, bool critical,
 	else if (!scanned)
 		return;
 
-	mutex_lock(&vmpr->sr_lock);
+	spin_lock(&vmpr->sr_lock);
 	vmpr->scanned += scanned;
 	vmpr->reclaimed += reclaimed;
 	scanned = vmpr->scanned;
-	mutex_unlock(&vmpr->sr_lock);
+	spin_unlock(&vmpr->sr_lock);
 
 	if (!critical && (scanned < calculate_vmpressure_win() || work_pending(&vmpr->work)))
 		return;
@@ -395,6 +395,7 @@ void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio)
 	__vmpressure(gfp, memcg, true, 0, 0);
 }
 
+#ifdef CONFIG_MEMCG
 /**
  * vmpressure_register_event() - Bind vmpressure notifications to an eventfd
  * @cg:		cgroup that is interested in vmpressure notifications
@@ -475,6 +476,7 @@ void vmpressure_unregister_event(struct cgroup *cg, struct cftype *cft,
 	}
 	mutex_unlock(&vmpr->events_lock);
 }
+#endif
 
 /**
  * vmpressure_init() - Initialize vmpressure control structure
@@ -485,7 +487,7 @@ void vmpressure_unregister_event(struct cgroup *cg, struct cftype *cft,
  */
 void vmpressure_init(struct vmpressure *vmpr)
 {
-	mutex_init(&vmpr->sr_lock);
+	spin_lock_init(&vmpr->sr_lock);
 	mutex_init(&vmpr->events_lock);
 	INIT_LIST_HEAD(&vmpr->events);
 	INIT_WORK(&vmpr->work, vmpressure_work_fn);
