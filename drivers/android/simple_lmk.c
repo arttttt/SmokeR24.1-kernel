@@ -20,7 +20,7 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
 #include <linux/atomic.h>
 #ifndef atomic_read_acquire
-#definei atomic_read_acquire(v) ({ int __compat_p1 = atomic_read(v); smp_rmb(); __compat_p1; })
+#define atomic_read_acquire(v) ({ int __compat_p1 = atomic_read(v); smp_rmb(); __compat_p1; })
 #endif
 #ifndef atomic_set_release
 #define atomic_set_release(v, i) ({ smp_wmb(); atomic_set(v, i); })
