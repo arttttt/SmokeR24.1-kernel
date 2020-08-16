@@ -126,13 +126,13 @@ extern void mem_cgroup_replace_page_cache(struct page *oldpage,
 
 static inline void mem_cgroup_oom_enable(void)
 {
-	WARN_ON(current->memcg_oom.may_oom);
+//	WARN_ON(current->memcg_oom.may_oom);
 	current->memcg_oom.may_oom = 1;
 }
 
 static inline void mem_cgroup_oom_disable(void)
 {
-	WARN_ON(!current->memcg_oom.may_oom);
+//	WARN_ON(!current->memcg_oom.may_oom);
 	current->memcg_oom.may_oom = 0;
 }
 
