@@ -541,12 +541,8 @@ static inline int cgroup_name(struct cgroup *cgrp, char *buf, size_t buflen)
 static inline char * __must_check cgroup_path(struct cgroup *cgrp, char *buf,
 					      size_t buflen)
 {
-	int ret;
 
-	ret = kernfs_path(cgrp->kn, buf, buflen);
-	if (ret < 0 || ret >= buflen)
-		return NULL;
-	return buf;
+	return kernfs_path(cgrp->kn, buf, buflen);
 }
 
 static inline void pr_cont_cgroup_name(struct cgroup *cgrp)
