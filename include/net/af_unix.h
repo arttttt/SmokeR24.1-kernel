@@ -18,6 +18,7 @@ extern struct sock *unix_peer_get(struct sock *);
 
 extern unsigned int unix_tot_inflight;
 extern spinlock_t unix_table_lock;
+extern spinlock_t unix_gc_lock;
 extern struct hlist_head unix_socket_table[2 * UNIX_HASH_SIZE];
 
 struct unix_address {
