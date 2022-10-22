@@ -29,7 +29,6 @@ struct sk_filter
 	struct rcu_head		rcu;
 	unsigned int		(*bpf_func)(const struct sk_buff *skb,
 					    const struct sock_filter *filter);
-	struct rcu_head		rcu;
 	struct sock_filter     	insns[0];
 };
 
