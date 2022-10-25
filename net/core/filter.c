@@ -92,9 +92,9 @@ EXPORT_SYMBOL(sk_filter_trim_cap);
  * taken from arch/x86/net/bpf_jit_comp.c.
  */
 #ifdef __BIG_ENDIAN_BITFIELD
-#define PKT_TYPE_MAX   (7 << 5)
+#define PKT_TYPE_MAX	(7 << 5)
 #else
-#define PKT_TYPE_MAX   7
+#define PKT_TYPE_MAX	7
 #endif
 static unsigned int pkt_type_offset(void)
 {
@@ -172,13 +172,6 @@ static u64 __get_random_u32(u64 ctx, u64 a, u64 x, u64 r4, u64 r5)
 {
 	return prandom_u32();
 }
-
-/* Register mappings for user programs. */
-#define A_REG		0
-#define X_REG		7
-#define TMP_REG		8
-#define ARG2_REG	2
-#define ARG3_REG	3
 
 static bool convert_bpf_extensions(struct sock_filter *fp,
 				   struct bpf_insn **insnp)
