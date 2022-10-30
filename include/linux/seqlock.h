@@ -86,6 +86,7 @@ static inline unsigned raw_read_seqcount(const seqcount_t *s)
 	return ret;
 }
 
+/*
  * read_seqcount_begin - begin a seq-read critical section
  * @s: pointer to seqcount_t
  * Returns: count to be passed to read_seqcount_retry
