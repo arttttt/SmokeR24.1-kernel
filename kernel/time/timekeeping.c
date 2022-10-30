@@ -396,7 +396,7 @@ static void timekeeping_forward_now(struct timekeeper *tk)
 
 	cycle_now = tk->tkr.read(clock);
 	delta = (cycle_now - tk->tkr.cycle_last) & tk->tkr.mask;
-	tk->tkr.cycle_last = tk->cycle_last = cycle_now;
+	tk->tkr.cycle_last = cycle_now;
 
 	tk->tkr.xtime_nsec += delta * tk->tkr.mult;
 
@@ -1281,11 +1281,11 @@ static void timekeeping_adjust(struct timekeeper *tk, s64 offset)
 	}
 
 	if (unlikely(tk->tkr.clock->maxadj &&
-		(tk->tkr.mult + adj > tk->tkr.clock->mult + tk->clock->maxadj))) {
+		(tk->tkr.mult + adj > tk->tkr.clock->mult + tk->tkr.clock->maxadj))) {
 		printk_once(KERN_WARNING
 			"Adjusting %s more than 11%% (%ld vs %ld)\n",
 			tk->tkr.clock->name, (long)tk->tkr.mult + adj,
-			(long)tk->tkr.clock->mult + tk->clock->maxadj);
+			(long)tk->tkr.clock->mult + tk->tkr.clock->maxadj);
 	}
 	/*
 	 * So the following can be confusing.

@@ -40,20 +40,6 @@ struct tk_read_base {
 
 struct timekeeper {
 	struct tk_read_base	tkr;
-	/* Current clocksource used for timekeeping. */
-	struct clocksource	*clock;
-	/* Read function of @clock */
-	cycle_t			(*read)(struct clocksource *cs);
-	/* Bitmask for two's complement subtraction of non 64bit counters */
-	cycle_t			mask;
-	/* Last cycle value */
-	cycle_t			cycle_last;
-	/* NTP adjusted clock multiplier */
-	u32			mult;
-	/* The shift value of the current clocksource. */
-	u32			shift;
-	/* Clock shifted nano seconds */
-	u64			xtime_nsec;
 
 	/* Current CLOCK_REALTIME time in seconds */
 	u64			xtime_sec;
@@ -94,7 +80,7 @@ static inline struct timespec tk_xtime(struct timekeeper *tk)
 	struct timespec ts;
 
 	ts.tv_sec = tk->xtime_sec;
-	ts.tv_nsec = (long)(tk->xtime_nsec >> tk->shift);
+	ts.tv_nsec = (long)(tk->tkr.xtime_nsec >> tk->tkr.shift);
 	return ts;
 }
 
