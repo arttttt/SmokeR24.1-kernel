@@ -2999,12 +2999,6 @@ u64 perf_event_read_local(struct perf_event *event)
 	WARN_ON_ONCE(event->attr.inherit);
 
 	/*
-	 * It must not have a pmu::count method, those are not
-	 * NMI safe.
-	 */
-	WARN_ON_ONCE(event->pmu->count);
-
-	/*
 	 * If the event is currently on this CPU, its either a per-task event,
 	 * or local to this CPU. Furthermore it means its ACTIVE (otherwise
 	 * oncpu == -1).
