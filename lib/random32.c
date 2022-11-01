@@ -38,6 +38,7 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 #include <asm/unaligned.h>
+#define random_get_entropy()	get_cycles()
 
 #ifdef CONFIG_RANDOM32_SELFTEST
 static void __init prandom_state_selftest(void);
@@ -238,7 +239,7 @@ static void __init __prandom_start_seed_timer(void)
 	add_timer(&seed_timer);
 }
 
-static void prandom_seed_full_state(struct rnd_state __percpu *pcpu_state)
+void prandom_seed_full_state(struct rnd_state __percpu *pcpu_state)
 {
 	int i;
 
