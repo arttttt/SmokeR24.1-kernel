@@ -321,7 +321,7 @@ static void bpf_evict_inode(struct inode *inode)
 {
 	enum bpf_type type;
 
-	truncate_inode_pages_final(&inode->i_data);
+	truncate_inode_pages(&inode->i_data, 0);
 	clear_inode(inode);
 
 	if (!bpf_inode_type(inode, &type))
@@ -373,15 +373,16 @@ MODULE_ALIAS_FS("bpf");
 static int __init bpf_init(void)
 {
 	int ret;
+	static struct kobject *bpf_kobj;
 
-	ret = sysfs_create_mount_point(fs_kobj, "bpf");
-	if (ret)
-		return ret;
+	bpf_kobj = kobject_create_and_add("bpf", fs_kobj);
+	if (!bpf_kobj)
+		return -ENOMEM;
 
 	ret = register_filesystem(&bpf_fs_type);
 	if (ret)
-		sysfs_remove_mount_point(fs_kobj, "bpf");
-
+		kobject_put(bpf_kobj);
+        
 	return ret;
 }
 fs_initcall(bpf_init);
