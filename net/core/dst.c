@@ -396,8 +396,8 @@ struct metadata_dst __percpu *metadata_dst_alloc_percpu(u8 optslen, gfp_t flags)
 	int cpu;
 	struct metadata_dst __percpu *md_dst;
 
-	md_dst = __alloc_percpu(sizeof(struct metadata_dst) + optslen,
-				    __alignof__(struct metadata_dst));
+	md_dst = __alloc_percpu_gfp(sizeof(struct metadata_dst) + optslen,
+				    __alignof__(struct metadata_dst), flags);
 	if (!md_dst)
 		return NULL;
 
