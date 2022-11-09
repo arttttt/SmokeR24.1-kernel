@@ -2995,4 +2995,10 @@ do {								\
 #define PTYPE_HASH_SIZE	(16)
 #define PTYPE_HASH_MASK	(PTYPE_HASH_SIZE - 1)
 
+/* This device needs to keep skb dst for qdisc enqueue or ndo_start_xmit() */
+static inline void netif_keep_dst(struct net_device *dev)
+{
+	dev->priv_flags &= ~IFF_XMIT_DST_RELEASE;
+}
+
 #endif	/* _LINUX_NETDEVICE_H */
