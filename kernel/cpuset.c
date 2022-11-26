@@ -1455,15 +1455,16 @@ static void cpuset_attach(struct cgroup_taskset *tset)
 	static nodemask_t cpuset_attach_nodemask_to;
 	struct task_struct *task;
 	struct task_struct *leader;
-<<<<<<< HEAD
 	struct cgroup_subsys_state *css;
 	struct cpuset *cs;
+	struct cpuset *cpus_cs;
+	struct cpuset *mems_cs;
 	struct cpuset *oldcs = effective_nodemask_cpuset(cpuset_attach_old_cs);
-	struct cpuset *cpus_cs = effective_cpumask_cpuset(cs);
-	struct cpuset *mems_cs = effective_nodemask_cpuset(cs);
 
 	cgroup_taskset_first(tset, &css);
 	cs = css_cs(css);
+	cpus_cs = effective_cpumask_cpuset(cs);
+	mems_cs = effective_nodemask_cpuset(cs);
 
 	mutex_lock(&cpuset_mutex);
 
