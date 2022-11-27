@@ -649,7 +649,6 @@ perf_trace_##call(void *__data, proto)					\
 	struct ftrace_event_call *event_call = __data;			\
 	struct ftrace_data_offsets_##call __maybe_unused __data_offsets;\
 	struct ftrace_raw_##call *entry;				\
-	struct bpf_prog *prog = event_call->prog;			\
 	struct pt_regs *__regs;						\
 	u64 __count = 1;					\
 	struct task_struct *__task = NULL;				\

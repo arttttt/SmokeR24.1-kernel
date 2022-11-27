@@ -262,9 +262,33 @@ struct ftrace_event_call {
 #ifdef CONFIG_PERF_EVENTS
 	int				perf_refcount;
 	struct hlist_head __percpu	*perf_events;
-	struct bpf_prog			*prog;
+	struct bpf_prog_array __rcu	*prog_array;
 #endif
 };
+
+#ifdef CONFIG_PERF_EVENTS
+static inline bool bpf_prog_array_valid(struct ftrace_event_call *call)
+{
+	/*
+	 * This inline function checks whether call->prog_array
+	 * is valid or not. The function is called in various places,
+	 * outside rcu_read_lock/unlock, as a heuristic to speed up execution.
+	 *
+	 * If this function returns true, and later call->prog_array
+	 * becomes false inside rcu_read_lock/unlock region,
+	 * we bail out then. If this function return false,
+	 * there is a risk that we might miss a few events if the checking
+	 * were delayed until inside rcu_read_lock/unlock region and
+	 * call->prog_array happened to become non-NULL then.
+	 *
+	 * Here, READ_ONCE() is used instead of rcu_access_pointer().
+	 * rcu_access_pointer() requires the actual definition of
+	 * "struct bpf_prog_array" while READ_ONCE() only needs
+	 * a declaration of the same type.
+	 */
+	return !!READ_ONCE(call->prog_array);
+}
+#endif
 
 static inline const char *
 ftrace_event_name(struct ftrace_event_call *call)
@@ -345,13 +369,23 @@ extern int filter_current_check_discard(struct ring_buffer *buffer,
 					void *rec,
 					struct ring_buffer_event *event);
 
-#ifdef CONFIG_BPF_SYSCALL
-unsigned int trace_call_bpf(struct bpf_prog *prog, void *ctx);
+#if 1
+unsigned int trace_call_bpf(struct ftrace_event_call *call, void *ctx);
+int perf_event_attach_bpf_prog(struct perf_event *event, struct bpf_prog *prog);
+void perf_event_detach_bpf_prog(struct perf_event *event);
 #else
-static inline unsigned int trace_call_bpf(struct bpf_prog *prog, void *ctx)
+static inline unsigned int trace_call_bpf(struct ftrace_event_call *call, void *ctx)
 {
 	return 1;
 }
+
+static inline int
+perf_event_attach_bpf_prog(struct perf_event *event, struct bpf_prog *prog)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline void perf_event_detach_bpf_prog(struct perf_event *event) { }
 #endif
 
 enum {
@@ -443,7 +477,7 @@ void perf_trace_buf_update(void *record, u16 type);
 void *perf_trace_buf_alloc(int size, struct pt_regs **regs, int *rctxp);
 
 void perf_trace_run_bpf_submit(void *raw_data, int size, int rctx,
-			       struct trace_event_call *call, u64 count,
+			       struct ftrace_event_call *call, u64 count,
 			       struct pt_regs *regs, struct hlist_head *head,
 			       struct task_struct *task);
 
