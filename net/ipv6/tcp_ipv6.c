@@ -1007,6 +1007,8 @@ static int tcp_v6_conn_request(struct sock *sk, struct sk_buff *skb)
 
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
 	tcp_openreq_init(req, &tmp_opt, skb);
+	inet_rsk(req)->ireq_net = sock_net(sk);
+	atomic64_set(&inet_rsk(req)->ir_cookie, 0);
 
 	treq = inet6_rsk(req);
 	treq->rmt_addr = ipv6_hdr(skb)->saddr;

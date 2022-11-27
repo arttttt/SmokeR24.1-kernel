@@ -1536,6 +1536,8 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
 	tcp_openreq_init(req, &tmp_opt, skb);
+	inet_rsk(req)->ireq_net = sock_net(sk);
+	atomic64_set(&inet_rsk(req)->ir_cookie, 0);
 
 	ireq = inet_rsk(req);
 	ireq->loc_addr = daddr;
