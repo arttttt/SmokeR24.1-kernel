@@ -2608,6 +2608,7 @@ extern struct sk_buff *skb_segment(struct sk_buff *skb,
 unsigned int skb_gso_transport_seglen(const struct sk_buff *skb);
 int skb_vlan_pop(struct sk_buff *skb);
 int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci);
+int skb_ensure_writable(struct sk_buff *skb, int write_len);
 
 static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
 				       int len, void *buffer)
