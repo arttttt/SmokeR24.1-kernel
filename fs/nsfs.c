@@ -4,6 +4,7 @@
 #include <linux/proc_ns.h>
 #include <linux/magic.h>
 #include <linux/ktime.h>
+#include <linux/lockref.h>
 
 static struct vfsmount *nsfs_mnt;
 
