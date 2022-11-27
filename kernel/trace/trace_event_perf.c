@@ -226,7 +226,7 @@ void perf_trace_del(struct perf_event *p_event, int flags)
 	tp_event->class->reg(tp_event, TRACE_REG_PERF_DEL, p_event);
 }
 
-void *perf_trace_buf_alloc(int size, struct pt_regs **regs, int *rctxp)
+__kprobes void *perf_trace_buf_alloc(int size, struct pt_regs **regs, int *rctxp)
 {
 	char *raw_data;
 	int rctx;
@@ -250,9 +250,8 @@ void *perf_trace_buf_alloc(int size, struct pt_regs **regs, int *rctxp)
 	return raw_data;
 }
 EXPORT_SYMBOL_GPL(perf_trace_buf_alloc);
-NOKPROBE_SYMBOL(perf_trace_buf_alloc);
 
-void perf_trace_buf_update(void *record, u16 type)
+__kprobes void perf_trace_buf_update(void *record, u16 type)
 {
 	struct trace_entry *entry = record;
 	int pc = preempt_count();
@@ -262,7 +261,6 @@ void perf_trace_buf_update(void *record, u16 type)
 	tracing_generic_entry_update(entry, flags, pc);
 	entry->type = type;
 }
-NOKPROBE_SYMBOL(perf_trace_buf_update);
 
 #ifdef CONFIG_FUNCTION_TRACER
 static void
