@@ -105,7 +105,7 @@ EXPORT_SYMBOL(sk_filter_trim_cap);
 
 BPF_CALL_1(__skb_get_pay_offset, struct sk_buff *, skb)
 {
-	return skb_get_poff(skb);
+	return __skb_get_poff(skb);
 }
 
 BPF_CALL_3(__skb_get_nlattr, struct sk_buff *, skb, u32, a, u32, x)
@@ -1778,7 +1778,7 @@ BPF_CALL_1(bpf_get_hash_recalc, struct sk_buff *, skb)
 	 * can then use the inline skb->hash via context directly
 	 * instead of calling this helper again.
 	 */
-	return skb_get_hash(skb);
+	return skb_get_rxhash(skb);
 }
 
 static const struct bpf_func_proto bpf_get_hash_recalc_proto = {
@@ -2277,7 +2277,7 @@ BPF_CALL_3(bpf_skb_under_cgroup, struct sk_buff *, skb, struct bpf_map *, map,
 	struct cgroup *cgrp;
 	struct sock *sk;
 
-	sk = skb_to_full_sk(skb);
+	sk = skb->sk;
 	if (!sk || !sk_fullsock(sk))
 		return -ENOENT;
 	if (unlikely(idx >= array->map.max_entries))
@@ -2345,7 +2345,7 @@ static const struct bpf_func_proto bpf_get_socket_cookie_proto = {
 
 BPF_CALL_1(bpf_get_socket_uid, struct sk_buff *, skb)
 {
-	struct sock *sk = sk_to_full_sk(skb->sk);
+	struct sock *sk = skb->sk;
 	kuid_t kuid;
 
 	if (!sk || !sk_fullsock(sk))
