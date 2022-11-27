@@ -539,7 +539,7 @@ static int get_filter(void __user *arg, struct sock_filter **p)
 {
 	struct sock_fprog uprog;
 	struct sock_filter *code = NULL;
-	int len, err;
+	int len;
 
 	if (copy_from_user(&uprog, arg, sizeof(uprog)))
 		return -EFAULT;
