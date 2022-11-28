@@ -349,7 +349,7 @@ static int map_lookup_elem(union bpf_attr *attr)
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	if (!(f.file->f_mode & FMODE_CAN_READ)) {
+	if (!f.file->f_op->aio_read && !f.file->f_op->read) {
 		err = -EPERM;
 		goto err_put;
 	}
@@ -428,7 +428,7 @@ static int map_update_elem(union bpf_attr *attr)
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	if (!(f.file->f_mode & FMODE_CAN_WRITE)) {
+	if (!f.file->f_op->aio_write && !f.file->f_op->write) {
 		err = -EPERM;
 		goto err_put;
 	}
@@ -509,7 +509,7 @@ static int map_delete_elem(union bpf_attr *attr)
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	if (!(f.file->f_mode & FMODE_CAN_WRITE)) {
+	if (!f.file->f_op->aio_write && !f.file->f_op->write) {
 		err = -EPERM;
 		goto err_put;
 	}
@@ -559,7 +559,7 @@ static int map_get_next_key(union bpf_attr *attr)
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	if (!(f.file->f_mode & FMODE_CAN_READ)) {
+	if (!f.file->f_op->aio_read && !f.file->f_op->read) {
 		err = -EPERM;
 		goto err_put;
 	}
