@@ -192,7 +192,6 @@ void dst_init(struct dst_entry *dst, struct dst_ops *ops,
 	dst->next = NULL;
 	if (!(flags & DST_NOCOUNT))
 		dst_entries_add(ops, 1);
-	return dst;
 }
 EXPORT_SYMBOL(dst_init);
 
@@ -348,7 +347,7 @@ static struct dst_ops md_dst_ops = {
 	.family =		AF_UNSPEC,
 };
 
-static int dst_md_discard_sk(struct sock *sk, struct sk_buff *skb)
+static int dst_md_discard_sk(struct sk_buff *skb)
 {
 	WARN_ONCE(1, "Attempting to call output on metadata dst\n");
 	kfree_skb(skb);
