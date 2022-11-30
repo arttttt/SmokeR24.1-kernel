@@ -2639,7 +2639,7 @@ int proc_cpuset_show(struct seq_file *m, void *unused_v)
 {
 	struct pid *pid;
 	struct task_struct *tsk;
-	char *buf, *p;
+	char *buf;
 	struct cgroup_subsys_state *css;
 	int retval;
 
@@ -2657,11 +2657,11 @@ int proc_cpuset_show(struct seq_file *m, void *unused_v)
 	retval = -ENAMETOOLONG;
 	rcu_read_lock();
 	css = task_css(tsk, cpuset_cgrp_id);
-	p = cgroup_path(css->cgroup, buf, PATH_MAX);
+	retval = cgroup_path(css->cgroup, buf, PATH_MAX);
 	rcu_read_unlock();
-	if (!p)
+	if (retval >= PATH_MAX)
 		goto out_put_task;
-	seq_puts(m, p);
+	seq_puts(m, buf);
 	seq_putc(m, '\n');
 	retval = 0;
 out_put_task:
