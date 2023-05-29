@@ -51,6 +51,9 @@ static struct tcf_proto __rcu **ingress_find_tcf(struct Qdisc *sch,
 
 static int ingress_init(struct Qdisc *sch, struct nlattr *opt)
 {
+	if (sch->parent != TC_H_INGRESS)
+		return -EOPNOTSUPP;
+
 	net_inc_ingress_queue();
 
 	return 0;
@@ -59,6 +62,9 @@ static int ingress_init(struct Qdisc *sch, struct nlattr *opt)
 static void ingress_destroy(struct Qdisc *sch)
 {
 	struct net_device *dev = qdisc_dev(sch);
+
+	if (sch->parent != TC_H_INGRESS)
+		return;
 
 	tcf_destroy_chain(&dev->ingress_cl_list);
 	net_dec_ingress_queue();
