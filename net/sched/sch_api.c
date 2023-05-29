@@ -1209,6 +1209,8 @@ replay:
 					return -EEXIST;
 				if (tca[TCA_KIND] && nla_strcmp(tca[TCA_KIND], q->ops->id))
 					return -EINVAL;
+				if (q->flags & TCQ_F_INGRESS)
+					return -EINVAL;
 				if (q == p ||
 				    (p && check_loop(q, p, 0)))
 					return -ELOOP;
