@@ -139,6 +139,9 @@ static struct tcf_proto __rcu **clsact_find_tcf(struct Qdisc *sch,
 
 static int clsact_init(struct Qdisc *sch, struct nlattr *opt)
 {
+	if (sch->parent != TC_H_CLSACT)
+		return -EOPNOTSUPP;
+
 	net_inc_ingress_queue();
 	net_inc_egress_queue();
 
@@ -148,6 +151,9 @@ static int clsact_init(struct Qdisc *sch, struct nlattr *opt)
 static void clsact_destroy(struct Qdisc *sch)
 {
 	struct net_device *dev = qdisc_dev(sch);
+
+	if (sch->parent != TC_H_CLSACT)
+		return;
 
 	tcf_destroy_chain(&dev->ingress_cl_list);
 	tcf_destroy_chain(&dev->egress_cl_list);
