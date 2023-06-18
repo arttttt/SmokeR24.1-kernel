@@ -588,7 +588,6 @@ out:
 	return err;
 }
 
-#if 0
 static int __f2fs_tmpfile(struct inode *dir, struct dentry *dentry,
 					umode_t mode, struct inode **whiteout)
 {
@@ -660,7 +659,6 @@ static int f2fs_create_whiteout(struct inode *dir, struct inode **whiteout)
 {
 	return __f2fs_tmpfile(dir, NULL, S_IFCHR | WHITEOUT_MODE, whiteout);
 }
-#endif
 
 static int f2fs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			struct inode *new_dir, struct dentry *new_dentry)
@@ -1081,6 +1079,7 @@ const struct inode_operations f2fs_dir_inode_operations = {
 	.mkdir		= f2fs_mkdir,
 	.rmdir		= f2fs_rmdir,
 	.mknod		= f2fs_mknod,
+	.tmpfile	= f2fs_tmpfile,
 	.rename		= f2fs_rename,
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,

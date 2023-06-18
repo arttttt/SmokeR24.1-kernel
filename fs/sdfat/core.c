@@ -33,11 +33,26 @@
 #include <linux/writeback.h>
 #include <linux/kernel.h>
 #include <linux/log2.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
+#include <linux/iversion.h>
+#endif
 
 #include "sdfat.h"
 #include "core.h"
 #include <asm/byteorder.h>
 #include <asm/unaligned.h>
+
+
+/*************************************************************************
+ * FUNCTIONS WHICH HAS KERNEL VERSION DEPENDENCY
+ *************************************************************************/
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
+static inline u64 inode_peek_iversion(struct inode *inode)
+{
+	return inode->i_version;
+}
+#endif
+
 
 /*----------------------------------------------------------------------*/
 /*  Constant & Macro Definitions                                        */
@@ -1621,6 +1636,12 @@ s32 fscore_shutdown(void)
 	return 0;
 }
 
+/* check device is ejected */
+s32 fscore_check_bdi_valid(struct super_block *sb)
+{
+	return bdev_check_bdi_valid(sb);
+}
+
 static bool is_exfat(pbr_t *pbr)
 {
 	int i = 53;
@@ -1703,6 +1724,7 @@ s32 fscore_mount(struct super_block *sb)
 	pbr_t *p_pbr;
 	struct buffer_head *tmp_bh = NULL;
 	struct gendisk *disk = sb->s_bdev->bd_disk;
+	struct hd_struct *part = sb->s_bdev->bd_part;
 	struct sdfat_mount_options *opts = &(SDFAT_SB(sb)->options);
 	FS_INFO_T *fsi = &(SDFAT_SB(sb)->fsi);
 
@@ -1802,9 +1824,11 @@ free_bh:
 		"misaligned" : "aligned");
 
 	sdfat_log_msg(sb, KERN_INFO,
-		"detected volume size     : %llu MB (disk_size : %llu MB)",
-		fsi->num_sectors >> 11,
-		disk ? (u64)((disk->part0.nr_sects) >> 11) : 0);
+		"detected volume size     : %llu KB (disk : %llu KB, "
+		"part : %llu KB)",
+		(fsi->num_sectors * (sb->s_blocksize >> SECTOR_SIZE_BITS)) >> 1,
+		disk ? (u64)((disk->part0.nr_sects) >> 1) : 0,
+		part ? (u64)((part->nr_sects) >> 1) : 0);
 
 	ret = load_upcase_table(sb);
 	if (ret) {
@@ -1947,10 +1971,10 @@ s32 fscore_lookup(struct inode *inode, u8 *path, FILE_ID_T *fid)
 		return ret;
 
 	/* check the validation of hint_stat and initialize it if required */
-	if (dir_fid->version != (u32)(inode->i_version & 0xffffffff)) {
+	if (dir_fid->version != (u32)inode_peek_iversion(inode)) {
 		dir_fid->hint_stat.clu = dir.dir;
 		dir_fid->hint_stat.eidx = 0;
-		dir_fid->version = (u32)(inode->i_version & 0xffffffff);
+		dir_fid->version = (u32)inode_peek_iversion(inode);
 		dir_fid->hint_femp.eidx = -1;
 	}
 
@@ -2947,6 +2971,7 @@ s32 fscore_read_inode(struct inode *inode, DIR_ENTRY_T *info)
 	info->CreateTimestamp.Minute = tm.min;
 	info->CreateTimestamp.Second = tm.sec;
 	info->CreateTimestamp.MilliSecond = 0;
+	info->CreateTimestamp.Timezone.value = tm.tz.value;
 
 	fsi->fs_func->get_entry_time(ep, &tm, TM_MODIFY);
 	info->ModifyTimestamp.Year = tm.year;
@@ -2956,6 +2981,7 @@ s32 fscore_read_inode(struct inode *inode, DIR_ENTRY_T *info)
 	info->ModifyTimestamp.Minute = tm.min;
 	info->ModifyTimestamp.Second = tm.sec;
 	info->ModifyTimestamp.MilliSecond = 0;
+	info->ModifyTimestamp.Timezone.value = tm.tz.value;
 
 	memset((s8 *) &info->AccessTimestamp, 0, sizeof(DATE_TIME_T));
 
@@ -3058,6 +3084,7 @@ s32 fscore_write_inode(struct inode *inode, DIR_ENTRY_T *info, s32 sync)
 	fsi->fs_func->set_entry_attr(ep, info->Attr);
 
 	/* set FILE_INFO structure using the acquired DENTRY_T */
+	tm.tz  = info->CreateTimestamp.Timezone;
 	tm.sec  = info->CreateTimestamp.Second;
 	tm.min  = info->CreateTimestamp.Minute;
 	tm.hour = info->CreateTimestamp.Hour;
@@ -3066,6 +3093,7 @@ s32 fscore_write_inode(struct inode *inode, DIR_ENTRY_T *info, s32 sync)
 	tm.year = info->CreateTimestamp.Year;
 	fsi->fs_func->set_entry_time(ep, &tm, TM_CREATE);
 
+	tm.tz  = info->ModifyTimestamp.Timezone;
 	tm.sec  = info->ModifyTimestamp.Second;
 	tm.min  = info->ModifyTimestamp.Minute;
 	tm.hour = info->ModifyTimestamp.Hour;

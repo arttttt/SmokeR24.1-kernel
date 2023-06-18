@@ -31,6 +31,13 @@ config ANDROID_BINDER_DEVICES
 	  created. Each binder device has its own context manager, and is
 	  therefore logically separated from the other devices.
 
+config ANDROID_FSTAB_FAKE
+	bool "Enable android fstab driver for fake DT fstab"
+	depends on PROC_FS
+	---help---
+	  This is intended to allow early mounting partitions
+	  on devices without DT, or where DT can't be modified.
+
 endif # if ANDROID
 
 endmenu

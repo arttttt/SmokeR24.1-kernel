@@ -441,6 +441,7 @@ static void fat_get_entry_time(DENTRY_T *p_entry, TIMESTAMP_T *tp, u8 mode)
 		break;
 	}
 
+	tp->tz.value = 0x00;
 	tp->sec  = (t & 0x001F) << 1;
 	tp->min  = (t >> 5) & 0x003F;
 	tp->hour = (t >> 11);
@@ -1323,8 +1324,9 @@ static sector_t __calc_hidden_sect(struct super_block *sb)
 	hidden = bdev->bd_part->start_sect;
 	/* a disk device, not a partition */
 	if (!hidden) {
-		ASSERT(bdev == bdev->bd_contains);
-		ASSERT(!bdev->bd_part->partno);
+		if (bdev != bdev->bd_contains)
+			sdfat_log_msg(sb, KERN_WARNING,
+				"hidden(0), but disk has a partition table");
 		goto out;
 	}
 
@@ -1334,8 +1336,8 @@ static sector_t __calc_hidden_sect(struct super_block *sb)
 	}
 
 out:
-	sdfat_log_msg(sb, KERN_INFO, "start_sect of partition  : %lld",
-		(s64)hidden);
+	sdfat_log_msg(sb, KERN_INFO, "start_sect of part(%d)    : %lld",
+		bdev ? bdev->bd_part->partno : -1, (s64)hidden);
 	return hidden;
 
 }

@@ -2998,6 +2998,68 @@ stale_open:
 	goto retry_lookup;
 }
 
+static int do_tmpfile(int dfd, struct filename *pathname,
+		struct nameidata *nd, int flags,
+		const struct open_flags *op,
+		struct file *file, int *opened)
+{
+	static const struct qstr name = QSTR_INIT("/", 1);
+	struct dentry *dentry, *child;
+	struct inode *dir;
+	int error = path_lookupat(dfd, pathname->name,
+				  flags | LOOKUP_DIRECTORY, nd);
+	if (unlikely(error))
+		return error;
+	error = mnt_want_write(nd->path.mnt);
+	if (unlikely(error))
+		goto out;
+	/* we want directory to be writable */
+	error = inode_permission(nd->inode, MAY_WRITE | MAY_EXEC);
+	if (error)
+		goto out2;
+	dentry = nd->path.dentry;
+	dir = dentry->d_inode;
+	if (!dir->i_op->tmpfile) {
+		error = -EOPNOTSUPP;
+		goto out2;
+	}
+	child = d_alloc(dentry, &name);
+	if (unlikely(!child)) {
+		error = -ENOMEM;
+		goto out2;
+	}
+	nd->flags &= ~LOOKUP_DIRECTORY;
+	nd->flags |= op->intent;
+	dput(nd->path.dentry);
+	nd->path.dentry = child;
+	error = dir->i_op->tmpfile(dir, nd->path.dentry, op->mode);
+	if (error)
+		goto out2;
+	audit_inode(pathname, nd->path.dentry, 0);
+	/* Don't check for other permissions, the inode was just created */
+	error = may_open(&nd->path, MAY_OPEN, op->open_flag);
+	if (error)
+		goto out2;
+	file->f_path.mnt = nd->path.mnt;
+	error = finish_open(file, nd->path.dentry, NULL, opened);
+	if (error)
+		goto out2;
+	error = open_check_o_direct(file);
+	if (error) {
+		fput(file);
+	} else if (!(op->open_flag & O_EXCL)) {
+		struct inode *inode = file_inode(file);
+		spin_lock(&inode->i_lock);
+		inode->i_state |= I_LINKABLE;
+		spin_unlock(&inode->i_lock);
+	}
+out2:
+	mnt_drop_write(nd->path.mnt);
+out:
+	path_put(&nd->path);
+	return error;
+}
+
 static struct file *path_openat(int dfd, struct filename *pathname,
 		struct nameidata *nd, const struct open_flags *op, int flags)
 {
@@ -3012,6 +3074,11 @@ static struct file *path_openat(int dfd, struct filename *pathname,
 		return file;
 
 	file->f_flags = op->open_flag;
+
+	if (unlikely(file->f_flags & __O_TMPFILE)) {
+		error = do_tmpfile(dfd, pathname, nd, flags, op, file, &opened);
+		goto out2;
+	}
 
 	error = path_init(dfd, pathname->name, flags | LOOKUP_PARENT, nd, &base);
 	if (unlikely(error))
@@ -3048,6 +3115,7 @@ out:
 		path_put(&nd->root);
 	if (base)
 		fput(base);
+out2:
 	if (!(opened & FILE_OPENED)) {
 		BUG_ON(!error);
 		put_filp(file);
@@ -3699,12 +3767,18 @@ int vfs_link2(struct vfsmount *mnt, struct dentry *old_dentry, struct inode *dir
 
 	mutex_lock(&inode->i_mutex);
 	/* Make sure we don't allow creating hardlink to an unlinked file */
-	if (inode->i_nlink == 0)
+	if (inode->i_nlink == 0 && !(inode->i_state & I_LINKABLE))
 		error =  -ENOENT;
 	else if (max_links && inode->i_nlink >= max_links)
 		error = -EMLINK;
 	else
 		error = dir->i_op->link(old_dentry, dir, new_dentry);
+
+	if (!error && (inode->i_state & I_LINKABLE)) {
+		spin_lock(&inode->i_lock);
+		inode->i_state &= ~I_LINKABLE;
+		spin_unlock(&inode->i_lock);
+	}
 	mutex_unlock(&inode->i_mutex);
 	if (!error)
 		fsnotify_link(dir, inode, new_dentry);
@@ -4062,6 +4136,20 @@ SYSCALL_DEFINE2(rename, const char __user *, oldname, const char __user *, newna
 {
 	return sys_renameat(AT_FDCWD, oldname, AT_FDCWD, newname);
 }
+
+int vfs_whiteout(struct inode *dir, struct dentry *dentry)
+{
+	int error = may_create(NULL, dir, dentry);
+	if (error)
+		return error;
+
+	if (!dir->i_op->mknod)
+		return -EPERM;
+
+	return dir->i_op->mknod(dir, dentry,
+				S_IFCHR | WHITEOUT_MODE, WHITEOUT_DEV);
+}
+EXPORT_SYMBOL(vfs_whiteout);
 
 int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen, const char *link)
 {

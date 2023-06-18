@@ -154,17 +154,20 @@ TRACE_EVENT(sched_switch,
 
 TRACE_EVENT(sched_switch_end,
 
-	TP_PROTO(u32 a),
+	TP_PROTO(int dummy),
 
-	TP_ARGS(a),
+	TP_ARGS(dummy),
 
 	TP_STRUCT__entry(
+		__field(int, dummy)
 	),
 
 	TP_fast_assign(
+		__entry->dummy = dummy;
 	),
 
-	TP_printk("none %d", 0)
+	TP_printk("dummy=%lu",
+		(unsigned long)__entry->dummy)
 );
 
 

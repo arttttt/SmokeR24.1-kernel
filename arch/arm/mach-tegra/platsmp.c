@@ -7,7 +7,7 @@
  *  Copyright (C) 2009 Palm
  *  All Rights Reserved
  *
- *  Copyright (C) 2010-2014, NVIDIA Corporation. All rights reserved.
+ *  Copyright (C) 2010-2015, NVIDIA Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -30,6 +30,7 @@
 #include <asm/cputype.h>
 #include <asm/smp_plat.h>
 #include <asm/smp_scu.h>
+#include <asm/psci.h>
 
 #include <linux/platform/tegra/flowctrl.h>
 #include <linux/platform/tegra/reset.h>
@@ -255,6 +256,12 @@ static int tegra11x_power_up_cpu(unsigned int cpu)
 	BUG_ON(is_lp_cluster());
 
 	cpu = cpu_logical_map(cpu);
+
+#if defined(CONFIG_ARM_PSCI)
+	/* monitor takes care of CPU_ON */
+	if (tegra_cpu_is_secure())
+		return psci_ops.cpu_on(cpu, __pa(tegra_secondary_startup));
+#endif
 
 	if (cpu_isset(cpu, tegra_cpu_power_map)) {
 		/* set SCLK as event trigger for flow conroller */

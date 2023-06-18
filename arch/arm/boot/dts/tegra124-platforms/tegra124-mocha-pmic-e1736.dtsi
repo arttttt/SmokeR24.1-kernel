@@ -147,7 +147,6 @@
 			power_pm {
 				compatible = "ti,palmas-pm";
 				system-pmic-power-off;
-				system-pmic-power-reset;
 			};
 
 			gpadc {
