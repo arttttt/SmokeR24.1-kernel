@@ -939,7 +939,8 @@ struct cgroup_subsys blkio_cgrp_subsys = {
 	.css_offline = blkcg_css_offline,
 	.css_free = blkcg_css_free,
 	.can_attach = blkcg_can_attach,
-	.dfl_cftypes = blkcg_files,
+	.base_cftypes = blkcg_files,
+//	.dfl_cftypes = blkcg_files,
 
 	/*
 	 * blkio subsystem is utterly broken in terms of hierarchy support.
