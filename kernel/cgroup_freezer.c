@@ -469,16 +469,16 @@ static u64 freezer_parent_freezing_read(struct cgroup_subsys_state *css,
 	return (bool)(freezer->state & CGROUP_FREEZING_PARENT);
 }
 
-static u64 freezer_killable_read(struct cgroup *cgroup, struct cftype *cft)
+static u64 freezer_killable_read(struct cgroup_subsys_state *css, struct cftype *cft)
 {
-	struct freezer *freezer = cgroup_freezer(cgroup);
+	struct freezer *freezer = css_freezer(css);
 
 	return (bool)(freezer->state & CGROUP_FREEZER_KILLABLE);
 }
 
-static int freezer_killable_write(struct cgroup *cgroup, struct cftype *cft, u64 val)
+static int freezer_killable_write(struct cgroup_subsys_state *css, struct cftype *cft, u64 val)
 {
-	struct freezer *freezer = cgroup_freezer(cgroup);
+	struct freezer *freezer = css_freezer(css);
 
 	if (val > 1)
 		return -EINVAL;
