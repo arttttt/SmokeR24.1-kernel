@@ -949,7 +949,7 @@ b_epilogue:
 			ctx->seen |= SEEN_SKB | SEEN_CALL;
 
 			emit(ARM_MOV_R(ARM_R0, r_skb), ctx);
-			emit_mov_i(ARM_R3, (unsigned int)__skb_get_poff, ctx);
+			emit_mov_i(ARM_R3, (unsigned int)skb_get_poff, ctx);
 			emit_blx_r(ARM_R3, ctx);
 			emit(ARM_MOV_R(r_A, ARM_R0), ctx);
 			break;
