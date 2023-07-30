@@ -60,7 +60,7 @@ static bool ip_gso_exceeds_dst_mtu(const struct sk_buff *skb)
 {
 	unsigned int mtu;
 
-	if (skb->local_df || !skb_is_gso(skb))
+	if (skb->ignore_df || !skb_is_gso(skb))
 		return false;
 
 	mtu = dst_mtu(skb_dst(skb));
