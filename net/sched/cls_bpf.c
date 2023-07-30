@@ -17,6 +17,7 @@
 #include <linux/skbuff.h>
 #include <linux/filter.h>
 #include <linux/bpf.h>
+#include <linux/rculist.h>
 
 #include <net/rtnetlink.h>
 #include <net/pkt_cls.h>
@@ -95,6 +96,21 @@ static int cls_bpf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 static bool cls_bpf_is_ebpf(const struct cls_bpf_prog *prog)
 {
 	return !prog->bpf_ops;
+}
+
+/*
+ * INIT_LIST_HEAD_RCU - Initialize a list_head visible to RCU readers
+ * @list: list to be initialized
+ *
+ * You should instead use INIT_LIST_HEAD() for normal initialization and
+ * cleanup tasks, when readers have no access to the list being initialized.
+ * However, if the list being initialized is visible to readers, you
+ * need to keep the compiler from being too mischievous.
+ */
+static inline void INIT_LIST_HEAD_RCU(struct list_head *list)
+{
+	ACCESS_ONCE(list->next) = list;
+	ACCESS_ONCE(list->prev) = list;
 }
 
 static int cls_bpf_init(struct tcf_proto *tp)

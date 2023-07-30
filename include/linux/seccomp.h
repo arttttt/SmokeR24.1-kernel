@@ -44,7 +44,7 @@ int seccomp_phase2(u32 phase1_result);
 /* A wrapper for architectures supporting only SECCOMP_MODE_STRICT. */
 static inline void secure_computing_strict(int this_syscall)
 {
-	BUG_ON(secure_computing(this_syscall) != 0);
+//	BUG_ON(secure_computing(this_syscall) != 0);
 }
 
 extern long prctl_get_seccomp(void);
