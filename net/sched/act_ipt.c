@@ -259,6 +259,8 @@ nla_put_failure:
 	return -1;
 }
 
+#define TCA_ACT_XT 10
+
 static struct tc_action_ops act_ipt_ops = {
 	.kind		=	"ipt",
 	.type		=	TCA_ACT_IPT,
