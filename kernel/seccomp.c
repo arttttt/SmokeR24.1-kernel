@@ -68,10 +68,11 @@ struct seccomp_filter {
 static void populate_seccomp_data(struct seccomp_data *sd)
 {
 	struct task_struct *task = current;
+	struct pt_regs *regs = task_pt_regs(current);
 	unsigned long args[6];
 
 	sd->nr = syscall_get_nr(task, regs);
-	sd->arch = syscall_get_arch(task, regs);
+	sd->arch = syscall_get_arch();
 	syscall_get_arguments(task, regs, 0, 6, args);
 	sd->args[0] = args[0];
 	sd->args[1] = args[1];
