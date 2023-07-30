@@ -17,6 +17,8 @@
 #include <linux/sched.h>
 #include <linux/uidgid.h>
 
+extern u64 notrace ktime_get_mono_fast_ns(void);
+
 /* If kernel subsystem is allowing eBPF programs to call this function,
  * inside its own verifier_ops->get_func_proto() callback it should return
  * bpf_map_lookup_elem_proto, so that verifier can properly check the arguments
