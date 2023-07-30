@@ -30,6 +30,11 @@ static void ns_prune_dentry(struct dentry *dentry)
 	}
 }
 
+static int always_delete_dentry(const struct dentry *dentry)
+{
+	return 1;
+}
+
 const struct dentry_operations ns_dentry_operations =
 {
 	.d_prune	= ns_prune_dentry,
