@@ -823,26 +823,24 @@ static u32 bbr_ssthresh(struct sock *sk)
 	return TCP_INFINITE_SSTHRESH;	 /* BBR does not use ssthresh */
 }
 
-static size_t bbr_get_info(struct sock *sk, u32 ext, int *attr,
-			   union tcp_cc_info *info)
+static void bbr_get_info(struct sock *sk, u32 ext, struct sk_buff *skb)
 {
-	if (ext & (1 << (INET_DIAG_BBRINFO - 1)) ||
+	if (ext &(1 << (INET_DIAG_BBRINFO - 1)) ||
 	    ext & (1 << (INET_DIAG_VEGASINFO - 1))) {
 		struct tcp_sock *tp = tcp_sk(sk);
 		struct bbr *bbr = inet_csk_ca(sk);
 		u64 bw = bbr_bw(sk);
 
-		bw = bw * tp->mss_cache * USEC_PER_SEC >> BW_SCALE;
-		memset(&info->bbr, 0, sizeof(info->bbr));
-		info->bbr.bbr_bw_lo		= (u32)bw;
-		info->bbr.bbr_bw_hi		= (u32)(bw >> 32);
-		info->bbr.bbr_min_rtt		= bbr->min_rtt_us;
-		info->bbr.bbr_pacing_gain	= bbr->pacing_gain;
-		info->bbr.bbr_cwnd_gain		= bbr->cwnd_gain;
-		*attr = INET_DIAG_BBRINFO;
-		return sizeof(info->bbr);
+                bw = bw * tp->mss_cache * USEC_PER_SEC >> BW_SCALE;
+		struct tcp_bbr_info info = {
+			.bbr_bw_lo = (u32)bw,		/* lower 32 bits of bw */
+			.bbr_bw_hi = (u32)(bw >> 32),		/* upper 32 bits of bw */
+			.bbr_min_rtt = bbr->min_rtt_us,		/* min-filtered RTT in uSec */
+			.bbr_pacing_gain = bbr->pacing_gain,	/* pacing gain shifted left 8 bits */
+			.bbr_cwnd_gain = bbr->cwnd_gain,		/* cwnd gain shifted left 8 bits */
+		};
+		nla_put(skb, INET_DIAG_VEGASINFO, sizeof(info), &info);
 	}
-	return 0;
 }
 
 static void bbr_set_state(struct sock *sk, u8 new_state)
