@@ -888,8 +888,8 @@ static int tcp_v4_send_synack(struct sock *sk, struct dst_entry *dst,
 					    ireq->rmt_addr,
 					    ireq->opt);
 		err = net_xmit_eval(err);
-		if (!tcp_rsk(req)->snt_synack && !err)
-			tcp_rsk(req)->snt_synack = tcp_time_stamp;
+		if (!tcp_rsk(req)->snt_synack.v64 && !err)
+			skb_mstamp_get(&tcp_rsk(req)->snt_synack);
 	}
 
 	return err;
@@ -1413,7 +1413,7 @@ static int tcp_v4_conn_req_fastopen(struct sock *sk,
 				    ireq->rmt_addr, ireq->opt);
 	err = net_xmit_eval(err);
 	if (!err)
-		tcp_rsk(req)->snt_synack = tcp_time_stamp;
+		skb_mstamp_get(&tcp_rsk(req)->snt_synack);
 	/* XXX (TFO) - is it ok to ignore error and continue? */
 
 	spin_lock(&queue->fastopenq->lock);
@@ -1638,7 +1638,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 		if (err || want_cookie)
 			goto drop_and_free;
 
-		tcp_rsk(req)->snt_synack = tcp_time_stamp;
+		skb_mstamp_get(&tcp_rsk(req)->snt_synack);
 		tcp_rsk(req)->listener = NULL;
 		/* Add the request_sock to the SYN table */
 		inet_csk_reqsk_queue_hash_add(sk, req, TCP_TIMEOUT_INIT);

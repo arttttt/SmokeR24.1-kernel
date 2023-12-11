@@ -117,10 +117,10 @@ struct tcp_request_sock {
 	/* Only used by TCP MD5 Signature so far. */
 	const struct tcp_request_sock_ops *af_specific;
 #endif
+	struct skb_mstamp		snt_synack; /* first SYNACK sent time */
 	struct sock			*listener; /* needed for TFO */
 	u32				rcv_isn;
 	u32				snt_isn;
-	u32				snt_synack; /* synack sent time */
 	u32				rcv_nxt; /* the ack # by SYNACK. For
 						  * FastOpen it's the seq#
 						  * after data-in-SYN.

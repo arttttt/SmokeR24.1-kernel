@@ -3038,14 +3038,18 @@ static inline bool tcp_ack_update_rtt(struct sock *sk, const int flag,
 }
 
 /* Compute time elapsed between (last) SYNACK and the ACK completing 3WHS. */
-static void tcp_synack_rtt_meas(struct sock *sk, struct request_sock *req)
+void tcp_synack_rtt_meas(struct sock *sk, struct request_sock *req)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
-	long seq_rtt_us = -1L;
+	long rtt_us = -1L;
 
-	if (tp->lsndtime && !tp->total_retrans)
-		seq_rtt_us = jiffies_to_usecs(tcp_time_stamp - tp->lsndtime);
-	tcp_ack_update_rtt(sk, FLAG_SYN_ACKED, seq_rtt_us, -1L, seq_rtt_us);
+	if (req && !req->num_retrans && tcp_rsk(req)->snt_synack.v64) {
+		struct skb_mstamp now;
+
+		skb_mstamp_get(&now);
+		rtt_us = skb_mstamp_us_delta(&now, &tcp_rsk(req)->snt_synack);
+	}
+
+	tcp_ack_update_rtt(sk, FLAG_SYN_ACKED, rtt_us, -1L, -1L);
 }
 
 static void tcp_cong_avoid(struct sock *sk, u32 ack, u32 acked, u32 in_flight)
@@ -5942,6 +5946,11 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 		switch (sk->sk_state) {
 		case TCP_SYN_RECV:
 			if (acceptable) {
+
+
+				if (!tp->srtt_us)
+					tcp_synack_rtt_meas(sk, req);
+
 				/* Once we leave TCP_SYN_RECV, we no longer
 				 * need req so release it.
 				 */
@@ -5977,7 +5986,6 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 				tp->snd_wnd = ntohs(th->window) <<
 					      tp->rx_opt.snd_wscale;
 				tcp_init_wl(tp, TCP_SKB_CB(skb)->seq);
-				tcp_synack_rtt_meas(sk, req);
 
 				if (tp->rx_opt.tstamp_ok)
 					tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;
