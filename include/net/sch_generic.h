@@ -91,6 +91,7 @@ struct Qdisc {
 	struct gnet_stats_basic_packed bstats;
 	unsigned int		__state;
 	struct gnet_stats_queue	qstats;
+	int                     owner;
 	struct rcu_head		rcu_head;
 	int			padded;
 	atomic_t		refcnt;
