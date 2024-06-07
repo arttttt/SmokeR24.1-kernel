@@ -363,6 +363,7 @@ struct Qdisc noop_qdisc = {
 	.q.lock		=	__SPIN_LOCK_UNLOCKED(noop_qdisc.q.lock),
 	.dev_queue	=	&noop_netdev_queue,
 	.busylock	=	__SPIN_LOCK_UNLOCKED(noop_qdisc.busylock),
+	.owner = -1,
 };
 EXPORT_SYMBOL(noop_qdisc);
 
