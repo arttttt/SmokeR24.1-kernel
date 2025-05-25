@@ -1050,7 +1050,7 @@ struct psi_trigger *psi_trigger_create(struct psi_group *group,
 
 	if (!rcu_access_pointer(group->poll_kworker)) {
 		struct sched_param param = {
-			.sched_priority = 1,
+			.sched_priority = MAX_USER_RT_PRIO - 2,
 		};
 		struct kthread_worker *kworker;
 
