@@ -747,11 +747,6 @@ static inline bool bpf_jit_is_ebpf(void)
 # endif
 }
 
-static inline bool ebpf_jit_enabled(void)
-{
-	return bpf_jit_enable && bpf_jit_is_ebpf();
-}
-
 static inline bool bpf_prog_ebpf_jited(const struct bpf_prog *fp)
 {
 	return fp->jited && bpf_jit_is_ebpf();
@@ -811,11 +806,6 @@ void bpf_prog_kallsyms_add(struct bpf_prog *fp);
 void bpf_prog_kallsyms_del(struct bpf_prog *fp);
 
 #else /* CONFIG_BPF_JIT */
-
-static inline bool ebpf_jit_enabled(void)
-{
-	return false;
-}
 
 static inline bool bpf_prog_ebpf_jited(const struct bpf_prog *fp)
 {
