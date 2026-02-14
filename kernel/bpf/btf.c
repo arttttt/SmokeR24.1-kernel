@@ -11,6 +11,7 @@
 #include <linux/file.h>
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
+#include <linux/refcount.h>
 #include <linux/bpf_verifier.h>
 #include <linux/btf.h>
 
