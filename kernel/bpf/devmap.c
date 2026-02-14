@@ -43,6 +43,9 @@
 #include "bpf_lru_list.h"
 #include "map_in_map.h"
 
+#define DEV_CREATE_FLAG_MASK \
+	(BPF_F_RDONLY | BPF_F_WRONLY)
+
 struct bpf_dtab_netdev {
 	struct net_device *dev;
 	int key;
@@ -66,7 +69,7 @@ static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
 
 	/* check sanity of attributes */
 	if (attr->max_entries == 0 || attr->key_size != 4 ||
-	    attr->value_size != 4 || attr->map_flags)
+	    attr->value_size != 4 || attr->map_flags & ~DEV_CREATE_FLAG_MASK)
 		return ERR_PTR(-EINVAL);
 
 	/* if value_size is bigger, the user space won't be able to

@@ -534,6 +534,9 @@ out:
 #define LPM_KEY_SIZE_MAX	LPM_KEY_SIZE(LPM_DATA_SIZE_MAX)
 #define LPM_KEY_SIZE_MIN	LPM_KEY_SIZE(LPM_DATA_SIZE_MIN)
 
+#define LPM_CREATE_FLAG_MASK	(BPF_F_NO_PREALLOC |	\
+				 BPF_F_RDONLY | BPF_F_WRONLY)
+
 static struct bpf_map *trie_alloc(union bpf_attr *attr)
 {
 	struct lpm_trie *trie;
@@ -545,7 +548,8 @@ static struct bpf_map *trie_alloc(union bpf_attr *attr)
 
 	/* check sanity of attributes */
 	if (attr->max_entries == 0 ||
-	    attr->map_flags != BPF_F_NO_PREALLOC ||
+	    !(attr->map_flags & BPF_F_NO_PREALLOC) ||
+		attr->map_flags & ~LPM_CREATE_FLAG_MASK ||
 	    attr->key_size < LPM_KEY_SIZE_MIN ||
 	    attr->key_size > LPM_KEY_SIZE_MAX ||
 	    attr->value_size < LPM_VAL_SIZE_MIN ||
