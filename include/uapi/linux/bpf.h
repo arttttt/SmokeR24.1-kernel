@@ -223,6 +223,9 @@ enum bpf_attach_type {
 /* flags for BPF_PROG_QUERY */
 #define BPF_F_QUERY_EFFECTIVE	(1U << 0)
 
+/* Enable memory-mapping BPF map */
+#define BPF_F_MMAPABLE		(1U << 10)
+
 #define BPF_OBJ_NAME_LEN 16U
 
 union bpf_attr {

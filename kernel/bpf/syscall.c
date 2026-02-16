@@ -78,7 +78,7 @@ void bpf_register_map_type(struct bpf_map_type_list *tl)
 	list_add(&tl->list_node, &bpf_map_types);
 }
 
-void *bpf_map_area_alloc(size_t size)
+static void *__bpf_map_area_alloc(size_t size, bool mmapable)
 {
 	/* We definitely need __GFP_NORETRY, so OOM killer doesn't
 	 * trigger under memory pressure as we really just want to
@@ -87,14 +87,30 @@ void *bpf_map_area_alloc(size_t size)
 	const gfp_t flags = __GFP_NOWARN | __GFP_NORETRY | __GFP_ZERO;
 	void *area;
 
-	if (size <= (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER)) {
-		area = kmalloc(size, GFP_USER | flags);
+	/* kmalloc()'ed memory can't be mmap()'ed */
+	if (!mmapable && size <= (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER)) {		area = kmalloc(size, GFP_USER | flags);
 		if (area != NULL)
 			return area;
 	}
 
+	if (mmapable) {
+		BUG_ON(!PAGE_ALIGNED(size));
+		return vmalloc_user_node_flags(size, /*numa_node*/ 0, GFP_KERNEL |
+					       __GFP_REPEAT | flags);
+	}
+
 	return __vmalloc(size, GFP_KERNEL | __GFP_HIGHMEM | flags,
 			 PAGE_KERNEL);
+}
+
+void *bpf_map_area_alloc(size_t size)
+{
+	return __bpf_map_area_alloc(size, false);
+}
+
+void *bpf_map_area_mmapable_alloc(size_t size, int numa_node)
+{
+	return __bpf_map_area_alloc(size, true);
 }
 
 void bpf_map_area_free(void *area)
@@ -304,6 +320,74 @@ static unsigned int bpf_map_poll(struct file *filp, struct poll_table_struct *pt
 	return POLLERR;
 }
 
+/* called for any extra memory-mapped regions (except initial) */
+static void bpf_map_mmap_open(struct vm_area_struct *vma)
+{
+	struct bpf_map *map = vma->vm_file->private_data;
+
+	bpf_map_inc(map, true);
+
+	if (vma->vm_flags & VM_WRITE) {
+		mutex_lock(&map->freeze_mutex);
+		map->writecnt++;
+		mutex_unlock(&map->freeze_mutex);
+	}
+}
+
+/* called for all unmapped memory region (including initial) */
+static void bpf_map_mmap_close(struct vm_area_struct *vma)
+{
+	struct bpf_map *map = vma->vm_file->private_data;
+
+	if (vma->vm_flags & VM_WRITE) {
+		mutex_lock(&map->freeze_mutex);
+		map->writecnt--;
+		mutex_unlock(&map->freeze_mutex);
+	}
+
+	bpf_map_put_with_uref(map);
+}
+
+static const struct vm_operations_struct bpf_map_default_vmops = {
+	.open		= bpf_map_mmap_open,
+	.close		= bpf_map_mmap_close,
+};
+
+static int bpf_map_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	struct bpf_map *map = filp->private_data;
+	int err;
+
+	if (!map->ops->map_mmap) //  || map_value_has_spin_lock(map)
+		return -ENOTSUPP;
+
+	if (!(vma->vm_flags & VM_SHARED))
+		return -EINVAL;
+
+	mutex_lock(&map->freeze_mutex);
+
+//	if ((vma->vm_flags & VM_WRITE) && map->frozen) {
+//		err = -EPERM;
+//		goto out;
+//	}
+
+	/* set default open/close callbacks */
+	vma->vm_ops = &bpf_map_default_vmops;
+	vma->vm_private_data = map;
+
+	err = map->ops->map_mmap(map, vma);
+	if (err)
+		goto out;
+
+	bpf_map_inc(map, true);
+
+	if (vma->vm_flags & VM_WRITE)
+		map->writecnt++;
+out:
+	mutex_unlock(&map->freeze_mutex);
+	return err;
+}
+
 const struct file_operations bpf_map_fops = {
 #ifdef CONFIG_PROC_FS
 	.show_fdinfo	= bpf_map_show_fdinfo,
@@ -311,6 +395,7 @@ const struct file_operations bpf_map_fops = {
 	.release	= bpf_map_release,
 	.read		= bpf_dummy_read,
 	.write		= bpf_dummy_write,
+	.mmap		= bpf_map_mmap,
 	.poll		= bpf_map_poll,
 };
 
@@ -395,6 +480,7 @@ static int map_create(union bpf_attr *attr)
 
 	atomic_set(&map->refcnt, 1);
 	atomic_set(&map->usercnt, 1);
+	mutex_init(&map->freeze_mutex);
 
 	if (bpf_map_support_seq_show(map) &&
 	    (attr->btf_key_type_id || attr->btf_value_type_id)) {
