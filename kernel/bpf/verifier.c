@@ -148,6 +148,7 @@ struct bpf_call_arg_meta {
 	bool pkt_access;
 	int regno;
 	int access_size;
+	int mem_size;
 };
 
 /* verbose verifier prints what it's seeing
@@ -916,7 +917,16 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 		if (!err && t == BPF_READ && value_regno >= 0)
 			mark_reg_unknown_value_and_range(state->regs,
 							 value_regno);
-
+	} else if (reg->type == PTR_TO_MEM) {
+		if (t == BPF_WRITE && value_regno >= 0 &&
+		    is_pointer_value(env, value_regno)) {
+			verbose("R%d leaks addr into mem\n", value_regno);
+			return -EACCES;
+		}
+		err = 0;//check_mem_region_access(env, regno, off, size,
+				//	      reg->mem_size, false);
+		if (!err && t == BPF_READ && value_regno >= 0)
+			mark_reg_unknown_value_and_range(state->regs, value_regno);
 	} else if (reg->type == PTR_TO_CTX) {
 		enum bpf_reg_type reg_type = UNKNOWN_VALUE;
 
@@ -1090,6 +1100,10 @@ static int check_helper_mem_access(struct bpf_verifier_env *env, int regno,
 		return check_packet_access(env, regno, 0, access_size);
 	case PTR_TO_MAP_VALUE:
 		return check_map_access(env, regno, 0, access_size);
+	case PTR_TO_MEM:
+		return 0;//check_mem_region_access(env, regno, reg->off,
+					//       access_size, reg->mem_size,
+					  //     zero_size_allowed);
 	case PTR_TO_MAP_VALUE_ADJ:
 		return check_map_access_adj(env, regno, 0, access_size);
 	default: /* const_imm|ptr_to_stack or invalid ptr */
@@ -1133,7 +1147,8 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		if (type != PTR_TO_PACKET && type != expected_type)
 			goto err_type;
 	} else if (arg_type == ARG_CONST_SIZE ||
-		   arg_type == ARG_CONST_SIZE_OR_ZERO) {
+		   arg_type == ARG_CONST_SIZE_OR_ZERO ||
+		   arg_type == ARG_CONST_ALLOC_SIZE_OR_ZERO) {
 		expected_type = CONST_IMM;
 		/* One exception. Allow UNKNOWN_VALUE registers when the
 		 * boundaries are known and don't cause unsafe memory accesses
@@ -1166,10 +1181,18 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		 */
 		if (type == CONST_IMM && reg->imm == 0)
 			/* final test in check_stack_boundary() */;
-		else if (type != PTR_TO_PACKET && type != PTR_TO_MAP_VALUE &&
+		else if (type != PTR_TO_PACKET && type != PTR_TO_MAP_VALUE && type != PTR_TO_MEM &&
 			 type != PTR_TO_MAP_VALUE_ADJ && type != expected_type)
 			goto err_type;
 		meta->raw_mode = arg_type == ARG_PTR_TO_UNINIT_MEM;
+	} else if (arg_type == ARG_PTR_TO_ALLOC_MEM ||
+	       arg_type == ARG_PTR_TO_ALLOC_MEM_OR_NULL) {
+		expected_type = PTR_TO_MEM;
+		if (type == CONST_IMM && reg->imm == 0 &&
+		    arg_type == ARG_PTR_TO_ALLOC_MEM_OR_NULL)
+			/* final test in check_stack_boundary() */;
+		else if (type != expected_type)
+			goto err_type;
 	} else {
 		verbose("unsupported arg_type %d\n", arg_type);
 		return -EFAULT;
@@ -1267,6 +1290,14 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 						      zero_size_allowed, meta);
 			if (err)
 				return err;
+		} else if (arg_type == ARG_PTR_TO_ALLOC_MEM ||
+	       arg_type == ARG_PTR_TO_ALLOC_MEM_OR_NULL) {
+//			if (!tnum_is_const(reg->var_off)) {
+//				verbose(env, "R%d unbounded size, use 'var &= const' or 'if (var < const)'\n",
+//					regno);
+//				return -EACCES;
+//			}
+			meta->mem_size = reg->imm;
 		} else {
 			/* register is CONST_IMM */
 			err = check_helper_mem_access(env, regno - 1, reg->imm,
@@ -1295,6 +1326,14 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 	case BPF_MAP_TYPE_PERF_EVENT_ARRAY:
 		if (func_id != BPF_FUNC_perf_event_read &&
 		    func_id != BPF_FUNC_perf_event_output)
+			goto error;
+		break;
+	case BPF_MAP_TYPE_RINGBUF:
+		if (func_id != BPF_FUNC_ringbuf_output &&
+		    func_id != BPF_FUNC_ringbuf_reserve &&
+		    func_id != BPF_FUNC_ringbuf_submit &&
+		    func_id != BPF_FUNC_ringbuf_discard &&
+		    func_id != BPF_FUNC_ringbuf_query)
 			goto error;
 		break;
 	case BPF_MAP_TYPE_STACK_TRACE:
@@ -1505,6 +1544,11 @@ static int check_call(struct bpf_verifier_env *env, int func_id, int insn_idx)
 		regs[BPF_REG_0].max_value = regs[BPF_REG_0].min_value = 0;
 		regs[BPF_REG_0].type = PTR_TO_SOCKET_OR_NULL;
 		regs[BPF_REG_0].id = ++env->id_gen;
+	} else if (fn->ret_type == RET_PTR_TO_ALLOC_MEM_OR_NULL) {
+		regs[BPF_REG_0].max_value = regs[BPF_REG_0].min_value = 0;
+		regs[BPF_REG_0].type = PTR_TO_MEM_OR_NULL;
+		regs[BPF_REG_0].id = ++env->id_gen;
+		regs[BPF_REG_0].mem_size = meta.mem_size;
 	} else {
 		verbose("unknown return type %d of func %d\n",
 			fn->ret_type, func_id);
@@ -2392,6 +2436,8 @@ static void mark_map_reg(struct bpf_reg_state *regs, u32 regno, u32 id,
 			reg->type = PTR_TO_SOCKET;
 		} else if (reg->type == PTR_TO_SOCK_COMMON_OR_NULL) {
 			reg->type = PTR_TO_SOCK_COMMON;
+		} else if (reg->type == PTR_TO_MEM_OR_NULL) {
+			reg->type = PTR_TO_MEM;
 		}
 		/* We don't need id from this point onwards anymore, thus we
 		 * should better reset it, so that state pruning has chances

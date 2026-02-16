@@ -32,6 +32,8 @@ struct bpf_reg_state {
 		 *   PTR_TO_MAP_VALUE_OR_NULL
 		 */
 		struct bpf_map *map_ptr;
+
+		u32 mem_size; /* for PTR_TO_MEM | PTR_TO_MEM_OR_NULL */
 	};
 	u32 id;
 	/* Used to determine if any memory access using this register will
