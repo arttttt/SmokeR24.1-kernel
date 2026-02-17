@@ -226,6 +226,8 @@ static const char * const reg_type_str[] = {
 	[PTR_TO_PACKET_END]	= "pkt_end",
 	[PTR_TO_SOCK_COMMON]	= "sock_common",
 	[PTR_TO_SOCK_COMMON_OR_NULL] = "sock_common_or_null",
+	[PTR_TO_MEM]		= "mem",
+	[PTR_TO_MEM_OR_NULL]	= "mem_or_null",
 };
 
 static void print_verifier_state(struct bpf_verifier_state *state)
@@ -581,6 +583,8 @@ static bool is_spillable_regtype(enum bpf_reg_type type)
 	case PTR_TO_SOCKET_OR_NULL:
 	case PTR_TO_SOCK_COMMON:
 	case PTR_TO_SOCK_COMMON_OR_NULL:
+	case PTR_TO_MEM:
+	case PTR_TO_MEM_OR_NULL:
 		return true;
 	default:
 		return false;
@@ -902,6 +906,9 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 	if (err)
 		return err;
 
+	if (reg->type == PTR_TO_MEM_OR_NULL)
+			reg->type = PTR_TO_MEM;
+
 	if (reg->type == PTR_TO_MAP_VALUE ||
 	    reg->type == PTR_TO_MAP_VALUE_ADJ) {
 		if (t == BPF_WRITE && value_regno >= 0 &&
@@ -982,8 +989,8 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 		if (!err && value_regno >= 0)
 			mark_reg_unknown_value_and_range(state->regs, value_regno);
         } else {
-		verbose("R%d invalid mem access '%s'\n",
-			regno, reg_type_str[reg->type]);
+		verbose("R%d invalid mem access '%s', '%d'\n",
+			regno, reg_type_str[reg->type], reg->type);
 		return -EACCES;
 	}
 
@@ -1179,7 +1186,8 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 		 * passed in as argument, it's a CONST_IMM type. Final test
 		 * happens during stack boundary checking.
 		 */
-		if (type == CONST_IMM && reg->imm == 0)
+		if (type == CONST_IMM && reg->imm == 0 &&
+			arg_type == ARG_PTR_TO_ALLOC_MEM_OR_NULL)
 			/* final test in check_stack_boundary() */;
 		else if (type != PTR_TO_PACKET && type != PTR_TO_MAP_VALUE && type != PTR_TO_MEM &&
 			 type != PTR_TO_MAP_VALUE_ADJ && type != expected_type)
@@ -1297,7 +1305,7 @@ static int check_func_arg(struct bpf_verifier_env *env, u32 regno,
 //					regno);
 //				return -EACCES;
 //			}
-			meta->mem_size = reg->imm;
+			meta->mem_size = reg->mem_size;
 		} else {
 			/* register is CONST_IMM */
 			err = check_helper_mem_access(env, regno - 1, reg->imm,
@@ -1331,8 +1339,6 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 	case BPF_MAP_TYPE_RINGBUF:
 		if (func_id != BPF_FUNC_ringbuf_output &&
 		    func_id != BPF_FUNC_ringbuf_reserve &&
-		    func_id != BPF_FUNC_ringbuf_submit &&
-		    func_id != BPF_FUNC_ringbuf_discard &&
 		    func_id != BPF_FUNC_ringbuf_query)
 			goto error;
 		break;
@@ -1375,6 +1381,12 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 	case BPF_FUNC_perf_event_read:
 	case BPF_FUNC_perf_event_output:
 		if (map->map_type != BPF_MAP_TYPE_PERF_EVENT_ARRAY)
+			goto error;
+		break;
+	case BPF_FUNC_ringbuf_output:
+	case BPF_FUNC_ringbuf_reserve:
+	case BPF_FUNC_ringbuf_query:
+		if (map->map_type != BPF_MAP_TYPE_RINGBUF)
 			goto error;
 		break;
 	case BPF_FUNC_get_stackid:
@@ -2781,8 +2793,8 @@ static int push_insn(int t, int w, int e, struct bpf_verifier_env *env)
 		insn_stack[cur_stack++] = w;
 		return 1;
 	} else if ((insn_state[w] & 0xF0) == DISCOVERED) {
-		verbose("back-edge from insn %d to %d\n", t, w);
-		return -EINVAL;
+	//	verbose("back-edge from insn %d to %d\n", t, w);
+	//	return -EINVAL;
 	} else if (insn_state[w] == EXPLORED) {
 		/* forward- or cross-edge */
 		insn_state[t] = DISCOVERED | e;

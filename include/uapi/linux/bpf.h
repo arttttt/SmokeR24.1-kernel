@@ -801,11 +801,11 @@ enum bpf_func_id {
 	BPF_FUNC_ktime_get_boot_ns = 125,
 
 
-	BPF_FUNC_ringbuf_output = 126,
-	BPF_FUNC_ringbuf_reserve = 127,
-	BPF_FUNC_ringbuf_submit = 128,
-	BPF_FUNC_ringbuf_discard = 129,
-	BPF_FUNC_ringbuf_query = 130,
+	BPF_FUNC_ringbuf_output = 130,
+	BPF_FUNC_ringbuf_reserve = 131,
+	BPF_FUNC_ringbuf_submit = 132,
+	BPF_FUNC_ringbuf_discard = 133,
+	BPF_FUNC_ringbuf_query = 134,
 
 	__BPF_FUNC_MAX_ID,
 };

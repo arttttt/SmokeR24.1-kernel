@@ -171,7 +171,11 @@ static struct bpf_map *ringbuf_map_alloc(union bpf_attr *attr)
 	if (!rb_map)
 		return ERR_PTR(-ENOMEM);
 
-	bpf_map_init_from_attr(&rb_map->map, attr);
+	rb_map->map.map_type = attr->map_type;
+	rb_map->map.key_size = attr->key_size;
+	rb_map->map.value_size = attr->value_size;
+	rb_map->map.max_entries = attr->max_entries;
+	rb_map->map.map_flags = attr->map_flags;
 
 	rb_map->map.pages = sizeof(struct bpf_ringbuf_map) +
 			     sizeof(struct bpf_ringbuf) +
@@ -180,7 +184,7 @@ static struct bpf_map *ringbuf_map_alloc(union bpf_attr *attr)
 	if (err)
 		goto err_free_map;
 
-	rb_map->rb = bpf_ringbuf_alloc(attr->max_entries, rb_map->map.numa_node);
+	rb_map->rb = bpf_ringbuf_alloc(attr->max_entries, 0);
 	if (IS_ERR(rb_map->rb)) {
 		err = PTR_ERR(rb_map->rb);
 		goto err_free_map;
@@ -299,6 +303,11 @@ const struct bpf_map_ops ringbuf_map_ops = {
 	.map_update_elem = ringbuf_map_update_elem,
 	.map_delete_elem = ringbuf_map_delete_elem,
 	.map_get_next_key = ringbuf_map_get_next_key,
+};
+
+static struct bpf_map_type_list ringbuf_type __read_mostly = {
+	.ops = &ringbuf_map_ops,
+	.type = BPF_MAP_TYPE_RINGBUF,
 };
 
 /* Given pointer to ring buffer record metadata and struct bpf_ringbuf itself,
@@ -495,3 +504,10 @@ const struct bpf_func_proto bpf_ringbuf_query_proto = {
 	.arg1_type	= ARG_CONST_MAP_PTR,
 	.arg2_type	= ARG_ANYTHING,
 };
+
+static int __init register_ringbuf_map(void)
+{
+	bpf_register_map_type(&ringbuf_type);
+	return 0;
+}
+late_initcall(register_ringbuf_map);
