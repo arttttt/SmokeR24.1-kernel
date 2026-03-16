@@ -34,5 +34,11 @@
 - [V4L2 Camera Bringup](v4l2-camera-bringup.md) — V4L2 migration plan *(existing)*
 - [ISP Profiles](camera-isp-profiles/) — Extracted ISP calibration data *(existing)*
 
+### TrustZone & Secure OS
+- [TrustZone & TLK Analysis](trustzone-tlk.md) — Full reverse-engineering of the stock TOS image: NVTOSP header format, TLK memory layout, embedded Trusted Applications, boot protocol, and U-Boot loading plan
+
+### U-Boot
+- [MIPI DSI Display Issues](u-boot-mocha-dsi-issues.md) — Analysis of DSI bugs in U-Boot mocha display driver
+
 ### Plans
 - [Master Plan](plans/master-plan.md) — Overall project roadmap and phase dependencies
