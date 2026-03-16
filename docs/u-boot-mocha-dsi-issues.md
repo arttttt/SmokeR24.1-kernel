@@ -87,7 +87,7 @@ the DSI controller was left in by the previous bootloader stage.
 
 ---
 
-## Bug #3 — Undefined variable `panel` (HIGH)
+## Bug #3 — Undefined variable `panel` (LOW)
 
 **File:** `drivers/video/tegra124/panel.c:169,173`
 
@@ -96,15 +96,14 @@ ret = mipi_dsi_dcs_set_display_on(&plat->link1);
 if (ret < 0) {
     dev_err(panel->dev, "failed to set display on: %d\n", ret);
 }
-ret = mipi_dsi_dcs_set_display_on(&plat->link2);
-if (ret < 0) {
-    dev_err(panel->dev, "failed to set display on: %d\n", ret);
-}
 ```
 
 The variable `panel` is not declared in `sharp_init_sequence()`.
-The function parameter is `struct udevice *dev`. This should
-either fail to compile or cause undefined behavior.
+The function parameter is `struct udevice *dev`.
+
+This compiles because u-boot's `dev_err` macro expands to
+`printk(fmt, ...)` and the `dev` argument is never evaluated.
+Not a functional issue — just dead code in the error path.
 
 **Fix:**
 ```c
