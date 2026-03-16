@@ -172,6 +172,89 @@ interfere with the calibration results.
 
 ---
 
+## Bug #7 — DC_CMD_DISPLAY_POWER_CONTROL not set (HIGH)
+
+**File:** `drivers/video/tegra124/display.c`
+
+The kernel enables all DC power domains before starting the
+display:
+
+```c
+tegra_dc_writel(dc, PW0_ENABLE | PW1_ENABLE | PW2_ENABLE |
+    PW3_ENABLE | PW4_ENABLE | PM0_ENABLE | PM1_ENABLE,
+    DC_CMD_DISPLAY_POWER_CONTROL);  // value = 0x1F1F
+```
+
+U-boot never writes to `DC_CMD_DISPLAY_POWER_CONTROL`. The
+register stays at its reset default (likely 0), which may
+completely disable the DC output path.
+
+---
+
+## Bug #8 — Wrong initialization order: DC enabled before DSI (HIGH)
+
+**File:** `drivers/video/tegra124/display.c:display_init()`
+
+Current u-boot order:
+
+1. `tegra_dc_init()` — initialize DC
+2. `update_display_mode()` — configure DC timing
+3. Set `DSI_ENABLE` in `DC_DISP_DISP_WIN_OPTIONS` — DC starts
+   expecting DSI output
+4. `display_panel_dsi_init()` — only NOW does DSI get configured
+
+The DC is told to output via DSI before the DSI host is even
+initialized. The kernel does it the other way around:
+
+1. Initialize DSI hardware
+2. Set DSI to LP mode
+3. Send panel init commands
+4. Switch DSI to HS mode
+5. Start DC stream (tegra_dsi_start_dc_stream)
+
+---
+
+## Bug #9 — Panel init commands sent before DSI host is enabled (HIGH)
+
+**File:** `drivers/video/tegra124/display.c:display_panel_dsi_init()`
+
+```c
+// Step 1: attach panel to DSI hosts
+tegra_dsi_attach(panel_dev, dsi_host, timing);
+
+// Step 2: send panel init commands (EXIT_SLEEP, DISPLAY_ON, etc.)
+panel_enable_backlight(panel_dev);
+
+// Step 3: only NOW enable DSI video stream
+dsi_host_enable(dsi_host);
+```
+
+DSI commands (exit sleep mode, set display on) are sent during
+`panel_enable_backlight()` BEFORE `dsi_host_enable()` configures
+and starts the DSI video stream.
+
+In the kernel, panel init commands are sent while DSI is in LP
+(low-power) mode, then DSI switches to HS (high-speed) mode,
+and only then the DC video stream starts.
+
+---
+
+## Bug #10 — DC_DISP_DATA_ENABLE_OPTIONS not configured (MEDIUM)
+
+**File:** `drivers/video/tegra124/display.c`
+
+The kernel sets data enable options:
+
+```c
+tegra_dc_writel(dc, DE_SELECT_ACTIVE | DE_CONTROL_NORMAL,
+    DC_DISP_DISP_ENABLE_OPTIONS);
+```
+
+U-boot does not configure this register. Without it, the DC
+may not properly signal active data periods to the DSI output.
+
+---
+
 ## Verified non-issues
 
 The following items were investigated and found to be correct:
@@ -217,3 +300,25 @@ The following items were investigated and found to be correct:
   selects the appropriate packet sequence. This needs
   verification against the kernel's `dsi_pkt_seq` selection
   to confirm which mode is actually correct for this panel.
+
+---
+
+## Summary by severity
+
+**BLOCKER (prevents display from working):**
+- #1: Reversed writel — DSIB never configured
+
+**HIGH (likely prevents display from working):**
+- #7: DC power domains not enabled
+- #8: DC enabled before DSI is initialized
+- #9: Panel init commands sent before DSI host is enabled
+- #2: No DSI power cycle before configuration
+
+**MEDIUM (may cause issues):**
+- #10: DC data enable options not set
+- #4: Inverted error checks (hides real errors)
+- #5: PAD_CONTROL_3 direct write
+- #6: No DSI register reset before calibration
+
+**LOW (cosmetic):**
+- #3: Undefined variable in dead error-path code
