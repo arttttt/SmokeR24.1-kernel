@@ -829,3 +829,8 @@ adb pull /sdcard/eks.dat
 ### TOS image
 - Dumped from MiPad TOS partition (September 2017 build)
 - Compiled with `Android clang version 3.8.256229 (based on LLVM 3.8.256229)`
+
+### NVIDIA public documentation
+- [Tegra Boot Flow](https://http.download.nvidia.com/tegra-public-appnotes/tegra-boot-flow.html) — BootROM cold boot: BCT redundancy, bootloader loading algorithm, recovery mode (RCM)
+- [Tegra210 nvtboot Boot Flow](https://http.download.nvidia.com/tegra-public-appnotes/t210-nvtboot-flow.html) — T210 multi-stage boot (nvtboot → TOS → bootloader); T124 uses a simpler chain but the secure monitor handoff concept is similar
+- [BCT Overview](https://http.download.nvidia.com/tegra-public-appnotes/bct-overview.html) — Boot Configuration Table format and fields
