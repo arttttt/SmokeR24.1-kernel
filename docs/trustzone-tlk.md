@@ -423,46 +423,183 @@ being in a T124-era source tree. It lacks all `TEGRA_12x_SOC` ifdefs.
 The kernel `sleep-t30.S` is the correct and complete reference — it covers
 T30, T114, T148, and T124 via `CONFIG_ARCH_TEGRA_12x_SOC` ifdefs.
 
-#### T124-specific differences vs T30
+#### Detailed comparison: JXD sleep.S vs kernel sleep-t30.S
 
-**EMC_SEL_DPD_CTRL (register 0x3d8) — T124 only:**
-```asm
-@ Selective deep power down for pad groups — does not exist on T30
-ldr  r1, [r0, #EMC_SEL_DPD_CTRL]
-orr  r1, r1, #0x1FF          @ enable SEL_DPD for all groups
-str  r1, [r0, #EMC_SEL_DPD_CTRL]
+**File sizes:** JXD: 485 lines (T30 only) vs Kernel: 1322 lines (T30 + T114 + T124)
+
+##### Shared macros (identical in both)
+
+All low-level macros are byte-for-byte identical:
+`emc_device_mask`, `emc_timing_update`, `wait_for_us`, `wait_until`,
+`cpu_to_halt_reg`, `cpu_to_csr_reg`, `cpu_id`, `mov32`
+
+##### Macros only in kernel
+
+| Macro | Purpose | Why absent from JXD |
+|-------|---------|---------------------|
+| `pll_enable` | Re-enable PLL during LP1 resume | JXD does PLL restart in C code (`nvbl_lp0.c`) |
+| `pll_locked` | Wait for PLL lock | Same |
+| `pll_iddq_exit/entry` | T114/T124 PLL IDDQ power saving | T30 has no IDDQ |
+| `set_voltage` | I2C DVC core voltage change in LP1 | JXD handles in C code |
+
+##### Function mapping
+
+| JXD | Kernel | Notes |
+|-----|--------|-------|
+| `NvBlLp0CoreSuspend` | `tegra3_sleep_core_finish` | Same logic, different names |
+| `tegra_turn_off_mmu` | `tegra_turn_off_mmu` (in `sleep.S`) | JXD: inline; kernel: separate file |
+| `tegra_shut_off_mmu` | `tegra_shut_off_mmu` (in `sleep.S`) | Identical |
+| `g_NvBlLp0TearDownCore` | `tegra3_tear_down_core` | Same: calls self-refresh then enter_sleep |
+| `tegra3_enter_sleep` | `tegra3_enter_sleep` | **Differs** — see below |
+| `tegra3_sdram_self_refresh` | `tegra3_sdram_self_refresh` | **Major differences** — see below |
+| `NvBlLp0CoreResume` | `tegra3_lp1_reset` | **Completely different** — see below |
+| — | `tegra30_hotplug_shutdown` | Only in kernel (CPU hotplug) |
+| — | `tegra30_cpu_shutdown` | Only in kernel (LP2 per-CPU) |
+| — | `tegra3_sleep_cpu_secondary_finish` | Only in kernel (secondary CPU LP2) |
+| — | `tegra3_stop_mc_clk_finish` | Only in kernel (MC clock stop for LP1.1) |
+| — | `emc_exit_selfrefresh` | Only in kernel (~60 lines T124 DPD3 recovery) |
+
+##### `tegra3_enter_sleep` — differences
+
+```
+Step                    JXD                            Kernel
+────                    ───                            ──────
+Timestamp save          (none)                         str r1, [r4, #PMC_SCRATCH38]
+
+Flow Controller CSR:    Identical setup                Identical setup
+
+Halt register:
+  T30 path              HALT_CPU_IRQ | HALT_CPU_FIQ    HALT_CPU_IRQ | HALT_CPU_FIQ
+  T11x path             ifdef TEGRA_11x_SOC only       ifdef CONFIG_ARCH_TEGRA_11x_SOC
+  T124 path             MISSING — falls into T30!      CONFIG_ARCH_TEGRA_12x_SOC:
+                                                         HALT_LIC_IRQ | HALT_LIC_FIQ
+                        ^^^ WRONG for T124             ^^^ REQUIRED for T124
+                        (uses HALT_CPU not HALT_LIC)   (Legacy Interrupt Controller)
+
+WFI/WFE:               WFI always                     T124/T114: WFI; T30: WFE
+
+Debug lock:             Identical                      Identical
 ```
 
-**EMC_CFG additional bit:**
-```asm
-bic  r1, r1, #(1<<28)        @ DYN_SELF_REF — all Tegras
-bic  r1, r1, #(1<<29)        @ T124/T114 only — additional self-ref control
+**Critical:** On T124, using `HALT_CPU_IRQ/FIQ` (JXD) instead of
+`HALT_LIC_IRQ/FIQ` (kernel) means the CPU may not wake up from LP1/LP0
+because the interrupt routing is different on T124.
+
+##### `tegra3_sdram_self_refresh` — line-by-line comparison
+
+```
+Step  Operation               JXD (T30)                   Kernel (T124 path)
+────  ─────────               ─────────                   ──────────────────
+1     EMC base                EMC_PA_BASE (ifdef, ok)     TEGRA_EMC_BASE
+
+2     EMC_SEL_DPD_CTRL        ABSENT                      ldr/orr #0x1FF/str
+      (reg 0x3d8)                                         Enables selective DPD
+                              ^^^ MISSING                 ^^^ REQUIRED for T124
+
+3     ZCAL/AUTO_CAL off       Identical                   Identical
+
+4     EMC_CFG disable         bic #(1<<28) only           bic #(1<<28)
+      DYN_SELF_REF                                        bic #(1<<29)
+                              ^^^ MISSING bit 29          ^^^ T124 needs both bits
+
+5     Timing update           Identical                   Identical
+
+6     AUTO_CAL_ACTIVE wait    COMMENTED OUT!              Active wait loop
+                              /* emc_wait_audo_cal:       emc_wait_audo_cal:
+                                 ... */                     ldr/tst/bne
+                              ^^^ DANGEROUS               ^^^ Required: if cal is active
+                              Cal may be running when       during self-refresh entry,
+                              entering self-refresh         EMC state is undefined
+
+7     Stall DRAM requests     Identical (REQ_CTRL = 3)    Identical
+
+8     Wait EMC idle           Identical (status bit 2)    Identical
+
+9     Enter self-refresh      Identical (SELF_REF = 1)    Identical
+
+10    Wait self-refresh done  Identical (device mask)     Identical
+
+11    XM2VTTGEN DRVUP/DN      Identical (mask 0xF8F8FFFF) Identical
+
+12    XM2VTTGENPADCTRL2       orr r1, r1, #7             orr r1, r1, #0x3f
+      E_NO_VTTGEN             ^^^ 3 bits (T30)           ^^^ 6 bits (T124)
+                              Wrong for T124: only 3 of   All 6 VTTGEN pad groups
+                              6 pad groups disabled        disabled correctly
+
+13    Timing update           Identical                   Identical
+
+14    PMC LP0 check           Identical (tst PMC_CTRL)    Identical
+
+15    PMC_POR_DPD_CTRL        ABSENT                      orr #0x80000003
+      (reg 0x264)                                         Enables DPD override
+                              ^^^ MISSING                 ^^^ Required before DPD entry
+
+16    PMC_IO_DPD_REQ          mov32 0x8EC00000            mov32 0x80400000
+                              ^^^ T30 value               ^^^ T124 value (different pads)
+                              Wrong pads for T124
+
+17    DPD_STATUS wait         ABSENT                      wait bit 22
+                              ^^^ No confirmation         ^^^ Required
+
+18    PMC_IO_DPD3_REQ         ABSENT (register doesn't    0x830DFFFF (func pads)
+      func pads               exist on T30)               wait DPD3_STATUS bit 18
+
+19    PMC_IO_DPD3_REQ         ABSENT                      0x8CD00000 (VTTGEN pads)
+      VTTGEN pads                                         wait DPD3_STATUS bit 20
+
+20    PMC_IO_DPD3_REQ         ABSENT                      0x80020000 (BGBIAS pads)
+      BGBIAS pads                                         wait DPD3_STATUS bit 17
+
+                              Steps 15-20 ENTIRELY        4 sequential DPD3 steps
+                              ABSENT from JXD             with status polling
 ```
 
-**XM2VTTGENPADCTRL2 mask:**
-```asm
-@ T30:   orr r1, r1, #7       (3 bits: E_NO_VTTGEN)
-@ T124:  orr r1, r1, #0x3f    (6 bits: more pad groups)
+##### Resume path — completely different
+
+| Aspect | JXD `NvBlLp0CoreResume` | Kernel `tegra3_lp1_reset` |
+|--------|-------------------------|---------------------------|
+| CPU mode init | Clears SPSR in all modes (SVC/FIQ/IRQ/ABT/UND/SYS) | Handled by kernel resume framework |
+| Cache | `nvaosConfigureCache` (NVIDIA bootloader function) | Kernel cache init |
+| FPU | `initFpu` (NVIDIA function) | Not needed in this path |
+| SCTLR | Explicit bic/orr for MMU/cache/branch predictor | Kernel framework handles |
+| PLL restart | Not in ASM — delegated to `NvBlLp0StartResume` (C) | **Full ASM:** PLLM/PLLC/PLLX/PLLP enable + IDDQ exit (T124) + lock wait |
+| EMC exit self-refresh | Not in ASM — delegated to C code | **Full ASM:** 60+ lines for T124 DPD3 pad recovery (BGBIAS → VTTGEN → func → IO, each with status wait) |
+| Core voltage | Not in ASM | `set_voltage` macro: I2C DVC transaction for LP1 low voltage restore |
+| Clock restore | Not in ASM | SCLK/CCLK burst restore, MSELECT, PLLP reshift, PLLX_DIV2 |
+| L2 cache | Not in ASM | L2 powergate toggle + unclamping |
+
+##### Pad save area
+
+JXD saves 8 registers:
+```
+EMC_CFG, EMC_ZCAL_INTERVAL, EMC_AUTO_CAL_INTERVAL,
+EMC_XM2VTTGENPADCTRL, EMC_XM2VTTGENPADCTRL2,
+PMC_IO_DPD_STATUS, CLK_SOURCE_MSELECT, SCLK_BURST
 ```
 
-**PMC_IO_DPD3 — entire subsystem T124 only:**
-```asm
-@ Registers 0x45c / 0x460 — do not exist on T30
-@ Resume requires 4 sequential DPD3 pad recovery steps:
-@   1. BGBIAS pads out of DPD    (wait DPD3_STATUS bit 17)
-@   2. VTTGEN pads out of DPD    (wait DPD3_STATUS bit 20)
-@   3. Func pads out of DPD      (wait DPD3_STATUS bit 18)
-@   4. IO_DPD pad recovery       (wait DPD_STATUS bit 22)
-@ Skipping these hangs the system on LP0/LP1 resume.
+Kernel (T124) saves the same 8 plus:
+```
+CLK_RESET_CCLK_BURST  (includes PLLX_DIV2 state)
+PMC_IO_DPD3_STATUS    (for DPD3 pad recovery during resume)
 ```
 
-**PMC_POR_DPD_CTRL (0x264) — T124 only:**
-```asm
-@ Clear DPD override bits during resume
-ldr  r1, [r2, #PMC_POR_DPD_CTRL]
-bic  r1, r1, #0x80000003
-str  r1, [r2, #PMC_POR_DPD_CTRL]
-```
+##### Summary: 8 critical differences that break T124
+
+| # | Issue | JXD | Kernel T124 | T124 consequence |
+|---|-------|-----|-------------|------------------|
+| 1 | `EMC_SEL_DPD_CTRL` | Absent | Enables selective DPD (0x1FF) | Pads don't enter low-power; possible hang or excess current |
+| 2 | `EMC_CFG bit 29` | Not cleared | `bic #(1<<29)` | DYN_SELF_REF may not fully disable |
+| 3 | `AUTO_CAL wait` | Commented out | Active wait loop | Calibration may be active during self-refresh entry — undefined EMC state |
+| 4 | `E_NO_VTTGEN` mask | `#7` (3 bits) | `#0x3f` (6 bits) | Only 3 of 6 VTTGEN pad groups disabled; current leak |
+| 5 | `PMC_IO_DPD_REQ` value | `0x8EC00000` (T30) | `0x80400000` (T124) | Wrong pads enter DPD; possible hang on resume |
+| 6 | `PMC_IO_DPD3` | Entirely absent | 4 sequential steps with status waits | DPD3 pads unmanaged — **hang on resume guaranteed** |
+| 7 | `PMC_POR_DPD_CTRL` | Absent | `orr/bic #0x80000003` on entry/resume | DPD override not configured |
+| 8 | Flow Controller halt | `HALT_CPU_IRQ/FIQ` | `HALT_LIC_IRQ/FIQ` | CPU may not wake from LP1/LP0 — wrong interrupt routing |
+
+**Conclusion:** JXD `sleep.S` cannot be used for T124 suspend/resume.
+The kernel `sleep-t30.S` with `CONFIG_ARCH_TEGRA_12x_SOC` paths is the
+only correct and complete reference for implementing PSCI cpu_suspend
+and system_suspend on Tegra124.
 
 #### Source file map for sleep/suspend code
 
