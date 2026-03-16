@@ -35,7 +35,7 @@
 - [ISP Profiles](camera-isp-profiles/) — Extracted ISP calibration data *(existing)*
 
 ### TrustZone & Secure OS
-- [TrustZone & TLK Analysis](trustzone-tlk.md) — Full reverse-engineering of the stock TOS image: NVTOSP header format, TLK memory layout, embedded Trusted Applications, boot protocol, and U-Boot loading plan
+- [TrustZone & TLK Analysis](trustzone-tlk.md) — Full reverse-engineering of the stock TOS image: NVTOSP format, TLK memory layout, embedded TAs, boot protocol, PSCI implementation status and plan, Widevine L1 chain of trust, EKS analysis, OP-TEE porting assessment, and low-level sleep code source map
 
 ### U-Boot
 - [MIPI DSI Display Issues](u-boot-mocha-dsi-issues.md) — Analysis of DSI bugs in U-Boot mocha display driver
