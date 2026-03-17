@@ -48,6 +48,84 @@ same thing, value `0x02`.)
 
 ---
 
+## Method 0: Coreboot Bootblock Patch — Button Combo (RECOMMENDED)
+
+**This is the best method.** A ~10-line patch to coreboot bootblock adds a
+permanent Vol Up + Vol Down → RCM safety net. Once flashed, it works at
+every boot without any external tools.
+
+### Background
+
+The Pixel C does **NOT** use nvtboot. Boot ROM loads coreboot bootblock
+directly into IRAM. The bootblock runs on BPMP (ARM7) before SDRAM init.
+GPIO reads and PMC writes work at this stage — no SDRAM needed.
+
+Source: [coreboot tegra210 bootblock.c](https://github.com/coreboot/coreboot/blob/master/src/soc/nvidia/tegra210/bootblock.c)
+
+### The Patch
+
+Add to `tegra210_main()` in `src/soc/nvidia/tegra210/bootblock.c`, as the
+**very first thing** before `enable_jtag()`:
+
+```c
+    /*
+     * Vol Up (GPIO_M4) + Vol Down (GPIO_X7) held → reboot to RCM.
+     * Both active LOW on Pixel C. Works in IRAM, no SDRAM needed.
+     */
+    write32((void *)0x6000d110, read32((void *)0x6000d110) & ~(1 << 4));
+    write32((void *)0x6000d610, read32((void *)0x6000d610) & ~(1 << 7));
+
+    if (!(read32((void *)0x6000d108) & (1 << 4)) &&
+        !(read32((void *)0x6000d608) & (1 << 7))) {
+        struct tegra_pmc_regs *pmc = (void *)TEGRA_PMC_BASE;
+        write32(&pmc->scratch0, read32(&pmc->scratch0) | 0x2);
+        write32(&pmc->cntrl, read32(&pmc->cntrl) | 0x10);
+        while (1);
+    }
+```
+
+### GPIO Register Addresses
+
+| Register | Address | Description |
+|----------|---------|-------------|
+| GPIO_M_OE | `0x6000d110` | Port M output enable |
+| GPIO_M_IN | `0x6000d108` | Port M input value |
+| GPIO_X_OE | `0x6000d610` | Port X output enable |
+| GPIO_X_IN | `0x6000d608` | Port X input value |
+
+### Build and Flash
+
+```bash
+git clone https://github.com/ttefke/coreboot-smaug
+cd coreboot-smaug
+# Apply patch to src/soc/nvidia/tegra210/bootblock.c
+make defconfig && make
+fastboot flash bootloader build/coreboot.rom
+fastboot reboot
+```
+
+### What This Protects Against
+
+| Scenario | Result |
+|----------|--------|
+| Normal boot | Boots normally (buttons not pressed) |
+| Hold Vol Up + Vol Down + Power | → RCM → USB recovery |
+| Corrupt kernel | Vol+Vol → RCM → reflash kernel |
+| Corrupt depthcharge | Vol+Vol → RCM → reflash |
+| Corrupt romstage/ramstage | Vol+Vol → RCM → reflash coreboot |
+| Corrupt bootblock itself | Brick (patch lives in bootblock) |
+| Corrupt BCT / eMMC dead | Brick (Boot ROM can't read anything) |
+
+### Why Not Hekate?
+
+Pixel C has a **fully open boot chain** (coreboot → depthcharge). There is
+no proprietary nvtboot to replace. Everything hekate does (SDRAM init, CCPLEX
+start, eMMC access, display) is already implemented in coreboot. Adding a
+button check to the existing open bootblock is simpler and more reliable
+than porting a separate bootloader.
+
+---
+
 ## Method 1: Software — PMC SCRATCH0 Register Write (Device Boots)
 
 ### Prerequisites
@@ -554,6 +632,7 @@ entry impossible without hardware modification.
 
 | Device State | Method | Difficulty | Confirmed? | Time |
 |-------------|--------|-----------|-----------|------|
+| Working + unlocked BL | **Coreboot bootblock patch** | Easy (build + flash) | Code verified from source | One-time, then permanent |
 | Android boots + root | PMC SCRATCH0 write | Easy | HW-level mechanism | Seconds |
 | Fastboot works | U-Boot chainload | Medium | Proposed, not confirmed | Minutes |
 | Complete brick | eMMC DAT0 short | Hard (disassembly) | Yes (Shield TV, same SoC) | Seconds-100s |

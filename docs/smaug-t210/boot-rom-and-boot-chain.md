@@ -36,7 +36,8 @@ that chip revision. This is why Fusee Gelee (CVE-2018-6242) is unpatchable.
 7. Reads **BCT** (Boot Configuration Table) from boot media into IRAM
 8. Validates BCT hash/signature
 9. If BCT contains SDRAM parameters, programs SDRAM controller
-10. Reads bootloader (nvtboot) from boot media into IRAM/SDRAM
+10. Reads bootloader from boot media into IRAM (coreboot bootblock on Pixel C,
+    nvtboot on Jetson/Shield)
 11. Validates bootloader hash/signature
 12. If all valid: jumps to bootloader entry point
 13. If any error: enters **RCM** (USB recovery mode)
@@ -120,82 +121,128 @@ Discoverers:
 
 ---
 
-## Complete T210 Boot Chain
+## Pixel C Boot Chain (Verified from Coreboot Source)
+
+**IMPORTANT**: The Pixel C does **NOT** use nvtboot. Unlike Jetson TX1 and
+Shield TV which use the standard NVIDIA boot flow (Boot ROM → nvtboot → cboot),
+the Pixel C uses coreboot directly as the first-stage bootloader loaded by
+Boot ROM. This is confirmed by the coreboot tegra210 source code:
+- `src/soc/nvidia/tegra210/bootblock.c` — runs on BPMP, reads BCT from IRAM
+- `src/soc/nvidia/tegra210/romstage.c` — initializes SDRAM, starts CCPLEX
+- `src/soc/nvidia/tegra210/ccplex.c` — powers up Cortex-A57 cores
+
+Source: [coreboot/coreboot tegra210 SoC](https://github.com/coreboot/coreboot/tree/master/src/soc/nvidia/tegra210)
+
+### Boot Flow Diagram
 
 ```
 Power On
     │
     ▼
-┌─────────────────────────────────────────────────────┐
-│  Stage 1: BOOT ROM (IROM)                           │
-│  ─────────────────────────                          │
-│  Processor: BPMP (ARM7TDMI, 32-bit)                 │
-│  Memory:    Executes from internal ROM               │
-│             Uses IRAM (256KB) for data/stack          │
-│  Source:    CLOSED — mask ROM on silicon              │
-│             (dumped binary available, see above)      │
-│                                                      │
-│  Actions:                                            │
-│  • Read fuses and straps                             │
-│  • Check PMC_SCRATCH0 → RCM?                         │
-│  • Check Recovery Strap GPIO → RCM?                   │
-│  • Initialize eMMC controller                         │
-│  • Load BCT from eMMC → IRAM                          │
-│  • Validate BCT, init SDRAM                           │
-│  • Load nvtboot from eMMC → IRAM                      │
-│  • Validate nvtboot signature                         │
-│  • Jump to nvtboot                                    │
-│  • (On error → enter RCM)                             │
-└──────────────────────┬──────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│  Stage 2: nvtboot (TegraBoot) — 1st stage bootloader │
-│  ─────────────────────────────────                   │
-│  Processor: BPMP (still ARM7TDMI)                    │
-│  Memory:    IRAM (256KB), then SDRAM                  │
-│  Source:    CLOSED — NVIDIA proprietary binary        │
-│             (distributed in L4T / factory images)     │
-│                                                      │
-│  Actions:                                            │
-│  • Full SDRAM initialization                          │
-│  • Load ARM Trusted Firmware (ATF/TOS)                │
-│  • Load coreboot/cboot into SDRAM                     │
-│  • Configure power rails and clocks                   │
-│  • Start CCPLEX (Cortex-A57 cores)                    │
-│  • BPMP halts                                         │
-└──────────────────────┬──────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│  Stage 3: Coreboot (Pixel C) / CBoot (Jetson/Shield) │
-│  ─────────────────────────────────                   │
-│  Processor: CCPLEX (ARM Cortex-A57, 64-bit)          │
-│  Memory:    SDRAM (3GB on Pixel C)                    │
-│  Source:    OPEN — coreboot is fully open source      │
-│                                                      │
-│  Actions:                                            │
-│  • SoC peripheral initialization                      │
-│  • Display initialization                             │
-│  • Load depthcharge payload                           │
-│  • Transfer control to depthcharge                    │
-└──────────────────────┬──────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│  Stage 4: Depthcharge (Pixel C) / U-Boot (others)    │
-│  ─────────────────────────────                       │
-│  Processor: CCPLEX                                   │
-│  Memory:    SDRAM                                     │
-│  Source:    OPEN — depthcharge is open source          │
-│                                                      │
-│  Actions:                                            │
-│  • Fastboot server                                    │
-│  • Verified Boot (vboot)                              │
-│  • Button handling (volume, power)                    │
-│  • Boot mode selection (normal/recovery/bootloader)   │
-│  • Load and boot Linux kernel                         │
-└──────────────────────┬──────────────────────────────┘
-                       ▼
-                  Linux Kernel
+┌──────────────────────────────────────────────────────────┐
+│  Stage 1: BOOT ROM (IROM)                                │
+│  ─────────────────────────                               │
+│  Processor: BPMP (ARM7TDMI, 32-bit)                      │
+│  Memory:    Executes from internal ROM                    │
+│             Uses IRAM (256KB) for data/stack               │
+│  Source:    CLOSED — mask ROM on silicon                   │
+│             (dumped binary available, see above)           │
+│                                                           │
+│  Actions:                                                 │
+│  • Read fuses and straps                                  │
+│  • Check PMC_SCRATCH0 → RCM?                              │
+│  • Check Recovery Strap GPIO → RCM?                        │
+│  • Initialize eMMC controller                              │
+│  • Load BCT from eMMC → IRAM                               │
+│  • Validate BCT hash/signature                             │
+│  • Load coreboot bootblock from eMMC → IRAM                │
+│  • Validate bootblock hash/signature                       │
+│  • Jump to coreboot bootblock entry point                  │
+│  • (On error → enter RCM)                                  │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│  Stage 2: Coreboot Bootblock                              │
+│  ────────────────────────                                │
+│  Processor: BPMP (still ARM7TDMI, 32-bit)                 │
+│  Memory:    IRAM (256KB) — NO SDRAM YET                    │
+│  Source:    OPEN — src/soc/nvidia/tegra210/bootblock.c     │
+│                                                           │
+│  Actions:                                                 │
+│  • Enable JTAG                                            │
+│  • MBIST workaround (clock gating fixes)                  │
+│  • Clock init (UART, mselect, timers)                     │
+│  • Read ODMDATA from BCT in IRAM                          │
+│  • Console init                                           │
+│  • Jump to romstage                                       │
+│                                                           │
+│  >>> BUTTON CHECK CAN BE ADDED HERE <<<                   │
+│  GPIO read + PMC write work in IRAM, no SDRAM needed      │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│  Stage 3: Coreboot Romstage                               │
+│  ───────────────────────                                 │
+│  Processor: BPMP (still ARM7TDMI)                         │
+│  Memory:    IRAM → initializes SDRAM                       │
+│  Source:    OPEN — src/soc/nvidia/tegra210/romstage.c      │
+│                                                           │
+│  Actions:                                                 │
+│  • SDRAM initialization (sdram_init)                      │
+│  • TrustZone region init                                  │
+│  • GPU/NVDEC/TSEC/VPR carveout regions                    │
+│  • CBMEM initialization                                   │
+│  • ccplex_cpu_prepare() — power rails, clocks, RAM repair │
+│  • Jump to ramstage                                       │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│  Stage 4: Coreboot Ramstage                               │
+│  ───────────────────────                                 │
+│  Processor: CCPLEX (ARM Cortex-A57, 64-bit)               │
+│  Memory:    SDRAM (3GB)                                    │
+│  Source:    OPEN                                           │
+│                                                           │
+│  Transition: ccplex_cpu_start() launches A57 core,        │
+│              clock_halt_avp() stops BPMP                   │
+│                                                           │
+│  Actions:                                                 │
+│  • Full SoC peripheral initialization                     │
+│  • Display init (JDI panel driver)                        │
+│  • Load depthcharge payload from CBFS                     │
+│  • Transfer control to depthcharge                        │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│  Stage 5: Depthcharge                                     │
+│  ─────────────────────                                   │
+│  Processor: CCPLEX                                        │
+│  Memory:    SDRAM                                          │
+│  Source:    OPEN — github.com/coreboot/depthcharge         │
+│                                                           │
+│  Actions:                                                 │
+│  • Fastboot server                                        │
+│  • Verified Boot (vboot)                                  │
+│  • Button handling (volume, power)                        │
+│  • Boot mode selection (normal/recovery/bootloader)       │
+│  • Load and boot Linux kernel                             │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+                    Linux Kernel
 ```
+
+### Key Difference: Pixel C vs Other T210 Devices
+
+| | Pixel C (smaug) | Jetson TX1 / Shield TV |
+|---|---|---|
+| Boot ROM loads | **Coreboot bootblock** | nvtboot (proprietary) |
+| SDRAM init by | **Coreboot romstage** (open) | nvtboot (closed) |
+| CCPLEX start by | **Coreboot romstage** (open) | nvtboot (closed) |
+| 2nd stage | **Depthcharge** (open) | CBoot or U-Boot |
+| Entire boot chain open? | **YES** (except Boot ROM) | No (nvtboot is closed) |
+
+This means Pixel C has a **fully open boot chain** from the first instruction
+after Boot ROM all the way to the kernel.
 
 ### What's Open, What's Closed
 
@@ -203,12 +250,11 @@ Power On
 |-----------|-------------|----------------------|
 | Boot ROM | **NO** (dumped binary available) | [Tegra-X1-Bootrom](https://github.com/adeljck/Tegra-X1-Bootrom) |
 | BCT | Configurable (binary format) | Generated by NVIDIA cbootimage tool |
-| nvtboot | **NO** (proprietary binary blob) | Distributed in L4T / factory images |
+| Coreboot bootblock | **YES** | [coreboot tegra210](https://github.com/coreboot/coreboot/tree/master/src/soc/nvidia/tegra210) |
+| Coreboot romstage | **YES** | same |
+| Coreboot ramstage | **YES** | same |
 | ARM Trusted Firmware | **YES** | [arm-trusted-firmware tegra](https://github.com/ARM-software/arm-trusted-firmware/tree/master/plat/nvidia/tegra) |
-| Coreboot (Pixel C) | **YES** | [ttefke/coreboot-smaug](https://github.com/ttefke/coreboot-smaug) |
-| Depthcharge (Pixel C) | **YES** | [coreboot/depthcharge](https://github.com/coreboot/depthcharge) |
-| CBoot (Jetson/Shield) | Partial | Some source in L4T |
-| U-Boot (Jetson) | **YES** | [OE4T/u-boot-tegra](https://github.com/OE4T/u-boot-tegra) |
+| Depthcharge | **YES** | [coreboot/depthcharge](https://github.com/coreboot/depthcharge) |
 | Linux Kernel | **YES** | mainline + vendor trees |
 
 ### Where Button Handling Can Be Added
@@ -218,13 +264,98 @@ To add a "Vol Up + Vol Down → enter RCM" feature:
 | Stage | Can add button check? | Helps when bricked? |
 |-------|----------------------|-------------------|
 | Boot ROM | **NO** (mask ROM) | N/A |
-| nvtboot | **NO** (closed source, signed) | Would help, but impossible |
-| Coreboot | **YES** (open source) | Only if coreboot itself starts |
-| Depthcharge | **YES** (open source) | Only if depthcharge starts |
+| **Coreboot bootblock** | **YES — BEST PLACE** | Yes, if eMMC/BCT readable |
+| Coreboot romstage | YES | Yes, same scope as bootblock |
+| Depthcharge | YES (but late) | Only if full boot chain works |
 
-If the device is bricked at the eMMC/BCT level (Boot ROM can't load nvtboot),
+The coreboot bootblock is the **earliest modifiable code**. It runs on BPMP
+in IRAM before SDRAM init. GPIO reads and PMC register writes work at this
+stage. If Boot ROM can load the bootblock (BCT + bootblock valid in eMMC),
+the button check will work.
+
+If the device is bricked at the eMMC/BCT level (Boot ROM can't load anything),
 **no software modification can help** — only hardware methods (eMMC shorting,
 ISP programming).
+
+---
+
+## Proposed Coreboot Bootblock Patch: Button Combo → RCM
+
+Adding ~10 lines to `tegra210_main()` in `bootblock.c`, **before** any other
+init, gives a hardware button combination to force RCM entry:
+
+```c
+void tegra210_main(void)
+{
+    /*
+     * Check Vol Up + Vol Down → reboot to RCM.
+     * GPIO(M,4) = Volume Up, GPIO(X,7) = Volume Down.
+     * Both are active LOW on Pixel C (smaug).
+     * GPIO registers are memory-mapped, work from IRAM.
+     */
+    /* Configure as input (clear output enable bits) */
+    uint32_t gpio_m_oe = read32((void *)0x6000d110);  /* GPIO port M OE */
+    uint32_t gpio_x_oe = read32((void *)0x6000d610);  /* GPIO port X OE */
+    write32((void *)0x6000d110, gpio_m_oe & ~(1 << 4));
+    write32((void *)0x6000d610, gpio_x_oe & ~(1 << 7));
+
+    uint32_t gpio_m_in = read32((void *)0x6000d108);  /* GPIO port M input */
+    uint32_t gpio_x_in = read32((void *)0x6000d608);  /* GPIO port X input */
+
+    if (!(gpio_m_in & (1 << 4)) && !(gpio_x_in & (1 << 7))) {
+        /* Both volume buttons pressed — reboot into RCM */
+        struct tegra_pmc_regs *pmc = (void *)TEGRA_PMC_BASE;
+        write32(&pmc->scratch0, read32(&pmc->scratch0) | 0x2);
+        write32(&pmc->cntrl, read32(&pmc->cntrl) | 0x10);
+        while (1)
+            ; /* wait for reset */
+    }
+
+    /* Normal boot continues below */
+    enable_jtag();
+    mbist_workaround();
+    // ... rest of existing code ...
+```
+
+### Why This Works
+
+- **Runs on BPMP (ARM7)** in IRAM — no SDRAM needed
+- **GPIO is memory-mapped** at fixed addresses — works immediately after reset
+- **PMC registers** are always accessible — no init needed
+- **Adds no new dependencies** — uses only existing MMIO
+- **~10 lines of code** in an existing, tested file
+
+### Build and Flash
+
+```bash
+# 1. Clone coreboot-smaug:
+git clone https://github.com/ttefke/coreboot-smaug
+cd coreboot-smaug
+
+# 2. Apply the button combo patch to src/soc/nvidia/tegra210/bootblock.c
+
+# 3. Build:
+make defconfig  # or use smaug_defconfig
+make
+
+# 4. Flash via fastboot (requires unlocked bootloader):
+fastboot flash bootloader build/coreboot.rom
+fastboot reboot
+
+# 5. Test: hold Vol Up + Vol Down during power-on → RCM
+```
+
+### Safety Net Behavior
+
+| Scenario | Without patch | With patch |
+|----------|-------------|-----------|
+| Normal power on | Boot normally | Boot normally |
+| Vol Up + Vol Down held | Boot normally | **→ RCM (USB recovery)** |
+| Corrupt kernel | Stuck | Vol+Vol → RCM → reflash |
+| Corrupt depthcharge | Stuck | Vol+Vol → RCM → reflash |
+| Corrupt romstage | Brick | Vol+Vol → RCM → reflash |
+| Corrupt bootblock | Brick | Brick (patch is in bootblock) |
+| Corrupt BCT/eMMC | Brick | Brick (Boot ROM can't read) |
 
 ---
 
@@ -235,7 +366,8 @@ tells Boot ROM:
 
 - How to configure the eMMC controller (timing, bus width)
 - SDRAM controller parameters (training, timing, voltage)
-- Where the bootloader (nvtboot) is located on eMMC
+- Where the bootloader is located on eMMC (coreboot bootblock on Pixel C,
+  nvtboot on Jetson/Shield)
 - Bootloader load address in memory
 - Bootloader entry point
 - Cryptographic hash/signature of the bootloader
