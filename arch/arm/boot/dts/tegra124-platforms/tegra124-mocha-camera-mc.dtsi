@@ -1,0 +1,383 @@
+/*
+ * Copyright (c) 2025, Smoke Team.  All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * Tegra124 Mocha (MiPad 1st Gen) Camera Device Tree Bindings
+ * For Media Controller (MC) framework using vi.c + channel.c + ov5693.c
+ *
+ * Hardware Configuration:
+ * - Rear: IMX179 (8MP, RGGB) on CSI-A (4-lane), MCLK1, I2C2 addr 0x10
+ * - Front: OV5693 (5MP, BGGR) on CSI-B (2-lane), MCLK2, I2C2 addr 0x36
+ * - Focuser: AD5823 (I2C2 addr 0x0c) - paired with IMX179
+ *
+ * GPIO map (from Xiaomi board-ardbeg.h / PCL DTS):
+ *   CAM_RSTN    = PBB3 = 219 = TEGRA_GPIO(BB, 3) - IMX179 reset
+ *   CAM1_PWDN   = PBB5 = 221 = TEGRA_GPIO(BB, 5) - IMX179 power down
+ *   CAM2_PWDN   = PBB6 = 222 = TEGRA_GPIO(BB, 6) - OV5693 power down
+ *   CAM_AF_PWDN = PBB7 = 223 = TEGRA_GPIO(BB, 7) - AD5823 focuser enable
+ *   CAM2_RSTN   = PCC1 = 225 = TEGRA_GPIO(CC, 1) - OV5693 reset
+ *
+ * Regulator map (from mocha PMIC e1736):
+ *   LDO4 "avdd-cam"    2.7V -> vana(IMX179), avdd_ov5693(OV5693)
+ *   LDO2 "vdd-lcd-io"  1.8V -> vdig(IMX179), dvdd(OV5693), imx179_reg2
+ *   LDO6 "vdd-cam-af"  1.8V -> vif(IMX179), dovdd(OV5693), vdd_i2c(AD5823)
+ *   LDO7 "avdd-cam-af" 2.7V -> imx179_reg1, vdd(AD5823), vana(OV5693-AF)
+ *   Fixed vdd_cam_1v8   1.8V -> Palmas GPIO1, SMPS8-derived
+ *   Fixed vdd_cam_1v2   1.2V -> Palmas GPIO2, SMPS8-derived
+ */
+
+#include <dt-bindings/media/camera.h>
+#include <dt-bindings/gpio/tegra-gpio.h>
+
+/ {
+	host1x {
+		vi {
+			/*
+			 * T124 VI with MC framework support
+			 * 2 channels: CSI-A (port 0) and CSI-B (port 2)
+			 * See tegra_vi_get_port_info() in graph.c
+			 */
+			num-channels = <2>;
+			status = "okay";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				/*
+				 * Channel 0: CSI-A (4-lane)
+				 * Maps to VI port 0, connected to IMX179 rear sensor
+				 */
+				port@0 {
+					reg = <0>;
+					mocha_vi_in0: endpoint {
+						csi-port = <0>;
+						bus-width = <4>;
+						remote-endpoint = <&mocha_imx179_out0>;
+					};
+				};
+
+				/*
+				 * Channel 1: CSI-B (2-lane)
+				 * Maps to VI port 1, connected to OV5693 front sensor
+				 */
+				port@1 {
+					reg = <1>;
+					mocha_vi_in1: endpoint {
+						csi-port = <2>;
+						bus-width = <2>;
+						remote-endpoint = <&mocha_ov5693_out0>;
+					};
+				};
+			};
+		};
+
+		/* ISP A */
+		isp@54600000 {
+			status = "okay";
+		};
+
+		/* ISP B */
+		isp@54680000 {
+			status = "okay";
+		};
+	};
+
+	/*
+	 * Camera sensors on I2C2.
+	 *
+	 * i2c@7000c400 is a TOP-LEVEL node in tegra124-soc-base.dtsi,
+	 * NOT a child of host1x. We must reference it at root level
+	 * via the &i2c2 label, otherwise sensors will end up in a
+	 * phantom bus node that doesn't correspond to the real I2C2
+	 * adapter and will never probe.
+	 */
+	i2c@7000c400 {
+		status = "okay";
+		clock-frequency = <400000>;
+
+		/*
+		 * Rear camera: IMX179
+		 * 8MP, RGGB, CSI-A 4-lane, MCLK1 (24MHz)
+		 * Module: Primax
+		 *
+		 * Power sequence (from Xiaomi board code):
+		 *   ON:  DPD off -> ext_reg1(LDO7) -> ext_reg2(1v2) ->
+		 *         ext_reg3(1v8) -> avdd(LDO4) -> CAM_RSTN=1
+		 *   OFF: CAM_RSTN=0 -> CAM_AF_PWDN=0 -> avdd off ->
+		 *         ext_reg1..3 off -> DPD on
+		 */
+		imx179_a@10 {
+			compatible = "nvidia,imx179";
+			reg = <0x10>;
+			status = "okay";
+
+			devnode = "video0";
+			physical_w = "3.674";
+			physical_h = "2.738";
+			sensor_model = "imx179";
+
+			/* camera_common clock parsing: string name, not phandle */
+			mclk = "mclk";
+			post_crop_frame_drop = "0";
+
+			/*
+			 * Regulators (string names for camera_common_regulator_get)
+			 * Matched via regulator-consumer-supply in PMIC DTS:
+			 *   "vana"        -> LDO4 2.7V (device "2-0010")
+			 *   "vif"         -> LDO6 1.8V (device "2-0010")
+			 */
+			avdd-reg = "vana";
+			iovdd-reg = "vif";
+
+			/* GPIOs */
+			reset-gpios = <&gpio TEGRA_GPIO(BB, 3) GPIO_ACTIVE_HIGH>;
+			pwdn-gpios = <&gpio TEGRA_GPIO(BB, 5) GPIO_ACTIVE_HIGH>;
+
+			mode0 { /* 8MP 30fps */
+				mclk_khz = "24000";
+				num_lanes = "4";
+				tegra_sinterface = "serial_a";
+				discontinuous_clk = "no";
+				dpcm_enable = "false";
+				cil_settletime = "0";
+
+				active_w = "3280";
+				active_h = "2464";
+				pixel_t = "bayer_rggb";
+				readout_orientation = "0";
+				line_length = "3440";
+				inherent_gain = "1";
+				mclk_multiplier = "17.0";
+				pix_clk_hz = "200000000";
+
+				min_gain_val = "1.0";
+				max_gain_val = "16";
+				min_hdr_ratio = "1";
+				max_hdr_ratio = "64";
+				min_framerate = "1.5";
+				max_framerate = "30";
+				min_exp_time = "34";
+				max_exp_time = "683709";
+				embedded_metadata_height = "0";
+			};
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mocha_imx179_out0: endpoint {
+						csi-port = <0>;
+						bus-width = <4>;
+						remote-endpoint = <&mocha_vi_in0>;
+					};
+				};
+			};
+		};
+
+		/*
+		 * Focuser: AD5823
+		 * I2C addr 0x0c, paired with IMX179 rear camera
+		 *
+		 * Regulators from PMIC:
+		 *   "vdd"    -> LDO7 2.7V (device "2-000c")
+		 *   "vdd_i2c" -> LDO6 1.8V (device "2-000c")
+		 */
+		ad5823_a@0c {
+			compatible = "nvidia,ad5823";
+			reg = <0x0c>;
+			status = "okay";
+
+			/* String names matched by regulator consumer framework */
+			vdd-supply = "vdd";
+			vdd-i2c-supply = "vdd_i2c";
+
+			af-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_HIGH>;
+
+			macro-pos = <620>;
+			infinite-pos = <70>;
+		};
+
+		/*
+		 * Front camera: OV5693
+		 * 5MP, BGGR, CSI-B 2-lane, MCLK2 (24MHz)
+		 * Module: Sunny
+		 *
+		 * Power sequence (from Xiaomi board code ardbeg_ov5693_power_on):
+		 *   ON:  DPD_off(csie) ->
+		 *         CAM2_PWDN=0, CAM2_RSTN=0, CAM_AF_PWDN=0 ->
+		 *         afvdd ON  (imx179_reg1, LDO7, 2.7V) ->
+		 *         avdd ON   (avdd_ov5693, LDO4, 2.7V) ->
+		 *         1v8 ON    (vdd_cam_1v8, fixed, Palmas GPIO1) ->
+		 *         CAM2_PWDN=1 ->
+		 *         1v2 ON    (vdd_cam_1v2, fixed, Palmas GPIO2) ->
+		 *         udelay(2) ->
+		 *         CAM2_RSTN=1 ->
+		 *         usleep(300)
+		 *
+		 *   OFF: CAM2_RSTN=0 -> 1v2 OFF -> 1v8 OFF ->
+		 *         CAM2_PWDN=0 -> CAM_AF_PWDN=0 ->
+		 *         avdd OFF -> afvdd OFF -> DPD_on(csie)
+		 *
+		 * Regulators:
+		 *   avdd_ov5693  -> LDO4 2.7V  (analog supply)
+		 *   dovdd        -> LDO6 1.8V  (digital IO supply)
+		 *   dvdd         -> LDO2 1.8V  (digital core)
+		 *   vdd_cam_1v8  -> fixed 1.8V (Palmas GPIO1)
+		 *   vdd_cam_1v2  -> fixed 1.2V (Palmas GPIO2)
+		 *   imx179_reg1  -> LDO7 2.7V  (shared AF supply)
+		 *
+		 * Note: The stock Xiaomi board code uses 4 regulators in
+		 * power_on plus an additional "afvdd" from imx179_reg1.
+		 * The generic ov5693.c only handles avdd + iovdd.
+		 * A mocha-specific driver is needed.
+		 */
+		ov5693_b@36 {
+			compatible = "nvidia,ov5693";
+			reg = <0x36>;
+			status = "okay";
+
+			devnode = "video1";
+			physical_w = "3.674";
+			physical_h = "2.738";
+			sensor_model = "ov5693";
+
+			/* camera_common clock parsing: string name, not phandle */
+			mclk = "mclk2";
+			post_crop_frame_drop = "0";
+
+			/*
+			 * Regulators (string names for camera_common_regulator_get)
+			 * Matched via regulator-consumer-supply in PMIC DTS:
+			 *   "avdd_ov5693" -> LDO4 2.7V (device "2-0036")
+			 *   "dovdd"       -> LDO6 1.8V (device "2-0036")
+			 */
+			avdd-reg = "avdd_ov5693";
+			iovdd-reg = "dovdd";
+
+			/*
+			 * GPIOs:
+			 *   CAM2_PWDN  = PBB6 = 222 (power down, active high)
+			 *   CAM2_RSTN  = PCC1 = 225 (reset, active high)
+			 *   CAM_AF_PWDN = PBB7 = 223 (shared AF enable)
+			 */
+			pwdn-gpios = <&gpio TEGRA_GPIO(BB, 6) GPIO_ACTIVE_HIGH>;
+			reset-gpios = <&gpio TEGRA_GPIO(CC, 1) GPIO_ACTIVE_HIGH>;
+
+			mode0 { /* 5MP 30fps */
+				mclk_khz = "24000";
+				num_lanes = "2";
+				tegra_sinterface = "serial_b";
+				discontinuous_clk = "no";
+				dpcm_enable = "false";
+				cil_settletime = "0";
+
+				active_w = "2592";
+				active_h = "1944";
+				pixel_t = "bayer_bggr";
+				readout_orientation = "180";
+				line_length = "2688";
+				inherent_gain = "1";
+				mclk_multiplier = "17.0";
+				pix_clk_hz = "160000000";
+
+				min_gain_val = "1.0";
+				max_gain_val = "16";
+				min_hdr_ratio = "1";
+				max_hdr_ratio = "64";
+				min_framerate = "1.8";
+				max_framerate = "30";
+				min_exp_time = "34";
+				max_exp_time = "550385";
+				embedded_metadata_height = "0";
+			};
+
+			mode1 { /* 720p 120fps */
+				mclk_khz = "24000";
+				num_lanes = "2";
+				tegra_sinterface = "serial_b";
+				discontinuous_clk = "no";
+				dpcm_enable = "false";
+				cil_settletime = "0";
+
+				active_w = "1280";
+				active_h = "720";
+				pixel_t = "bayer_bggr";
+				readout_orientation = "180";
+				line_length = "1752";
+				inherent_gain = "1";
+				mclk_multiplier = "17.0";
+				pix_clk_hz = "160000000";
+
+				min_gain_val = "1.0";
+				max_gain_val = "16";
+				min_hdr_ratio = "1";
+				max_hdr_ratio = "64";
+				min_framerate = "2.8";
+				max_framerate = "120";
+				min_exp_time = "22";
+				max_exp_time = "358733";
+				embedded_metadata_height = "0";
+			};
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mocha_ov5693_out0: endpoint {
+						csi-port = <2>;
+						bus-width = <2>;
+						remote-endpoint = <&mocha_vi_in1>;
+					};
+				};
+			};
+		};
+	};
+
+	/*
+	 * tegra-camera-platform: bandwidth management (isomgr)
+	 * proc-device-tree paths match the REAL node locations:
+	 * sensors are under root i2c@7000c400, NOT under host1x.
+	 */
+	tegra-camera-platform {
+		compatible = "nvidia,tegra-camera-platform";
+
+		modules {
+			module0 {
+				badge = "mocha_rear_P5V27C";
+				position = "rear";
+				orientation = "0";
+				drivernode0 {
+					pcl_id = "v4l2_sensor";
+					proc-device-tree = "/proc/device-tree/i2c@7000c400/imx179_a@10";
+				};
+				drivernode1 {
+					pcl_id = "v4l2_focuser";
+					proc-device-tree = "/proc/device-tree/i2c@7000c400/ad5823_a@0c";
+				};
+			};
+
+			module1 {
+				badge = "mocha_front_P5V27C";
+				position = "front";
+				orientation = "1";
+				drivernode0 {
+					pcl_id = "v4l2_sensor";
+					proc-device-tree = "/proc/device-tree/i2c@7000c400/ov5693_b@36";
+				};
+			};
+		};
+	};
+};
