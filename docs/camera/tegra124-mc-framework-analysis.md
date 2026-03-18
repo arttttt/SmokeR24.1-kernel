@@ -236,3 +236,140 @@ We should proceed with MC framework (not fall back to soc_camera) because:
 
 The bring-up strategy is: start with OV5693 on CSI-B (simpler, 2-lane),
 get basic RAW capture working, then expand to IMX179 and ISP.
+
+---
+
+## 7. Mitigation Plan: Closing Potential Issues
+
+### 7.1 MIPI Calibration — Ready to Port
+
+The MC framework's `tegra_mipi_bias_pad_enable()` returns `-ENOSYS`
+on T124. If MIPI cal turns out to be needed (bit errors, frame
+corruption at high speeds), we have a **complete reference** in the
+legacy vi2.c driver.
+
+**Source:** `drivers/media/platform/soc_camera/tegra_camera/vi2.c:1615-1645`
+
+The entire T124 MIPI bias pad init is 2 register writes:
+```c
+// MIPI calibrator at 0x700e3000
+clk_mipi_cal = clk_get_sys("mipi-cal", NULL);
+mipi_cal = ioremap(0x700e3000, 0x100);
+regs = devm_regmap_init_mmio(&pdev->dev, mipi_cal, &mipi_cal_config);
+
+clk_prepare_enable(clk_mipi_cal);
+regmap_update_bits(regs, 0x58, (1 << 0), 0);  // MIPI_BIAS_PAD_CFG0: clear E_VCLAMP_REF
+regmap_update_bits(regs, 0x60, (1 << 1), 0);  // MIPI_BIAS_PAD_CFG2: clear PDVREG
+clk_disable_unprepare(clk_mipi_cal);
+```
+
+Register defines (from vi2.c):
+```
+MIPI_CAL_BASE           = 0x700e3000
+MIPI_BIAS_PAD_CFG0      = 0x58   (bit 0 = E_VCLAMP_REF, bit 1 = PDVCLAMP)
+MIPI_BIAS_PAD_CFG1      = 0x5c
+MIPI_BIAS_PAD_CFG2      = 0x60   (bit 1 = PDVREG)
+```
+
+**Fix approach:** Add ~20 lines to `channel.c` behind
+`#ifdef CONFIG_ARCH_TEGRA_12x_SOC` in `tegra_channel_start_streaming()`,
+or create a helper in `camera_common.c`. This can be done in minutes
+when needed.
+
+### 7.2 Runtime Debugging — vi2.c as Golden Reference
+
+The legacy `vi2.c` (1700+ lines) is a **complete, production-tested**
+T124 camera implementation using the same hardware registers. If MC
+framework doesn't work on T124, we can byte-for-byte compare what
+vi2.c writes vs what MC channel.c writes.
+
+**Key comparison points:**
+
+| Operation | MC framework (channel.c) | Legacy (vi2.c) | Same registers? |
+|-----------|-------------------------|----------------|-----------------|
+| CSI PP setup | `csi_write(TEGRA_CSI_PIXEL_PARSER_0_BASE+...)` | Direct VI aperture writes to 0x838+ | YES — same offsets |
+| Image format | `TEGRA_VI_CSI_IMAGE_DEF` (0x048) | `TEGRA_VI_CSI_0_IMAGE_DEF` (0x120) | DIFFERENT offsets — needs verification |
+| Surface addr | `TEGRA_VI_CSI_SURFACE0_OFFSET_MSB/LSB` | `TEGRA_VI_CSI_0_SURFACE0_OFFSET_MSB` | Same concept, may differ in offset |
+| Single shot | `TEGRA_VI_CSI_SINGLE_SHOT` | Direct trigger write | Same mechanism |
+| Error status | `TEGRA_VI_CSI_ERROR_STATUS` | `VI_CSI_0_ERROR_STATUS` (0x184) | YES |
+| Stream on/off | `tegra_csi_start_streaming()` | `vi2_csi_start()` inline code | Same register sequence |
+| Power on | `nvhost_vi_finalize_poweron()` | Same function | Identical |
+
+**Important note on register offsets:**
+
+The MC framework's `channel.c` accesses VI/CSI registers via
+`csi_write(chan, index, offset)` where `offset` is **relative to the
+CSI port's pixel parser base**. The legacy vi2.c uses **absolute
+offsets from the VI aperture base** (e.g., 0x120 for CSI_0_IMAGE_DEF).
+
+Both ultimately write to the same physical registers. The mapping is:
+```
+MC:     csibase[0] = vi_aperture + 0x0838 (PP0_BASE)
+        csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF)
+        → writes to vi_aperture + 0x0838 + TEGRA_VI_CSI_IMAGE_DEF
+
+Legacy: vi_aperture + TEGRA_VI_CSI_0_IMAGE_DEF (absolute offset)
+```
+
+The offsets in `registers.h` vs vi2.c need to be verified to match
+when debugging. Both refer to the same hardware, just different
+addressing styles.
+
+### 7.3 CSI Register Mapping — Verified Compatible
+
+CSI pixel parser base addresses in MC framework (`registers.h`):
+```
+TEGRA_CSI_PIXEL_PARSER_0_BASE = 0x0838  (ports A, B)
+TEGRA_CSI_PIXEL_PARSER_2_BASE = 0x1038  (ports C, D — T210 only)
+TEGRA_CSI_PIXEL_PARSER_4_BASE = 0x1838  (ports E, F — T210 only)
+```
+
+T124 VI aperture: `0x54080000`, size `0x40000` (256KB). All three
+PP bases fall within this range, so `ioremap()` won't fail. PP2 and
+PP4 physically don't exist on T124 silicon but are never accessed
+when DTS limits channels to 2 with `csi-port = <0>` and `<2>`.
+
+Legacy vi2.c uses the same base (0x0838) for CSI-A, confirming
+PP0_BASE is correct for T124.
+
+### 7.4 DMA Buffer Management — Same Allocator
+
+Both MC (channel.c) and legacy (vi2.c) use `vb2_dma_contig_memops`
+for buffer allocation. The DMA addressing, IOMMU (SMMU) group
+assignment, and buffer alignment requirements are identical.
+
+### 7.5 Power and Clock — Confirmed Working
+
+`nvhost_vi_finalize_poweron()` in `tegra_vi.c` is shared by both
+MC and legacy paths. It has explicit T124 handling:
+```c
+#ifdef CONFIG_ARCH_TEGRA_12x_SOC
+    if (dev->id == 0)
+        host1x_writel(dev, T12_VI_CFG_CG_CTRL, T12_CG_2ND_LEVEL_EN);
+#endif
+```
+
+This function is called during VI probe regardless of which camera
+framework is active. Clock list in `t124_vi_info` (vi_bypass, csi,
+cilab, cilcd, cile, emc, sclk) is the same for both frameworks.
+
+### 7.6 What We Don't Have (and don't need yet)
+
+| Missing | Impact | When needed |
+|---------|--------|-------------|
+| `arisp.h` (ISP register fields) | Cannot program ISP | Phase 3 (ISP driver) |
+| T124 MIPI cal in MC framework | May need for 4-lane CSI-A | Phase 2 (IMX179) or earlier if OV5693 has issues |
+| Runtime trace comparison | Need live device | First boot with MC |
+
+---
+
+## 8. Summary Risk Matrix
+
+| Risk | Probability | Impact | Mitigation | Effort to fix |
+|------|------------|--------|------------|---------------|
+| MIPI cal needed | Medium | Frame corruption | Port 2 register writes from vi2.c | ~20 lines |
+| Register offset mismatch | Low | Capture fails | Compare MC vs vi2.c register traces | Hours of debugging |
+| DMA/buffer issue | Low | No frames | Same allocator as vi2.c | Low |
+| Power sequence wrong | Very low | Sensor won't init | Same finalize_poweron | N/A (shared code) |
+| Async subdev race | Low | Probe order issue | Standard V4L2 pattern | Moderate |
+| Unknown T124 quirk | Unknown | Unknown | vi2.c as byte-level reference | Varies |
