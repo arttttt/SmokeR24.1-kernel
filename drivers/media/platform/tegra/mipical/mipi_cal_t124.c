@@ -439,7 +439,7 @@ static void __exit tegra_mipi_module_exit(void)
 subsys_initcall(tegra_mipi_module_init);
 module_exit(tegra_mipi_module_exit);
 
-MODULE_AUTHOR("Smoke Team");
+MODULE_AUTHOR("Artem Bambalov <artembambalov1993@gmail.com>");
 MODULE_DESCRIPTION("Common MIPI calibration driver for Tegra T124");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:" DRV_NAME);

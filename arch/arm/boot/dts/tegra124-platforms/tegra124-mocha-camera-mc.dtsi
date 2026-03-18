@@ -92,6 +92,11 @@
 		};
 	};
 
+	/* Enable MIPI calibration block for common mipical driver */
+	mipical {
+		status = "okay";
+	};
+
 	/*
 	 * Camera sensors on I2C2.
 	 *
