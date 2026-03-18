@@ -17,6 +17,8 @@
 #ifndef MIPI_CAL_H
 #define MIPI_CAL_H
 
+#include <linux/errno.h>
+
 #define DSID	(1 << 31)
 #define DSIC	(1 << 30)
 #define DSIB	(1 << 29)
