@@ -38,8 +38,7 @@ static const struct regmap_config t124_mipi_cal_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
-	.cache_type = REGCACHE_NONE,
-	.fast_io = 1,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static DEFINE_MUTEX(t124_mipi_lock);
@@ -74,8 +73,8 @@ int tegra_mipi_bias_pad_enable(void)
 
 do_enable:
 	clk = clk_get_sys("mipi-cal", NULL);
-	if (IS_ERR(clk)) {
-		ret = PTR_ERR(clk);
+	if (IS_ERR_OR_NULL(clk)) {
+		ret = clk ? PTR_ERR(clk) : -ENODEV;
 		pr_err("%s: cannot get mipi-cal clk: %d\n", __func__, ret);
 		goto out;
 	}
