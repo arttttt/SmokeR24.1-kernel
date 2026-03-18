@@ -163,20 +163,23 @@ static int tegra_mipi_wait(struct tegra_mipi *mipi)
 	unsigned long timeout;
 	int val;
 
+	/* Clear status before triggering — matches T124 dsi.c flow */
+	regmap_write(mipi->regmap, CIL_MIPI_CAL_STATUS, 0xffffffff);
+
 	regmap_update_bits(mipi->regmap, MIPI_CAL_CTRL,
 			   CAL_STARTCAL, CAL_STARTCAL);
 
 	timeout = jiffies + msecs_to_jiffies(MIPI_CAL_TIMEOUT_MSEC);
 	while (time_before(jiffies, timeout)) {
 		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-		if ((val & CAL_ACTIVE) == 0)
+		if (!(val & CAL_ACTIVE) && (val & CAL_DONE))
 			return 0;
-		usleep_range(10, 50);
+		usleep_range(10, 100);
 	}
 
 	/* Re-check after timeout (may have slept past) */
 	regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-	if ((val & CAL_ACTIVE) == 0)
+	if (!(val & CAL_ACTIVE) && (val & CAL_DONE))
 		return 0;
 
 	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x\n", val);
@@ -211,9 +214,10 @@ static void t124_clear_all(struct tegra_mipi *mipi)
  */
 static void t124_apply_dsi_prod(struct tegra_mipi *mipi, int lanes)
 {
-	/* BIAS_PAD_CFG1: PAD_DRIV_UP_REF = 3 */
-	regmap_write(mipi->regmap, MIPI_BIAS_PAD_CFG1,
-		     BIAS_PAD_DRIV_UP_REF(0x3));
+	/* BIAS_PAD_CFG1: PAD_DRIV_UP_REF = 3, preserve other fields */
+	regmap_update_bits(mipi->regmap, MIPI_BIAS_PAD_CFG1,
+			   BIAS_PAD_DRIV_UP_REF(0x7),
+			   BIAS_PAD_DRIV_UP_REF(0x3));
 
 	/* Deselect CSI clock lanes */
 	regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG_2, 0);
@@ -274,7 +278,7 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 	if (lanes & (DSIA | DSIB | DSIC | DSID))
 		t124_apply_dsi_prod(mipi, lanes);
 
-	/* Configure control register */
+	/* Configure control register: AUTOCAL_EN=0 (bit 1 not set) */
 	regmap_write(mipi->regmap, MIPI_CAL_CTRL,
 		     CAL_NOISE_FLT(0xa) | CAL_PRESCALE(0x2) | CAL_CLKEN_OVR);
 
@@ -411,6 +415,16 @@ static int tegra_mipi_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int tegra_mipi_remove(struct platform_device *pdev)
+{
+	struct tegra_mipi *mipi = platform_get_drvdata(pdev);
+
+	if (mipi->mipi_cal_clk)
+		clk_put(mipi->mipi_cal_clk);
+
+	return 0;
+}
+
 static const struct of_device_id tegra_mipi_of_match[] = {
 	{ .compatible = "nvidia,tegra124-mipical" },
 	{ },
@@ -424,6 +438,7 @@ static struct platform_driver tegra_mipi_cal_platform_driver = {
 		.of_match_table = tegra_mipi_of_match,
 	},
 	.probe = tegra_mipi_probe,
+	.remove = tegra_mipi_remove,
 };
 
 static int __init tegra_mipi_module_init(void)
