@@ -2338,6 +2338,57 @@ static void tegra_dsi_mipi_calibration_21x(struct tegra_dc_dsi_data *dsi)
 }
 #endif
 
+#if defined(COMMON_MIPICAL_SUPPORTED) && defined(CONFIG_ARCH_TEGRA_12x_SOC)
+/*
+ * T124 DSI calibration using the common mipical driver.
+ * DSI pad register writes stay here (DSI-internal registers).
+ * MIPI cal block register writes are delegated to tegra_mipi_calibration().
+ */
+static void
+tegra_dsi_mipi_calibration_12x(struct tegra_dc_dsi_data *dsi)
+{
+	u32 val;
+	struct clk *clk72mhz = NULL;
+
+	clk72mhz = clk_get_sys("clk72mhz", NULL);
+	if (IS_ERR_OR_NULL(clk72mhz)) {
+		dev_err(&dsi->dc->ndev->dev, "dsi: can't get clk72mhz clock\n");
+		return;
+	}
+	tegra_disp_clk_prepare_enable(clk72mhz);
+
+	/* Bug 1445912: override tap delay for panel-a-1200-1920-7-0 */
+	if (dsi->info.boardinfo.platform_boardid == BOARD_P1761 &&
+		dsi->info.boardinfo.display_boardversion == 1) {
+		val = (DSI_PAD_OUTADJ3(0x4) | DSI_PAD_OUTADJ2(0x4) |
+		   DSI_PAD_OUTADJ1(0x4) | DSI_PAD_OUTADJ0(0x4));
+		tegra_dsi_writel(dsi, val, DSI_PAD_CONTROL_1_VS1);
+	}
+
+	val = (DSI_PAD_SLEWUPADJ(0x7) | DSI_PAD_SLEWDNADJ(0x7) |
+		DSI_PAD_LPUPADJ(0x1) | DSI_PAD_LPDNADJ(0x1) |
+		DSI_PAD_OUTADJCLK(0x0));
+	tegra_dsi_writel(dsi, val, DSI_PAD_CONTROL_2_VS1);
+
+	val = tegra_dsi_readl(dsi, DSI_PAD_CONTROL_3_VS1);
+	val |= (DSI_PAD_PREEMP_PD_CLK(0x3) | DSI_PAD_PREEMP_PU_CLK(0x3) |
+		   DSI_PAD_PREEMP_PD(0x3) | DSI_PAD_PREEMP_PU(0x3));
+	tegra_dsi_writel(dsi, val, DSI_PAD_CONTROL_3_VS1);
+
+	/* Calibrate DSI 0 */
+	if (dsi->info.ganged_type ||
+		dsi->info.dsi_instance == DSI_INSTANCE_0)
+		tegra_mipi_calibration(DSIA | DSIB);
+
+	/* Calibrate DSI 1 */
+	if (dsi->info.ganged_type ||
+		dsi->info.dsi_instance == DSI_INSTANCE_1)
+		tegra_mipi_calibration(DSIC | DSID);
+
+	tegra_disp_clk_disable_unprepare(clk72mhz);
+}
+#endif
+
 #ifdef CONFIG_ARCH_TEGRA_12x_SOC
 static void __maybe_unused
 tegra_dsi_mipi_calibration_12x(struct tegra_dc_dsi_data *dsi)
@@ -2638,7 +2689,11 @@ static void tegra_dsi_pad_calibration(struct tegra_dc_dsi_data *dsi)
 
 	if (dsi->info.controller_vs == DSI_VS_1) {
 #if defined(COMMON_MIPICAL_SUPPORTED)
+#if defined(CONFIG_ARCH_TEGRA_21x_SOC)
 		tegra_dsi_mipi_calibration_21x(dsi);
+#elif defined(CONFIG_ARCH_TEGRA_12x_SOC)
+		tegra_dsi_mipi_calibration_12x(dsi);
+#endif
 		return;
 #else
 		tegra_mipi_cal_init_hw(dsi->mipi_cal);
