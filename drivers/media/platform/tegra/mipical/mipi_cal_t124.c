@@ -427,7 +427,6 @@ static int tegra_mipi_remove(struct platform_device *pdev)
 
 static const struct of_device_id tegra_mipi_of_match[] = {
 	{ .compatible = "nvidia,tegra124-mipical" },
-	{ },
 };
 MODULE_DEVICE_TABLE(of, tegra_mipi_of_match);
 
