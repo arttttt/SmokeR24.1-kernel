@@ -2389,7 +2389,7 @@ tegra_dsi_mipi_calibration_12x(struct tegra_dc_dsi_data *dsi)
 }
 #endif
 
-#ifdef CONFIG_ARCH_TEGRA_12x_SOC
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) && !defined(COMMON_MIPICAL_SUPPORTED)
 static void __maybe_unused
 tegra_dsi_mipi_calibration_12x(struct tegra_dc_dsi_data *dsi)
 {
