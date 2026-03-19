@@ -11,12 +11,14 @@
  * more details.
  *
  * Tegra124 Mocha (MiPad 1st Gen) Camera Device Tree Bindings
- * For Media Controller (MC) framework using vi.c + channel.c + ov5693.c
+ * For Media Controller (MC) framework using vi.c + channel.c + ov5693_mocha.c
  *
  * Hardware Configuration:
  * - Rear: IMX179 (8MP, RGGB) on CSI-A (4-lane), MCLK1, I2C2 addr 0x10
+ *         DISABLED — no V4L2 MC driver yet
  * - Front: OV5693 (5MP, BGGR) on CSI-B (2-lane), MCLK2, I2C2 addr 0x36
  * - Focuser: AD5823 (I2C2 addr 0x0c) - paired with IMX179
+ *         DISABLED — IMX179 not active
  *
  * GPIO map (from Xiaomi board-ardbeg.h / PCL DTS):
  *   CAM_RSTN    = PBB3 = 219 = TEGRA_GPIO(BB, 3) - IMX179 reset
@@ -42,10 +44,10 @@
 		vi {
 			/*
 			 * T124 VI with MC framework support
-			 * 2 channels: CSI-A (port 0) and CSI-B (port 2)
-			 * See tegra_vi_get_port_info() in graph.c
+			 * 1 channel: CSI-B (port 2) for OV5693 front camera
+			 * IMX179 rear disabled — no V4L2 MC driver yet
 			 */
-			num-channels = <2>;
+			num-channels = <1>;
 			status = "okay";
 
 			ports {
@@ -53,26 +55,13 @@
 				#size-cells = <0>;
 
 				/*
-				 * Channel 0: CSI-A (4-lane)
-				 * Maps to VI port 0, connected to IMX179 rear sensor
+				 * Channel 0: CSI-B (2-lane)
+				 * CSI port=2 (PORT_C in csi.h,
+				 * first port of the second CSI brick)
 				 */
 				port@0 {
 					reg = <0>;
 					mocha_vi_in0: endpoint {
-						csi-port = <0>;
-						bus-width = <4>;
-						remote-endpoint = <&mocha_imx179_out0>;
-					};
-				};
-
-				/*
-				 * Channel 1: CSI-B (2-lane)
-				 * VI port reg=1, CSI port=2 (PORT_C in csi.h,
-				 * first port of the second CSI brick)
-				 */
-				port@1 {
-					reg = <1>;
-					mocha_vi_in1: endpoint {
 						csi-port = <2>;
 						bus-width = <2>;
 						remote-endpoint = <&mocha_ov5693_out0>;
@@ -107,19 +96,14 @@
 
 		/*
 		 * Rear camera: IMX179
-		 * 8MP, RGGB, CSI-A 4-lane, MCLK1 (24MHz)
-		 * Module: Primax
-		 *
-		 * Power sequence (from Xiaomi board code):
-		 *   ON:  DPD off -> ext_reg1(LDO7) -> ext_reg2(1v2) ->
-		 *         ext_reg3(1v8) -> avdd(LDO4) -> CAM_RSTN=1
-		 *   OFF: CAM_RSTN=0 -> CAM_AF_PWDN=0 -> avdd off ->
-		 *         ext_reg1..3 off -> DPD on
+		 * DISABLED — no V4L2 MC driver yet, NVC imx179.c is
+		 * incompatible with MC framework.
+		 * Re-enable when imx179_mocha.c is implemented.
 		 */
 		imx179_a@10 {
 			compatible = "nvidia,imx179";
 			reg = <0x10>;
-			status = "okay";
+			status = "disabled";
 
 			devnode = "video0";
 			physical_w = "3.674";
@@ -171,33 +155,21 @@
 				embedded_metadata_height = "0";
 			};
 
-			ports {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				port@0 {
-					reg = <0>;
-					mocha_imx179_out0: endpoint {
-						csi-port = <0>;
-						bus-width = <4>;
-						remote-endpoint = <&mocha_vi_in0>;
-					};
-				};
-			};
+			/*
+			 * ports block removed — not connected to VI graph
+			 * while IMX179 is disabled. Prevents VI async notifier
+			 * from waiting for a subdev that will never register.
+			 */
 		};
 
 		/*
 		 * Focuser: AD5823
-		 * I2C addr 0x0c, paired with IMX179 rear camera
-		 *
-		 * Regulators from PMIC:
-		 *   "vdd"    -> LDO7 2.7V (device "2-000c")
-		 *   "vdd_i2c" -> LDO6 1.8V (device "2-000c")
+		 * DISABLED — paired with IMX179 which is disabled.
 		 */
 		ad5823_a@0c {
 			compatible = "nvidia,ad5823";
 			reg = <0x0c>;
-			status = "okay";
+			status = "disabled";
 
 			/* String names matched by regulator consumer framework */
 			vdd-supply = "vdd";
@@ -346,7 +318,7 @@
 					mocha_ov5693_out0: endpoint {
 						csi-port = <2>;
 						bus-width = <2>;
-						remote-endpoint = <&mocha_vi_in1>;
+						remote-endpoint = <&mocha_vi_in0>;
 					};
 				};
 			};
@@ -363,20 +335,6 @@
 
 		modules {
 			module0 {
-				badge = "mocha_rear_P5V27C";
-				position = "rear";
-				orientation = "0";
-				drivernode0 {
-					pcl_id = "v4l2_sensor";
-					proc-device-tree = "/proc/device-tree/i2c@7000c400/imx179_a@10";
-				};
-				drivernode1 {
-					pcl_id = "v4l2_focuser";
-					proc-device-tree = "/proc/device-tree/i2c@7000c400/ad5823_a@0c";
-				};
-			};
-
-			module1 {
 				badge = "mocha_front_P5V27C";
 				position = "front";
 				orientation = "1";
