@@ -121,7 +121,7 @@ static const struct regmap_config t124_mipi_cal_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_NONE,
 };
 
 static struct tegra_mipi *get_mipi(void)
