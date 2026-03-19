@@ -8591,7 +8591,7 @@ static struct clk tegra_visp_clks[] = {
 
 	SHARED_CLK("ispa.isp.c4bus",	"ispa.isp",	NULL,	&tegra_visp_clks[1], "ispa", 0, 0),
 	SHARED_CLK("ispb.isp.c4bus",	"ispb.isp",	NULL,	&tegra_visp_clks[1], "ispb", 0, 0),
-	SHARED_CLK("vi_v4l2.c4bus",	"vi",		NULL,	&tegra_visp_clks[0], "vi", 0, 0),
+	SHARED_CLK("vi_v4l2.c4bus",	"vi",		"vi_v4l2",	&tegra_visp_clks[0], "vi", 0, 0),
 	SHARED_CLK("vi_bypass.c4bus",	"tegra_vi",	NULL,	&tegra_visp_clks[0], "vi", 0, 0),
 };
 
