@@ -17,7 +17,8 @@
 | MCLK | 24 MHz | 24 MHz |
 | PCLK | 348 MHz | — |
 | Line Length | 3440 px | — |
-| Modes | 8MP@30fps | 5MP@30, 1080p@30, 720p@120 |
+| Modes | 8MP@30fps | 5MP@30, 1080p@30, 720p@60 |
+| I2C Bus | CAM I2C (i2c@7000c500, adapter 2) | CAM I2C (i2c@7000c500, adapter 2) |
 | Focuser | AD5823 VCM (macro=620, inf=70) | Fixed |
 | Module | Primax | Sunny |
 | CCM | [2.084 -0.413 -0.079; -1.102 1.817 -0.789; 0.017 -0.404 1.868] | See ov5693_sunny_v2.13.isp |

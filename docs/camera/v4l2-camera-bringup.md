@@ -1,5 +1,10 @@
 # V4L2 Camera Bringup for Xiaomi Mi Pad 1 (mocha) / Tegra K1 (T124)
 
+> **NOTE**: This document was written for the soc_camera approach.
+> The actual implementation uses the **Media Controller (MC) V4L2 framework**
+> with `drivers/media/i2c/ov5693_mocha.c` and `tegra124-mocha-camera-mc.dtsi`.
+> See commit history on branch `camera/v4l2-bringup` for current state.
+
 ## Goal
 
 Bring up cameras (IMX179 rear, OV5693 front) via the clean V4L2 stack instead
@@ -433,7 +438,7 @@ Repository: https://github.com/antmicro/android-camera-hal
 ## Hardware Parameters for Mocha Cameras
 
 ### IMX179 (rear, 8MP)
-- I2C bus: 2, addr: 0x10
+- I2C bus: 2 (CAM I2C, i2c@7000c500), addr: 0x10
 - CSI port: A (presumably, 4 lanes)
 - Resolution: 3280x2464
 - Format: RAW10 Bayer RGGB
@@ -444,7 +449,7 @@ Repository: https://github.com/antmicro/android-camera-hal
 - Device ID: 0x0179
 
 ### OV5693 (front, 5MP)
-- I2C bus: 2, addr: 0x36
+- I2C bus: 2 (CAM I2C, i2c@7000c500), addr: 0x36
 - CSI port: B (presumably)
 - GPIOs: 222, 225, 223
 - Regulators: dvdd, avdd_ov5693, vdd_cam_1v2
@@ -453,6 +458,6 @@ Repository: https://github.com/antmicro/android-camera-hal
 - Device ID: 0x5693
 
 ### AD5823 (autofocus actuator for IMX179)
-- I2C bus: 2, addr: 0x0C
+- I2C bus: 2 (CAM I2C, i2c@7000c500), addr: 0x0C
 - Regulators: vdd, vdd_i2c
 - Device ID: 0x5823
