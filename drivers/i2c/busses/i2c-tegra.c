@@ -1886,6 +1886,10 @@ skip_pinctrl:
 
 	tegra_register_pm_notifier(&i2c_dev->pm_nb);
 
+	dev_info(&pdev->dev, "i2c-tegra: adapter %d (%s) of_node=%s\n",
+		i2c_dev->adapter.nr, dev_name(&i2c_dev->adapter.dev),
+		i2c_dev->adapter.dev.of_node ?
+			i2c_dev->adapter.dev.of_node->full_name : "(null)");
 	of_i2c_register_devices(&i2c_dev->adapter);
 	pm_runtime_enable(&i2c_dev->adapter.dev);
 	tegra_i2c_gpio_init(i2c_dev);

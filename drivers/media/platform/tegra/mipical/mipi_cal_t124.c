@@ -298,7 +298,7 @@ int tegra_mipi_calibration(int lanes)
 	mipi = get_mipi();
 	if (!mipi)
 		return -ENODEV;
-	dev_dbg(mipi->dev, "%s lanes=0x%x\n", __func__, lanes);
+	dev_info(mipi->dev, "%s lanes=0x%x\n", __func__, lanes);
 
 	return _tegra_mipi_calibration(mipi, lanes);
 }

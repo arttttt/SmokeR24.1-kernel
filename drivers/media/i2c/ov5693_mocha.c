@@ -1453,7 +1453,8 @@ static int ov5693_probe(struct i2c_client *client,
 	char debugfs_name[10];
 	int err;
 
-	pr_info("[OV5693-mocha]: probing v4l2 sensor.\n");
+	pr_info("[OV5693-mocha]: probing v4l2 sensor on %s.\n",
+		dev_name(&client->dev));
 
 	if (!IS_ENABLED(CONFIG_OF) || !node)
 		return -EINVAL;
@@ -1482,6 +1483,10 @@ static int ov5693_probe(struct i2c_client *client,
 		dev_err(&client->dev, "unable to get platform data\n");
 		return -EFAULT;
 	}
+	dev_info(&client->dev, "parse_dt done: mclk=%s pwdn=%u reset=%u af=%u\n",
+		priv->pdata->mclk_name ? priv->pdata->mclk_name : "(null)",
+		priv->pdata->pwdn_gpio, priv->pdata->reset_gpio,
+		priv->pdata->af_gpio);
 
 	/* Mocha: afvdd regulator (imx179_reg1, not in camera_common) */
 	err = of_property_read_string(node, "afvdd-reg", &afvdd_reg_name);
@@ -1491,6 +1496,9 @@ static int ov5693_probe(struct i2c_client *client,
 		if (err)
 			dev_warn(&client->dev,
 				"unable to get afvdd regulator %s\n",
+				afvdd_reg_name);
+		else
+			dev_info(&client->dev, "afvdd regulator %s: ok\n",
 				afvdd_reg_name);
 	}
 
@@ -1519,11 +1527,17 @@ static int ov5693_probe(struct i2c_client *client,
 	priv->s_data->dev		= &client->dev;
 
 	err = ov5693_power_get(priv);
-	if (err)
+	if (err) {
+		dev_err(&client->dev, "power_get failed: %d\n", err);
 		return err;
+	}
+	dev_info(&client->dev, "power_get done: avdd=%p iovdd=%p dvdd=%p vcmvdd=%p afvdd=%p\n",
+		priv->power.avdd, priv->power.iovdd, priv->power.dvdd,
+		priv->power.vcmvdd, priv->afvdd);
 
 	err = camera_common_parse_ports(client, common_data);
 	if (err) {
+		dev_err(&client->dev, "Failed to find port info: %d\n", err);
 		dev_err(&client->dev, "Failed to find port info\n");
 		return err;
 	}
@@ -1603,7 +1617,19 @@ static struct i2c_driver ov5693_i2c_driver = {
 	.id_table = ov5693_id,
 };
 
-module_i2c_driver(ov5693_i2c_driver);
+static int __init ov5693_mocha_init(void)
+{
+	pr_info("[OV5693-mocha]: registering i2c driver\n");
+	return i2c_add_driver(&ov5693_i2c_driver);
+}
+
+static void __exit ov5693_mocha_exit(void)
+{
+	i2c_del_driver(&ov5693_i2c_driver);
+}
+
+module_init(ov5693_mocha_init);
+module_exit(ov5693_mocha_exit);
 
 MODULE_DESCRIPTION("V4L2 sensor driver for OV5693 on Xiaomi Mi Pad 1 (mocha)");
 MODULE_AUTHOR("Artem Bambalov <artembambalov1993@gmail.com>");

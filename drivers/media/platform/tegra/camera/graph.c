@@ -545,6 +545,9 @@ int tegra_vi_graph_init(struct tegra_mc_vi *vi)
 		goto done;
 	}
 
+	dev_info(vi->dev, "async notifier registered: %d subdevs, link_status=%d, bound=%d\n",
+		num_subdevs, vi->link_status, vi->subdevs_bound);
+
 	if (!vi->link_status) {
 		if (vi->subdevs_bound) {
 			ret = tegra_vi_graph_notify_complete(&vi->notifier);
