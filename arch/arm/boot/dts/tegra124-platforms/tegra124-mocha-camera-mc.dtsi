@@ -14,11 +14,20 @@
  * For Media Controller (MC) framework using vi.c + channel.c + ov5693_mocha.c
  *
  * Hardware Configuration:
- * - Rear: IMX179 (8MP, RGGB) on CSI-A (4-lane), MCLK1, I2C2 addr 0x10
+ * - Rear: IMX179 (8MP, RGGB) on CSI-A (4-lane), MCLK1, CAM I2C addr 0x10
  *         DISABLED — no V4L2 MC driver yet
- * - Front: OV5693 (5MP, BGGR) on CSI-B (2-lane), MCLK2, I2C2 addr 0x36
- * - Focuser: AD5823 (I2C2 addr 0x0c) - paired with IMX179
+ * - Front: OV5693 (5MP, BGGR) on CSI-B (2-lane), MCLK2, CAM I2C addr 0x36
+ * - Focuser: AD5823 (CAM I2C addr 0x0c) - paired with IMX179
  *         DISABLED — IMX179 not active
+ *
+ * I2C bus mapping (from DT aliases in tegra124-soc-shield.dtsi):
+ *   i2c@7000c000 = adapter 0 (GEN1)
+ *   i2c@7000c400 = adapter 1 (GEN2) — battery (bq27520), charger (bq2419x)
+ *   i2c@7000c500 = adapter 2 (CAM)  — cameras (OV5693, IMX179, AD5823)
+ *   i2c@7000c700 = adapter 3 (GEN4) — touch, audio, sensors
+ *
+ * Verified from R21.5 PCL DTS: busnum = <2> for all camera devices,
+ * which maps to i2c_get_adapter(2) = i2c@7000c500.
  *
  * GPIO map (from Xiaomi board-ardbeg.h / PCL DTS):
  *   CAM_RSTN    = PBB3 = 219 = TEGRA_GPIO(BB, 3) - IMX179 reset
@@ -82,15 +91,16 @@
 	};
 
 	/*
-	 * Camera sensors on I2C2.
+	 * Camera sensors on CAM I2C (i2c@7000c500, adapter 2).
 	 *
-	 * i2c@7000c400 is a TOP-LEVEL node in tegra124-soc-base.dtsi,
-	 * NOT a child of host1x. We must reference it at root level
-	 * via the &i2c2 label, otherwise sensors will end up in a
-	 * phantom bus node that doesn't correspond to the real I2C2
-	 * adapter and will never probe.
+	 * Cameras are on the dedicated CAM I2C bus, NOT on GEN2 (i2c@7000c400).
+	 * Confirmed by R21.5 PCL DTS: busnum = <2> for all camera devices.
+	 * DT alias i2c2 = &i2c3 = i2c@7000c500 = Linux adapter 2.
+	 *
+	 * i2c@7000c500 is disabled by default in tegra124-soc-base.dtsi,
+	 * so we enable it here.
 	 */
-	i2c@7000c400 {
+	i2c@7000c500 {
 		status = "okay";
 		clock-frequency = <400000>;
 
@@ -328,7 +338,7 @@
 	/*
 	 * tegra-camera-platform: bandwidth management (isomgr)
 	 * proc-device-tree paths match the REAL node locations:
-	 * sensors are under root i2c@7000c400, NOT under host1x.
+	 * sensors are under root i2c@7000c500 (CAM I2C).
 	 */
 	tegra-camera-platform {
 		compatible = "nvidia,tegra-camera-platform";
@@ -340,7 +350,7 @@
 				orientation = "1";
 				drivernode0 {
 					pcl_id = "v4l2_sensor";
-					proc-device-tree = "/proc/device-tree/i2c@7000c400/ov5693_b@36";
+					proc-device-tree = "/proc/device-tree/i2c@7000c500/ov5693_b@36";
 				};
 			};
 		};
