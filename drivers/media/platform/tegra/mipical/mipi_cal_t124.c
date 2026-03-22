@@ -158,7 +158,7 @@ static void tegra_mipi_clk_disable(struct tegra_mipi *mipi)
 	clk_disable_unprepare(mipi->mipi_cal_clk);
 }
 
-static int tegra_mipi_wait(struct tegra_mipi *mipi)
+static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
 {
 	unsigned long timeout;
 	int val;
@@ -172,17 +172,18 @@ static int tegra_mipi_wait(struct tegra_mipi *mipi)
 	timeout = jiffies + msecs_to_jiffies(MIPI_CAL_TIMEOUT_MSEC);
 	while (time_before(jiffies, timeout)) {
 		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-		if (!(val & CAL_ACTIVE) && (val & CAL_DONE))
+		if (((val & lanes) == lanes) && !(val & CAL_ACTIVE))
 			return 0;
 		usleep_range(10, 100);
 	}
 
 	/* Re-check after timeout (may have slept past) */
 	regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-	if (!(val & CAL_ACTIVE) && (val & CAL_DONE))
+	if (((val & lanes) == lanes) && !(val & CAL_ACTIVE))
 		return 0;
 
-	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x\n", val);
+	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x, lanes: 0x%x\n",
+		val, lanes);
 	return -ETIMEDOUT;
 }
 
@@ -283,7 +284,7 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 		     CAL_NOISE_FLT(0xa) | CAL_PRESCALE(0x2) | CAL_CLKEN_OVR);
 
 	/* Trigger and wait for calibration */
-	err = tegra_mipi_wait(mipi);
+	err = tegra_mipi_wait(mipi, lanes);
 
 	tegra_mipi_clk_disable(mipi);
 err_unlock:
