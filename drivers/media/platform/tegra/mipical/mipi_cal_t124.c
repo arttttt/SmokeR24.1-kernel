@@ -369,7 +369,6 @@ static int tegra_mipi_probe(struct platform_device *pdev)
 	struct tegra_mipi *mipi;
 	struct resource *mem;
 	void __iomem *regs;
-	int err;
 
 	mipi = devm_kzalloc(&pdev->dev, sizeof(*mipi), GFP_KERNEL);
 	if (!mipi)
