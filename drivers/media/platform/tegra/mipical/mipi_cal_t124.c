@@ -112,6 +112,7 @@
 struct tegra_mipi {
 	struct device *dev;
 	struct clk *mipi_cal_clk;
+	struct clk *mipi_cal_fixed;
 	struct regmap *regmap;
 	struct mutex lock;
 	atomic_t refcount;
@@ -150,12 +151,24 @@ static struct tegra_mipi *get_mipi(void)
 
 static int tegra_mipi_clk_enable(struct tegra_mipi *mipi)
 {
-	return clk_prepare_enable(mipi->mipi_cal_clk);
+	int err;
+
+	if (mipi->mipi_cal_fixed) {
+		err = clk_prepare_enable(mipi->mipi_cal_fixed);
+		if (err)
+			return err;
+	}
+	err = clk_prepare_enable(mipi->mipi_cal_clk);
+	if (err && mipi->mipi_cal_fixed)
+		clk_disable_unprepare(mipi->mipi_cal_fixed);
+	return err;
 }
 
 static void tegra_mipi_clk_disable(struct tegra_mipi *mipi)
 {
 	clk_disable_unprepare(mipi->mipi_cal_clk);
+	if (mipi->mipi_cal_fixed)
+		clk_disable_unprepare(mipi->mipi_cal_fixed);
 }
 
 static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
@@ -407,6 +420,12 @@ static int tegra_mipi_probe(struct platform_device *pdev)
 					  : -ENODEV;
 	}
 
+	mipi->mipi_cal_fixed = clk_get_sys("mipi-cal-fixed", NULL);
+	if (IS_ERR(mipi->mipi_cal_fixed)) {
+		dev_warn(&pdev->dev, "cannot get mipi-cal-fixed clock, proceeding without\n");
+		mipi->mipi_cal_fixed = NULL;
+	}
+
 	mutex_init(&mipi->lock);
 	atomic_set(&mipi->refcount, 0);
 	platform_set_drvdata(pdev, mipi);
@@ -419,6 +438,8 @@ static int tegra_mipi_remove(struct platform_device *pdev)
 {
 	struct tegra_mipi *mipi = platform_get_drvdata(pdev);
 
+	if (mipi->mipi_cal_fixed)
+		clk_put(mipi->mipi_cal_fixed);
 	if (mipi->mipi_cal_clk)
 		clk_put(mipi->mipi_cal_clk);
 
