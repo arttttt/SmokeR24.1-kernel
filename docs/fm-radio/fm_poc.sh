@@ -22,10 +22,15 @@
 #
 # IMPORTANT:
 #   - Requires root (su)
-#   - Requires 'hcitool' (from BlueZ, usually in /system/bin/ or /vendor/bin/)
+#   - Requires 'hci_fm' binary (see hci_fm.c, compile and push to device)
 #   - Bluetooth must be ON before running this script
 #   - Plug in HEADPHONES — they act as FM antenna!
 #   - If no audio: check 'tinymix' or 'amixer' for "FM Switch" control
+#
+# Build hci_fm:
+#   arm-linux-gnueabihf-gcc -static -o hci_fm hci_fm.c
+#   adb push hci_fm /data/local/tmp/
+#   adb shell chmod +x /data/local/tmp/hci_fm
 #
 # Protocol: BCM FM commands are HCI VSC with OGF=0x3F, OCF=0x0015.
 #   Parameters: <register_addr> <0x00=write|0x01=read> [data_lo] [data_hi]
@@ -34,14 +39,9 @@
 # Source: drivers/bluetooth/broadcom/v4l2_fm_driver/ in SmokeR24.1-kernel
 #
 
-set -e
-
 # ============================================================================
 #  Constants
 # ============================================================================
-
-OGF="0x3F"
-OCF="0x0015"
 
 # FM registers
 REG_RDS_SYS=0x00        # FM ON/OFF + RDS enable
@@ -60,45 +60,44 @@ REG_PCM_ROUTE=0x4D      # FM-over-BT-SCO routing
 REG_SNR=0xDF            # SNR readback
 REG_VOLUME=0xF8         # Volume (0-255)
 REG_BLEND_MUTE=0xF9     # Blend/soft mute
-REG_SEARCH_BOUNDARY=0xFB
 REG_SEARCH_METHOD=0xFC
 REG_SCH_STEP=0xFD       # Step: 0=50kHz, 1=100kHz, 2=200kHz
 REG_PRESET_MAX=0xFE
 
 # FM ON/OFF values for REG_RDS_SYS
-FM_OFF=0x00
-FM_ON=0x01
-FM_RDS_ON=0x02
-FM_ON_RDS=0x03          # FM + RDS both on
+FM_OFF=0
+FM_ON=1
+FM_ON_RDS=3             # FM + RDS both on
 
-# Audio control bits (REG_AUD_CTL0)
-AUD_RF_MUTE=0x0001
-AUD_MANUAL_MUTE=0x0002
-AUD_DAC_ON=0x0010
-AUD_I2S_ON=0x0020
-AUD_DEEMPH_75US=0x0040  # 0=50us(EUR), 1=75us(NA)
+# Audio control values (REG_AUD_CTL0)
+AUD_MANUAL_MUTE=2       # 0x0002
+AUD_I2S_ON=32           # 0x0020
+AUD_I2S_UNMUTED=32      # I2S on, unmuted
+AUD_I2S_MUTED=34        # I2S on + manual mute
 
 # Stereo mode (REG_FM_CTRL)
-STEREO_AUTO=0x02
+STEREO_AUTO=2           # 0x02
 
 # Tune mode (REG_SCH_TUNE)
-TUNE_PRESET=0x01
-TUNE_SEEK=0x02
+TUNE_PRESET=1
+TUNE_SEEK=2
 
-# Seek direction
-SCAN_UP=0x80
-SCAN_DOWN=0x00
+# Seek direction (upper nibble of SCH_CTL0)
+SCAN_UP=128             # 0x80
+SCAN_DOWN=0             # 0x00
 
 # Defaults
 DEFAULT_FREQ=1000       # 100.0 MHz
 DEFAULT_VOLUME=180
-DEFAULT_RSSI_THRESHOLD=0x55  # 85 dBm
-FM_ENABLE_DELAY_MS=300
+DEFAULT_RSSI_THRESHOLD=85  # 0x55
 
-# Band limits (Europe/China/Russia compatible, widest range)
+# Band limits
 BAND_LOW=760            # 76.0 MHz
 BAND_HIGH=1080          # 108.0 MHz
 SCAN_STEP=1             # 0.1 MHz per step
+
+# FM enable delay
+FM_ENABLE_DELAY=0.3     # seconds
 
 # ============================================================================
 #  Helper functions
@@ -134,16 +133,24 @@ fmt_freq() {
     echo "${mhz}.${dec}"
 }
 
-# Convert integer to hex byte
-hex8() {
-    printf "0x%02X" $(( $1 & 0xFF ))
-}
+# ============================================================================
+#  hci_fm tool discovery
+# ============================================================================
 
-# Find hcitool
-find_hcitool() {
-    for p in /system/bin/hcitool /vendor/bin/hcitool /system/xbin/hcitool hcitool; do
-        if command -v "$p" >/dev/null 2>&1; then
-            echo "$p"
+HCI_FM=""
+
+find_hci_fm() {
+    local dir
+    dir=$(dirname "$0")
+    for p in \
+        "${dir}/hci_fm" \
+        /data/local/tmp/hci_fm \
+        /system/bin/hci_fm \
+        /vendor/bin/hci_fm \
+        /system/xbin/hci_fm \
+        ; do
+        if [ -x "$p" ]; then
+            HCI_FM="$p"
             return 0
         fi
     done
@@ -151,25 +158,26 @@ find_hcitool() {
 }
 
 # Find mixer tool
+MIXER_CMD=""
+MIXER_TYPE=""
+
 find_mixer() {
     for p in /system/bin/tinymix /vendor/bin/tinymix tinymix; do
         if command -v "$p" >/dev/null 2>&1; then
-            echo "$p tinymix"
+            MIXER_CMD="$p"
+            MIXER_TYPE="tinymix"
             return 0
         fi
     done
     for p in /system/bin/amixer /vendor/bin/amixer amixer; do
         if command -v "$p" >/dev/null 2>&1; then
-            echo "$p amixer"
+            MIXER_CMD="$p"
+            MIXER_TYPE="amixer"
             return 0
         fi
     done
     return 1
 }
-
-HCITOOL=""
-MIXER_CMD=""
-MIXER_TYPE=""
 
 check_prereqs() {
     # Root check
@@ -177,25 +185,17 @@ check_prereqs() {
         die "Must run as root. Use 'su -c ./fm_poc.sh' or run from root shell"
     fi
 
-    # hcitool
-    HCITOOL=$(find_hcitool) || die "hcitool not found. Install BlueZ tools or push hcitool binary to /system/bin/"
+    # hci_fm binary
+    find_hci_fm || die "hci_fm not found. Build it:
+  arm-linux-gnueabihf-gcc -static -o hci_fm hci_fm.c
+  adb push hci_fm /data/local/tmp/
+  adb shell chmod +x /data/local/tmp/hci_fm"
 
-    # mixer
-    local mixer_info
-    mixer_info=$(find_mixer) || log "WARNING: No mixer tool found. Audio routing may need manual setup."
-    if [ -n "$mixer_info" ]; then
-        MIXER_CMD=$(echo "$mixer_info" | awk '{print $1}')
-        MIXER_TYPE=$(echo "$mixer_info" | awk '{print $2}')
-    fi
+    # mixer (optional)
+    find_mixer || log "WARNING: No mixer tool found. Audio routing may need manual setup."
 
-    # BT check
-    if ! $HCITOOL dev 2>/dev/null | grep -q "hci0"; then
-        die "No HCI device found. Is Bluetooth turned ON?"
-    fi
-
-    log "hcitool: $HCITOOL"
-    log "mixer: ${MIXER_CMD:-none} (${MIXER_TYPE:-none})"
-    log "HCI device: hci0 OK"
+    log "hci_fm: $HCI_FM"
+    log "mixer:  ${MIXER_CMD:-none} (${MIXER_TYPE:-none})"
 }
 
 # ============================================================================
@@ -203,91 +203,77 @@ check_prereqs() {
 # ============================================================================
 
 # Write 16-bit value to FM register
-# Usage: fm_write <reg_addr_hex> <value_16bit_decimal>
 fm_write() {
     local reg=$1
     local val=$2
-    local lo=$(hex8 $val)
-    local hi=$(hex8 $(( val >> 8 )))
     local result
 
-    result=$($HCITOOL cmd $OGF $OCF $reg 0x00 $lo $hi 2>&1)
-    if echo "$result" | grep -q "Input/output error\|Connection timed out\|Can't send"; then
-        err "Command failed for reg $reg: $result"
-        return 1
-    fi
-    return 0
+    result=$($HCI_FM write $reg $val 2>&1)
+    case "$result" in
+        OK*) return 0 ;;
+        *)   err "write reg=$reg val=$val: $result"; return 1 ;;
+    esac
 }
 
 # Write 8-bit value to FM register
 fm_write8() {
     local reg=$1
     local val=$2
-    local lo=$(hex8 $val)
-
-    $HCITOOL cmd $OGF $OCF $reg 0x00 $lo 0x00 >/dev/null 2>&1
-}
-
-# Read FM register (returns hex bytes on stdout)
-# Usage: fm_read <reg_addr_hex> <read_len_1_or_2>
-fm_read() {
-    local reg=$1
-    local len=${2:-2}
     local result
 
-    result=$($HCITOOL cmd $OGF $OCF $reg 0x01 $(hex8 $len) 2>&1)
-    echo "$result"
+    result=$($HCI_FM write8 $reg $val 2>&1)
+    case "$result" in
+        OK*) return 0 ;;
+        *)   err "write8 reg=$reg val=$val: $result"; return 1 ;;
+    esac
 }
 
-# Read 16-bit register value, return as decimal
+# Read FM register, return decimal value (16-bit)
 fm_read16() {
     local reg=$1
-    local raw
-    raw=$(fm_read $reg 2)
+    local result lo hi
 
-    # Parse response: look for the data bytes after status+opcode+rdwr
-    # HCI Event: 0x0e plen N
-    #   XX 15 FC 00 <reg> <rdwr> <lo> <hi>
-    # The last two hex bytes before the end are our data
-    local bytes
-    bytes=$(echo "$raw" | grep ">" | tail -1 | sed 's/.*> //' | tr -s ' ')
-
-    if [ -z "$bytes" ]; then
-        echo "0"
-        return 1
-    fi
-
-    # Extract data bytes (positions depend on response format)
-    # Try to get the last 2 bytes from the response
-    local lo hi
-    lo=$(echo "$bytes" | awk '{print $(NF-1)}')
-    hi=$(echo "$bytes" | awk '{print $NF}')
-
-    if [ -z "$lo" ] || [ -z "$hi" ]; then
-        echo "0"
-        return 1
-    fi
-
-    echo $(( 0x$hi * 256 + 0x$lo ))
+    result=$($HCI_FM read $reg 2 2>&1)
+    case "$result" in
+        OK*)
+            # Parse "OK XX YY" → value = 0xYY * 256 + 0xXX
+            lo=$(echo "$result" | awk '{print $2}')
+            hi=$(echo "$result" | awk '{print $3}')
+            if [ -n "$lo" ] && [ -n "$hi" ]; then
+                echo $(( 0x$hi * 256 + 0x$lo ))
+            else
+                echo "0"
+            fi
+            return 0
+            ;;
+        *)
+            echo "0"
+            return 1
+            ;;
+    esac
 }
 
-# Read 8-bit register value
+# Read FM register, return decimal value (8-bit)
 fm_read8() {
     local reg=$1
-    local raw
-    raw=$(fm_read $reg 1)
+    local result val
 
-    local bytes
-    bytes=$(echo "$raw" | grep ">" | tail -1 | sed 's/.*> //')
-    local val
-    val=$(echo "$bytes" | awk '{print $NF}')
-
-    if [ -z "$val" ]; then
-        echo "0"
-        return 1
-    fi
-
-    echo $(( 0x$val ))
+    result=$($HCI_FM read $reg 1 2>&1)
+    case "$result" in
+        OK*)
+            val=$(echo "$result" | awk '{print $2}')
+            if [ -n "$val" ]; then
+                echo $(( 0x$val ))
+            else
+                echo "0"
+            fi
+            return 0
+            ;;
+        *)
+            echo "0"
+            return 1
+            ;;
+    esac
 }
 
 # ============================================================================
@@ -298,22 +284,19 @@ fm_audio_on() {
     if [ -z "$MIXER_CMD" ]; then
         log "No mixer tool — please enable FM audio manually:"
         log "  tinymix 'FM Switch' 1"
-        log "  OR: amixer cset name='FM Switch' on"
         return
     fi
 
     log "Enabling FM audio path (RT5671 AIF4)..."
     if [ "$MIXER_TYPE" = "tinymix" ]; then
-        $MIXER_CMD "FM Switch" 1 2>/dev/null || log "WARNING: 'FM Switch' control not found in tinymix"
+        $MIXER_CMD "FM Switch" 1 2>/dev/null || log "WARNING: 'FM Switch' control not found"
     else
-        $MIXER_CMD cset name='FM Switch' on 2>/dev/null || log "WARNING: 'FM Switch' control not found in amixer"
+        $MIXER_CMD cset name='FM Switch' on 2>/dev/null || log "WARNING: 'FM Switch' control not found"
     fi
 }
 
 fm_audio_off() {
-    if [ -z "$MIXER_CMD" ]; then
-        return
-    fi
+    [ -z "$MIXER_CMD" ] && return
 
     log "Disabling FM audio path..."
     if [ "$MIXER_TYPE" = "tinymix" ]; then
@@ -338,36 +321,36 @@ fm_power_on() {
     log "Sending FM ON..."
     fm_write $REG_RDS_SYS $FM_ON
     if [ $? -ne 0 ]; then
-        die "FM ON command failed. Is BT firmware running?"
+        die "FM ON command failed. Is BT running? Is FM chip responding?"
     fi
 
     # Step 2: Wait for FM to settle
-    log "Waiting ${FM_ENABLE_DELAY_MS}ms for FM to initialize..."
-    sleep 0.3
+    log "Waiting for FM init (300ms)..."
+    sleep $FM_ENABLE_DELAY
 
-    # Step 3: Set stereo auto mode, Europe/West band
-    log "Setting stereo auto mode..."
+    # Step 3: Stereo auto mode
+    log "Setting stereo auto..."
     fm_write $REG_FM_CTRL $STEREO_AUTO
 
-    # Step 4: Set audio path — I2S ON, unmuted, 50us de-emphasis (Europe)
-    log "Configuring audio: I2S on, unmuted, 50us de-emphasis..."
-    fm_write $REG_AUD_CTL0 $AUD_I2S_ON
+    # Step 4: Audio path — I2S ON, unmuted, 50us de-emphasis
+    log "Audio: I2S on, unmuted, 50us de-emphasis..."
+    fm_write $REG_AUD_CTL0 $AUD_I2S_UNMUTED
 
-    # Step 5: Set scan step to 100kHz
+    # Step 5: Scan step 100kHz
     fm_write8 $REG_SCH_STEP 1
 
-    # Step 6: Set volume
-    log "Setting volume to $DEFAULT_VOLUME/255..."
+    # Step 6: Volume
+    log "Volume: $DEFAULT_VOLUME/255"
     fm_write $REG_VOLUME $DEFAULT_VOLUME
 
-    # Step 7: Tune to frequency
-    log "Tuning to $(fmt_freq $freq) MHz (reg=$reg_val = $(hex8 $reg_val) $(hex8 $(( reg_val >> 8 ))))..."
+    # Step 7: Set frequency
+    log "Tuning to $(fmt_freq $freq) MHz (reg=$reg_val)..."
     fm_write $REG_FM_FREQ $reg_val
 
     # Step 8: Trigger tune (preset mode)
     fm_write8 $REG_SCH_TUNE $TUNE_PRESET
 
-    # Step 9: Wait for tune to complete
+    # Step 9: Wait for tune
     sleep 0.5
 
     # Step 10: Enable ALSA audio path
@@ -376,28 +359,21 @@ fm_power_on() {
     log ""
     log "=== FM should be playing ==="
     log "If no audio:"
-    log "  1. Are headphones plugged in? (they are the antenna!)"
+    log "  1. Are headphones plugged in? (FM antenna!)"
     log "  2. Try: tinymix 'FM Switch' 1"
-    log "  3. Try a different frequency: ./fm_poc.sh tune <freq>"
-    log "  4. Check dmesg for errors"
+    log "  3. Try different frequency: ./fm_poc.sh tune <freq>"
+    log "  4. Run: ./fm_poc.sh diag"
     log ""
 
-    # Show status
     fm_status
 }
 
 fm_power_off() {
     log "=== FM Power OFF ==="
-
     fm_audio_off
-
-    # Mute first
     fm_write $REG_AUD_CTL0 $AUD_MANUAL_MUTE
     sleep 0.1
-
-    # FM OFF
     fm_write $REG_RDS_SYS $FM_OFF
-
     log "FM is OFF"
 }
 
@@ -407,47 +383,34 @@ fm_tune() {
     if [ -z "$freq" ]; then
         die "Usage: fm_poc.sh tune <freq_MHz*10>  (e.g., 1000 for 100.0 MHz)"
     fi
-
     if [ "$freq" -lt "$BAND_LOW" ] || [ "$freq" -gt "$BAND_HIGH" ]; then
         die "Frequency $(fmt_freq $freq) MHz out of range ($(fmt_freq $BAND_LOW)-$(fmt_freq $BAND_HIGH) MHz)"
     fi
 
     local reg_val=$(freq_to_reg $freq)
-
     log "Tuning to $(fmt_freq $freq) MHz..."
     fm_write $REG_FM_FREQ $reg_val
     fm_write8 $REG_SCH_TUNE $TUNE_PRESET
     sleep 0.5
-
     fm_status
 }
 
 fm_status() {
     log "--- Status ---"
 
-    # Read RSSI
-    local rssi_raw
-    rssi_raw=$(fm_read8 $REG_RSSI 2>/dev/null) || rssi_raw=0
-    # Convert from 2's complement: RSSI = (0x80 - raw) & ~0x80
+    local rssi_raw=$(fm_read8 $REG_RSSI)
     local rssi=$(( (128 - rssi_raw) & 127 ))
 
-    # Read frequency register
-    local freq_reg
-    freq_reg=$(fm_read16 $REG_FM_FREQ 2>/dev/null) || freq_reg=0
+    local freq_reg=$(fm_read16 $REG_FM_FREQ)
     local freq_mhz10=0
-    if [ "$freq_reg" -gt 0 ]; then
-        freq_mhz10=$(reg_to_freq $freq_reg)
-    fi
+    [ "$freq_reg" -gt 0 ] && freq_mhz10=$(reg_to_freq $freq_reg)
 
-    # Read SNR
-    local snr
-    snr=$(fm_read8 $REG_SNR 2>/dev/null) || snr=0
+    local snr=$(fm_read8 $REG_SNR)
 
     log "Frequency: $(fmt_freq $freq_mhz10) MHz (reg=$freq_reg)"
-    log "RSSI:      $rssi dBuV (raw=0x$(printf '%02X' $rssi_raw))"
+    log "RSSI:      $rssi dBuV (raw=$rssi_raw)"
     log "SNR:       $snr dB"
 
-    # Signal quality assessment
     if [ "$rssi" -gt 40 ]; then
         log "Signal:    STRONG"
     elif [ "$rssi" -gt 20 ]; then
@@ -455,92 +418,71 @@ fm_status() {
     elif [ "$rssi" -gt 5 ]; then
         log "Signal:    WEAK"
     else
-        log "Signal:    NO SIGNAL (try different frequency or check antenna)"
+        log "Signal:    NO SIGNAL"
     fi
 }
 
 fm_set_volume() {
     local vol=${1:-$DEFAULT_VOLUME}
-
-    if [ "$vol" -lt 0 ] || [ "$vol" -gt 255 ]; then
-        die "Volume must be 0-255"
-    fi
-
-    log "Setting volume to $vol/255"
+    [ "$vol" -lt 0 ] || [ "$vol" -gt 255 ] && die "Volume must be 0-255"
+    log "Volume: $vol/255"
     fm_write $REG_VOLUME $vol
 }
 
 fm_mute() {
-    log "Muting FM..."
-    fm_write $REG_AUD_CTL0 $(( AUD_I2S_ON | AUD_MANUAL_MUTE ))
+    log "Muting..."
+    fm_write $REG_AUD_CTL0 $AUD_I2S_MUTED
 }
 
 fm_unmute() {
-    log "Unmuting FM..."
-    fm_write $REG_AUD_CTL0 $AUD_I2S_ON
+    log "Unmuting..."
+    fm_write $REG_AUD_CTL0 $AUD_I2S_UNMUTED
 }
 
 fm_seek() {
-    local direction=$1  # "up" or "down"
+    local direction=$1
     local dir_bit=$SCAN_UP
     local dir_name="UP"
-
-    if [ "$direction" = "down" ]; then
-        dir_bit=$SCAN_DOWN
-        dir_name="DOWN"
-    fi
+    [ "$direction" = "down" ] && dir_bit=$SCAN_DOWN && dir_name="DOWN"
 
     log "Seeking $dir_name..."
 
-    # Set search method = normal scan
     fm_write8 $REG_SEARCH_METHOD 0
-    # Set preset max = 0 (no limit)
     fm_write8 $REG_PRESET_MAX 0
-    # Set search control: RSSI threshold + direction
+
     local sch_ctl=$(( DEFAULT_RSSI_THRESHOLD | dir_bit ))
     fm_write8 $REG_SCH_CTL0 $sch_ctl
-    # Trigger seek
     fm_write8 $REG_SCH_TUNE $TUNE_SEEK
 
-    # Wait for seek (no interrupt handler, just poll)
-    log "Waiting for seek to complete..."
-    local timeout=20
+    log "Waiting for seek..."
     local i=0
-    while [ $i -lt $timeout ]; do
+    while [ $i -lt 20 ]; do
         sleep 1
         i=$(( i + 1 ))
 
-        # Read interrupt flags
-        local flags
-        flags=$(fm_read16 $REG_FM_RDS_FLAG 2>/dev/null) || continue
-
-        # Check tune complete bit (bit 0)
+        local flags=$(fm_read16 $REG_FM_RDS_FLAG)
         if [ $(( flags & 1 )) -ne 0 ]; then
             log "Seek complete!"
             fm_status
             return 0
         fi
-        # Check tune fail bit (bit 1)
         if [ $(( flags & 2 )) -ne 0 ]; then
-            log "Seek reached band limit, no station found"
+            log "Seek reached band limit"
             fm_status
             return 1
         fi
-
         printf "."
     done
-
     echo ""
-    log "Seek timed out after ${timeout}s"
+    log "Seek timed out"
     fm_status
     return 1
 }
 
 fm_scan() {
     log "=== Full Band Scan ==="
-    log "Scanning $(fmt_freq $BAND_LOW) - $(fmt_freq $BAND_HIGH) MHz, step $(fmt_freq $SCAN_STEP) MHz"
-    log "This will take about 30 seconds..."
-    echo ""
+    log "Scanning $(fmt_freq $BAND_LOW) - $(fmt_freq $BAND_HIGH) MHz"
+    log ""
 
     local freq=$BAND_LOW
     local found=0
@@ -548,31 +490,17 @@ fm_scan() {
 
     while [ $freq -le $BAND_HIGH ]; do
         local reg_val=$(freq_to_reg $freq)
-
-        # Tune to frequency
         fm_write $REG_FM_FREQ $reg_val >/dev/null 2>&1
         fm_write8 $REG_SCH_TUNE $TUNE_PRESET >/dev/null 2>&1
-
-        # Brief settle time
         sleep 0.05
 
-        # Read RSSI
-        local rssi_raw
-        rssi_raw=$(fm_read8 $REG_RSSI 2>/dev/null) || rssi_raw=128
+        local rssi_raw=$(fm_read8 $REG_RSSI 2>/dev/null)
         local rssi=$(( (128 - rssi_raw) & 127 ))
 
-        # Show progress
         printf "\r  $(fmt_freq $freq) MHz  RSSI: %3d dBuV  " "$rssi"
 
-        # Station detected if RSSI above threshold
         if [ "$rssi" -gt 25 ]; then
-            local bar=""
-            local b=0
-            while [ $b -lt $(( rssi / 5 )) ] && [ $b -lt 20 ]; do
-                bar="${bar}#"
-                b=$(( b + 1 ))
-            done
-            printf " <<< STATION  %s" "$bar"
+            printf " <<< STATION"
             found=$(( found + 1 ))
             stations="${stations}  $(fmt_freq $freq) MHz  (RSSI: $rssi)\n"
         fi
@@ -582,57 +510,43 @@ fm_scan() {
     done
 
     echo ""
-    log "=== Scan Complete ==="
-    log "Found $found station(s):"
-    if [ -n "$stations" ]; then
-        printf "$stations"
-    else
-        log "  No stations found. Check:"
-        log "  - Are headphones plugged in? (antenna)"
-        log "  - Is the FM chip actually responding? (check dmesg)"
-    fi
+    log "=== Found $found station(s) ==="
+    [ -n "$stations" ] && printf "$stations"
 }
-
-# ============================================================================
-#  Diagnostics
-# ============================================================================
 
 fm_diag() {
     log "=== FM Diagnostics ==="
 
-    # Check HCI
     echo ""
-    log "HCI device info:"
-    $HCITOOL dev 2>&1 | sed 's/^/  /'
+    log "hci_fm binary: $HCI_FM"
+    echo ""
 
-    # Try a basic FM read (receiver ID register)
-    echo ""
-    log "Reading FM receiver ID (reg 0x28)..."
-    local raw
-    raw=$(fm_read 0x28 2 2>&1)
-    echo "$raw" | sed 's/^/  /'
+    log "Testing FM read (receiver ID, reg 0x28)..."
+    local result
+    result=$($HCI_FM read 0x28 2 2>&1)
+    log "  Result: $result"
 
-    # Check if FM responds at all
     echo ""
-    log "Sending FM ON test..."
-    raw=$(fm_write $REG_RDS_SYS $FM_ON 2>&1)
-    if [ $? -eq 0 ]; then
-        log "FM ON command accepted by HCI!"
+    log "Testing FM ON..."
+    result=$($HCI_FM write 0x00 1 2>&1)
+    log "  FM ON: $result"
+
+    if echo "$result" | grep -q "^OK"; then
         sleep 0.3
-        # Read back
-        log "Reading RDS_SYS register..."
-        raw=$(fm_read $REG_RDS_SYS 1 2>&1)
-        echo "$raw" | sed 's/^/  /'
-        # Turn off
-        fm_write $REG_RDS_SYS $FM_OFF >/dev/null 2>&1
+        log "  FM chip responded! Reading back..."
+        result=$($HCI_FM read 0x00 1 2>&1)
+        log "  RDS_SYS readback: $result"
+        $HCI_FM write 0x00 0 >/dev/null 2>&1
+        log "  FM OFF sent"
     else
-        log "FM ON command FAILED"
-        echo "$raw" | sed 's/^/  /'
+        log "  FM did NOT respond. Possible causes:"
+        log "    - BT is not running"
+        log "    - FM chip does not support this protocol"
+        log "    - Bluedroid is blocking vendor commands"
     fi
 
-    # Check audio mixer
     echo ""
-    log "Audio mixer controls with 'FM':"
+    log "Audio mixer 'FM' controls:"
     if [ -n "$MIXER_CMD" ]; then
         if [ "$MIXER_TYPE" = "tinymix" ]; then
             $MIXER_CMD 2>&1 | grep -i "fm" | sed 's/^/  /' || log "  No FM controls found"
@@ -643,19 +557,13 @@ fm_diag() {
         log "  No mixer tool available"
     fi
 
-    # Check kernel modules
     echo ""
-    log "Kernel FM/BT modules:"
-    cat /proc/modules 2>/dev/null | grep -iE "fm|brcm|ldisc|radio" | sed 's/^/  /' || log "  No matching modules loaded"
-
-    # Check /dev
-    echo ""
-    log "Radio/BT devices:"
-    ls -la /dev/radio* /dev/brcm_bt* /dev/hci* 2>/dev/null | sed 's/^/  /' || log "  No radio/BT devices found"
+    log "Kernel FM-related:"
+    dmesg 2>/dev/null | grep -iE "fm|radio|v4l2fm|fmdrv|brcm_ldisc" | tail -20 | sed 's/^/  /' || log "  Nothing in dmesg"
 
     echo ""
-    log "dmesg (FM/radio related, last 30 lines):"
-    dmesg 2>/dev/null | grep -iE "fm|radio|v4l2fm|fmdrv|brcm_ldisc|ldisc" | tail -30 | sed 's/^/  /' || log "  No FM messages in dmesg"
+    log "/dev devices:"
+    ls -la /dev/radio* /dev/brcm_bt* 2>/dev/null | sed 's/^/  /' || log "  No radio/BT devices"
 }
 
 # ============================================================================
@@ -679,78 +587,39 @@ Commands:
   seek_up         Seek next station upward
   seek_down       Seek next station downward
   scan            Scan full band, list all stations
-  diag            Run diagnostics (check HCI, mixer, kernel)
+  diag            Run diagnostics
 
 Frequency format: MHz * 10 (integer)
   1000 = 100.0 MHz     876 = 87.6 MHz
   1062 = 106.2 MHz     915 = 91.5 MHz
 
-Examples:
-  ./fm_poc.sh on                # FM on at 100.0 MHz
-  ./fm_poc.sh on 915            # FM on at 91.5 MHz
-  ./fm_poc.sh scan              # Find all stations
-  ./fm_poc.sh seek_up           # Find next station
-  ./fm_poc.sh vol 200           # Louder
-  ./fm_poc.sh off               # Power off
+Requirements:
+  - Root access
+  - hci_fm binary (see hci_fm.c — build and push to device)
+  - Bluetooth ON
+  - Headphones plugged in (FM antenna)
 
-NOTE: Headphones MUST be plugged in — they serve as FM antenna!
+Build hci_fm:
+  arm-linux-gnueabihf-gcc -static -o hci_fm hci_fm.c
+  adb push hci_fm /data/local/tmp/
+  adb shell chmod +x /data/local/tmp/hci_fm
 EOF
 }
 
 CMD="${1:-}"
 
 case "$CMD" in
-    on)
-        check_prereqs
-        fm_power_on "${2:-$DEFAULT_FREQ}"
-        ;;
-    off)
-        check_prereqs
-        fm_power_off
-        ;;
-    tune)
-        check_prereqs
-        fm_tune "$2"
-        ;;
-    status)
-        check_prereqs
-        fm_status
-        ;;
-    vol|volume)
-        check_prereqs
-        fm_set_volume "$2"
-        ;;
-    mute)
-        check_prereqs
-        fm_mute
-        ;;
-    unmute)
-        check_prereqs
-        fm_unmute
-        ;;
-    seek_up)
-        check_prereqs
-        fm_seek up
-        ;;
-    seek_down)
-        check_prereqs
-        fm_seek down
-        ;;
-    scan)
-        check_prereqs
-        fm_power_on $BAND_LOW
-        sleep 0.5
-        fm_scan
-        ;;
-    diag)
-        check_prereqs
-        fm_diag
-        ;;
-    help|-h|--help)
-        usage
-        ;;
-    *)
-        usage
-        exit 1
-        ;;
+    on)         check_prereqs; fm_power_on "${2:-$DEFAULT_FREQ}" ;;
+    off)        check_prereqs; fm_power_off ;;
+    tune)       check_prereqs; fm_tune "$2" ;;
+    status)     check_prereqs; fm_status ;;
+    vol|volume) check_prereqs; fm_set_volume "$2" ;;
+    mute)       check_prereqs; fm_mute ;;
+    unmute)     check_prereqs; fm_unmute ;;
+    seek_up)    check_prereqs; fm_seek up ;;
+    seek_down)  check_prereqs; fm_seek down ;;
+    scan)       check_prereqs; fm_power_on $BAND_LOW; sleep 0.5; fm_scan ;;
+    diag)       check_prereqs; fm_diag ;;
+    help|-h|--help) usage ;;
+    *)          usage; exit 1 ;;
 esac
