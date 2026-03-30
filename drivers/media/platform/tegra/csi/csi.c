@@ -362,25 +362,23 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 	{
 		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND,
 				   port_num >> 1);
+		u32 newval;
 		if (port->lanes == 4) {
 			if ((port->num & 0x1) == PORT_A)
-				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
-					  (val & 0xFFFF0000) | 0x0101,
-					  port_num >> 1);
+				newval = (val & 0xFFFF0000) | 0x0101;
 			else
-				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
-					  (val & 0x0000FFFF) | 0x21010000,
-					  port_num >> 1);
+				newval = (val & 0x0000FFFF) | 0x21010000;
 		} else {
 			if ((port->num & 0x1) == PORT_A)
-				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
-					  (val & 0xFFFF0000) | 0x0201,
-					  port_num >> 1);
+				newval = (val & 0xFFFF0000) | 0x0201;
 			else
-				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
-					  (val & 0x0000FFFF) | 0x22010000,
-					  port_num >> 1);
+				newval = (val & 0x0000FFFF) | 0x22010000;
 		}
+		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, newval,
+			  port_num >> 1);
+		dev_info(csi->dev,
+			 "T124 CSI%d: port=%d lanes=%d CIL_CMD=0x%08x->0x%08x\n",
+			 port_num, port->num, port->lanes, val, newval);
 	}
 #else
 	/* T210+ CIL PHY registers setup */
@@ -483,23 +481,20 @@ void tegra_csi_status(struct tegra_csi_device *csi,
 	struct tegra_csi_port *port = &csi->ports[port_num];
 	u32 val = pp_read(port, TEGRA_CSI_PIXEL_PARSER_STATUS);
 
-	dev_dbg(csi->dev, "TEGRA_CSI_PIXEL_PARSER_STATUS 0x%08x\n",
-		val);
+	dev_err(csi->dev, "CSI%d PP_STATUS 0x%08x\n", port_num, val);
 
 	val = cil_read(port, TEGRA_CSI_CIL_STATUS);
-	dev_dbg(csi->dev, "TEGRA_CSI_CIL_STATUS 0x%08x\n", val);
+	dev_err(csi->dev, "CSI%d CIL_STATUS 0x%08x\n", port_num, val);
 
 	val = cil_read(port, TEGRA_CSI_CILX_STATUS);
-	dev_dbg(csi->dev, "TEGRA_CSI_CILX_STATUS 0x%08x\n", val);
+	dev_err(csi->dev, "CSI%d CILX_STATUS 0x%08x\n", port_num, val);
 
-#if DEBUG
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_0);
-	dev_dbg(csi->dev, "TEGRA_CSI_DEBUG_COUNTER_0 0x%08x\n", val);
+	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_0 0x%08x\n", port_num, val);
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_1);
-	dev_dbg(csi->dev, "TEGRA_CSI_DEBUG_COUNTER_1 0x%08x\n", val);
+	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_1 0x%08x\n", port_num, val);
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_2);
-	dev_dbg(csi->dev, "TEGRA_CSI_DEBUG_COUNTER_2 0x%08x\n", val);
-#endif
+	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_2 0x%08x\n", port_num, val);
 }
 EXPORT_SYMBOL(tegra_csi_status);
 
