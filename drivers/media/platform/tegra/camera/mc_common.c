@@ -1,3 +1,4 @@
+#define DEBUG
 /*
  * Tegra Video Input device common APIs
  *
@@ -66,6 +67,7 @@ int tegra_vi_power_on(struct tegra_mc_vi *vi)
 	}
 
 	vi_write(vi, TEGRA_VI_CFG_CG_CTRL, 1);
+	dev_info(vi->dev, "vi_power_on: CG_CTRL=1, unpowergating VE\n");
 
 	/* unpowergate VE */
 	ret = tegra_unpowergate_partition(TEGRA_POWERGATE_VENC);

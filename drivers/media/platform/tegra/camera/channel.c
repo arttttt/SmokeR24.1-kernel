@@ -1,3 +1,4 @@
+#define DEBUG
 /*
  * NVIDIA Tegra Video Input Device
  *

@@ -1,3 +1,4 @@
+#define DEBUG
 /*
  * camera_common.c - utilities for tegra camera driver
  *
