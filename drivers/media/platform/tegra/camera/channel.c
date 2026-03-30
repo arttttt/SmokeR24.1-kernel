@@ -924,6 +924,16 @@ static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
 	return tegra_mipi_calibration(lanes);
 
 }
+#elif defined(CONFIG_ARCH_TEGRA_12x_SOC)
+static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
+{
+	/*
+	 * T124 legacy (vi2.c / NVC) does not perform CSI MIPI calibration.
+	 * Only bias pad init is needed, which is done by tegra_mipi_bias_pad_enable()
+	 * called before this function in tegra_channel_enable_stream().
+	 */
+	return 0;
+}
 #else
 static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
 {
