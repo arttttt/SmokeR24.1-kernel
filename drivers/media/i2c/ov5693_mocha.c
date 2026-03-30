@@ -322,7 +322,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	struct ov5693 *priv = (struct ov5693 *)s_data->priv;
 	struct camera_common_power_rail *pw = &priv->power;
 
-	dev_dbg(&priv->i2c_client->dev, "%s: power on\n", __func__);
+	dev_info(&priv->i2c_client->dev, "%s: power on\n", __func__);
 
 	if (priv->pdata && priv->pdata->power_on) {
 		err = priv->pdata->power_on(pw);
@@ -601,7 +601,7 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	struct v4l2_control control;
 	int err;
 
-	dev_dbg(&client->dev, "%s++\n", __func__);
+	dev_info(&client->dev, "%s: enable=%d\n", __func__, enable);
 
 	if (!enable) {
 		ov5693_update_ctrl_range(priv, OV5693_MAX_FRAME_LENGTH);
