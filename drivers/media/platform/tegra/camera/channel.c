@@ -1039,6 +1039,22 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 	}
 
 	chan->capture_state = CAPTURE_IDLE;
+	/* T124 SLCG workaround: toggle PLL_D → CSI_OUT to init clock gating */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	{
+		struct clk *pll_d = clk_get(chan->vi->dev, "pll_d");
+		if (!IS_ERR(pll_d)) {
+			tegra_clk_cfg_ex(pll_d, TEGRA_CLK_PLLD_CSI_OUT_ENB, 1);
+			clk_prepare_enable(pll_d);
+			udelay(1);
+			clk_disable_unprepare(pll_d);
+			tegra_clk_cfg_ex(pll_d, TEGRA_CLK_MIPI_CSI_OUT_ENB, 1);
+			clk_put(pll_d);
+			dev_info(&chan->video.dev,
+				 "T124 SLCG: PLL_D CSI toggle done\n");
+		}
+	}
+#endif
 	for (i = 0; i < chan->valid_ports; i++) {
 		tegra_csi_start_streaming(chan->vi->csi, chan->port[i]);
 		/* ensure sync point state is clean */
