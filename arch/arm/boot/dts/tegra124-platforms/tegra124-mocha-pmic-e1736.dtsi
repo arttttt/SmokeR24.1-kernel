@@ -579,6 +579,7 @@
 						regulator-name = "avdd-cam";
 						regulator-min-microvolt = <2700000>;
 						regulator-max-microvolt = <2700000>;
+						regulator-always-on;
 
 						consumers {
 							c1 {
@@ -664,6 +665,7 @@
 						regulator-name = "vdd-cam-af";
 						regulator-min-microvolt = <1800000>;
 						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
 
 						consumers {
 							c1 {
@@ -713,6 +715,7 @@
 						regulator-name = "avdd-cam-af";
 						regulator-min-microvolt = <2700000>;
 						regulator-max-microvolt = <2700000>;
+						regulator-always-on;
 
 						consumers {
 							c1 {
