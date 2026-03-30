@@ -46,6 +46,11 @@ static const struct camera_common_colorfmt camera_common_color_fmts[] = {
 		V4L2_COLORSPACE_SRGB,
 		V4L2_PIX_FMT_SRGGB8,
 	},
+	{
+		V4L2_MBUS_FMT_SBGGR10_1X10,
+		V4L2_COLORSPACE_SRGB,
+		V4L2_PIX_FMT_SBGGR10,
+	},
 };
 
 static struct tegra_io_dpd camera_common_csi_io[] = {
