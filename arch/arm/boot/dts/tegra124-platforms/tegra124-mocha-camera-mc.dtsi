@@ -341,7 +341,7 @@
 	 * sensors are under root i2c@7000c500 (CAM I2C).
 	 */
 	tegra-camera-platform {
-		compatible = "nvidia,tegra-camera-platform";
+		compatible = "nvidia, tegra-camera-platform";
 
 		modules {
 			module0 {
