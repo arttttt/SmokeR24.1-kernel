@@ -329,6 +329,9 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 				enum tegra_csi_port_num port_num)
 {
 	struct tegra_csi_port *port = &csi->ports[port_num];
+	int port_val = ((port_num >> 1) << 1);
+	struct tegra_csi_port *port_a = &csi->ports[port_val];
+	struct tegra_csi_port *port_b = &csi->ports[port_val+1];
 
 	csi_write(csi, TEGRA_CSI_CLKEN_OVERRIDE, 0, port_num>>1);
 
@@ -339,7 +342,48 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 
 	cil_write(port, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
 
-	/* CIL PHY registers setup */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/*
+	 * T124/T132-specific CIL setup — ported from legacy vi2.c
+	 * (vi2_capture_setup_cil_t124 / vi2_capture_setup_cil_phy_t124).
+	 * Key differences from T210:
+	 * - PHY_CONTROL = 0x9 (not 0xA)
+	 * - PAD_CONFIG0 with BRICK_CLOCK_A_4X on port_a of the brick
+	 * - PHY_CIL_COMMAND uses different bit layout per port
+	 */
+	cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, BRICK_CLOCK_A_4X);
+	cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
+	cil_write(port_a, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+	cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+	cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
+	cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
+
+	/* T124 PHY CIL command — proper RMW preserving other port's bits */
+	{
+		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+				   port_num >> 1);
+		if (port->lanes == 4) {
+			if ((port->num & 0x1) == PORT_A)
+				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+					  (val & 0xFFFF0000) | 0x0101,
+					  port_num >> 1);
+			else
+				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+					  (val & 0x0000FFFF) | 0x21010000,
+					  port_num >> 1);
+		} else {
+			if ((port->num & 0x1) == PORT_A)
+				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+					  (val & 0xFFFF0000) | 0x0201,
+					  port_num >> 1);
+			else
+				csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+					  (val & 0x0000FFFF) | 0x22010000,
+					  port_num >> 1);
+		}
+	}
+#else
+	/* T210+ CIL PHY registers setup */
 	cil_write(port, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
 	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
 
@@ -352,10 +396,6 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 	 * camera.
 	 */
 	if (port->lanes == 4) {
-		int port_val = ((port_num >> 1) << 1);
-		struct tegra_csi_port *port_a = &csi->ports[port_val];
-		struct tegra_csi_port *port_b = &csi->ports[port_val+1];
-
 		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0,
 			  BRICK_CLOCK_A_4X);
 		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
@@ -366,15 +406,15 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 			CSI_A_PHY_CIL_ENABLE | CSI_B_PHY_CIL_ENABLE,
 			port_num>>1);
 	} else {
-		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND, port_num>>1);
-		int port_val = ((port_num >> 1) << 1);
-		struct tegra_csi_port *port_a = &csi->ports[port_val];
+		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+				   port_num >> 1);
 
 		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
 		val |= ((port->num & 0x1) == PORT_A) ? CSI_A_PHY_CIL_ENABLE :
 			CSI_B_PHY_CIL_ENABLE;
 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, val, port_num>>1);
 	}
+#endif
 
 	/* CSI pixel parser registers setup */
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_PP_COMMAND,
