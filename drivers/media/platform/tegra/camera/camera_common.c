@@ -636,8 +636,9 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
 		tegra_io_dpd_disable(&camera_common_csi_io[io_idx]);
-		dev_dbg(s_data->dev,
-			 "%s: csi %d\n", __func__, io_idx);
+		dev_info(s_data->dev,
+			 "dpd_disable: csi_port=%d io_idx=%d numlanes=%d\n",
+			 s_data->csi_port, io_idx, s_data->numlanes);
 	}
 }
 
@@ -648,10 +649,13 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 	/* 2 lanes per port, divide by two to get numports */
 	int numports = (s_data->numlanes + 1) >> 1;
 
-	/* disable CSI IOs DPD mode to turn on camera */
+	/* enable CSI IOs DPD mode */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
 		tegra_io_dpd_enable(&camera_common_csi_io[io_idx]);
+		dev_info(s_data->dev,
+			 "dpd_enable: csi_port=%d io_idx=%d numlanes=%d\n",
+			 s_data->csi_port, io_idx, s_data->numlanes);
 		dev_dbg(s_data->dev,
 			 "%s: csi %d\n", __func__, io_idx);
 	}

@@ -27,7 +27,7 @@
 #include "vi/vi.h"
 #include "csi/csi.h"
 
-#define DEBUG 0
+#define DEBUG 1
 
 static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
 		u32 val, u8 port)
@@ -235,6 +235,8 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 		for (i = 0; csi_port_is_valid(port_num[i]); i++) {
 			port = port_num[i];
 			cil_num = port >> 1;
+			dev_info(csi->dev, "channel_power ON: port=%d cil=%d\n",
+				 port, cil_num);
 			err = clock_start(csi,
 				csi->cil[cil_num], csi->clk_freq);
 			if (err)
@@ -245,6 +247,8 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 		for (i = 0; csi_port_is_valid(port_num[i]); i++) {
 			port = port_num[i];
 			cil_num = port >> 1;
+			dev_info(csi->dev, "channel_power OFF: port=%d cil=%d\n",
+				 port, cil_num);
 			camera_common_dpd_enable(&csi->s_data[port]);
 			clk_disable_unprepare(csi->cil[cil_num]);
 		}

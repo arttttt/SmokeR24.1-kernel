@@ -257,6 +257,10 @@ static int tegra_channel_capture_setup(struct tegra_channel *chan)
 		csi_write(chan, index, TEGRA_VI_CSI_IMAGE_SIZE_WC, word_count);
 		csi_write(chan, index, TEGRA_VI_CSI_IMAGE_SIZE,
 			  (height << IMAGE_SIZE_HEIGHT_OFFSET) | width);
+		dev_info(&chan->video.dev,
+			 "capture_setup[%d]: port=%d %ux%u fmt=0x%x dt=0x%x wc=%u bypass=%u\n",
+			 index, chan->port[index], width, height,
+			 format, data_type, word_count, bypass_pixel_transform);
 	}
 
 	return 0;
