@@ -598,11 +598,17 @@ static int ov5693_power_get(struct ov5693 *priv)
 				 __func__, pw->pwdn_gpio);
 	} else {
 		if (pw->pwdn_gpio)
-			gpio_request(pw->pwdn_gpio, "cam2_pwdn_gpio");
+			gpio_request_one(pw->pwdn_gpio,
+					 GPIOF_OUT_INIT_LOW,
+					 "cam2_pwdn_gpio");
 		if (pw->reset_gpio)
-			gpio_request(pw->reset_gpio, "cam2_reset_gpio");
+			gpio_request_one(pw->reset_gpio,
+					 GPIOF_OUT_INIT_LOW,
+					 "cam2_reset_gpio");
 		if (pw->af_gpio)
-			gpio_request(pw->af_gpio, "cam_af_pwdn_gpio");
+			gpio_request_one(pw->af_gpio,
+					 GPIOF_OUT_INIT_LOW,
+					 "cam_af_pwdn_gpio");
 	}
 
 	pw->state = SWITCH_OFF;
@@ -622,7 +628,8 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	struct v4l2_control control;
 	int err;
 
-	dev_info(&client->dev, "%s: enable=%d\n", __func__, enable);
+	dev_info(&client->dev, "%s: enable=%d mode=%d\n",
+		 __func__, enable, s_data->mode);
 
 	if (!enable) {
 		ov5693_update_ctrl_range(priv, OV5693_MAX_FRAME_LENGTH);
