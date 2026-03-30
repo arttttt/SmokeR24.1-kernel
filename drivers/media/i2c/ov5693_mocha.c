@@ -41,11 +41,11 @@
 
 #include "ov5693_mocha_mode_tbls.h"
 
-/* CSI-E DPD for OV5693 on CSI-B port (second brick: C/D/E pads) */
-static struct tegra_io_dpd csie_io = {
-	.name			= "CSIE",
-	.io_dpd_reg_index	= 1,
-	.io_dpd_bit		= 12,
+/* CSI-B DPD for OV5693 on CSI-B port */
+static struct tegra_io_dpd csib_io = {
+	.name			= "CSIB",
+	.io_dpd_reg_index	= 0,
+	.io_dpd_bit		= 1,
 };
 
 #define OV5693_MAX_COARSE_DIFF		6
@@ -334,7 +334,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	}
 
 	/* Step 1: disable CSI-E IO DPD */
-	tegra_io_dpd_disable(&csie_io);
+	tegra_io_dpd_disable(&csib_io);
 
 	/* Step 2: drive all GPIOs low */
 	if (pw->pwdn_gpio)
@@ -402,7 +402,7 @@ ov5693_avdd_fail:
 	if (priv->afvdd)
 		regulator_disable(priv->afvdd);
 ov5693_afvdd_fail:
-	tegra_io_dpd_enable(&csie_io);
+	tegra_io_dpd_enable(&csib_io);
 	pr_err("%s failed.\n", __func__);
 	return -ENODEV;
 }
@@ -469,7 +469,7 @@ static int ov5693_power_off(struct camera_common_data *s_data)
 		regulator_disable(priv->afvdd);
 
 	/* Step 10: enable CSI-E IO DPD */
-	tegra_io_dpd_enable(&csie_io);
+	tegra_io_dpd_enable(&csib_io);
 
 	pw->state = SWITCH_OFF;
 	return 0;
