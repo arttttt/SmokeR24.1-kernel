@@ -639,8 +639,23 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	}
 
 	err = ov5693_write_table(priv, mode_table[s_data->mode]);
-	if (err)
+	if (err) {
+		dev_err(&client->dev,
+			"%s: write_table mode %d failed: %d\n",
+			__func__, s_data->mode, err);
 		goto exit;
+	}
+
+	/* Verify sensor is alive — read chip ID */
+	{
+		unsigned int chip_id_h = 0, chip_id_l = 0;
+		int rd_err;
+		rd_err = regmap_read(priv->regmap, 0x300A, &chip_id_h);
+		rd_err |= regmap_read(priv->regmap, 0x300B, &chip_id_l);
+		dev_info(&client->dev,
+			 "%s: chip_id=0x%02x%02x (err=%d)\n",
+			 __func__, chip_id_h, chip_id_l, rd_err);
+	}
 
 	/* write list of override regs for the asking frame length,
 	 * coarse integration time, and gain. Failures to write
