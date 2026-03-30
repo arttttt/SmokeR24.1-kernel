@@ -185,14 +185,14 @@ static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
 	timeout = jiffies + msecs_to_jiffies(MIPI_CAL_TIMEOUT_MSEC);
 	while (time_before(jiffies, timeout)) {
 		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-		if (((val & lanes) == lanes) && !(val & CAL_ACTIVE))
+		if ((val & CAL_DONE) && !(val & CAL_ACTIVE))
 			return 0;
 		usleep_range(10, 100);
 	}
 
 	/* Re-check after timeout (may have slept past) */
 	regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-	if (((val & lanes) == lanes) && !(val & CAL_ACTIVE))
+	if ((val & CAL_DONE) && !(val & CAL_ACTIVE))
 		return 0;
 
 	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x, lanes: 0x%x\n",
@@ -291,6 +291,20 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 	/* Apply DSI production settings */
 	if (lanes & (DSIA | DSIB | DSIC | DSID))
 		t124_apply_dsi_prod(mipi, lanes);
+
+	/* Select CSI lanes for calibration */
+	if (lanes & CSIA)
+		regmap_write(mipi->regmap, CILA_MIPI_CAL_CONFIG, CIL_SEL);
+	if (lanes & CSIB)
+		regmap_write(mipi->regmap, CILB_MIPI_CAL_CONFIG, CIL_SEL);
+	if (lanes & CSIC)
+		regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG, CIL_SEL);
+	if (lanes & CSID)
+		regmap_write(mipi->regmap, CILD_MIPI_CAL_CONFIG, CIL_SEL);
+	if (lanes & CSIE)
+		regmap_write(mipi->regmap, CILE_MIPI_CAL_CONFIG, CIL_SEL);
+	if (lanes & CSIF)
+		regmap_write(mipi->regmap, CILF_MIPI_CAL_CONFIG, CIL_SEL);
 
 	/* Configure control register: AUTOCAL_EN=0 (bit 1 not set) */
 	regmap_write(mipi->regmap, MIPI_CAL_CTRL,
