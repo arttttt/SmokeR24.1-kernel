@@ -561,8 +561,15 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			chan->syncpt[index], thresh[index],
 			chan->timeout, NULL, &ts);
 		if (err) {
+			u32 errstatus;
 			dev_err(&chan->video.dev,
 				"frame start syncpt timeout!%d\n", index);
+			/* Dump CSI status for debug */
+			errstatus = csi_read(chan, index,
+					     TEGRA_VI_CSI_ERROR_STATUS);
+			dev_err(&chan->video.dev,
+				"CSI%d: ERROR_STATUS=0x%08x\n",
+				chan->port[index], errstatus);
 			state = VB2_BUF_STATE_ERROR;
 			/* perform error recovery for timeout */
 			tegra_channel_ec_recover(chan);
