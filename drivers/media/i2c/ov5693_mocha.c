@@ -710,19 +710,19 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		regmap_read(priv->regmap, 0x0100, &stream_mode);
 		regmap_read(priv->regmap, 0x3018, &mipi_ctrl);
 		regmap_read(priv->regmap, 0x3022, &mipi_sc);
-		regmap_read(priv->regmap, 0x0300, &pll1);
-		regmap_read(priv->regmap, 0x0301, &pll2);
-		regmap_read(priv->regmap, 0x0302, &pll3);
+		regmap_read(priv->regmap, 0x3098, &pll1);
+		regmap_read(priv->regmap, 0x3099, &pll2);
+		regmap_read(priv->regmap, 0x30b3, &pll3);
 		regmap_read(priv->regmap, 0x3011, &lane_mode);
 		regmap_read(priv->regmap, 0x5e00, &test_pat);
 		regmap_read(priv->regmap, 0x3019, &mipi_ctrl2);
 		regmap_read(priv->regmap, 0x3090, &pll_mult);
 		dev_info(&client->dev,
-			 "%s: chip_id=0x%02x%02x stream=0x%02x "
-			 "mipi_ctrl=0x%02x mipi_sc=0x%02x "
-			 "pll=0x%02x/0x%02x/0x%02x "
-			 "lane_mode=0x%02x test_pat=0x%02x "
-			 "mipi_ctrl2=0x%02x pll_mult=0x%02x (err=%d)\n",
+			 "%s: chip=0x%02x%02x strm=0x%02x "
+			 "mipi=0x%02x sc=0x%02x "
+			 "pll(3098/99/b3)=0x%02x/0x%02x/0x%02x "
+			 "lane=0x%02x tp=0x%02x "
+			 "ctrl2=0x%02x mul=0x%02x (err=%d)\n",
 			 __func__, chip_id_h, chip_id_l, stream_mode,
 			 mipi_ctrl, mipi_sc, pll1, pll2, pll3,
 			 lane_mode, test_pat, mipi_ctrl2, pll_mult, rd_err);
