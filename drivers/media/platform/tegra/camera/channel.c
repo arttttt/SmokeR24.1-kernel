@@ -697,23 +697,19 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		{
 			struct tegra_csi_device *csi = chan->vi->csi;
 			struct tegra_csi_port *pp = &csi->ports[chan->port[index]];
+			u32 syncpt_val = 0;
+			nvhost_syncpt_read_ext_check(chan->vi->ndev,
+				chan->syncpt[index], &syncpt_val);
 			dev_info(&chan->video.dev,
-				"PRE-SHOT port=%d: "
-				"PP_CMD=0x%08x CTRL0=0x%08x CTRL1=0x%08x "
-				"INPUT=0x%08x GAP=0x%08x "
-				"IMG_DEF=0x%08x IMG_DT=0x%08x IMG_SZ=0x%08x "
-				"CILE_PHY=0x%08x CIL_CMD=0x%08x\n",
+				"PRE-SHOT port=%d syncpt=%d val=%d thresh=%d: "
+				"IMG_DEF=0x%08x BUF=0x%08x "
+				"PP_STATUS=0x%08x CIL_E=0x%08x\n",
 				chan->port[index],
-				readl(pp->pixel_parser + 0x10),  /* PP_COMMAND */
-				readl(pp->pixel_parser + 0x04),  /* CONTROL0 */
-				readl(pp->pixel_parser + 0x08),  /* CONTROL1 */
-				readl(pp->pixel_parser + 0x00),  /* INPUT_STREAM */
-				readl(pp->pixel_parser + 0x0c),  /* GAP */
+				chan->syncpt[index], syncpt_val, thresh[index],
 				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DEF),
-				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DT),
-				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_SIZE),
-				readl(csi->iomem[0] + 0x1D8),   /* PHY_CILE_CTRL */
-				readl(csi->iomem[0] + 0x0D0));  /* CIL_COMMAND */
+				csi_read(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_LSB),
+				readl(pp->pixel_parser + 0x18),  /* PP_STATUS */
+				readl(csi->iomem[0] + 0x1E0));   /* CIL_E_STATUS */
 		}
 #endif
 		csi_write(chan, index,

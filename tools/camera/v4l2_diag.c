@@ -148,12 +148,12 @@
 #define CSI_PG_BLUE_FREQ_RATE_B            0x8E0
 
 /* PMC registers for DPD */
-#define PMC_BASE                           0x7000E400
-#define PMC_SIZE                           0x400
-#define PMC_IO_DPD_REQ                     0x01B8  /* offset from PMC_BASE */
-#define PMC_IO_DPD_STATUS                  0x01BC
-#define PMC_IO_DPD2_REQ                    0x01C0
-#define PMC_IO_DPD2_STATUS                 0x01C4
+#define PMC_BASE                           0x7000E000  /* page-aligned */
+#define PMC_SIZE                           0x1000
+#define PMC_IO_DPD_REQ                     0x05B8  /* 0x7000E400+0x1B8 - 0x7000E000 */
+#define PMC_IO_DPD_STATUS                  0x05BC
+#define PMC_IO_DPD2_REQ                    0x05C0
+#define PMC_IO_DPD2_STATUS                 0x05C4
 
 struct buffer {
 	void *start;
@@ -194,12 +194,12 @@ static int mem_fd = -1;
 
 static int map_vi_registers(void)
 {
-	mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
+	mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
 	if (mem_fd < 0) {
 		perror("open /dev/mem (need root)");
 		return -1;
 	}
-	vi_map = mmap(NULL, VI_SIZE, PROT_READ, MAP_SHARED, mem_fd, VI_BASE);
+	vi_map = mmap(NULL, VI_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, VI_BASE);
 	if (vi_map == MAP_FAILED) {
 		perror("mmap VI registers");
 		vi_map = NULL;
@@ -207,7 +207,7 @@ static int map_vi_registers(void)
 		mem_fd = -1;
 		return -1;
 	}
-	pmc_map = mmap(NULL, PMC_SIZE, PROT_READ, MAP_SHARED, mem_fd, PMC_BASE);
+	pmc_map = mmap(NULL, PMC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, PMC_BASE);
 	if (pmc_map == MAP_FAILED) {
 		perror("mmap PMC registers");
 		pmc_map = NULL;
