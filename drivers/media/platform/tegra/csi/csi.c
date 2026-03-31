@@ -425,7 +425,7 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 
 		if (port->lanes == 1) {
 			/* CSI_C (1-lane via CILE) */
-			csi_write(csi, 0x1D8, 0x9, 0); /* PHY_CILE_CONTROL0: THS=9 (legacy vi2.c value) */
+			csi_write(csi, 0x1D8, 0x4e, 0); /* PHY_CILE_CONTROL0: THS=14+BYPASS_LP_SEQ */
 			dev_info(csi->dev,
 				 "T124 CILE: PAD=0x%08x PHY=0x%08x INT=0x%08x\n",
 				 csi_read(csi, 0x1D0, 0),
