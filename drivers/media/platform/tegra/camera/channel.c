@@ -422,7 +422,7 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 			writel(0x22020202, vi_base + 0x908);
 
 			/* TPG uses RGB888 format */
-			format = 0x12;  /* TEGRA_IMAGE_FORMAT_T_A8B8G8R8 */
+			format = 64;    /* TEGRA_IMAGE_FORMAT_T_A8B8G8R8 = 0x40 */
 			data_type = 0x24; /* TEGRA_IMAGE_DT_RGB888 */
 			word_count = width * 3;
 
