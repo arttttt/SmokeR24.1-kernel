@@ -726,6 +726,35 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			 __func__, chip_id_h, chip_id_l, stream_mode,
 			 mipi_ctrl, mipi_sc, pll1, pll2, pll3,
 			 lane_mode, test_pat, mipi_ctrl2, pll_mult, rd_err);
+
+		/* Read OTP/fuse and MIPI TX status for deep hardware check */
+		{
+			unsigned int fuse_id0 = 0, fuse_id1 = 0;
+			unsigned int otp_ctrl = 0, otp_data = 0;
+			unsigned int mipi_tx_ctrl = 0, mipi_tx_status = 0;
+			unsigned int sccb_ctrl = 0, pad_out = 0;
+			unsigned int sc_cmmn_chip_id = 0;
+			unsigned int r4800 = 0, r4801 = 0, r4802 = 0;
+			/* Fuse ID (unique per chip) */
+			regmap_read(priv->regmap, 0x300C, &fuse_id0);
+			regmap_read(priv->regmap, 0x300D, &fuse_id1);
+			/* SC common chip ID & rev */
+			regmap_read(priv->regmap, 0x302A, &sc_cmmn_chip_id);
+			/* SCCB/system control */
+			regmap_read(priv->regmap, 0x3100, &sccb_ctrl);
+			regmap_read(priv->regmap, 0x3002, &pad_out);
+			/* MIPI control regs */
+			regmap_read(priv->regmap, 0x4800, &r4800);
+			regmap_read(priv->regmap, 0x4801, &r4801);
+			regmap_read(priv->regmap, 0x4802, &r4802);
+			dev_info(&client->dev,
+				 "HW: fuse=0x%02x%02x sc_id=0x%02x "
+				 "sccb=0x%02x pad_out=0x%02x "
+				 "mipi(4800/01/02)=0x%02x/0x%02x/0x%02x\n",
+				 fuse_id0, fuse_id1, sc_cmmn_chip_id,
+				 sccb_ctrl, pad_out,
+				 r4800, r4801, r4802);
+		}
 	}
 
 	if (test_mode)

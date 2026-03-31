@@ -122,6 +122,39 @@
 /* CSI clock override */
 #define CSI_CLKEN_OVERRIDE                 0xAF4
 
+/* CSI additional debug */
+#define CSI_READONLY_STATUS                0xAEC
+#define CSI_SW_STATUS_RESET                0xAF0
+#define CSI_CAP_CIL                        0x808
+#define CSI_CAP_CSI                        0x818
+#define CSI_CAP_PP                         0x828
+#define CSI_CIL_PAD_CONFIG0                0x90C  /* global CIL pad config */
+#define CSI_DEBUG_CONTROL                  0xAE4
+#define CSI_DEBUG_COUNTER_0                0xAE8
+
+/* CILE escape mode registers */
+#define CSI_CIL_E_ESCAPE_MODE_COMMAND      0xA1C
+#define CSI_CIL_E_ESCAPE_MODE_DATA         0xA20
+#define CSI_CSICIL_SW_SENSOR_E_RESET       0xA24
+
+/* CSI Test Pattern Generator B */
+#define CSI_PG_CTRL_B                      0x8C4
+#define CSI_PG_PHASE_B                     0x8C8
+#define CSI_PG_RED_FREQ_B                  0x8CC
+#define CSI_PG_RED_FREQ_RATE_B             0x8D0
+#define CSI_PG_GREEN_FREQ_B                0x8D4
+#define CSI_PG_GREEN_FREQ_RATE_B           0x8D8
+#define CSI_PG_BLUE_FREQ_B                 0x8DC
+#define CSI_PG_BLUE_FREQ_RATE_B            0x8E0
+
+/* PMC registers for DPD */
+#define PMC_BASE                           0x7000E400
+#define PMC_SIZE                           0x400
+#define PMC_IO_DPD_REQ                     0x01B8  /* offset from PMC_BASE */
+#define PMC_IO_DPD_STATUS                  0x01BC
+#define PMC_IO_DPD2_REQ                    0x01C0
+#define PMC_IO_DPD2_STATUS                 0x01C4
+
 struct buffer {
 	void *start;
 	size_t length;
@@ -156,6 +189,7 @@ static const char *fcc_to_str(unsigned int fourcc, char *buf)
 /* ---- Register reading via /dev/mem ---- */
 
 static volatile unsigned int *vi_map = NULL;
+static volatile unsigned int *pmc_map = NULL;
 static int mem_fd = -1;
 
 static int map_vi_registers(void)
@@ -173,6 +207,12 @@ static int map_vi_registers(void)
 		mem_fd = -1;
 		return -1;
 	}
+	pmc_map = mmap(NULL, PMC_SIZE, PROT_READ, MAP_SHARED, mem_fd, PMC_BASE);
+	if (pmc_map == MAP_FAILED) {
+		perror("mmap PMC registers");
+		pmc_map = NULL;
+		/* continue without PMC */
+	}
 	return 0;
 }
 
@@ -181,6 +221,10 @@ static void unmap_vi_registers(void)
 	if (vi_map) {
 		munmap((void *)vi_map, VI_SIZE);
 		vi_map = NULL;
+	}
+	if (pmc_map) {
+		munmap((void *)pmc_map, PMC_SIZE);
+		pmc_map = NULL;
 	}
 	if (mem_fd >= 0) {
 		close(mem_fd);
@@ -192,6 +236,12 @@ static unsigned int vi_read(unsigned int offset)
 {
 	if (!vi_map) return 0xDEADBEEF;
 	return vi_map[offset / 4];
+}
+
+static unsigned int pmc_read(unsigned int offset)
+{
+	if (!pmc_map) return 0xDEADBEEF;
+	return pmc_map[offset / 4];
 }
 
 static void dump_cil_status_bits(const char *name, unsigned int val)
@@ -277,6 +327,34 @@ static void dump_registers(const char *label)
 	printf("\n-- CIL A/B (brick 0, for reference) --\n");
 	dump_cil_status_bits("CIL_A_STATUS", vi_read(CSI_CIL_A_STATUS));
 	dump_cil_status_bits("CIL_B_STATUS", vi_read(CSI_CIL_B_STATUS));
+
+	printf("\n-- CSI Debug/Status --\n");
+	printf("  %-25s = 0x%08X\n", "CSI_READONLY_STATUS", vi_read(CSI_READONLY_STATUS));
+	printf("  %-25s = 0x%08X\n", "CSI_CAP_CIL", vi_read(CSI_CAP_CIL));
+	printf("  %-25s = 0x%08X\n", "CSI_CAP_CSI", vi_read(CSI_CAP_CSI));
+	printf("  %-25s = 0x%08X\n", "CSI_CAP_PP", vi_read(CSI_CAP_PP));
+	printf("  %-25s = 0x%08X\n", "CIL_PAD_CONFIG0 (global)", vi_read(CSI_CIL_PAD_CONFIG0));
+	printf("  %-25s = 0x%08X\n", "CILE_ESC_CMD (0xA1C)", vi_read(CSI_CIL_E_ESCAPE_MODE_COMMAND));
+	printf("  %-25s = 0x%08X\n", "CILE_ESC_DATA (0xA20)", vi_read(CSI_CIL_E_ESCAPE_MODE_DATA));
+	printf("  %-25s = 0x%08X\n", "DEBUG_COUNTER_0", vi_read(CSI_DEBUG_COUNTER_0));
+
+	if (pmc_map) {
+		printf("\n-- PMC DPD Status --\n");
+		printf("  %-25s = 0x%08X\n", "IO_DPD_STATUS", pmc_read(PMC_IO_DPD_STATUS));
+		printf("  %-25s = 0x%08X\n", "IO_DPD2_STATUS", pmc_read(PMC_IO_DPD2_STATUS));
+		/* CSIE DPD is in DPD2, bit 12 */
+		{
+			unsigned int dpd2 = pmc_read(PMC_IO_DPD2_STATUS);
+			printf("  CSIE DPD (bit 12)       = %s\n",
+				(dpd2 & (1 << 12)) ? "ON (pads powered down!)" : "OFF (pads active)");
+			/* CSIA DPD is in DPD, bit 0; CSIB DPD is DPD, bit 1 */
+			unsigned int dpd1 = pmc_read(PMC_IO_DPD_STATUS);
+			printf("  CSIA DPD (bit 0)        = %s\n",
+				(dpd1 & (1 << 0)) ? "ON" : "OFF");
+			printf("  CSIB DPD (bit 1)        = %s\n",
+				(dpd1 & (1 << 1)) ? "ON" : "OFF");
+		}
+	}
 
 	printf("=== End Registers ===\n\n");
 }

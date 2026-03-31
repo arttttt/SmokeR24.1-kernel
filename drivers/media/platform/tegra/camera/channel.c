@@ -43,6 +43,12 @@
 #include "nvhost_acm.h"
 #include "mipi_cal.h"
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+static int t124_csi_tpg = 0;
+module_param(t124_csi_tpg, int, 0644);
+MODULE_PARM_DESC(t124_csi_tpg, "Enable T124 CSI Test Pattern Generator (bypasses sensor MIPI)");
+#endif
+
 
 #define FRAMERATE	30
 #define BPP_MEM		2
@@ -346,8 +352,35 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		val = readl(vi_base + 0x908);
 		writel((val & 0x0000FFFF) | 0x12020000, vi_base + 0x908);
 
+		if (t124_csi_tpg) {
+			/*
+			 * CSI TPG mode: generate test pattern at PP_B level.
+			 * Bypasses sensor MIPI link entirely.
+			 * From R21.5 vi2.c TPG code (adapted for PP_B).
+			 */
+			writel(((0) << 2) | 0x1, vi_base + 0x8C4); /* PG_CTRL_B: mode 0, enable */
+			writel(0x0, vi_base + 0x8C8);               /* PG_PHASE_B */
+			writel(0x100010, vi_base + 0x8CC);           /* PG_RED_FREQ_B */
+			writel(0x0, vi_base + 0x8D0);                /* PG_RED_FREQ_RATE_B */
+			writel(0x100010, vi_base + 0x8D4);           /* PG_GREEN_FREQ_B */
+			writel(0x0, vi_base + 0x8D8);                /* PG_GREEN_FREQ_RATE_B */
+			writel(0x100010, vi_base + 0x8DC);           /* PG_BLUE_FREQ_B */
+			writel(0x0, vi_base + 0x8E0);                /* PG_BLUE_FREQ_RATE_B */
+			/* Override CIL_COMMAND for TPG */
+			writel(0x22020202, vi_base + 0x908);
+
+			/* TPG uses RGB888 format */
+			format = 0x12;  /* TEGRA_IMAGE_FORMAT_T_A8B8G8R8 */
+			data_type = 0x24; /* TEGRA_IMAGE_DT_RGB888 */
+			word_count = width * 3;
+
+			dev_info(&chan->video.dev,
+				 "T124 CSI TPG ENABLED: %dx%d RGB888 wc=%d\n",
+				 width, height, word_count);
+		}
+
 		/* VI CSI 1 image config */
-		writel((1 << 24) | (format << 16) | 0x1,
+		writel((t124_csi_tpg ? 0 : (1 << 24)) | (format << 16) | 0x1,
 		       vi_base + 0x200 + 0x0c);    /* VI_CSI_1_IMAGE_DEF */
 		writel(data_type,
 		       vi_base + 0x200 + 0x20);    /* VI_CSI_1_IMAGE_DT */
