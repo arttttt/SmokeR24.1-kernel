@@ -546,7 +546,7 @@ static void tegra_channel_ec_init(struct tegra_channel *chan)
 	 * Timeout units is jiffies, 1 jiffy = 10ms
 	 * TODO: Get frame rate from sub-device and adopt timeout
 	 */
-	chan->timeout = 20;
+	chan->timeout = 200; /* R21.5 uses 200ms for CSI syncpt wait */
 
 	/*
 	 * Sync point FIFO full blocks host interface
