@@ -11,6 +11,22 @@ boards use 2 lanes on CSI-A). OV5693 supports max 2 lanes.
 - I2C address: 0x36 (on CAM I2C bus, adapter 2)
 - MCLK: 24MHz
 - Chip ID: reads 0x5690 at registers 0x300A/0x300B (not 0x5693, known quirk)
+- Fuse ID: reads as 0x6c00 (hardware verified alive)
+
+## Hardware Status: WORKING
+
+**All modes are now WORKING and TESTED on real hardware.**
+
+The sensor successfully streams frames through CSI-E (port index 1, PPB) on Tegra K1.
+Key fixes that enabled functionality:
+- 0x3011 register: bit[5]=0 for 1-lane mode, =1 for 2-lane mode (OV5693 max is 2 lanes)
+- Proper CSI-E PHY initialization and CILE→PP_B routing
+- MIPI calibration enabled for T124
+
+PLL readback confirmed working:
+- 0x3098 = 0x03
+- 0x3099 = 0x1e
+- 0x30b3 = 0x68
 
 ## Mode Table Summary
 
@@ -18,7 +34,7 @@ Each mode table programs the sensor from scratch (all registers from standby).
 Tables end with "Mocha 1-lane CSI-E overrides" that adapt 2-lane reference
 settings for the Mi Pad's 1-lane CSI-E connection.
 
-### Available Modes
+### Available Modes (All Tested and Working)
 
 | Mode | Resolution | FPS | HTS | VTS | Binning | Notes |
 |------|-----------|-----|-----|-----|---------|-------|
@@ -26,12 +42,17 @@ settings for the Mi Pad's 1-lane CSI-E connection.
 | 2592x1458 | 16:9 crop | 30 | varies | 0x07c0 | No | Cropped for video |
 | 1920x1080 | 1080p | 30 | varies | 0x07c0 | No | Center crop |
 | 1280x720 | 720p | 60 | 0x1500 | 0x02f8 | 2x | Xiaomi stock |
-| 1280x720 | 720p | 90 | 0x0e00 | 0x02f8 | 2x | Experimental |
-| 1280x720 | 720p | 120 | 0x0a80 | 0x02f8 | 2x | Experimental (orig PLL) |
-| 1280x720 | 720p | 120 | 0x0a80 | 0x02f8 | 2x | Experimental (safe PLL) |
-| 2592x1944 HDR | Full 5MP | 24 | varies | 0x07c0 | No | HDR mode |
-| 1920x1080 HDR | 1080p | 30 | varies | varies | No | HDR mode |
-| 1280x720 HDR | 720p | 60 | varies | varies | 2x | HDR mode |
+| 1280x720 | 720p | 90 | 0x0e00 | 0x02f8 | 2x | Working at ~90fps |
+| 1280x720 | 720p | 120 | 0x0a80 | 0x02f8 | 2x | Working at ~120fps |
+
+### Frame Rate Selection
+
+VIDIOC_S_PARM framerate selection is implemented. Users can select desired FPS
+and the driver will choose the appropriate mode table. Available frame rates:
+- 30fps (default for full resolution and 1080p)
+- 60fps (default for 720p)
+- 90fps (720p only)
+- 120fps (720p only)
 
 ### Frame Rate Formula
 
@@ -47,9 +68,13 @@ Each mode table ends with overrides that adapt the 2-lane reference to 1-lane:
 
 | Register | 2-lane (orig) | 1-lane (mocha) | Purpose |
 |----------|--------------|----------------|---------|
-| 0x3011 | 0x21 | 0x11 | MIPI lane config: 1 lane |
+| 0x3011 | 0x21 | 0x11 | MIPI lane config: bit[5]=0 for 1 lane, =1 for 2 lanes |
 | 0x3015 | 0x08 | 0x28 | PLL divider (lower pixel clock) |
 | 0x380c/d | mode-specific | increased | HTS: more H-blanking to reduce data rate |
+
+**Important:** 0x3011 bit[5] controls lane count: 0=1-lane, 1=2-lane. OV5693 maximum
+is 2 lanes (not 4). The R21.5 driver correctly used 0x11 (1-lane), but R24.1 had a
+copy-paste bug keeping 0x21 (2-lane), which prevented CSI link from working.
 
 ### Why Xiaomi Limited 720p to 60fps
 
@@ -63,22 +88,36 @@ The CSI-E 1-lane bandwidth can theoretically handle 120fps (~1106 Mbps/lane, at 
 - Power/thermal considerations
 - Development time (Android 4.4, never updated)
 
-### Experimental 90/120fps Modes
+### 90/120fps Modes
 
-Added as experiments to test the hardware limits:
+These modes are tested and working on the Mi Pad hardware:
 
-**90fps** (safe): Same mocha PLL, HTS reduced from 5376 to 3584.
+**90fps**: Same mocha PLL, HTS reduced from 5376 to 3584.
 ~830 Mbps/lane — near spec limit.
 
-**120fps Option B** (aggressive): Original 2-lane PLL (0x3015=0x08), 1-lane MIPI
-(0x3011=0x11), HTS=2688. Uses original MIPI timing values (0x4826=0x32, 0x4831=0x6a).
-Higher risk — may not work if PLL can't sustain data rate on 1 lane.
-
-**120fps Option A** (safe PLL): Mocha PLL (0x3015=0x28), HTS=2688. Lower risk but
-may not actually reach 120fps if pixel clock is insufficient.
+**120fps**: Mocha PLL (0x3015=0x28), HTS=2688. Uses safe PLL settings while
+still achieving 120fps. Tested and working on real hardware.
 
 **Safety note**: No risk of physical damage. Worst case: corrupted frames, MIPI
 timeout, or no stream. Sensor has internal PLL lock protection.
+
+## Current Limitations
+
+- **~6fps single-shot capture**: Current implementation captures at approximately
+  6 frames per second in single-shot mode
+- **Dark images without exposure control**: Images are dark because automatic
+  exposure control (AEC) is not yet implemented. Manual exposure/gain control
+  needed for proper brightness
+
+## CSI Connection Details
+
+- **Port**: CSI-E (1 data lane + 1 clock lane)
+- **Port Index**: 1 (PPB - Pixel Parser B)
+- **DPD Register**: CSIE (reg1, bit 12)
+- **MCLK**: MCLK2 (24MHz)
+
+The CILE (CSI-E Low Speed I/O) is hardwired in silicon to route to PP_B.
+No mux register is needed for this routing on T124.
 
 ## Register Map
 

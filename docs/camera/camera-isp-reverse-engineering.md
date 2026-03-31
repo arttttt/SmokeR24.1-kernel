@@ -530,17 +530,33 @@ This is why the **V4L2 + kernel ISP driver** approach is recommended (see sectio
 
 ## 10. Implementation Plan: V4L2 + Kernel ISP Driver
 
+### Current Status (March 2025)
+
+| Step | Status | Notes |
+|------|--------|-------|
+| Step 1: Device Tree + Power | **COMPLETE** | OV5693 I2C responds, chip ID reads OK |
+| Step 2: V4L2 RAW Capture | **COMPLETE** | OV5693 captures RAW Bayer via MC framework |
+| Step 3: Minimal ISP | **NOT STARTED** | Future work — kernel ISP driver |
+| Step 4: Full ISP Calibration | **NOT STARTED** | Future work — load mocha ISP profiles |
+| Step 5: 3A Statistics | **NOT STARTED** | Future work — AE/AWB/AF |
+
+**OV5693 works without ISP**, producing RAW Bayer (SBGGR10) frames directly via V4L2.
+No demosaic, no color correction, ~6fps at 5MP. ISP kernel driver is future work
+for processed YUV/RGB output and better frame rates.
+
+**IMX179 rear camera:** Not started — no V4L2 subdev driver yet.
+
 ### Architecture
 ```
-Sensor (V4L2 subdev)  →  CSI (csi.c)  →  VI (vi2.c)  →  [DRAM: RAW Bayer]
-                                                                ↓
-                                                   ISP kernel module (NEW)
-                                                   drivers/video/tegra/host/isp/isp_t124.c
-                                                                ↓
-                                                         [DRAM: YUV/RGB]
-                                                                ↓
-                                                         V4L2 output device
-                                                                ↓
+Sensor (V4L2 subdev)  →  CSI (csi.c)  →  VI (channel.c)  →  [DRAM: RAW Bayer]
+                                                                    ↓
+                                              ISP kernel module (FUTURE WORK)
+                                              drivers/video/tegra/host/isp/isp_t124.c
+                                                                    ↓
+                                                            [DRAM: YUV/RGB]
+                                                                    ↓
+                                                            V4L2 output device
+                                                                    ↓
                                                    Userspace (libcamera, GStreamer, etc.)
 ```
 
@@ -559,16 +575,20 @@ Sensor (V4L2 subdev)  →  CSI (csi.c)  →  VI (vi2.c)  →  [DRAM: RAW Bayer]
 
 | Component | File | Status |
 |-----------|------|--------|
-| V4L2 video device + buffer queues | `drivers/media/platform/tegra/camera/channel.c` (2037 lines) | Ready |
-| Media controller graph | `drivers/media/platform/tegra/camera/graph.c` | Ready |
-| VI capture driver (T124) | `drivers/media/platform/soc_camera/tegra_camera/vi2.c` | Ready |
-| CSI transceiver | `drivers/media/platform/tegra/csi/csi.c` | Ready |
-| ISP host1x client (power/clock) | `drivers/video/tegra/host/isp/isp.c` | Ready |
+| V4L2 video device + buffer queues | `drivers/media/platform/tegra/camera/channel.c` (T124 direct path) | **WORKING** |
+| Media controller graph | `drivers/media/platform/tegra/camera/graph.c` | **WORKING** |
+| VI capture driver (T124) | `drivers/media/platform/tegra/vi/vi.c` | **WORKING** |
+| CSI transceiver | `drivers/media/platform/tegra/csi/csi.c` | **WORKING** |
+| MIPI calibration (T124) | `drivers/media/platform/tegra/mipical/mipi_cal_t124.c` | **WORKING** |
+| ISP host1x client (power/clock) | `drivers/video/tegra/host/isp/isp.c` | Ready (no register programming) |
 | ISP interrupt handler | `drivers/video/tegra/host/isp/isp_isr_v1.c` | Ready |
-| OV5693 V4L2 subdev | `drivers/media/i2c/soc_camera/ov5693_v4l2.c` | Ready |
-| OV5693 V4L2 subdev (newer) | `drivers/media/i2c/ov5693.c` | Ready |
-| IMX179 legacy (miscdevice) | `drivers/media/platform/tegra/imx179.c` | Needs V4L2 subdev wrapper |
-| AD5823 legacy (miscdevice) | `drivers/media/platform/tegra/ad5823.c` | Needs V4L2 subdev wrapper |
+| **OV5693 V4L2 subdev (mocha)** | **`drivers/media/i2c/ov5693_mocha.c`** | **WORKING** |
+| OV5693 V4L2 subdev (reference) | `drivers/media/i2c/ov5693.c` | Reference |
+| IMX179 legacy (miscdevice) | `drivers/media/platform/tegra/imx179.c` | Not started — needs V4L2 subdev |
+| AD5823 legacy (miscdevice) | `drivers/media/platform/tegra/ad5823.c` | Not started — needs V4L2 subdev |
+
+**Current limitation:** RAW Bayer output only. ISP kernel driver (for demosaic, color
+correction, YUV output) is future work. ~6fps at 5MP without ISP.
 
 ### What Needs To Be Written
 
@@ -588,29 +608,31 @@ Sensor (V4L2 subdev)  →  CSI (csi.c)  →  VI (vi2.c)  →  [DRAM: RAW Bayer]
 ### Step-by-Step Plan
 
 ```
-Step 1: Device Tree + Power Sequence
-  - Add IMX179/OV5693 nodes to mocha DTS
-  - Verify I2C communication, regulator enable
-  - Test: sensor responds to I2C reads (chip ID)
+Step 1: Device Tree + Power Sequence — COMPLETE for OV5693
+  - [x] Add OV5693 nodes to mocha DTS (CSI-E, 1-lane, MCLK2)
+  - [x] Verify I2C communication, regulator enable
+  - [x] Test: sensor responds to I2C reads (chip ID=0x5690)
 
-Step 2: V4L2 RAW Capture (no ISP)
-  - Write imx179_v4l2.c (or adapt existing driver)
-  - Configure vi2.c soc_camera for T124
-  - Capture RAW Bayer frames via V4L2
-  - Test: raw image visible after software demosaic (dcraw)
+Step 2: V4L2 RAW Capture (no ISP) — COMPLETE for OV5693
+  - [x] Write ov5693_mocha.c with mocha power sequence
+  - [x] Configure channel.c/csi.c for T124 CSI-E
+  - [x] Capture RAW Bayer frames via V4L2
+  - [x] Test: SBGGR10 format, /dev/video0 working
+  - [ ] IMX179 rear camera — NOT STARTED
 
-Step 3: Minimal ISP (demosaic + output)
+Step 3: Minimal ISP (demosaic + output) — FUTURE WORK
   - Write isp_t124.c with minimum registers:
     SET_CLASS(0x32) → enable(0x015) → input(0x200) →
     tone_curve(0x101, linear) → output(0xE00, 0xE30-0xE33)
   - Test: ISP produces viewable YUV output
+  - Note: OV5693 works without ISP (RAW only, ~6fps)
 
-Step 4: Full ISP Calibration
+Step 4: Full ISP Calibration — FUTURE WORK
   - Load mocha calibration profiles:
     lens_shading(0xD31-0xE5C) → tone_curve(0x101) → CCM
   - Test: good quality image comparable to stock
 
-Step 5: 3A Statistics (optional)
+Step 5: 3A Statistics — FUTURE WORK
   - Configure stats engine (0x800-0x922)
   - Read AE/AWB/AF stats (0xC41-0xCC5)
   - Implement basic auto-exposure/white-balance in userspace

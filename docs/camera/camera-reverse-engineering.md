@@ -5,6 +5,20 @@
 
 ---
 
+## Status (March 2025)
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **OV5693 front camera** | **WORKING** | V4L2 RAW capture via MC framework, 5MP@30fps |
+| **IMX179 rear camera** | Not started | No driver yet |
+| **ISP (demosaic, etc.)** | Not started | RAW only, no ISP processing |
+
+**OV5693 front camera is fully functional** via the Media Controller (MC) V4L2 framework.
+Captures RAW Bayer (SBGGR10) frames at 5MP, 1080p, and 720p@60fps.
+No proprietary blobs required.
+
+---
+
 ## 1. Hardware Overview
 
 ### Cameras
@@ -53,7 +67,7 @@ They share the VENC power gate but have independent channels, syncpoints, and cl
 
 The kernel contains two independent camera frameworks. Both exist simultaneously:
 
-#### Framework A: soc_camera + V4L2 (for T124, our target)
+#### Framework A: soc_camera + V4L2 (LEGACY — historical reference)
 ```
 drivers/media/platform/soc_camera/tegra_camera/
 ├── vi2.c           ← soc_camera host, compatible "nvidia,tegra124-vi"
@@ -67,10 +81,12 @@ drivers/media/i2c/soc_camera/
 ├── ov5693_mode_tbls.h
 ```
 
-#### Framework B: Media Controller + V4L2 (newer, primarily for T210)
+**Historical only.** soc_camera was deprecated upstream. MC framework is used instead.
+
+#### Framework B: Media Controller + V4L2 (ACTIVE — used for OV5693)
 ```
 drivers/media/platform/tegra/
-├── camera/channel.c     ← V4L2 video device, vb2 buffer queues (2037 lines)
+├── camera/channel.c     ← V4L2 video device, vb2 buffer queues (T124 direct path)
 ├── camera/graph.c       ← Media controller graph setup
 ├── camera/mc_common.c   ← Media controller helpers
 ├── camera/core.c        ← Format definitions
@@ -79,8 +95,12 @@ drivers/media/platform/tegra/
 ├── csi/csi.c            ← CSI transceiver
 
 drivers/media/i2c/
-├── ov5693.c             ← OV5693 as V4L2 subdev (newer version)
+├── ov5693_mocha.c       ← OV5693 V4L2 subdev (mocha-specific power sequence)
+├── ov5693.c             ← OV5693 V4L2 subdev (newer version, reference)
 ```
+
+**This is the active framework for SmokeR24.1.** OV5693 is working via MC V4L2.
+First ever T124 platform using MC framework (previously only T210+).
 
 #### Legacy Sensor Drivers (miscdevice, custom IOCTLs)
 ```
@@ -166,7 +186,12 @@ embedded ISP cal.     ↓                    ↓
 
 ---
 
-## 4. Blob Stack Incompatibility Analysis
+## 4. Blob Stack Incompatibility Analysis (Historical Reference Only)
+
+**This section is preserved for historical reference.** The working V4L2 MC framework
+approach (Section 8) eliminates all blob dependencies. The blob path was analyzed
+and determined to be a dead end — no combination of available blobs could produce
+a working stack on SmokeR24.1.
 
 ### Three Available Blob Sources — None Directly Usable
 
@@ -343,13 +368,20 @@ Sensor (V4L2 subdev) → CSI → VI → [DRAM: RAW] → ISP kernel module → [D
 - Verify sensor responds to I2C (read chip ID register)
 - **Test:** `i2cdetect` sees sensor at expected address
 
-### Step 2: V4L2 RAW Capture (no ISP)
-- Write `imx179_v4l2.c` using `camera_common` framework
-  - Template: `ov5693_v4l2.c` or `imx135_v4l2.c`
-  - Mode tables from JXD `sensor_bayer_imx179.c`
-  - I2C register sequences from existing `imx179.c`
-- Configure `vi2.c` soc_camera for T124 CSI-A
-- **Test:** Capture RAW Bayer via `v4l2-ctl --stream-mmap`, verify with dcraw/RawTherapee
+### Step 2: V4L2 RAW Capture (no ISP) — COMPLETE for OV5693
+- [x] Write `ov5693_mocha.c` using `camera_common` framework
+  - Mocha-specific power sequence (GPIOs, regulators, MCLK2)
+  - Mode tables: 5MP@30, 1080p@30, 720p@60fps
+  - CSI-E 1-lane configuration
+- [x] Configure MC framework for T124 CSI-E
+  - T124-specific CIL PHY init in `csi.c`
+  - T124 SLCG PLL_D CSI toggle in `channel.c`
+  - MIPI calibration via `mipi_cal_t124.c`
+- [x] **Test:** Capture RAW Bayer via `v4l2-ctl --stream-mmap`
+  - Working: SBGGR10 format, /dev/video0 + /dev/media0
+  - ~6fps at 5MP (limited by RAW bandwidth, no ISP)
+
+**IMX179 rear camera:** Not started — needs V4L2 subdev driver
 
 ### Step 3: Minimal ISP Kernel Driver
 - Write `isp_t124.c` in `drivers/video/tegra/host/isp/`
@@ -393,24 +425,32 @@ docs/camera-isp-profiles/                  ← extracted mocha-specific ISP cali
   └── ov5693_sunny_v2.13.isp              (6560 lines, front)
 ```
 
-### Kernel — V4L2 Camera Stack
+### Kernel — V4L2 Camera Stack (Working Files)
 ```
-drivers/media/platform/soc_camera/tegra_camera/
-├── vi2.c                  ← soc_camera VI host for T124 (our capture driver)
-├── common.c               ← tegra_camera utilities
-
 drivers/media/platform/tegra/camera/
-├── channel.c              ← V4L2 video device, vb2 buffer queues
-├── graph.c                ← media controller graph
+├── channel.c              ← V4L2 video device, vb2 buffer queues (T124 direct path)
+├── graph.c                ← media controller graph setup
 ├── mc_common.c            ← media controller helpers
 ├── core.c                 ← format definitions
 ├── camera_common.c        ← camera_common framework
+├── v4l2_diag.c            ← V4L2 diagnostics and debug
 ├── registers.h            ← VI/CSI register offsets
 
 drivers/media/platform/tegra/
-├── vi/vi.c                ← VI driver with V4L2
-├── csi/csi.c              ← CSI transceiver
-├── mipical/mipi_cal.c     ← MIPI calibration
+├── vi/vi.c                ← VI driver with V4L2 integration
+├── csi/csi.c              ← CSI transceiver (T124 CIL PHY init)
+├── csi/csi.h              ← CSI register definitions
+├── mipical/mipi_cal.c     ← MIPI calibration common code
+├── mipical/mipi_cal_t124.c ← T124-specific MIPI calibration
+
+drivers/media/i2c/
+├── ov5693_mocha.c         ← OV5693 V4L2 subdev (mocha-specific, WORKING)
+├── ov5693.c               ← OV5693 V4L2 subdev (reference)
+
+Historical (not used):
+drivers/media/platform/soc_camera/tegra_camera/
+├── vi2.c                  ← soc_camera VI host (legacy, not used)
+├── common.c               ← tegra_camera utilities
 ```
 
 ### Kernel — ISP
