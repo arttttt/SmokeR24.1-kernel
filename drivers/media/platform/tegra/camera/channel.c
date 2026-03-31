@@ -983,8 +983,8 @@ static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
 	}
 
 	if (lanes) {
-		dev_info(&chan->video.dev, "T124 mipi_cal: lanes=0x%x\n", lanes);
-		return tegra_mipi_calibration(lanes);
+		dev_info(&chan->video.dev, "T124 mipi_cal: lanes=0x%x (skipped — cal hangs on this device)\n", lanes);
+		/* TODO: fix MIPI cal timeout, for now skip */
 	}
 	return 0;
 }
