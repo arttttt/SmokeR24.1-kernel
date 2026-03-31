@@ -537,6 +537,26 @@ static void tegra_channel_vi_csi_recover(struct tegra_channel *chan)
 	u32 frame_start;
 	int index, valid_ports = chan->valid_ports;
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/*
+	 * T124 direct path: do NOT toggle DPD or re-init CSI via MC framework.
+	 * Just clear syncpt errors and re-arm. Toggling DPD kills MIPI pads
+	 * and the MC CSI stop/start doesn't apply to our direct register path.
+	 */
+	for (index = 0; index < valid_ports; index++) {
+		frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
+		if (error_val & frame_start)
+			chan->syncpoint_fifo[index] = SYNCPT_FIFO_DEPTH;
+	}
+	tegra_channel_write(chan,
+		TEGRA_VI_CFG_VI_INCR_SYNCPT_ERROR, error_val);
+	for (index = 0; index < valid_ports; index++)
+		nvhost_syncpt_set_min_eq_max_ext(chan->vi->ndev,
+						chan->syncpt[index]);
+	dev_info(chan->vi->dev, "T124 ec_recover: cleared syncpt errors\n");
+	return;
+#endif
+
 	/* Disable pad power to start recovery */
 	tegra_csi_pad_control(chan->vi->csi, chan->port, DISABLE);
 	/* Disable clock gating to enable continuous clock */
