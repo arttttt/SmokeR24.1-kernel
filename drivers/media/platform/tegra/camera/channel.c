@@ -718,11 +718,35 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 
 	chan->capture_state = CAPTURE_GOOD;
 	for (index = 0; index < valid_ports; index++) {
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+		/* Poll PP_B status right after single shot for early detection */
+		{
+			struct tegra_csi_device *csi = chan->vi->csi;
+			void __iomem *vi_base = chan->vi->iomem;
+			int poll;
+			u32 pp_stat, cile_stat, img_def, single_shot;
+			for (poll = 0; poll < 5; poll++) {
+				pp_stat = readl(vi_base + 0x888);   /* PP_B_STATUS */
+				cile_stat = readl(vi_base + 0xa18); /* CIL_E_STATUS */
+				img_def = readl(vi_base + 0x200 + 0x0c); /* IMAGE_DEF */
+				single_shot = readl(vi_base + 0x200 + 0x04); /* SINGLE_SHOT */
+				dev_info(&chan->video.dev,
+					"POST-SHOT[%d]: PP_B=0x%08x CIL_E=0x%08x "
+					"IMG_DEF=0x%08x SS=0x%08x\n",
+					poll, pp_stat, cile_stat, img_def, single_shot);
+				if (pp_stat & 0x1) /* PKT_RCVD */
+					break;
+				udelay(1000); /* 1ms between polls */
+			}
+		}
+#endif
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
 			chan->timeout, NULL, &ts);
 		if (err) {
 			u32 errstatus;
+			struct tegra_csi_device *csi = chan->vi->csi;
+			void __iomem *vi_base = chan->vi->iomem;
 			dev_err(&chan->video.dev,
 				"frame start syncpt timeout!%d\n", index);
 			/* Dump CSI status for debug */
@@ -731,6 +755,28 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			dev_err(&chan->video.dev,
 				"CSI%d: ERROR_STATUS=0x%08x\n",
 				chan->port[index], errstatus);
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+			/* Comprehensive register dump on timeout */
+			dev_err(&chan->video.dev,
+				"TIMEOUT DUMP: PP_B=0x%08x CIL_E=0x%08x "
+				"CILE_X=0x%08x READONLY=0x%08x "
+				"IMG_DEF=0x%08x IMG_DT=0x%08x "
+				"IMG_SZ=0x%08x IMG_WC=0x%08x "
+				"SURF_LSB=0x%08x STRIDE=0x%08x "
+				"INPUT_STRM=0x%08x CTRL0=0x%08x\n",
+				readl(vi_base + 0x888),
+				readl(vi_base + 0xa18),
+				readl(vi_base + 0xa1c),
+				readl(vi_base + 0xaec),
+				readl(vi_base + 0x200 + 0x0c),
+				readl(vi_base + 0x200 + 0x20),
+				readl(vi_base + 0x200 + 0x18),
+				readl(vi_base + 0x200 + 0x1c),
+				readl(vi_base + 0x200 + 0x28),
+				readl(vi_base + 0x200 + 0x54),
+				readl(vi_base + 0x86c),
+				readl(vi_base + 0x870));
+#endif
 			state = VB2_BUF_STATE_ERROR;
 			/* perform error recovery for timeout */
 			tegra_channel_ec_recover(chan);
