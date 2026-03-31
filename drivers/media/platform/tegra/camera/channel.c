@@ -678,6 +678,12 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	int valid_ports = chan->valid_ports;
 	int state = VB2_BUF_STATE_DONE;
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/* TPG uses A8B8G8R8 = 4 bytes/pixel, override stride */
+	if (t124_csi_tpg)
+		bytes_per_line = chan->format.width * 4;
+#endif
+
 	for (index = 0; index < valid_ports; index++) {
 		/* Program buffer address by using surface 0 */
 		csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_MSB, 0x0);
