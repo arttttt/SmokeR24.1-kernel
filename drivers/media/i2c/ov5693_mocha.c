@@ -333,8 +333,10 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	/* Step 1: disable CSI-B IO DPD */
+	/* Step 1: disable CSI-E IO DPD */
 	tegra_io_dpd_disable(&csie_io);
+	dev_info(&priv->i2c_client->dev, "DPD disabled for CSIE (reg=%d bit=%d)\n",
+		 csie_io.io_dpd_reg_index, csie_io.io_dpd_bit);
 
 	/* Step 1.5: enable MCLK2 (24MHz) */
 	if (pw->mclk) {

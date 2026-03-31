@@ -636,6 +636,14 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 	/* disable CSI IOs DPD mode to turn on camera */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
+		/*
+		 * T124 CSI-E (1-lane via CILE): MC PORT_B(1) maps to
+		 * physical CSIE which is index 4 in the DPD array.
+		 * The default csi_port=1 would hit CSIB (index 1) which
+		 * is wrong — CSIE pads would stay in deep power down.
+		 */
+		if (s_data->csi_port == 1 && s_data->numlanes == 1)
+			io_idx = 4; /* CSIE */
 		tegra_io_dpd_disable(&camera_common_csi_io[io_idx]);
 		dev_info(s_data->dev,
 			 "dpd_disable: csi_port=%d io_idx=%d numlanes=%d\n",
@@ -653,6 +661,9 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 	/* enable CSI IOs DPD mode */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
+		/* T124 CSI-E fix: same as dpd_disable */
+		if (s_data->csi_port == 1 && s_data->numlanes == 1)
+			io_idx = 4; /* CSIE */
 		tegra_io_dpd_enable(&camera_common_csi_io[io_idx]);
 		dev_info(s_data->dev,
 			 "dpd_enable: csi_port=%d io_idx=%d numlanes=%d\n",
