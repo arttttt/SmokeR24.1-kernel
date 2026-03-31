@@ -1119,6 +1119,9 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 		u32 data_type = chan->fmtinfo->img_dt;
 		u32 word_count = tegra_core_get_word_count(width, chan->fmtinfo);
 
+		/* Enable 2nd-level clock gating BEFORE CSI setup (legacy vi2 does this at init) */
+		writel(0x1, vi_base + 0x0b8);  /* TEGRA_VI_CFG_CG_CTRL = T12_CG_2ND_LEVEL_EN */
+
 		/* Clear all CIL and PP status (vi2_channel_init) */
 		writel(0xFFFFFFFF, vi_base + 0x93c); /* CIL_A_STATUS */
 		writel(0xFFFFFFFF, vi_base + 0x970); /* CIL_B_STATUS */
@@ -1144,7 +1147,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 		writel(0x0, vi_base + 0x9d4);      /* CIL_D_INT_MASK */
 		writel(0x0, vi_base + 0xa14);      /* CIL_E_INT_MASK */
 		/* PHY control — CSI_C uses CILE only */
-		writel(0x4e, vi_base + 0xa10);     /* PHY_CILE_CONTROL0: THS=14+BYPASS_LP_SEQ */
+		writel(0x49, vi_base + 0xa10);     /* PHY_CILE_CONTROL0: THS=9+BYPASS_LP_SEQ (NVIDIA forum fix) */
 
 		/* Pixel Parser B setup */
 		writel(0xf007, vi_base + 0x87c);   /* PPB_COMMAND = RST+SS */
