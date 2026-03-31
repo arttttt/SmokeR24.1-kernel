@@ -42,10 +42,10 @@
 #include "ov5693_mocha_mode_tbls.h"
 
 /* CSI-B DPD for OV5693 on CSI-B port */
-static struct tegra_io_dpd csib_io = {
-	.name			= "CSIB",
-	.io_dpd_reg_index	= 0,
-	.io_dpd_bit		= 1,
+static struct tegra_io_dpd csie_io = {
+	.name			= "CSIE",
+	.io_dpd_reg_index	= 1,
+	.io_dpd_bit		= 12,
 };
 
 #define OV5693_MAX_COARSE_DIFF		6
@@ -334,7 +334,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	}
 
 	/* Step 1: disable CSI-B IO DPD */
-	tegra_io_dpd_disable(&csib_io);
+	tegra_io_dpd_disable(&csie_io);
 
 	/* Step 1.5: enable MCLK2 (24MHz) */
 	if (pw->mclk) {
@@ -419,7 +419,7 @@ ov5693_afvdd_fail:
 	if (pw->mclk)
 		clk_disable_unprepare(pw->mclk);
 ov5693_mclk_fail:
-	tegra_io_dpd_enable(&csib_io);
+	tegra_io_dpd_enable(&csie_io);
 	pr_err("%s failed.\n", __func__);
 	return -ENODEV;
 }
@@ -490,7 +490,7 @@ static int ov5693_power_off(struct camera_common_data *s_data)
 		clk_disable_unprepare(pw->mclk);
 
 	/* Step 10: enable CSI-B IO DPD */
-	tegra_io_dpd_enable(&csib_io);
+	tegra_io_dpd_enable(&csie_io);
 
 	pw->state = SWITCH_OFF;
 	return 0;

@@ -64,15 +64,17 @@
 				#size-cells = <0>;
 
 				/*
-				 * Channel 0: CSI-B (2-lane)
-				 * CSI port=1 (PORT_B in csi.h)
-				 * T124 has only 2 CSI bricks: A(0) and B(1)
+				 * Channel 0: CSI-E (1-lane)
+				 * OV5693 front camera is wired to CSI-E pins
+				 * (CILE data + CILE clock).
+				 * In legacy vi2.c this is CSI_C port, which uses
+				 * Pixel Parser B (same as MC PORT_B = port 1).
 				 */
 				port@0 {
 					reg = <0>;
 					mocha_vi_in0: endpoint {
 						csi-port = <1>;
-						bus-width = <2>;
+						bus-width = <1>;
 						remote-endpoint = <&mocha_ov5693_out0>;
 					};
 				};
@@ -265,7 +267,7 @@
 
 			mode0 { /* 5MP 30fps */
 				mclk_khz = "24000";
-				num_lanes = "2";
+				num_lanes = "1";
 				tegra_sinterface = "serial_b";
 				discontinuous_clk = "no";
 				dpcm_enable = "false";
@@ -293,7 +295,7 @@
 
 			mode1 { /* 720p 60fps (2-lane CSI-B, reduced from 120fps) */
 				mclk_khz = "24000";
-				num_lanes = "2";
+				num_lanes = "1";
 				tegra_sinterface = "serial_b";
 				discontinuous_clk = "no";
 				dpcm_enable = "false";

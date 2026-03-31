@@ -348,33 +348,76 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 	/*
-	 * T124/T132-specific CIL setup — ported from legacy vi2.c
-	 * (vi2_capture_setup_cil_t124 / vi2_capture_setup_cil_phy_t124).
-	 * Key differences from T210:
-	 * - PHY_CONTROL = 0x9 (not 0xA)
-	 * - PAD_CONFIG0 with BRICK_CLOCK_A_4X on port_a of the brick
-	 * - PHY_CIL_COMMAND uses different bit layout per port
+	 * T124/T132-specific CIL setup — ported from legacy vi2.c.
+	 *
+	 * T124 CSI architecture (from schematic):
+	 *   Brick 0: CILA+CILB → CSI_A (4-lane or 2x 2-lane)
+	 *   Brick 1: CILC+CILD+CILE → CSI_B (4-lane) or CSI_C (1-lane via CILE)
+	 *
+	 * MC PORT_A(0) = legacy CSI_A, uses PP_A + CILA/CILB
+	 * MC PORT_B(1) = legacy CSI_B/CSI_C, uses PP_B + CILC/CILD or CILE
+	 *
+	 * OV5693 on mocha: CSI-E pins, 1-lane → CSI_C in legacy → PORT_B in MC
+	 * IMX179 on mocha: CSI-A/B pins, 4-lane → CSI_A in legacy → PORT_A in MC
+	 *
+	 * Key: CIL registers for CILC/D/E are NOT at port_a/port_b->cil offsets
+	 * (those point to CILA/CILB). Must use absolute offsets via csi_write.
 	 */
-	cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, BRICK_CLOCK_A_4X);
-	cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
-	cil_write(port_a, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
-	cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
-	cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
-	cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
+	if ((port->num & 0x1) == PORT_A) {
+		/* PORT_A = CSI_A: CILA + CILB (brick 0) */
+		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, BRICK_CLOCK_A_4X);
+		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
+		cil_write(port_a, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+		cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
+		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
+	} else {
+		/*
+		 * PORT_B = CSI_B or CSI_C: CILC/CILD/CILE
+		 * CIL registers are at fixed offsets from iomem[0]:
+		 *   CILC_PAD_CONFIG0 = 0x15C, PHY_CILC_CONTROL0 = 0x164
+		 *   CILD_PAD_CONFIG0 = 0x190, PHY_CILD_CONTROL0 = 0x198
+		 *   CILE_PAD_CONFIG0 = 0x1D0, PHY_CILE_CONTROL0 = 0x1D8
+		 *   CIL_C_INT_MASK  = 0x168
+		 *   CIL_D_INT_MASK  = 0x19C
+		 *   CIL_E_INT_MASK  = 0x1DC
+		 */
+		/* CILC PAD_CONFIG0 = CD_BK_MODE */
+		csi_write(csi, 0x15C, 0x10000, 0);
+		/* CILD PAD_CONFIG0 = 0 */
+		csi_write(csi, 0x190, 0x0, 0);
+		/* CILE PAD_CONFIG0 = 0 */
+		csi_write(csi, 0x1D0, 0x0, 0);
+		/* CIL C/D/E interrupt masks = 0 */
+		csi_write(csi, 0x168, 0x0, 0);
+		csi_write(csi, 0x19C, 0x0, 0);
+		csi_write(csi, 0x1DC, 0x0, 0);
+
+		if (port->lanes == 1) {
+			/* CSI_C (1-lane via CILE) */
+			csi_write(csi, 0x1D8, 0x9, 0); /* PHY_CILE_CONTROL0 */
+		} else {
+			/* CSI_B (2 or 4 lane via CILC+CILD) */
+			csi_write(csi, 0x164, 0x9, 0); /* PHY_CILC_CONTROL0 */
+			csi_write(csi, 0x198, 0x9, 0); /* PHY_CILD_CONTROL0 */
+		}
+	}
 
 	/* T124 PHY CIL command — proper RMW preserving other port's bits */
 	{
 		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND,
 				   port_num >> 1);
 		u32 newval;
-		if (port->lanes == 4) {
-			if ((port->num & 0x1) == PORT_A)
+		if ((port->num & 0x1) == PORT_A) {
+			if (port->lanes == 4)
 				newval = (val & 0xFFFF0000) | 0x0101;
 			else
-				newval = (val & 0x0000FFFF) | 0x21010000;
-		} else {
-			if ((port->num & 0x1) == PORT_A)
 				newval = (val & 0xFFFF0000) | 0x0201;
+		} else {
+			if (port->lanes == 4)
+				newval = (val & 0x0000FFFF) | 0x21010000;
+			else if (port->lanes == 1)
+				newval = (val & 0x0000FFFF) | 0x12020000;
 			else
 				newval = (val & 0x0000FFFF) | 0x22010000;
 		}
