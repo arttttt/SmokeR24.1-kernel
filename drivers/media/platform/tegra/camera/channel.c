@@ -290,9 +290,18 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 						      chan->port[i]);
 		atomic_set(&chan->is_streaming, ENABLE);
 	} else {
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+		if (!t124_csi_tpg) {
+#endif
 		ret = tegra_channel_set_stream(chan, true);
 		if (ret < 0)
 			return ret;
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+		} else {
+			dev_info(&chan->video.dev,
+				 "T124 CSI TPG: skipping sensor s_stream\n");
+		}
+#endif
 	}
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
@@ -399,9 +408,13 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 	}
 #endif
 
-	/* perform calibration as sensor started streaming */
-	tegra_mipi_bias_pad_enable();
+	/* perform calibration as sensor started streaming (skip for TPG) */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	if (!chan->vi->pg_mode && !t124_csi_tpg) {
+#else
 	if (!chan->vi->pg_mode) {
+#endif
+		tegra_mipi_bias_pad_enable();
 		mutex_lock(&chan->vi->mipical_lock);
 		tegra_channel_mipi_cal(chan, 0);
 		mutex_unlock(&chan->vi->mipical_lock);
@@ -721,7 +734,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC)
 		/* Poll PP_B status right after single shot for early detection */
 		{
-			struct tegra_csi_device *csi = chan->vi->csi;
 			void __iomem *vi_base = chan->vi->iomem;
 			int poll;
 			u32 pp_stat, cile_stat, img_def, single_shot;
@@ -745,7 +757,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			chan->timeout, NULL, &ts);
 		if (err) {
 			u32 errstatus;
-			struct tegra_csi_device *csi = chan->vi->csi;
 			void __iomem *vi_base = chan->vi->iomem;
 			dev_err(&chan->video.dev,
 				"frame start syncpt timeout!%d\n", index);
