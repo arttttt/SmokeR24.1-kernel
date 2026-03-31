@@ -702,11 +702,27 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 					chan->syncpt[index], 1);
 		/* Do not arm sync points if FIFO had entries before */
 		if (!chan->syncpoint_fifo[index]) {
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+			/*
+			 * T124 syncpt conditions (from R21.5 vi2.c):
+			 *   PPA_FRAME_START = 9
+			 *   PPB_FRAME_START = 10
+			 *   PPA_LINE_START  = 11
+			 *   PPB_LINE_START  = 12
+			 * These differ from T210 MC formula (5 + port*4).
+			 */
+			frame_start = (chan->port[index] == 0) ? 9 : 10;
+#else
 			frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
+#endif
 			val = VI_CFG_VI_INCR_SYNCPT_COND(frame_start) |
 				chan->syncpt[index];
 			tegra_channel_write(chan,
 				TEGRA_VI_CFG_VI_INCR_SYNCPT, val);
+			dev_info(&chan->video.dev,
+				"syncpt ARM: cond=%d syncpt=%d thresh=%d val=0x%08x\n",
+				frame_start, chan->syncpt[index],
+				thresh[index], val);
 		} else
 			chan->syncpoint_fifo[index]--;
 	}
