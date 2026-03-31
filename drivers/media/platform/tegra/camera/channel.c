@@ -523,6 +523,10 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			(buf->addr + chan->buffer_offset[index]));
 		csi_write(chan, index,
 			TEGRA_VI_CSI_SURFACE0_STRIDE, bytes_per_line);
+		dev_info(&chan->video.dev,
+			"capture_frame[%d]: buf_addr=0x%08x offset=0x%x stride=%d\n",
+			index, (u32)(buf->addr + chan->buffer_offset[index]),
+			chan->buffer_offset[index], bytes_per_line);
 
 		/* Program syncpoints */
 		thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
