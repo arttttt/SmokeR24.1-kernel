@@ -461,7 +461,7 @@ static void show_media_info(void)
 
 static int do_capture(const char *dev, int width, int height,
 		      const char *outfile, int nframes, int timeout_ms,
-		      int read_regs, int poll_regs)
+		      int read_regs, int poll_regs, int single_shot)
 {
 	struct buffer buffers[MAX_BUFFERS];
 	int nbuf = 0;
@@ -508,7 +508,7 @@ static int do_capture(const char *dev, int width, int height,
 	/* Request buffers */
 	struct v4l2_requestbuffers req;
 	memset(&req, 0, sizeof(req));
-	req.count = MAX_BUFFERS;
+	req.count = single_shot ? 1 : MAX_BUFFERS;
 	req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	req.memory = V4L2_MEMORY_MMAP;
 
@@ -659,9 +659,11 @@ static int do_capture(const char *dev, int width, int height,
 				}
 			}
 
-			/* Re-queue buffer */
-			if (xioctl(fd, VIDIOC_QBUF, &buf) < 0) {
-				perror("VIDIOC_QBUF (requeue)");
+			/* Re-queue buffer (skip in single-shot mode) */
+			if (!single_shot) {
+				if (xioctl(fd, VIDIOC_QBUF, &buf) < 0) {
+					perror("VIDIOC_QBUF (requeue)");
+				}
 			}
 
 			captured++;
@@ -705,6 +707,7 @@ static void usage(const char *prog)
 	printf("  -i          Info only (no capture)\n");
 	printf("  -r          Read CSI/VI registers via /dev/mem\n");
 	printf("  -R          Poll registers while waiting for frame\n");
+	printf("  -S          Single-shot mode (1 buffer, no requeue)\n");
 }
 
 int main(int argc, char *argv[])
@@ -717,9 +720,10 @@ int main(int argc, char *argv[])
 	int info_only = 0;
 	int read_regs = 0;
 	int poll_regs = 0;
+	int single_shot = 0;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irR")) != -1) {
+	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRS")) != -1) {
 		switch (opt) {
 		case 'd': dev = optarg; break;
 		case 'w': width = atoi(optarg); break;
@@ -730,6 +734,7 @@ int main(int argc, char *argv[])
 		case 'i': info_only = 1; break;
 		case 'r': read_regs = 1; break;
 		case 'R': poll_regs = 1; read_regs = 1; break;
+		case 'S': single_shot = 1; nframes = 1; break;
 		default:
 			usage(argv[0]);
 			return 1;
@@ -765,7 +770,8 @@ int main(int argc, char *argv[])
 
 	if (!info_only) {
 		int ret = do_capture(dev, width, height, outfile,
-				     nframes, timeout_ms, read_regs, poll_regs);
+				     nframes, timeout_ms, read_regs, poll_regs,
+				     single_shot);
 		unmap_vi_registers();
 		return ret < 0 ? 1 : 0;
 	}
