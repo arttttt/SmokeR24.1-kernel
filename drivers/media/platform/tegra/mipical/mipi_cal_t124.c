@@ -172,58 +172,6 @@ static void tegra_mipi_clk_disable(struct tegra_mipi *mipi)
 		clk_disable_unprepare(mipi->mipi_cal_fixed);
 }
 
-static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
-{
-	unsigned long timeout;
-	int val;
-
-	/* Clear status before triggering — matches T124 dsi.c flow */
-	regmap_write(mipi->regmap, CIL_MIPI_CAL_STATUS, 0xffffffff);
-
-	regmap_update_bits(mipi->regmap, MIPI_CAL_CTRL,
-			   CAL_STARTCAL, CAL_STARTCAL);
-
-	timeout = jiffies + msecs_to_jiffies(MIPI_CAL_TIMEOUT_MSEC);
-	while (time_before(jiffies, timeout)) {
-		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-		if (val & CAL_DONE)
-			return 0;
-		usleep_range(10, 100);
-	}
-
-	/* Re-check after timeout (may have slept past) */
-	regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-	if ((val & CAL_DONE) && !(val & CAL_ACTIVE))
-		return 0;
-
-	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x, lanes: 0x%x\n",
-		val, lanes);
-	return -ETIMEDOUT;
-}
-
-/*
- * Clear all lane selection registers to start from a clean state.
- */
-static void t124_clear_all(struct tegra_mipi *mipi)
-{
-	regmap_write(mipi->regmap, CILA_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, CILB_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, CILD_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, CILE_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, CILF_MIPI_CAL_CONFIG, 0);
-
-	regmap_write(mipi->regmap, DSIA_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, DSIB_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, DSIC_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, DSID_MIPI_CAL_CONFIG, 0);
-	regmap_write(mipi->regmap, DSIA_MIPI_CAL_CONFIG_2, 0);
-	regmap_write(mipi->regmap, DSIB_MIPI_CAL_CONFIG_2, 0);
-	regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG_2, 0);
-	regmap_write(mipi->regmap, CILD_MIPI_CAL_CONFIG_2, 0);
-	regmap_write(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2, 0);
-}
-
 /*
  * Apply T124 DSI production calibration settings.
  * Register values from dsi.c tegra_dsi_mipi_calibration_12x().
