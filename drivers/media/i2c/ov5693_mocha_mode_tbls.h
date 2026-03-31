@@ -28,7 +28,7 @@
  * 0x3001       pad_output_enable: I/O direction control
  * 0x3002       pad_output_value: I/O output value
  * 0x3006       pad_output_select: VSYNC/HREF/PCLK routing
- * 0x3011       mipi_lane_mode: bit[5]=0:2-lane, 1:4-lane
+ * 0x3011       mipi_lane_mode: bit[5]=0:1-lane, 1:2-lane (OV5693 max is 2 lanes)
  * 0x3012-0x3018 pad_control: drive strength, pull-up/down
  * 0x301b       chip_revision
  * 0x301d       pad_output_select2
@@ -129,11 +129,11 @@
  * 0x5e10       test_pattern_ctrl
  *
  * --- Mocha-specific Notes ---
- * The Mi Pad OV5693 is connected via CSI-B with 2 MIPI lanes
- * (reference boards use 4 lanes on CSI-A). Each mode table ends
- * with "Mocha 2-lane CSI-B overrides" that adjust:
- *   0x3011 = 0x11 (2-lane mode, reference uses 0x21 for 4-lane)
- *   0x3015 = 0x28 (PLL divider for 2-lane bandwidth)
+ * The Mi Pad OV5693 is connected via CSI-E with 1 MIPI data lane.
+ * Reference boards use 2 lanes on CSI-A. Each mode table ends
+ * with "Mocha 1-lane CSI-E overrides" that adjust:
+ *   0x3011 = 0x11 (1-lane mode, reference uses 0x21 for 2-lane)
+ *   0x3015 = 0x28 (PLL divider for reduced lane bandwidth)
  *   0x380c/d = increased HTS to reduce data rate on fewer lanes
  *
  * Frame rate formula:
@@ -432,8 +432,8 @@ static const ov5693_reg mode_2592x1944[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 2-lane CSI-B overrides */
-	{0x3011, 0x21},
+	/* Mocha 1-lane CSI-E overrides */
+	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x15},
 	{0x380d, 0x00},
@@ -695,8 +695,8 @@ static const ov5693_reg mode_2592x1458[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 2-lane CSI-B overrides */
-	{0x3011, 0x21},
+	/* Mocha 1-lane CSI-E overrides */
+	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x15},
 	{0x380d, 0x00},
@@ -947,8 +947,8 @@ static const ov5693_reg mode_1920x1080[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 2-lane CSI-B overrides */
-	{0x3011, 0x21},
+	/* Mocha 1-lane CSI-E overrides */
+	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0f},
 	{0x380d, 0xc0},
@@ -1200,8 +1200,8 @@ static const ov5693_reg mode_1280x720_60fps[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 2-lane CSI-B overrides (60fps: HTS=0x1500=5376) */
-	{0x3011, 0x21},
+	/* Mocha 1-lane CSI-E overrides (60fps: HTS=0x1500=5376) */
+	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x15},
 	{0x380d, 0x00},
@@ -1463,8 +1463,8 @@ static const ov5693_reg mode_1280x720_90fps[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 2-lane CSI-B overrides (90fps: HTS=0x0e00=3584) */
-	{0x3011, 0x21},
+	/* Mocha 1-lane CSI-E overrides (90fps: HTS=0x0e00=3584) */
+	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0e},
 	{0x380d, 0x00},
@@ -1733,11 +1733,11 @@ static const ov5693_reg mode_1280x720_120fps[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/*
-	 * Mocha 2-lane CSI-B overrides (120fps: HTS=0x0a80=2688)
-	 * Uses original 4-lane PLL (0x3015=0x08) but 2-lane MIPI (0x3011=0x11).
+	 * Mocha 1-lane CSI-E overrides (120fps: HTS=0x0a80=2688)
+	 * Uses original 2-lane PLL (0x3015=0x08) but 1-lane MIPI (0x3011=0x11).
 	 * This pushes more data per lane — may or may not work.
 	 */
-	{0x3011, 0x21},
+	{0x3011, 0x11},
 	{0x380c, 0x0a},
 	{0x380d, 0x80},
 	{OV5693_TABLE_END, 0x0000}
@@ -2002,8 +2002,8 @@ static const ov5693_reg mode_1280x720_120fps_safe[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 2-lane CSI-B overrides (120fps safe: HTS=0x0a80=2688, mocha PLL) */
-	{0x3011, 0x21},
+	/* Mocha 1-lane CSI-E overrides (120fps safe: HTS=0x0a80=2688, mocha PLL) */
+	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0a},
 	{0x380d, 0x80},
@@ -2016,11 +2016,11 @@ static const ov5693_reg mode_2592x1944_HDR_24fps[] = {
 	{0x3001, 0x0a},
 	{0x3002, 0x80},
 	{0x3006, 0x00},
-	{0x3011, 0x21},
+	{0x3011, 0x11}, /* 1-lane MIPI for mocha CSI-E */
 	{0x3012, 0x09},
 	{0x3013, 0x10},
 	{0x3014, 0x00},
-	{0x3015, 0x08},
+	{0x3015, 0x28}, /* PLL divider for 1-lane bandwidth */
 	{0x3016, 0xf0},
 	{0x3017, 0xf0},
 	{0x3018, 0xf0}, /* MIPI pad drive strength (NOT lane count — 0x3011 controls lanes) */
@@ -2264,11 +2264,11 @@ static const ov5693_reg mode_1920x1080_HDR_30fps[] = {
 	{0x3001, 0x0a},
 	{0x3002, 0x80},
 	{0x3006, 0x00},
-	{0x3011, 0x21},
+	{0x3011, 0x11}, /* 1-lane MIPI for mocha CSI-E */
 	{0x3012, 0x09},
 	{0x3013, 0x10},
 	{0x3014, 0x00},
-	{0x3015, 0x08},
+	{0x3015, 0x28}, /* PLL divider for 1-lane bandwidth */
 	{0x3016, 0xf0},
 	{0x3017, 0xf0},
 	{0x3018, 0xf0}, /* MIPI pad drive strength (NOT lane count — 0x3011 controls lanes) */
@@ -2512,11 +2512,11 @@ static const ov5693_reg mode_1280x720_HDR_60fps[] = {
 	{0x3001, 0x0a},
 	{0x3002, 0x80},
 	{0x3006, 0x00},
-	{0x3011, 0x21},
+	{0x3011, 0x11}, /* 1-lane MIPI for mocha CSI-E */
 	{0x3012, 0x09},
 	{0x3013, 0x10},
 	{0x3014, 0x00},
-	{0x3015, 0x08},
+	{0x3015, 0x28}, /* PLL divider for 1-lane bandwidth */
 	{0x3016, 0xf0},
 	{0x3017, 0xf0},
 	{0x3018, 0xf0}, /* MIPI pad drive strength (NOT lane count — 0x3011 controls lanes) */

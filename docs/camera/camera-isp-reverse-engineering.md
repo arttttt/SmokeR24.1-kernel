@@ -441,7 +441,7 @@ IMX179 (rear):  3280x2464 8MP, Bayer RGGB, MIPI CSI-A 4 lanes
                 Focuser: AD5823 (macro=620, inf=70)
                 CCM: [2.084, -0.413, -0.079; -1.102, 1.817, -0.789; 0.017, -0.404, 1.868]
 
-OV5693 (front): 2592x1944 5MP, Bayer BGGR, MIPI CSI-B 2 lanes
+OV5693 (front): 2592x1944 5MP, Bayer BGGR, MIPI CSI-E 1 lane
                 Modes: 5MP@30fps, 1080p@30fps, 720p@120fps
                 Real gain mode, gain = raw_value / 16.0
 ```

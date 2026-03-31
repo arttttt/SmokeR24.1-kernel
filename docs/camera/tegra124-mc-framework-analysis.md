@@ -125,7 +125,7 @@ at `mipi-cal@700e3000`. The legacy vi2.c driver uses it via
 
 **Risk:** MEDIUM. MIPI calibration may be needed for stable high-speed
 capture. However, basic capture should work without it — especially on
-2-lane CSI-B (OV5693). If we see bit errors or frame corruption, adding
+1-lane CSI-E (OV5693). If we see bit errors or frame corruption, adding
 T124 MIPI cal to the MC framework is the fix.
 
 **Workaround:** MIPI cal can be performed once at boot by a separate
@@ -234,7 +234,7 @@ We should proceed with MC framework (not fall back to soc_camera) because:
 3. The code is cleaner and better structured
 4. Future ISP integration will be easier with MC
 
-The bring-up strategy is: start with OV5693 on CSI-B (simpler, 2-lane),
+The bring-up strategy is: start with OV5693 on CSI-E (simpler, 1-lane),
 get basic RAW capture working, then expand to IMX179 and ISP.
 
 ---

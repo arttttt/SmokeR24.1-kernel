@@ -13,7 +13,7 @@
 | Sensor | Sony IMX179 | OmnVision OV5693 |
 | Resolution | 3280x2464 (8MP) | 2592x1944 (5MP) |
 | Bayer Pattern | RGGB | BGGR |
-| CSI Port | CSI-A, 4 lanes | CSI-B, 2 lanes |
+| CSI Port | CSI-A, 4 lanes | CSI-E, 1 lane |
 | MCLK | 24 MHz | 24 MHz |
 | PCLK | 348 MHz | — |
 | Line Length | 3440 px | — |
