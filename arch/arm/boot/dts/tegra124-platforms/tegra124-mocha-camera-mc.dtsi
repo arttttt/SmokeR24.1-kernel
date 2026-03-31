@@ -329,7 +329,7 @@
 					reg = <0>;
 					mocha_ov5693_out0: endpoint {
 						csi-port = <1>;
-						bus-width = <2>;
+						bus-width = <1>;
 						remote-endpoint = <&mocha_vi_in0>;
 					};
 				};
