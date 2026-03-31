@@ -465,7 +465,11 @@ static int tegra_mipi_probe(struct platform_device *pdev)
 					  : -ENODEV;
 	}
 
-	mipi->mipi_cal_fixed = clk_get_sys("mipi-cal-fixed", NULL);
+	mipi->mipi_cal_fixed = clk_get_sys("clk72mhz", NULL);
+	if (IS_ERR(mipi->mipi_cal_fixed)) {
+		dev_warn(&pdev->dev, "clk72mhz not found, trying mipi-cal-fixed\n");
+		mipi->mipi_cal_fixed = clk_get_sys("mipi-cal-fixed", NULL);
+	}
 	if (IS_ERR(mipi->mipi_cal_fixed)) {
 		dev_warn(&pdev->dev, "cannot get mipi-cal-fixed clock, proceeding without\n");
 		mipi->mipi_cal_fixed = NULL;
