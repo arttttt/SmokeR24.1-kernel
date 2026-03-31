@@ -53,6 +53,30 @@ MODULE_PARM_DESC(t124_csi_tpg, "Enable T124 CSI Test Pattern Generator (bypasses
 #define FRAMERATE	30
 #define BPP_MEM		2
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+static inline unsigned int tegra_channel_get_sizeimage(struct tegra_channel *chan)
+{
+	if (t124_csi_tpg)
+		return chan->format.width * chan->format.height * 4;
+	return chan->format.sizeimage;
+}
+static inline int tegra_channel_get_bytesperline(struct tegra_channel *chan)
+{
+	if (t124_csi_tpg)
+		return chan->format.width * 4;
+	return chan->format.bytesperline;
+}
+#else
+static inline unsigned int tegra_channel_get_sizeimage(struct tegra_channel *chan)
+{
+	return chan->format.sizeimage;
+}
+static inline int tegra_channel_get_bytesperline(struct tegra_channel *chan)
+{
+	return chan->format.bytesperline;
+}
+#endif
+
 extern int _vb2_fop_release(struct file *file, struct mutex *lock);
 static void tegra_channel_queued_buf_done(struct tegra_channel *chan,
 					  enum vb2_buffer_state state);
@@ -493,7 +517,7 @@ static void free_ring_buffers(struct tegra_channel *chan, int frames)
 		/* release one frame */
 		vb->v4l2_buf.sequence = chan->sequence++;
 		vb->v4l2_buf.field = V4L2_FIELD_NONE;
-		vb2_set_plane_payload(vb, 0, chan->format.sizeimage);
+		vb2_set_plane_payload(vb, 0, tegra_channel_get_sizeimage(chan));
 
 		/*
 		 * WAR to force buffer state if capture state is not good
@@ -672,17 +696,11 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	struct timespec ts;
 	int err = 0;
 	u32 val, frame_start;
-	int bytes_per_line = chan->format.bytesperline;
+	int bytes_per_line = tegra_channel_get_bytesperline(chan);
 	int index = 0;
 	u32 thresh[TEGRA_CSI_BLOCKS] = { 0 };
 	int valid_ports = chan->valid_ports;
 	int state = VB2_BUF_STATE_DONE;
-
-#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
-	/* TPG uses A8B8G8R8 = 4 bytes/pixel, override stride */
-	if (t124_csi_tpg)
-		bytes_per_line = chan->format.width * 4;
-#endif
 
 	for (index = 0; index < valid_ports; index++) {
 		/* Program buffer address by using surface 0 */
@@ -990,16 +1008,7 @@ tegra_channel_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
 		     unsigned int sizes[], void *alloc_ctxs[])
 {
 	struct tegra_channel *chan = vb2_get_drv_priv(vq);
-	unsigned int sizeimage = chan->format.sizeimage;
-
-#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
-	/* TPG uses A8B8G8R8 = 4 Bpp, need larger buffers */
-	if (t124_csi_tpg) {
-		sizeimage = chan->format.width * chan->format.height * 4;
-		dev_info(chan->vi->dev,
-			 "TPG queue_setup: sizeimage=%u (4Bpp)\n", sizeimage);
-	}
-#endif
+	unsigned int sizeimage = tegra_channel_get_sizeimage(chan);
 
 	/* Make sure the image size is large enough. */
 	if (fmt && fmt->fmt.pix.sizeimage < sizeimage)
@@ -1023,7 +1032,7 @@ static int tegra_channel_buffer_prepare(struct vb2_buffer *vb)
 	struct tegra_channel_buffer *buf = to_tegra_channel_buffer(vb);
 
 	buf->chan = chan;
-	vb2_set_plane_payload(vb, 0, chan->format.sizeimage);
+	vb2_set_plane_payload(vb, 0, tegra_channel_get_sizeimage(chan));
 	buf->addr = vb2_dma_contig_plane_dma_addr(vb, 0);
 
 	return 0;
