@@ -102,6 +102,7 @@
 #define DSIB_MIPI_CAL_CONFIG_2		0x68
 #define CILC_MIPI_CAL_CONFIG_2		0x6c	/* T124: DSI1 clock lane C */
 #define CILD_MIPI_CAL_CONFIG_2		0x70	/* T124: DSI1 clock lane D */
+#define CSIE_MIPI_CAL_CONFIG_2		0x74	/* T124: CSI-E clock lane */
 #define  CFG2_CLKSEL			(1 << 21)
 #define  CFG2_HSCLKPDOS(x)		(((x) & 0x1f) << 8)
 #define  CFG2_HSCLKPUOS(x)		(((x) & 0x1f) << 0)
@@ -185,7 +186,7 @@ static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
 	timeout = jiffies + msecs_to_jiffies(MIPI_CAL_TIMEOUT_MSEC);
 	while (time_before(jiffies, timeout)) {
 		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-		if ((val & CAL_DONE) && !(val & CAL_ACTIVE))
+		if (val & CAL_DONE)
 			return 0;
 		usleep_range(10, 100);
 	}
@@ -220,6 +221,7 @@ static void t124_clear_all(struct tegra_mipi *mipi)
 	regmap_write(mipi->regmap, DSIB_MIPI_CAL_CONFIG_2, 0);
 	regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG_2, 0);
 	regmap_write(mipi->regmap, CILD_MIPI_CAL_CONFIG_2, 0);
+	regmap_write(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2, 0);
 }
 
 /*
@@ -301,8 +303,11 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 		regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG, CIL_SEL);
 	if (lanes & CSID)
 		regmap_write(mipi->regmap, CILD_MIPI_CAL_CONFIG, CIL_SEL);
-	if (lanes & CSIE)
+	if (lanes & CSIE) {
 		regmap_write(mipi->regmap, CILE_MIPI_CAL_CONFIG, CIL_SEL);
+		regmap_write(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2,
+			     CFG2_CLKSEL);
+	}
 	if (lanes & CSIF)
 		regmap_write(mipi->regmap, CILF_MIPI_CAL_CONFIG, CIL_SEL);
 
