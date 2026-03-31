@@ -682,9 +682,6 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			"%s: warning coarse time short override failed\n",
 			__func__);
 
-	/* Enable sensor test pattern for MIPI TX debug */
-	regmap_write(priv->regmap, 0x5e00, 0x80);
-
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)
 		goto exit;
