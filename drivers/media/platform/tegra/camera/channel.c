@@ -1147,7 +1147,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 		writel(0x0, vi_base + 0x9d4);      /* CIL_D_INT_MASK */
 		writel(0x0, vi_base + 0xa14);      /* CIL_E_INT_MASK */
 		/* PHY control — CSI_C uses CILE only */
-		writel(0x4e, vi_base + 0xa10);     /* PHY_CILE_CONTROL0: THS=14+BYPASS_LP_SEQ */
+		writel(0x09, vi_base + 0xa10);     /* PHY_CILE_CONTROL0: THS=9 (R21.5 stock value) */
 
 		/* Pixel Parser B setup */
 		writel(0xf007, vi_base + 0x87c);   /* PPB_COMMAND = RST+SS */
