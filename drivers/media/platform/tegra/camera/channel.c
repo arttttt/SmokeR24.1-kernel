@@ -602,7 +602,7 @@ static void tegra_channel_ec_init(struct tegra_channel *chan)
 	 * Timeout units is jiffies, 1 jiffy = 10ms
 	 * TODO: Get frame rate from sub-device and adopt timeout
 	 */
-	chan->timeout = 2000; /* large timeout for debug — R21.5 uses 200ms */
+	chan->timeout = 200; /* R21.5 uses 200ms */
 
 	/*
 	 * Sync point FIFO full blocks host interface
@@ -710,7 +710,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			(buf->addr + chan->buffer_offset[index]));
 		csi_write(chan, index,
 			TEGRA_VI_CSI_SURFACE0_STRIDE, bytes_per_line);
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			"capture_frame[%d]: buf_addr=0x%08x offset=0x%x stride=%d\n",
 			index, (u32)(buf->addr + chan->buffer_offset[index]),
 			chan->buffer_offset[index], bytes_per_line);
@@ -844,7 +844,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			u32 syncpt_val = 0;
 			nvhost_syncpt_read_ext_check(chan->vi->ndev,
 				chan->syncpt[index], &syncpt_val);
-			dev_info(&chan->video.dev,
+			dev_dbg(&chan->video.dev,
 				"PRE-SHOT port=%d syncpt=%d val=%d thresh=%d: "
 				"IMG_DEF=0x%08x BUF=0x%08x "
 				"PP_STATUS=0x%08x CIL_E=0x%08x\n",
@@ -862,27 +862,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 
 	chan->capture_state = CAPTURE_GOOD;
 	for (index = 0; index < valid_ports; index++) {
-#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
-		/* Poll PP_B status right after single shot for early detection */
-		{
-			void __iomem *vi_base = chan->vi->iomem;
-			int poll;
-			u32 pp_stat, cile_stat, img_def, single_shot;
-			for (poll = 0; poll < 5; poll++) {
-				pp_stat = readl(vi_base + 0x888);   /* PP_B_STATUS */
-				cile_stat = readl(vi_base + 0xa18); /* CIL_E_STATUS */
-				img_def = readl(vi_base + 0x200 + 0x0c); /* IMAGE_DEF */
-				single_shot = readl(vi_base + 0x200 + 0x04); /* SINGLE_SHOT */
-				dev_info(&chan->video.dev,
-					"POST-SHOT[%d]: PP_B=0x%08x CIL_E=0x%08x "
-					"IMG_DEF=0x%08x SS=0x%08x\n",
-					poll, pp_stat, cile_stat, img_def, single_shot);
-				if (pp_stat & 0x1) /* PKT_RCVD */
-					break;
-				udelay(1000); /* 1ms between polls */
-			}
-		}
-#endif
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
 			chan->timeout, NULL, &ts);
