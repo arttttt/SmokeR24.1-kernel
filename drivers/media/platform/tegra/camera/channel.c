@@ -556,9 +556,34 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	}
 
 	/* Ensure all CSI ports are ready with setup to avoid timing issue */
-	for (index = 0; index < valid_ports; index++)
+	for (index = 0; index < valid_ports; index++) {
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+		/* Dump all VI_CSI and PP registers before single shot */
+		{
+			struct tegra_csi_device *csi = chan->vi->csi;
+			struct tegra_csi_port *pp = &csi->ports[chan->port[index]];
+			dev_info(&chan->video.dev,
+				"PRE-SHOT port=%d: "
+				"PP_CMD=0x%08x CTRL0=0x%08x CTRL1=0x%08x "
+				"INPUT=0x%08x GAP=0x%08x "
+				"IMG_DEF=0x%08x IMG_DT=0x%08x IMG_SZ=0x%08x "
+				"CILE_PHY=0x%08x CIL_CMD=0x%08x\n",
+				chan->port[index],
+				readl(pp->pixel_parser + 0x10),  /* PP_COMMAND */
+				readl(pp->pixel_parser + 0x04),  /* CONTROL0 */
+				readl(pp->pixel_parser + 0x08),  /* CONTROL1 */
+				readl(pp->pixel_parser + 0x00),  /* INPUT_STREAM */
+				readl(pp->pixel_parser + 0x0c),  /* GAP */
+				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DEF),
+				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DT),
+				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_SIZE),
+				readl(csi->iomem[0] + 0x1D8),   /* PHY_CILE_CTRL */
+				readl(csi->iomem[0] + 0x0D0));  /* CIL_COMMAND */
+		}
+#endif
 		csi_write(chan, index,
 			TEGRA_VI_CSI_SINGLE_SHOT, SINGLE_SHOT_CAPTURE);
+	}
 
 	chan->capture_state = CAPTURE_GOOD;
 	for (index = 0; index < valid_ports; index++) {
