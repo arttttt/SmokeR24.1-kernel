@@ -309,9 +309,10 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 	if (lanes & (DSIA | DSIB | DSIC | DSID))
 		t124_apply_dsi_prod(mipi, lanes);
 
-	/* 7. Trigger */
-	regmap_update_bits(mipi->regmap, MIPI_CAL_CTRL,
-			   CAL_STARTCAL, CAL_STARTCAL);
+	/* 7. Set production CTRL values + trigger */
+	regmap_write(mipi->regmap, MIPI_CAL_CTRL,
+		     CAL_NOISE_FLT(0xa) | CAL_PRESCALE(0x2) |
+		     CAL_CLKEN_OVR | CAL_STARTCAL);
 
 	/* 8. Wait — vi2 uses 500 retries at 200-300us */
 	while (--retry) {
