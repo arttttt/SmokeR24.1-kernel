@@ -238,9 +238,11 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 	/* Clear status */
 	regmap_write(mipi->regmap, CIL_MIPI_CAL_STATUS, 0xF1F10000);
 
-	/* Deselect DSI lanes */
+	/* Deselect ALL lanes — DSI may have left some selected */
 	regmap_update_bits(mipi->regmap, DSIA_MIPI_CAL_CONFIG, DSI_SEL, 0);
 	regmap_update_bits(mipi->regmap, DSIB_MIPI_CAL_CONFIG, DSI_SEL, 0);
+	regmap_update_bits(mipi->regmap, DSIC_MIPI_CAL_CONFIG, DSI_SEL, 0);
+	regmap_update_bits(mipi->regmap, DSID_MIPI_CAL_CONFIG, DSI_SEL, 0);
 
 	/* Bias pad setup — use update_bits to preserve other fields */
 	regmap_update_bits(mipi->regmap, MIPI_BIAS_PAD_CFG0,
@@ -299,6 +301,19 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 				   CIL_SEL, CIL_SEL);
 		regmap_update_bits(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2,
 				   CFG2_CLKSEL, CFG2_CLKSEL);
+	}
+
+	/* Dump state before trigger */
+	{
+		u32 ctrl, cile_cfg, csie_cfg2, dsia_cfg, dsib_cfg;
+		regmap_read(mipi->regmap, MIPI_CAL_CTRL, &ctrl);
+		regmap_read(mipi->regmap, CILE_MIPI_CAL_CONFIG, &cile_cfg);
+		regmap_read(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2, &csie_cfg2);
+		regmap_read(mipi->regmap, DSIA_MIPI_CAL_CONFIG, &dsia_cfg);
+		regmap_read(mipi->regmap, DSIB_MIPI_CAL_CONFIG, &dsib_cfg);
+		dev_info(mipi->dev,
+			"pre-cal: CTRL=0x%x CILE=0x%x CSIE2=0x%x DSIA=0x%x DSIB=0x%x\n",
+			ctrl, cile_cfg, csie_cfg2, dsia_cfg, dsib_cfg);
 	}
 
 	/* Trigger calibration */
