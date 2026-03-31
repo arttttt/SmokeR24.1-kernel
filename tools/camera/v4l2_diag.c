@@ -621,7 +621,7 @@ static void usage(const char *prog)
 	printf("  -d <dev>    Video device (default: /dev/video0)\n");
 	printf("  -w <width>  Frame width (default: 1280)\n");
 	printf("  -h <height> Frame height (default: 720)\n");
-	printf("  -o <file>   Output file (default: /data/local/tmp/frame.raw)\n");
+	printf("  -o <file>   Output file (default: /sdcard/Pictures/frame.raw)\n");
 	printf("  -n <count>  Number of frames (default: 1)\n");
 	printf("  -t <ms>     Timeout in ms (default: 2000)\n");
 	printf("  -i          Info only (no capture)\n");
@@ -632,7 +632,7 @@ static void usage(const char *prog)
 int main(int argc, char *argv[])
 {
 	const char *dev = "/dev/video0";
-	const char *outfile = "/data/local/tmp/frame.raw";
+	const char *outfile = "/sdcard/Pictures/frame.raw";
 	int width = 1280, height = 720;
 	int nframes = 1;
 	int timeout_ms = 2000;
