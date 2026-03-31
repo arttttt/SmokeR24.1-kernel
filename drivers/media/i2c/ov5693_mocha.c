@@ -689,9 +689,9 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	else
 		dev_info(&client->dev, "TEST PATTERN enabled (0x5e00=0x80)\n");
 
-	/* DEBUG: try 2-lane mode (0x21) — maybe OV5693 MIPI TX broken in 1-lane */
-	regmap_write(priv->regmap, 0x3011, 0x21);
-	dev_info(&client->dev, "DEBUG: forced 0x3011=0x21 (2-lane mode)\n");
+	/* DEBUG: try continuous clock (0x24) instead of dis-continuous (0x20) */
+	regmap_write(priv->regmap, 0x4800, 0x24);
+	dev_info(&client->dev, "DEBUG: forced 0x4800=0x24 (continuous clock)\n");
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)
