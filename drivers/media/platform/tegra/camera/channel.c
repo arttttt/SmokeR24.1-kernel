@@ -990,14 +990,24 @@ tegra_channel_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
 		     unsigned int sizes[], void *alloc_ctxs[])
 {
 	struct tegra_channel *chan = vb2_get_drv_priv(vq);
+	unsigned int sizeimage = chan->format.sizeimage;
+
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/* TPG uses A8B8G8R8 = 4 Bpp, need larger buffers */
+	if (t124_csi_tpg) {
+		sizeimage = chan->format.width * chan->format.height * 4;
+		dev_info(chan->vi->dev,
+			 "TPG queue_setup: sizeimage=%u (4Bpp)\n", sizeimage);
+	}
+#endif
 
 	/* Make sure the image size is large enough. */
-	if (fmt && fmt->fmt.pix.sizeimage < chan->format.sizeimage)
+	if (fmt && fmt->fmt.pix.sizeimage < sizeimage)
 		return -EINVAL;
 
 	*nplanes = 1;
 
-	sizes[0] = fmt ? fmt->fmt.pix.sizeimage : chan->format.sizeimage;
+	sizes[0] = fmt ? fmt->fmt.pix.sizeimage : sizeimage;
 	alloc_ctxs[0] = chan->alloc_ctx;
 
 	/* Make sure minimum number of buffers are passed */
