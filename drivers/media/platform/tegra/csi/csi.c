@@ -398,6 +398,11 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		if (port->lanes == 1) {
 			/* CSI_C (1-lane via CILE) */
 			csi_write(csi, 0x1D8, 0x9, 0); /* PHY_CILE_CONTROL0 */
+			dev_info(csi->dev,
+				 "T124 CILE: PAD=0x%08x PHY=0x%08x INT=0x%08x\n",
+				 csi_read(csi, 0x1D0, 0),
+				 csi_read(csi, 0x1D8, 0),
+				 csi_read(csi, 0x1DC, 0));
 		} else {
 			/* CSI_B (2 or 4 lane via CILC+CILD) */
 			csi_write(csi, 0x164, 0x9, 0); /* PHY_CILC_CONTROL0 */
