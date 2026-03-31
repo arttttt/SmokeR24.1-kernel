@@ -578,6 +578,11 @@ void tegra_csi_status(struct tegra_csi_device *csi,
 			port_num,
 			csi_read(csi, 0x1E0, 0),  /* CIL_E_STATUS */
 			csi_read(csi, 0x1E4, 0)); /* CIL_EX_STATUS */
+		/* Also check PP_A status — maybe data routes there */
+		dev_err(csi->dev, "CSI%d PP_A_STATUS 0x%08x PP_B_STATUS 0x%08x\n",
+			port_num,
+			readl(csi->iomem[0] + 0x1c),  /* PP_A status at PP0+0x1c */
+			readl(csi->iomem[0] + 0x34 + 0x1c)); /* PP_B status */
 	}
 #endif
 
