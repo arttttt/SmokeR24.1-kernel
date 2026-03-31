@@ -475,6 +475,19 @@ static int do_capture(const char *dev, int width, int height,
 		return -1;
 	}
 
+	/* Set framerate BEFORE format so mode selection considers fps */
+	if (framerate > 0) {
+		struct v4l2_streamparm parm;
+		memset(&parm, 0, sizeof(parm));
+		parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		parm.parm.capture.timeperframe.numerator = 1;
+		parm.parm.capture.timeperframe.denominator = framerate;
+		if (xioctl(fd, VIDIOC_S_PARM, &parm) < 0)
+			perror("VIDIOC_S_PARM (framerate)");
+		else
+			printf("Framerate set to %d fps\n", framerate);
+	}
+
 	/* Set format */
 	struct v4l2_format fmt;
 	memset(&fmt, 0, sizeof(fmt));
@@ -505,19 +518,6 @@ static int do_capture(const char *dev, int width, int height,
 		fmt.fmt.pix.width, fmt.fmt.pix.height,
 		fcc_to_str(fmt.fmt.pix.pixelformat, fcc),
 		fmt.fmt.pix.bytesperline, fmt.fmt.pix.sizeimage);
-
-	/* Set framerate if specified */
-	if (framerate > 0) {
-		struct v4l2_streamparm parm;
-		memset(&parm, 0, sizeof(parm));
-		parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-		parm.parm.capture.timeperframe.numerator = 1;
-		parm.parm.capture.timeperframe.denominator = framerate;
-		if (xioctl(fd, VIDIOC_S_PARM, &parm) < 0)
-			perror("VIDIOC_S_PARM (framerate)");
-		else
-			printf("Framerate set to %d fps\n", framerate);
-	}
 
 	/* Request buffers */
 	struct v4l2_requestbuffers req;
