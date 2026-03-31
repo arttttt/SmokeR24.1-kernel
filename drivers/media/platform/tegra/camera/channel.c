@@ -983,7 +983,11 @@ static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
 	}
 
 	if (lanes) {
-		dev_info(&chan->video.dev, "T124 mipi_cal: lanes=0x%x (skipped for CSI)\n", lanes);
+		int ret;
+		dev_info(&chan->video.dev, "T124 mipi_cal: lanes=0x%x\n", lanes);
+		ret = tegra_mipi_calibration(lanes);
+		if (ret)
+			dev_warn(&chan->video.dev, "T124 mipi_cal failed: %d\n", ret);
 	}
 	return 0;
 }
@@ -1136,7 +1140,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 		writel(0x0, vi_base + 0x9d4);      /* CIL_D_INT_MASK */
 		writel(0x0, vi_base + 0xa14);      /* CIL_E_INT_MASK */
 		/* PHY control — CSI_C uses CILE only */
-		writel(0x4e, vi_base + 0xa10);     /* PHY_CILE_CONTROL0: THS=14 + BYPASS_LP_SEQ */
+		writel(0x09, vi_base + 0xa10);     /* PHY_CILE_CONTROL0: THS=9 (legacy vi2.c value) */
 
 		/* Pixel Parser B setup */
 		writel(0xf007, vi_base + 0x87c);   /* PPB_COMMAND = RST+SS */
