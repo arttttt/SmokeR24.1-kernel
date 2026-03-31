@@ -810,6 +810,56 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				udelay(1000); /* 1ms between polls */
 			}
 		}
+
+		if (t124_csi_tpg) {
+			/*
+			 * TPG single-shot path:
+			 * 1. Wait FRAME_START (cond=10) — already armed above
+			 * 2. Then wait MWB_ACK_DONE (cond=7) for memory write
+			 * 3. Done — no re-arm, no ring-buffer lifecycle
+			 */
+			err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
+				chan->syncpt[index], thresh[index],
+				chan->timeout, NULL, &ts);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"TPG: FRAME_START timeout (syncpt=%d thresh=%d)\n",
+					chan->syncpt[index], thresh[index]);
+				state = VB2_BUF_STATE_ERROR;
+				chan->capture_state = CAPTURE_TIMEOUT;
+				break;
+			}
+			dev_info(&chan->video.dev,
+				"TPG: FRAME_START OK! Waiting MWB_ACK_DONE...\n");
+
+			/* Now wait MWB_ACK_DONE = condition 7 for PP_B */
+			{
+				u32 mw_thresh;
+				mw_thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
+							chan->syncpt[index], 1);
+				val = VI_CFG_VI_INCR_SYNCPT_COND(7) |
+					chan->syncpt[index];
+				tegra_channel_write(chan,
+					TEGRA_VI_CFG_VI_INCR_SYNCPT, val);
+				dev_info(&chan->video.dev,
+					"TPG: MWB_ACK_DONE ARM: cond=7 thresh=%d\n",
+					mw_thresh);
+
+				err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
+					chan->syncpt[index], mw_thresh,
+					chan->timeout, NULL, &ts);
+				if (err) {
+					dev_err(&chan->video.dev,
+						"TPG: MWB_ACK_DONE timeout\n");
+					/* Still return frame — might have partial data */
+				} else {
+					dev_info(&chan->video.dev,
+						"TPG: MWB_ACK_DONE OK! Frame written.\n");
+				}
+			}
+			/* Skip generic syncpt wait below */
+			break;
+		}
 #endif
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
@@ -1020,7 +1070,11 @@ tegra_channel_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
 	alloc_ctxs[0] = chan->alloc_ctx;
 
 	/* Make sure minimum number of buffers are passed */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	if (!t124_csi_tpg && *nbuffers < (QUEUED_BUFFERS - 1))
+#else
 	if (*nbuffers < (QUEUED_BUFFERS - 1))
+#endif
 		*nbuffers = QUEUED_BUFFERS - 1;
 
 	return 0;
