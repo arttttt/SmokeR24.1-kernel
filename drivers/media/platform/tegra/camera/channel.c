@@ -721,14 +721,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		/* Do not arm sync points if FIFO had entries before */
 		if (!chan->syncpoint_fifo[index]) {
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
-			/*
-			 * T124 syncpt conditions (from R21.5 vi2.c):
-			 *   PPA_FRAME_START = 9
-			 *   PPB_FRAME_START = 10
-			 *   PPA_LINE_START  = 11
-			 *   PPB_LINE_START  = 12
-			 * These differ from T210 MC formula (5 + port*4).
-			 */
 			frame_start = (chan->port[index] == 0) ? 9 : 10;
 #else
 			frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
@@ -737,13 +729,84 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				chan->syncpt[index];
 			tegra_channel_write(chan,
 				TEGRA_VI_CFG_VI_INCR_SYNCPT, val);
-			dev_info(&chan->video.dev,
-				"syncpt ARM: cond=%d syncpt=%d thresh=%d val=0x%08x\n",
-				frame_start, chan->syncpt[index],
-				thresh[index], val);
 		} else
 			chan->syncpoint_fifo[index]--;
 	}
+
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	if (t124_csi_tpg) {
+		/*
+		 * TPG dedicated single-shot path (matches R21.5 lifecycle):
+		 * 1. ARM FRAME_START (already done above)
+		 * 2. ARM MWB_ACK_DONE BEFORE single shot
+		 * 3. enable_stream (CSI init + TPG init, first frame only)
+		 * 4. SINGLE_SHOT
+		 * 5. Wait FRAME_START
+		 * 6. Wait MWB_ACK_DONE
+		 * 7. Return buffer
+		 */
+		u32 mw_thresh;
+
+		/* ARM MWB_ACK_DONE = condition 7 for PP_B */
+		mw_thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
+					chan->syncpt[0], 1);
+		val = VI_CFG_VI_INCR_SYNCPT_COND(7) | chan->syncpt[0];
+		tegra_channel_write(chan, TEGRA_VI_CFG_VI_INCR_SYNCPT, val);
+
+		/* Enable stream + CSI init (first frame only) */
+		if (!chan->bfirst_fstart) {
+			err = tegra_channel_enable_stream(chan);
+			if (err) {
+				state = VB2_BUF_STATE_ERROR;
+				chan->capture_state = CAPTURE_ERROR;
+				tegra_channel_ring_buffer(chan, vb, &ts, state);
+				return err;
+			}
+			val = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
+			csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
+					val | IMAGE_DEF_DEST_MEM);
+		}
+
+		dev_info(&chan->video.dev,
+			"TPG: FRAME_START cond=%d thresh=%d, MWB_ACK cond=7 thresh=%d\n",
+			(chan->port[0] == 0) ? 9 : 10, thresh[0], mw_thresh);
+
+		/* SINGLE_SHOT */
+		csi_write(chan, 0, TEGRA_VI_CSI_SINGLE_SHOT, SINGLE_SHOT_CAPTURE);
+
+		/* Wait FRAME_START */
+		chan->capture_state = CAPTURE_GOOD;
+		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
+			chan->syncpt[0], thresh[0],
+			chan->timeout, NULL, &ts);
+		if (err) {
+			dev_err(&chan->video.dev,
+				"TPG: FRAME_START timeout\n");
+			state = VB2_BUF_STATE_ERROR;
+			chan->capture_state = CAPTURE_TIMEOUT;
+		} else {
+			dev_info(&chan->video.dev,
+				"TPG: FRAME_START OK!\n");
+
+			/* Wait MWB_ACK_DONE */
+			err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
+				chan->syncpt[0], mw_thresh,
+				chan->timeout, NULL, &ts);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"TPG: MWB_ACK_DONE timeout (PP_B=0x%08x)\n",
+					readl(chan->vi->iomem + 0x888));
+				state = VB2_BUF_STATE_ERROR;
+			} else {
+				dev_info(&chan->video.dev,
+					"TPG: MWB_ACK_DONE OK! Frame in memory.\n");
+			}
+		}
+
+		tegra_channel_ring_buffer(chan, vb, &ts, state);
+		return 0;
+	}
+#endif
 
 	/* enable input stream once the VI registers are configured */
 	if (!chan->bfirst_fstart) {
@@ -809,56 +872,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 					break;
 				udelay(1000); /* 1ms between polls */
 			}
-		}
-
-		if (t124_csi_tpg) {
-			/*
-			 * TPG single-shot path:
-			 * 1. Wait FRAME_START (cond=10) — already armed above
-			 * 2. Then wait MWB_ACK_DONE (cond=7) for memory write
-			 * 3. Done — no re-arm, no ring-buffer lifecycle
-			 */
-			err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
-				chan->syncpt[index], thresh[index],
-				chan->timeout, NULL, &ts);
-			if (err) {
-				dev_err(&chan->video.dev,
-					"TPG: FRAME_START timeout (syncpt=%d thresh=%d)\n",
-					chan->syncpt[index], thresh[index]);
-				state = VB2_BUF_STATE_ERROR;
-				chan->capture_state = CAPTURE_TIMEOUT;
-				break;
-			}
-			dev_info(&chan->video.dev,
-				"TPG: FRAME_START OK! Waiting MWB_ACK_DONE...\n");
-
-			/* Now wait MWB_ACK_DONE = condition 7 for PP_B */
-			{
-				u32 mw_thresh;
-				mw_thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
-							chan->syncpt[index], 1);
-				val = VI_CFG_VI_INCR_SYNCPT_COND(7) |
-					chan->syncpt[index];
-				tegra_channel_write(chan,
-					TEGRA_VI_CFG_VI_INCR_SYNCPT, val);
-				dev_info(&chan->video.dev,
-					"TPG: MWB_ACK_DONE ARM: cond=7 thresh=%d\n",
-					mw_thresh);
-
-				err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
-					chan->syncpt[index], mw_thresh,
-					chan->timeout, NULL, &ts);
-				if (err) {
-					dev_err(&chan->video.dev,
-						"TPG: MWB_ACK_DONE timeout\n");
-					/* Still return frame — might have partial data */
-				} else {
-					dev_info(&chan->video.dev,
-						"TPG: MWB_ACK_DONE OK! Frame written.\n");
-				}
-			}
-			/* Skip generic syncpt wait below */
-			break;
 		}
 #endif
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
