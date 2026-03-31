@@ -160,6 +160,8 @@ void set_csi_portinfo(struct tegra_csi_device *csi,
 	s_data->numlanes = numlanes;
 	s_data->def_clk_freq = TEGRA_CLOCK_CSI_PORT_MAX;
 	csi->ports[port].lanes = numlanes;
+	dev_info(csi->dev, "set_csi_portinfo: port=%d lanes=%d\n",
+		 port, numlanes);
 }
 EXPORT_SYMBOL(set_csi_portinfo);
 
