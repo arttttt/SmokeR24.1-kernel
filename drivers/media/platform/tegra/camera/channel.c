@@ -1096,7 +1096,85 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 				 "T124 SLCG: PLL_D CSI toggle done\n");
 		}
 	}
-#endif
+
+	/*
+	 * BYPASS MC CSI framework — direct vi2.c register sequence.
+	 * vi2_capture_setup_csi_1() for CSI_C (OV5693, 1-lane CILE).
+	 * All offsets absolute from VI base.
+	 */
+	{
+		void __iomem *vi_base = chan->vi->iomem;
+		u32 val;
+		int width = chan->format.width;
+		int height = chan->format.height;
+		u32 format = chan->fmtinfo->img_fmt;
+		u32 data_type = chan->fmtinfo->img_dt;
+		u32 word_count = tegra_core_get_word_count(width, chan->fmtinfo);
+
+		/* Clear all CIL and PP status (vi2_channel_init) */
+		writel(0xFFFFFFFF, vi_base + 0x93c); /* CIL_A_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x970); /* CIL_B_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x9a4); /* CIL_C_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x9d8); /* CIL_D_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0xa18); /* CIL_E_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x940); /* CILA_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x974); /* CILB_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x9a8); /* CILC_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x9dc); /* CILD_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x854); /* PP_A_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x888); /* PP_B_STATUS */
+		writel(0xFFFFFFFF, vi_base + 0x100 + 0x84); /* VI_CSI_0_ERROR */
+		writel(0xFFFFFFFF, vi_base + 0x200 + 0x84); /* VI_CSI_1_ERROR */
+
+		/* vi2_capture_setup_csi_1 for CSI_C (1-lane CILE) */
+		/* CIL pad config */
+		writel(0x10000, vi_base + 0x994);  /* CILC_PAD_CONFIG0 = CD_BK_MODE */
+		writel(0x0, vi_base + 0x9c8);      /* CILD_PAD_CONFIG0 */
+		writel(0x0, vi_base + 0xa08);      /* CILE_PAD_CONFIG0 */
+		/* CIL interrupt masks */
+		writel(0x0, vi_base + 0x9a0);      /* CIL_C_INT_MASK */
+		writel(0x0, vi_base + 0x9d4);      /* CIL_D_INT_MASK */
+		writel(0x0, vi_base + 0xa14);      /* CIL_E_INT_MASK */
+		/* PHY control — CSI_C uses CILE only */
+		writel(0x9, vi_base + 0xa10);      /* PHY_CILE_CONTROL0 */
+
+		/* Pixel Parser B setup */
+		writel(0xf007, vi_base + 0x87c);   /* PPB_COMMAND = RST+SS */
+		writel(0x0, vi_base + 0x884);      /* PP_B_INT_MASK */
+		writel(0x280301f1, vi_base + 0x870); /* STREAM_B_CONTROL0 */
+		writel(0xf007, vi_base + 0x87c);   /* PPB_COMMAND again */
+		writel(0x11, vi_base + 0x874);     /* STREAM_B_CONTROL1 */
+		writel(0x140000, vi_base + 0x878); /* STREAM_B_GAP */
+		writel(0x0, vi_base + 0x880);      /* STREAM_B_EXPECTED_FRAME */
+		/* INPUT_STREAM_B: skip_threshold=0x3f, lanes-1=0 */
+		writel(0x3f0000, vi_base + 0x86c); /* INPUT_STREAM_B_CONTROL */
+
+		/* PHY CIL command — CSI_C 1-lane: 0x12020000 in upper 16 bits */
+		val = readl(vi_base + 0x908);      /* PHY_CIL_COMMAND */
+		writel((val & 0x0000FFFF) | 0x12020000, vi_base + 0x908);
+
+		/* VI CSI 1 image config */
+		writel((1 << 24) | (format << 16) | 0x1,
+		       vi_base + 0x200 + 0x0c);    /* VI_CSI_1_IMAGE_DEF */
+		writel(data_type,
+		       vi_base + 0x200 + 0x20);    /* VI_CSI_1_IMAGE_DT */
+		writel(word_count,
+		       vi_base + 0x200 + 0x1c);    /* VI_CSI_1_IMAGE_SIZE_WC */
+		writel((height << 16) | width,
+		       vi_base + 0x200 + 0x18);    /* VI_CSI_1_IMAGE_SIZE */
+
+		/* Enable pixel parser */
+		writel(0xf005, vi_base + 0x87c);   /* PPB_COMMAND = ENABLE */
+
+		dev_info(&chan->video.dev,
+			 "T124 direct vi2 CSI_C init: %dx%d fmt=0x%x dt=0x%x wc=%d CIL_CMD=0x%08x\n",
+			 width, height, format, data_type, word_count,
+			 readl(vi_base + 0x908));
+	}
+	/* Syncpt clean for T124 direct path */
+	for (i = 0; i < chan->valid_ports; i++)
+		nvhost_syncpt_set_min_eq_max_ext(chan->vi->ndev, chan->syncpt[i]);
+#else
 	for (i = 0; i < chan->valid_ports; i++) {
 		tegra_csi_start_streaming(chan->vi->csi, chan->port[i]);
 		/* ensure sync point state is clean */
@@ -1108,6 +1186,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 	ret = tegra_channel_capture_setup(chan);
 	if (ret < 0)
 		goto error_capture_setup;
+#endif
 
 	chan->sequence = 0;
 	tegra_channel_init_ring_buffer(chan);
