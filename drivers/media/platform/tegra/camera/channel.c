@@ -412,11 +412,11 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 			 */
 			writel(((0) << 2) | 0x1, vi_base + 0xa9c); /* PG_CTRL_B: mode 0, enable */
 			writel(0x0, vi_base + 0xaa4);               /* PG_PHASE_B */
-			writel(0x050010, vi_base + 0xaa8);           /* PG_RED_FREQ_B: slow */
+			writel(0x100010, vi_base + 0xaa8);           /* PG_RED_FREQ_B */
 			writel(0x0, vi_base + 0xaac);                /* PG_RED_FREQ_RATE_B */
-			writel(0x100010, vi_base + 0xab0);           /* PG_GREEN_FREQ_B: medium */
+			writel(0x100010, vi_base + 0xab0);           /* PG_GREEN_FREQ_B */
 			writel(0x0, vi_base + 0xab4);                /* PG_GREEN_FREQ_RATE_B */
-			writel(0x200010, vi_base + 0xab8);           /* PG_BLUE_FREQ_B: fast */
+			writel(0x100010, vi_base + 0xab8);           /* PG_BLUE_FREQ_B */
 			writel(0x0, vi_base + 0xabc);                /* PG_BLUE_FREQ_RATE_B */
 			/* Override CIL_COMMAND for TPG */
 			writel(0x22020202, vi_base + 0x908);
