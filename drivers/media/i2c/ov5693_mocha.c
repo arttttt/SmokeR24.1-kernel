@@ -682,16 +682,7 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			"%s: warning coarse time short override failed\n",
 			__func__);
 
-	/* Enable color bar test pattern for CSI link debug */
-	err = regmap_write(priv->regmap, 0x5e00, 0x80);
-	if (err)
-		dev_warn(&client->dev, "test pattern write failed: %d\n", err);
-	else
-		dev_info(&client->dev, "TEST PATTERN enabled (0x5e00=0x80)\n");
-
-	/* DEBUG: try continuous clock (0x24) instead of dis-continuous (0x20) */
-	regmap_write(priv->regmap, 0x4800, 0x24);
-	dev_info(&client->dev, "DEBUG: forced 0x4800=0x24 (continuous clock)\n");
+	/* Test pattern and clock mode now controlled by mode tables */
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)

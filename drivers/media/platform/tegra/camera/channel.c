@@ -363,8 +363,27 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 
 		if (t124_csi_tpg) {
 			/*
+			 * CSI TPG clock setup — from R21.5 vi2_clks_enable().
+			 * TPG needs PLL_D as active clock source, not just a toggle.
+			 */
+			struct clk *tpg_clk = clk_get(chan->vi->dev, "pll_d");
+			if (!IS_ERR(tpg_clk)) {
+				clk_prepare_enable(tpg_clk);
+				tegra_clk_cfg_ex(tpg_clk,
+						 TEGRA_CLK_PLLD_CSI_OUT_ENB, 1);
+				tegra_clk_cfg_ex(tpg_clk,
+						 TEGRA_CLK_PLLD_DSI_OUT_ENB, 1);
+				tegra_clk_cfg_ex(tpg_clk,
+						 TEGRA_CLK_MIPI_CSI_OUT_ENB, 0);
+				/* Keep tpg_clk enabled — don't disable */
+				dev_info(&chan->video.dev,
+					 "T124 TPG: PLL_D held ON (CSI=1 DSI=1 MIPI_CSI=0)\n");
+				/* Note: clk_put without disable to keep it running */
+				clk_put(tpg_clk);
+			}
+
+			/*
 			 * CSI TPG mode: generate test pattern at PP_B level.
-			 * Bypasses sensor MIPI link entirely.
 			 * Register offsets from R21.5 vi2.c (absolute from VI base).
 			 */
 			writel(((0) << 2) | 0x1, vi_base + 0xa9c); /* PG_CTRL_B: mode 0, enable */
