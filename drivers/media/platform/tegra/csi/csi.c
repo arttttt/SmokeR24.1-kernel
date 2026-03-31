@@ -543,6 +543,16 @@ void tegra_csi_status(struct tegra_csi_device *csi,
 	val = cil_read(port, TEGRA_CSI_CILX_STATUS);
 	dev_err(csi->dev, "CSI%d CILX_STATUS 0x%08x\n", port_num, val);
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/* Also dump CILE status for T124 CSI_C/CSI_E */
+	if (port->lanes == 1) {
+		dev_err(csi->dev, "CSI%d CILE_STATUS 0x%08x CILEX_STATUS 0x%08x\n",
+			port_num,
+			csi_read(csi, 0x1E0, 0),  /* CIL_E_STATUS */
+			csi_read(csi, 0x1E4, 0)); /* CIL_EX_STATUS */
+	}
+#endif
+
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_0);
 	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_0 0x%08x\n", port_num, val);
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_1);
