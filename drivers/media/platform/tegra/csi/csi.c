@@ -243,6 +243,28 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 				csi->cil[cil_num], csi->clk_freq);
 			if (err)
 				dev_err(csi->dev, "cil clk start error\n");
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+			/*
+			 * T124 CSI-E (1-lane via CILE) needs cile clock (cil[2])
+			 * in addition to the brick clock. Port 1 with 1 lane
+			 * maps to CSI_C which uses CILE, not CILB.
+			 */
+			if (csi->ports[port].lanes == 1 && (port & 1)) {
+				dev_info(csi->dev,
+					 "channel_power ON: also enabling cile clock\n");
+				err = clock_start(csi, csi->cil[2],
+						  csi->clk_freq);
+				if (err)
+					dev_err(csi->dev,
+						"cile clk start error\n");
+				/* Also need cilcd for the C/D/E brick */
+				err = clock_start(csi, csi->cil[1],
+						  csi->clk_freq);
+				if (err)
+					dev_err(csi->dev,
+						"cilcd clk start error\n");
+			}
+#endif
 			camera_common_dpd_disable(&csi->s_data[port]);
 		}
 	} else {
@@ -253,6 +275,12 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 				 port, cil_num);
 			camera_common_dpd_enable(&csi->s_data[port]);
 			clk_disable_unprepare(csi->cil[cil_num]);
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+			if (csi->ports[port].lanes == 1 && (port & 1)) {
+				clk_disable_unprepare(csi->cil[2]);
+				clk_disable_unprepare(csi->cil[1]);
+			}
+#endif
 		}
 	}
 
