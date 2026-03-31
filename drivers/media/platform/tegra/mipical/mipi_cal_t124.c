@@ -275,48 +275,119 @@ static void t124_apply_dsi_prod(struct tegra_mipi *mipi, int lanes)
 static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 {
 	int err;
+	int retry = 500;
+	u32 val;
 
 	mutex_lock(&mipi->lock);
 	err = tegra_mipi_clk_enable(mipi);
 	if (err)
 		goto err_unlock;
 
-	/* Start from clean state */
-	t124_clear_all(mipi);
+	/* Enable clock override first — matches vi2 flow */
+	regmap_update_bits(mipi->regmap, MIPI_CAL_CTRL,
+			   CAL_CLKEN_OVR, CAL_CLKEN_OVR);
 
-	/* Apply bias pad settings */
+	/* Clear status */
+	regmap_write(mipi->regmap, CIL_MIPI_CAL_STATUS, 0xF1F10000);
+
+	/* Deselect DSI lanes */
+	regmap_update_bits(mipi->regmap, DSIA_MIPI_CAL_CONFIG, DSI_SEL, 0);
+	regmap_update_bits(mipi->regmap, DSIB_MIPI_CAL_CONFIG, DSI_SEL, 0);
+
+	/* Bias pad setup — use update_bits to preserve other fields */
 	regmap_update_bits(mipi->regmap, MIPI_BIAS_PAD_CFG0,
-			   BIAS_PDVCLAMP, 0);
-	regmap_write(mipi->regmap, MIPI_BIAS_PAD_CFG0, BIAS_E_VCLAMP_REF);
-	regmap_write(mipi->regmap, MIPI_BIAS_PAD_CFG2, 0);
+			   BIAS_E_VCLAMP_REF, BIAS_E_VCLAMP_REF);
+	regmap_update_bits(mipi->regmap, MIPI_BIAS_PAD_CFG2,
+			   BIAS_PDVREG, 0);
 
-	/* Apply DSI production settings */
+	/* Deselect all CIL lanes and clock lanes */
+	regmap_update_bits(mipi->regmap, CILA_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CILB_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CILD_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CILE_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, DSIA_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, 0);
+	regmap_update_bits(mipi->regmap, DSIB_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, 0);
+	regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, 0);
+	regmap_update_bits(mipi->regmap, CILD_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, 0);
+	regmap_update_bits(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, 0);
+
+	/* Apply DSI production settings if DSI lanes requested */
 	if (lanes & (DSIA | DSIB | DSIC | DSID))
 		t124_apply_dsi_prod(mipi, lanes);
 
 	/* Select CSI lanes for calibration */
-	if (lanes & CSIA)
-		regmap_write(mipi->regmap, CILA_MIPI_CAL_CONFIG, CIL_SEL);
-	if (lanes & CSIB)
-		regmap_write(mipi->regmap, CILB_MIPI_CAL_CONFIG, CIL_SEL);
-	if (lanes & CSIC)
-		regmap_write(mipi->regmap, CILC_MIPI_CAL_CONFIG, CIL_SEL);
-	if (lanes & CSID)
-		regmap_write(mipi->regmap, CILD_MIPI_CAL_CONFIG, CIL_SEL);
-	if (lanes & CSIE) {
-		regmap_write(mipi->regmap, CILE_MIPI_CAL_CONFIG, CIL_SEL);
-		regmap_write(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2,
-			     CFG2_CLKSEL);
+	if (lanes & CSIA) {
+		regmap_update_bits(mipi->regmap, CILA_MIPI_CAL_CONFIG,
+				   CIL_SEL, CIL_SEL);
+		regmap_update_bits(mipi->regmap, DSIA_MIPI_CAL_CONFIG_2,
+				   CFG2_CLKSEL, 0);
 	}
-	if (lanes & CSIF)
-		regmap_write(mipi->regmap, CILF_MIPI_CAL_CONFIG, CIL_SEL);
+	if (lanes & CSIB) {
+		regmap_update_bits(mipi->regmap, CILB_MIPI_CAL_CONFIG,
+				   CIL_SEL, CIL_SEL);
+		regmap_update_bits(mipi->regmap, DSIB_MIPI_CAL_CONFIG_2,
+				   CFG2_CLKSEL, 0);
+	}
+	if (lanes & CSIC) {
+		regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG,
+				   CIL_SEL, CIL_SEL);
+		regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG_2,
+				   CFG2_CLKSEL, 0);
+	}
+	if (lanes & CSID) {
+		regmap_update_bits(mipi->regmap, CILD_MIPI_CAL_CONFIG,
+				   CIL_SEL, CIL_SEL);
+		regmap_update_bits(mipi->regmap, CILD_MIPI_CAL_CONFIG_2,
+				   CFG2_CLKSEL, 0);
+	}
+	if (lanes & CSIE) {
+		regmap_update_bits(mipi->regmap, CILE_MIPI_CAL_CONFIG,
+				   CIL_SEL, CIL_SEL);
+		regmap_update_bits(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2,
+				   CFG2_CLKSEL, CFG2_CLKSEL);
+	}
 
-	/* Configure control register: AUTOCAL_EN=0 (bit 1 not set) */
-	regmap_write(mipi->regmap, MIPI_CAL_CTRL,
-		     CAL_NOISE_FLT(0xa) | CAL_PRESCALE(0x2) | CAL_CLKEN_OVR);
+	/* Trigger calibration */
+	regmap_update_bits(mipi->regmap, MIPI_CAL_CTRL,
+			   CAL_STARTCAL, CAL_STARTCAL);
 
-	/* Trigger and wait for calibration */
-	err = tegra_mipi_wait(mipi, lanes);
+	/* Wait for completion — vi2 uses simple retry loop */
+	while (--retry) {
+		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
+		if (val & CAL_DONE)
+			break;
+		usleep_range(200, 300);
+	}
+
+	if (!retry) {
+		dev_err(mipi->dev,
+			"MIPI cal timeout, status: 0x%x, lanes: 0x%x\n",
+			val, lanes);
+		err = -ETIMEDOUT;
+	}
+
+	/* Cleanup: deselect all to avoid interference */
+	regmap_update_bits(mipi->regmap, CILA_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, DSIA_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, CFG2_CLKSEL);
+	regmap_update_bits(mipi->regmap, CILB_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, DSIB_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, CFG2_CLKSEL);
+	regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, CFG2_CLKSEL);
+	regmap_update_bits(mipi->regmap, CILD_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CILD_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, CFG2_CLKSEL);
+	regmap_update_bits(mipi->regmap, CILE_MIPI_CAL_CONFIG, CIL_SEL, 0);
+	regmap_update_bits(mipi->regmap, CSIE_MIPI_CAL_CONFIG_2,
+			   CFG2_CLKSEL, 0);
 
 	tegra_mipi_clk_disable(mipi);
 err_unlock:
