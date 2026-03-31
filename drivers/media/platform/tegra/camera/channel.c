@@ -803,7 +803,16 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			}
 		}
 
-		tegra_channel_ring_buffer(chan, vb, &ts, state);
+		/* Return buffer directly to userspace, bypass ring_buffer */
+		vb->v4l2_buf.sequence = chan->sequence++;
+		vb->v4l2_buf.field = V4L2_FIELD_NONE;
+		getrawmonotonic(&ts);
+		vb->v4l2_buf.timestamp.tv_sec = ts.tv_sec;
+		vb->v4l2_buf.timestamp.tv_usec = ts.tv_nsec / NSEC_PER_USEC;
+		vb2_set_plane_payload(vb, 0, tegra_channel_get_sizeimage(chan));
+		vb2_buffer_done(vb, state);
+		dev_info(&chan->video.dev,
+			"TPG: buffer returned to userspace (state=%d)\n", state);
 		return 0;
 	}
 #endif
