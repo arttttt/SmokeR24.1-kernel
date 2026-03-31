@@ -440,7 +440,13 @@ int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 			s_data->mode = frmfmt[i].mode;
 			s_data->fmt_width = mf->width;
 			s_data->fmt_height = mf->height;
-			break;
+			/* If framerate requested, keep searching for better match */
+			if (s_data->requested_fps == 0)
+				break;
+			if (frmfmt[i].num_framerates > 0 &&
+			    frmfmt[i].framerates[0] == s_data->requested_fps)
+				break;
+			/* Continue searching for exact fps match */
 		}
 	}
 

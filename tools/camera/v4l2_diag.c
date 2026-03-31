@@ -461,7 +461,8 @@ static void show_media_info(void)
 
 static int do_capture(const char *dev, int width, int height,
 		      const char *outfile, int nframes, int timeout_ms,
-		      int read_regs, int poll_regs, int single_shot)
+		      int read_regs, int poll_regs, int single_shot,
+		      int framerate)
 {
 	struct buffer buffers[MAX_BUFFERS];
 	int nbuf = 0;
@@ -505,6 +506,19 @@ static int do_capture(const char *dev, int width, int height,
 		fcc_to_str(fmt.fmt.pix.pixelformat, fcc),
 		fmt.fmt.pix.bytesperline, fmt.fmt.pix.sizeimage);
 
+	/* Set framerate if specified */
+	if (framerate > 0) {
+		struct v4l2_streamparm parm;
+		memset(&parm, 0, sizeof(parm));
+		parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		parm.parm.capture.timeperframe.numerator = 1;
+		parm.parm.capture.timeperframe.denominator = framerate;
+		if (xioctl(fd, VIDIOC_S_PARM, &parm) < 0)
+			perror("VIDIOC_S_PARM (framerate)");
+		else
+			printf("Framerate set to %d fps\n", framerate);
+	}
+
 	/* Request buffers */
 	struct v4l2_requestbuffers req;
 	memset(&req, 0, sizeof(req));
@@ -544,6 +558,15 @@ static int do_capture(const char *dev, int width, int height,
 			return -1;
 		}
 		printf("Buffer %d: length=%zu\n", i, buffers[i].length);
+	}
+
+	/* Fill buffers with marker pattern before queue */
+	for (i = 0; i < nbuf; i++) {
+		unsigned int *p = (unsigned int *)buffers[i].start;
+		size_t j;
+		for (j = 0; j < buffers[i].length / 4; j++)
+			p[j] = 0xDEADBEEF;
+		printf("Buffer %d: filled with 0xDEADBEEF\n", i);
 	}
 
 	/* Queue buffers */
@@ -637,6 +660,32 @@ static int do_capture(const char *dev, int width, int height,
 				frame + 1, buf.index, buf.bytesused,
 				t_frame - t_streamon);
 
+			/* Check how much DMA actually wrote */
+			{
+				unsigned int *p = (unsigned int *)buffers[buf.index].start;
+				size_t total = buf.bytesused / 4;
+				size_t deadbeef = 0, zeros = 0, other = 0;
+				size_t j;
+				for (j = 0; j < total; j++) {
+					if (p[j] == 0xDEADBEEF) deadbeef++;
+					else if (p[j] == 0) zeros++;
+					else other++;
+				}
+				printf("DMA check: deadbeef=%zu zeros=%zu other=%zu total=%zu\n",
+					deadbeef, zeros, other, total);
+				if (other > 0) {
+					printf("  First non-marker: @%zu = 0x%08x\n",
+						0UL, p[0]);
+					for (j = 0; j < total; j++) {
+						if (p[j] != 0xDEADBEEF && p[j] != 0) {
+							printf("  First other: @%zu = 0x%08x\n",
+								j, p[j]);
+							break;
+						}
+					}
+				}
+			}
+
 			if (read_regs)
 				dump_registers("AFTER FRAME");
 
@@ -708,6 +757,7 @@ static void usage(const char *prog)
 	printf("  -r          Read CSI/VI registers via /dev/mem\n");
 	printf("  -R          Poll registers while waiting for frame\n");
 	printf("  -S          Single-shot mode (1 buffer, no requeue)\n");
+	printf("  -f <fps>    Set framerate (e.g. 30, 60, 90, 120)\n");
 }
 
 int main(int argc, char *argv[])
@@ -721,9 +771,10 @@ int main(int argc, char *argv[])
 	int read_regs = 0;
 	int poll_regs = 0;
 	int single_shot = 0;
+	int framerate = 0;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRS")) != -1) {
+	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRSf:")) != -1) {
 		switch (opt) {
 		case 'd': dev = optarg; break;
 		case 'w': width = atoi(optarg); break;
@@ -735,6 +786,7 @@ int main(int argc, char *argv[])
 		case 'r': read_regs = 1; break;
 		case 'R': poll_regs = 1; read_regs = 1; break;
 		case 'S': single_shot = 1; nframes = 1; break;
+		case 'f': framerate = atoi(optarg); break;
 		default:
 			usage(argv[0]);
 			return 1;
@@ -771,7 +823,7 @@ int main(int argc, char *argv[])
 	if (!info_only) {
 		int ret = do_capture(dev, width, height, outfile,
 				     nframes, timeout_ms, read_regs, poll_regs,
-				     single_shot);
+				     single_shot, framerate);
 		unmap_vi_registers();
 		return ret < 0 ? 1 : 0;
 	}

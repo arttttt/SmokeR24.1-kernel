@@ -178,6 +178,7 @@ struct camera_common_data {
 	int	def_mode, def_width, def_height;
 	int	def_clk_freq;
 	int	fmt_width, fmt_height;
+	int	requested_fps;
 };
 
 struct camera_common_focuser_data;

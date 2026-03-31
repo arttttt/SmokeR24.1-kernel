@@ -768,6 +768,38 @@ static int ov5693_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	return 0;
 }
 
+static int ov5693_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *param)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+
+	if (param->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	s_data->requested_fps =
+		param->parm.capture.timeperframe.denominator /
+		(param->parm.capture.timeperframe.numerator ?
+		 param->parm.capture.timeperframe.numerator : 1);
+
+	dev_info(&client->dev, "s_parm: requested_fps=%d\n",
+		 s_data->requested_fps);
+	return 0;
+}
+
+static int ov5693_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *param)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+
+	if (param->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	param->parm.capture.timeperframe.numerator = 1;
+	param->parm.capture.timeperframe.denominator =
+		s_data->requested_fps ? s_data->requested_fps : 30;
+	return 0;
+}
+
 static struct v4l2_subdev_video_ops ov5693_subdev_video_ops = {
 	.s_stream	= ov5693_s_stream,
 	.s_mbus_fmt	= camera_common_s_fmt,
@@ -778,6 +810,8 @@ static struct v4l2_subdev_video_ops ov5693_subdev_video_ops = {
 	.g_input_status = ov5693_g_input_status,
 	.enum_framesizes	= camera_common_enum_framesizes,
 	.enum_frameintervals	= camera_common_enum_frameintervals,
+	.s_parm		= ov5693_s_parm,
+	.g_parm		= ov5693_g_parm,
 };
 
 static struct v4l2_subdev_core_ops ov5693_subdev_core_ops = {
