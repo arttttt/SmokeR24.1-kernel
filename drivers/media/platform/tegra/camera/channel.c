@@ -397,14 +397,14 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 			/* Override CIL_COMMAND for TPG */
 			writel(0x22020202, vi_base + 0x908);
 
-			/*
-			 * Keep original format/dt/wc from V4L2 so stride and
-			 * buffer layout match what userspace expects.
-			 * TPG generates pattern regardless of DT setting.
-			 */
+			/* TPG uses RGB888 format */
+			format = 0x12;  /* TEGRA_IMAGE_FORMAT_T_A8B8G8R8 */
+			data_type = 0x24; /* TEGRA_IMAGE_DT_RGB888 */
+			word_count = width * 3;
+
 			dev_info(&chan->video.dev,
-				 "T124 CSI TPG ENABLED: %dx%d fmt=0x%x dt=0x%x wc=%d\n",
-				 width, height, format, data_type, word_count);
+				 "T124 CSI TPG ENABLED: %dx%d RGB888 wc=%d\n",
+				 width, height, word_count);
 		}
 
 		/* VI CSI 1 image config */
