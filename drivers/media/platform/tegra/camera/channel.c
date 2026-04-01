@@ -1422,13 +1422,21 @@ static int tegra_channel_set_power(struct tegra_channel *chan, bool on)
 {
 	int ret;
 
-	ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
-			chan->grp_id, core, s_power, on);
-
-	/* Power associated lens channel (focuser) if any */
-	if (chan->lens_chan && chan->lens_chan->subdev_on_csi)
-		v4l2_subdev_call(chan->lens_chan->subdev_on_csi,
-				 core, s_power, on);
+	if (on) {
+		/* Power on: sensor first (rails up), then lens */
+		ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
+				chan->grp_id, core, s_power, 1);
+		if (chan->lens_chan && chan->lens_chan->subdev_on_csi)
+			v4l2_subdev_call(chan->lens_chan->subdev_on_csi,
+					 core, s_power, 1);
+	} else {
+		/* Power off: lens first (park while rails still up), then sensor */
+		if (chan->lens_chan && chan->lens_chan->subdev_on_csi)
+			v4l2_subdev_call(chan->lens_chan->subdev_on_csi,
+					 core, s_power, 0);
+		ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
+				chan->grp_id, core, s_power, 0);
+	}
 
 	return ret;
 }
