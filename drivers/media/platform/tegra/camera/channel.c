@@ -1061,7 +1061,12 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 		/* Program syncpoints */
 		thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
 					chan->syncpt[index], 1);
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+		/* T124: MWA_ACK_DONE=6 (port 0), MWB_ACK_DONE=7 (port 1) */
+		mw_ack_done = (chan->port[index] == 0) ? 6 : 7;
+#else
 		mw_ack_done = VI_CSI_MW_ACK_DONE(chan->port[index]);
+#endif
 		val = VI_CFG_VI_INCR_SYNCPT_COND(mw_ack_done) |
 				chan->syncpt[index];
 		tegra_channel_write(chan,
