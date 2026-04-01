@@ -27,12 +27,10 @@
 #include "vi/vi.h"
 #include "csi/csi.h"
 
-#define DEBUG 1
-
 static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
 		u32 val, u8 port)
 {
-#if DEBUG
+#ifdef DEBUG
 	dev_info(csi->dev, "%s:port %d offset 0x%08x val:0x%08x\n",
 				__func__, port, addr, val);
 #endif
@@ -42,7 +40,7 @@ static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
 static u32 csi_read(struct tegra_csi_device *csi, unsigned int addr,
 		u8 port)
 {
-#if DEBUG
+#ifdef DEBUG
 	dev_info(csi->dev, "%s:port %d offset 0x%08x\n", __func__, port, addr);
 #endif
 	return readl((csi->iomem[port] + addr));
@@ -51,7 +49,7 @@ static u32 csi_read(struct tegra_csi_device *csi, unsigned int addr,
 /* Pixel parser registers accessors */
 static void pp_write(struct tegra_csi_port *port, u32 addr, u32 val)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x val:0x%08x\n", __func__, addr, val);
 #endif
 	writel(val, port->pixel_parser + addr);
@@ -59,7 +57,7 @@ static void pp_write(struct tegra_csi_port *port, u32 addr, u32 val)
 
 static u32 pp_read(struct tegra_csi_port *port, u32 addr)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x\n", __func__, addr);
 #endif
 	return readl(port->pixel_parser + addr);
@@ -68,7 +66,7 @@ static u32 pp_read(struct tegra_csi_port *port, u32 addr)
 /* CSI CIL registers accessors */
 static void cil_write(struct tegra_csi_port *port, u32 addr, u32 val)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x val:0x%08x\n", __func__, addr, val);
 #endif
 	writel(val, port->cil + addr);
@@ -76,7 +74,7 @@ static void cil_write(struct tegra_csi_port *port, u32 addr, u32 val)
 
 static u32 cil_read(struct tegra_csi_port *port, u32 addr)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x\n", __func__, addr);
 #endif
 	return readl(port->cil + addr);
@@ -237,7 +235,7 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 		for (i = 0; csi_port_is_valid(port_num[i]); i++) {
 			port = port_num[i];
 			cil_num = port >> 1;
-			dev_info(csi->dev, "channel_power ON: port=%d cil=%d\n",
+			dev_dbg(csi->dev, "channel_power ON: port=%d cil=%d\n",
 				 port, cil_num);
 			err = clock_start(csi,
 				csi->cil[cil_num], csi->clk_freq);
@@ -250,7 +248,7 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 			 * maps to CSI_C which uses CILE, not CILB.
 			 */
 			if (csi->ports[port].lanes == 1 && (port & 1)) {
-				dev_info(csi->dev,
+				dev_dbg(csi->dev,
 					 "channel_power ON: also enabling cile clock\n");
 				err = clock_start(csi, csi->cil[2],
 						  csi->clk_freq);
@@ -271,7 +269,7 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 		for (i = 0; csi_port_is_valid(port_num[i]); i++) {
 			port = port_num[i];
 			cil_num = port >> 1;
-			dev_info(csi->dev, "channel_power OFF: port=%d cil=%d\n",
+			dev_dbg(csi->dev, "channel_power OFF: port=%d cil=%d\n",
 				 port, cil_num);
 			camera_common_dpd_enable(&csi->s_data[port]);
 			clk_disable_unprepare(csi->cil[cil_num]);
@@ -426,7 +424,7 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		if (port->lanes == 1) {
 			/* CSI_C (1-lane via CILE) */
 			csi_write(csi, 0x1D8, 0x09, 0); /* PHY_CILE_CONTROL0: THS=9 (R21.5 stock) */
-			dev_info(csi->dev,
+			dev_dbg(csi->dev,
 				 "T124 CILE: PAD=0x%08x PHY=0x%08x INT=0x%08x\n",
 				 csi_read(csi, 0x1D0, 0),
 				 csi_read(csi, 0x1D8, 0),
@@ -458,7 +456,7 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		}
 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, newval,
 			  port_num >> 1);
-		dev_info(csi->dev,
+		dev_dbg(csi->dev,
 			 "T124 CSI%d: port=%d lanes=%d CIL_CMD=0x%08x->0x%08x\n",
 			 port_num, port->num, port->lanes, val, newval);
 	}
@@ -519,11 +517,9 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		 (0x3f << CSI_SKIP_PACKET_THRESHOLD_OFFSET) |
 		 (port->lanes - 1));
 
-#if DEBUG
-	/* 0x454140E1 - register setting for line counter */
-	/* 0x454340E1 - tracks frame start, line starts, hpa headers */
+	/* Init debug counters for error-path diagnostics (tegra_csi_status) */
 	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, 0x454340E1);
-#endif
+
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_PP_COMMAND,
 		 (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
 		 CSI_PP_SINGLE_SHOT_ENABLE | CSI_PP_ENABLE);

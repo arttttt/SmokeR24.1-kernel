@@ -1,4 +1,3 @@
-#define DEBUG
 /*
  * Tegra Video Input device common APIs
  *
@@ -67,7 +66,7 @@ int tegra_vi_power_on(struct tegra_mc_vi *vi)
 	}
 
 	vi_write(vi, TEGRA_VI_CFG_CG_CTRL, 1);
-	dev_info(vi->dev, "vi_power_on: CG_CTRL=1, unpowergating VE\n");
+	dev_dbg(vi->dev, "vi_power_on: CG_CTRL=1, unpowergating VE\n");
 
 	/* unpowergate VE */
 	ret = tegra_unpowergate_partition(TEGRA_POWERGATE_VENC);
@@ -135,7 +134,7 @@ static int vi_s_ctrl(struct v4l2_ctrl *ctrl)
 			break;
 
 		if (ctrl->val) {
-			dev_info(&vi->ndev->dev, "Set TPG mode to %d\n",
+			dev_dbg(&vi->ndev->dev, "Set TPG mode to %d\n",
 				 ctrl->val);
 			vi->pg_mode = ctrl->val;
 			vi->csi->pg_mode = vi->pg_mode;

@@ -1,4 +1,3 @@
-#define DEBUG
 /*
  * camera_common.c - utilities for tegra camera driver
  *
@@ -651,7 +650,7 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 		if (s_data->csi_port == 1 && s_data->numlanes == 1)
 			io_idx = 4; /* CSIE */
 		tegra_io_dpd_disable(&camera_common_csi_io[io_idx]);
-		dev_info(s_data->dev,
+		dev_dbg(s_data->dev,
 			 "dpd_disable: csi_port=%d io_idx=%d numlanes=%d\n",
 			 s_data->csi_port, io_idx, s_data->numlanes);
 	}
@@ -671,7 +670,7 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 		if (s_data->csi_port == 1 && s_data->numlanes == 1)
 			io_idx = 4; /* CSIE */
 		tegra_io_dpd_enable(&camera_common_csi_io[io_idx]);
-		dev_info(s_data->dev,
+		dev_dbg(s_data->dev,
 			 "dpd_enable: csi_port=%d io_idx=%d numlanes=%d\n",
 			 s_data->csi_port, io_idx, s_data->numlanes);
 		dev_dbg(s_data->dev,

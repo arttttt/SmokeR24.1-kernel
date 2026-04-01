@@ -1,4 +1,3 @@
-#define DEBUG
 /*
  * NVIDIA Tegra Video Input Device
  *
@@ -288,7 +287,7 @@ static int tegra_channel_capture_setup(struct tegra_channel *chan)
 		csi_write(chan, index, TEGRA_VI_CSI_IMAGE_SIZE_WC, word_count);
 		csi_write(chan, index, TEGRA_VI_CSI_IMAGE_SIZE,
 			  (height << IMAGE_SIZE_HEIGHT_OFFSET) | width);
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			 "capture_setup[%d]: port=%d %ux%u fmt=0x%x dt=0x%x wc=%u bypass=%u\n",
 			 index, chan->port[index], width, height,
 			 format, data_type, word_count, bypass_pixel_transform);
@@ -322,7 +321,7 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 			return ret;
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 		} else {
-			dev_info(&chan->video.dev,
+			dev_dbg(&chan->video.dev,
 				 "T124 CSI TPG: skipping sensor s_stream\n");
 		}
 #endif
@@ -485,7 +484,7 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 				tegra_clk_cfg_ex(tpg_clk,
 						 TEGRA_CLK_MIPI_CSI_OUT_ENB, 0);
 				/* Keep tpg_clk enabled — don't disable */
-				dev_info(&chan->video.dev,
+				dev_dbg(&chan->video.dev,
 					 "T124 TPG: PLL_D held ON (CSI=1 DSI=1 MIPI_CSI=0)\n");
 				/* Note: clk_put without disable to keep it running */
 				clk_put(tpg_clk);
@@ -511,7 +510,7 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 			data_type = 0x24; /* TEGRA_IMAGE_DT_RGB888 */
 			word_count = width * 3;
 
-			dev_info(&chan->video.dev,
+			dev_dbg(&chan->video.dev,
 				 "T124 CSI TPG ENABLED: %dx%d RGB888 wc=%d\n",
 				 width, height, word_count);
 		}
@@ -529,7 +528,7 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		/* Enable pixel parser */
 		writel(0xf005, vi_base + pp_cmd_reg);	/* PP_COMMAND = ENABLE */
 
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			 "T124 %s init (post-stream): %dx%d fmt=0x%x dt=0x%x wc=%d CIL_CMD=0x%08x\n",
 			 port_name, width, height, format, data_type, word_count,
 			 readl(vi_base + 0x908));
@@ -857,7 +856,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 					val | IMAGE_DEF_DEST_MEM);
 		}
 
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			"TPG: FRAME_START cond=%d thresh=%d, MW_ACK cond=%d thresh=%d\n",
 			(chan->port[0] == 0) ? 9 : 10, thresh[0], mw_ack_cond, mw_thresh);
 
@@ -875,7 +874,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			state = VB2_BUF_STATE_ERROR;
 			chan->capture_state = CAPTURE_TIMEOUT;
 		} else {
-			dev_info(&chan->video.dev,
+			dev_dbg(&chan->video.dev,
 				"TPG: FRAME_START OK!\n");
 
 			/* Wait MW_ACK_DONE */
@@ -888,7 +887,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 					pp_name, readl(chan->vi->iomem + pp_status_reg));
 				state = VB2_BUF_STATE_ERROR;
 			} else {
-				dev_info(&chan->video.dev,
+				dev_dbg(&chan->video.dev,
 					"TPG: MW_ACK_DONE OK! Frame in memory.\n");
 			}
 		}
@@ -901,7 +900,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		vb->v4l2_buf.timestamp.tv_usec = ts.tv_nsec / NSEC_PER_USEC;
 		vb2_set_plane_payload(vb, 0, tegra_channel_get_sizeimage(chan));
 		vb2_buffer_done(vb, state);
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			"TPG: buffer returned to userspace (state=%d)\n", state);
 		return 0;
 	}
@@ -1382,7 +1381,7 @@ static int tegra_channel_mipi_cal(struct tegra_channel *chan, char is_bypass)
 
 	if (lanes) {
 		int ret;
-		dev_info(&chan->video.dev, "T124 mipi_cal: lanes=0x%x\n", lanes);
+		dev_dbg(&chan->video.dev, "T124 mipi_cal: lanes=0x%x\n", lanes);
 		ret = tegra_mipi_calibration(lanes);
 		if (ret)
 			dev_warn(&chan->video.dev, "T124 mipi_cal failed: %d\n", ret);
@@ -1526,7 +1525,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			clk_disable_unprepare(pll_d);
 			tegra_clk_cfg_ex(pll_d, TEGRA_CLK_MIPI_CSI_OUT_ENB, 1);
 			clk_put(pll_d);
-			dev_info(&chan->video.dev,
+			dev_dbg(&chan->video.dev,
 				 "T124 SLCG: PLL_D CSI toggle done\n");
 		}
 	}
