@@ -489,6 +489,13 @@ config VIDEO_IMX179_MOCHA
 	  This is a V4L2 MC sensor driver for the Sony IMX179 camera
 	  on Xiaomi Mi Pad 1 (mocha).
 
+config VIDEO_AD5823_MOCHA
+	tristate "AD5823 focuser support (mocha)"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	---help---
+	  V4L2 focuser driver for the AD5823 VCM on
+	  Xiaomi Mi Pad 1 (mocha).
+
 config VIDEO_OV7640
 	tristate "OmniVision OV7640 sensor support"
 	depends on I2C && VIDEO_V4L2

@@ -53,10 +53,9 @@
 		vi {
 			/*
 			 * T124 VI with MC framework support
-			 * 1 channel: CSI-B (port 2) for OV5693 front camera
-			 * IMX179 rear disabled — no V4L2 MC driver yet
+			 * 3 channels: IMX179 (CSI-A), OV5693 (CSI-E), AD5823 (focuser)
 			 */
-			num-channels = <2>;
+			num-channels = <3>;
 			status = "okay";
 
 			ports {
@@ -90,6 +89,17 @@
 						csi-port = <1>;
 						bus-width = <1>;
 						remote-endpoint = <&mocha_ov5693_out0>;
+					};
+				};
+
+				/*
+				 * Channel 2: AD5823 focuser
+				 * Focuser subdev connected to VI for MC graph
+				 */
+				port@2 {
+					reg = <2>;
+					mocha_vi_in2: endpoint {
+						remote-endpoint = <&mocha_ad5823_out0>;
 					};
 				};
 			};
@@ -206,21 +216,27 @@
 
 		/*
 		 * Focuser: AD5823
-		 * DISABLED — paired with IMX179 which is disabled.
+		 * Paired with IMX179 rear camera
 		 */
 		ad5823_a@0c {
-			compatible = "nvidia,ad5823";
+			compatible = "nvidia,ad5823-mocha";
 			reg = <0x0c>;
-			status = "disabled";
+			status = "okay";
 
-			/* String names matched by regulator consumer framework */
-			vdd-supply = "vdd";
-			vdd-i2c-supply = "vdd_i2c";
+			devnode = "video2";
+			type = "default";
 
-			af-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_HIGH>;
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
 
-			macro-pos = <620>;
-			infinite-pos = <70>;
+				port@0 {
+					reg = <0>;
+					mocha_ad5823_out0: endpoint {
+						remote-endpoint = <&mocha_vi_in2>;
+					};
+				};
+			};
 		};
 
 		/*
@@ -385,6 +401,10 @@
 				drivernode0 {
 					pcl_id = "v4l2_sensor";
 					proc-device-tree = "/proc/device-tree/i2c@7000c500/imx179_a@10";
+				};
+				drivernode1 {
+					pcl_id = "v4l2_focuser";
+					proc-device-tree = "/proc/device-tree/i2c@7000c500/ad5823_a@0c";
 				};
 			};
 

@@ -258,6 +258,7 @@ config VIDEO_TEGRA_VI
 	tristate "Tegra video input host1x client driver"
 	select VIDEO_I2C_OV5693_MOCHA if I2C
 	select VIDEO_IMX179_MOCHA if I2C
+	select VIDEO_AD5823_MOCHA if I2C
 	default y
 	help
 	  Driver for the Tegra video input hardware based on
