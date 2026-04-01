@@ -359,6 +359,62 @@ static void dump_registers(const char *label)
 	printf("=== End Registers ===\n\n");
 }
 
+/* Tegra camera V4L2 control IDs (from camera_common.h) */
+#define V4L2_CID_TEGRA_CAMERA_BASE	(V4L2_CTRL_CLASS_CAMERA | 0x2000)
+#define V4L2_CID_EEPROM_DATA		(V4L2_CID_TEGRA_CAMERA_BASE+5)
+#define V4L2_CID_OTP_DATA		(V4L2_CID_TEGRA_CAMERA_BASE+6)
+#define V4L2_CID_FUSE_ID		(V4L2_CID_TEGRA_CAMERA_BASE+7)
+
+static void show_sensor_info(int fd)
+{
+	struct v4l2_ext_controls ctrls;
+	struct v4l2_ext_control ctrl;
+	int i;
+
+	printf("=== Sensor Info (V4L2 Controls) ===\n");
+	fflush(stdout);
+
+	struct {
+		__u32 id;
+		const char *name;
+		int max_len;
+	} string_ctrls[] = {
+		{ V4L2_CID_FUSE_ID, "Fuse ID", 32 },
+		{ V4L2_CID_OTP_DATA, "OTP Data", 1024 },
+		{ V4L2_CID_EEPROM_DATA, "EEPROM Data", 2048 },
+	};
+
+	for (i = 0; i < 3; i++) {
+		char *buf = calloc(1, string_ctrls[i].max_len + 1);
+		if (!buf)
+			continue;
+
+		memset(&ctrl, 0, sizeof(ctrl));
+		memset(&ctrls, 0, sizeof(ctrls));
+
+		ctrl.id = string_ctrls[i].id;
+		ctrl.size = string_ctrls[i].max_len + 1;
+		ctrl.string = buf;
+
+		ctrls.ctrl_class = V4L2_CTRL_CLASS_CAMERA;
+		ctrls.count = 1;
+		ctrls.controls = &ctrl;
+
+		if (ioctl(fd, VIDIOC_G_EXT_CTRLS, &ctrls) == 0) {
+			if (buf[0]) {
+				printf("  %-12s: %s\n", string_ctrls[i].name, buf);
+			} else {
+				printf("  %-12s: (empty)\n", string_ctrls[i].name);
+			}
+		} else {
+			printf("  %-12s: (not available)\n", string_ctrls[i].name);
+		}
+
+		free(buf);
+	}
+	printf("\n");
+}
+
 /* ---- V4L2 operations ---- */
 
 static void show_capabilities(int fd)
@@ -815,6 +871,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	show_capabilities(fd);
+	show_sensor_info(fd);
 	close(fd);
 
 	if (read_regs)
