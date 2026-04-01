@@ -530,35 +530,49 @@ This is why the **V4L2 + kernel ISP driver** approach is recommended (see sectio
 
 ## 10. Implementation Plan: V4L2 + Kernel ISP Driver
 
-### Current Status (March 2025)
+### Current Status (April 2026)
 
 | Step | Status | Notes |
 |------|--------|-------|
-| Step 1: Device Tree + Power | **COMPLETE** | OV5693 I2C responds, chip ID reads OK |
-| Step 2: V4L2 RAW Capture | **COMPLETE** | OV5693 captures RAW Bayer via MC framework |
-| Step 3: Minimal ISP | **NOT STARTED** | Future work — kernel ISP driver |
-| Step 4: Full ISP Calibration | **NOT STARTED** | Future work — load mocha ISP profiles |
-| Step 5: 3A Statistics | **NOT STARTED** | Future work — AE/AWB/AF |
+| Step 1: Device Tree + Power | **COMPLETE** | Both cameras + focuser |
+| Step 2: V4L2 RAW Capture | **COMPLETE** | IMX179 + OV5693 + AD5823 via MC framework |
+| Step 3: Minimal ISP | **NOT STARTED** | Next step — kernel ISP entity |
+| Step 4: Full ISP Calibration | **NOT STARTED** | Load mocha ISP profiles |
+| Step 5: 3A Statistics | **NOT STARTED** | AE/AWB/AF |
 
-**OV5693 works without ISP**, producing RAW Bayer (SBGGR10) frames directly via V4L2.
-No demosaic, no color correction, ~6fps at 5MP. ISP kernel driver is future work
-for processed YUV/RGB output and better frame rates.
+**All cameras work without ISP**, producing RAW Bayer frames directly via V4L2:
+- IMX179 rear: RGGB 10-bit, 3 modes (3280x2460, 1920x1080, 1280x720@90)
+- OV5693 front: BGGR 10-bit, 6 capture + 2 HDR modes
+- AD5823 focuser: VCM control via lens channel in MC graph
 
-**IMX179 rear camera:** Not started — no V4L2 subdev driver yet.
+### Architecture: ISP as MC Entity
 
-### Architecture
+ISP integrates into the existing Media Controller graph as another entity
+in the pipeline, similar to how sensor and focuser entities are connected:
+
+**Current pipeline (RAW only):**
 ```
-Sensor (V4L2 subdev)  →  CSI (csi.c)  →  VI (channel.c)  →  [DRAM: RAW Bayer]
-                                                                    ↓
-                                              ISP kernel module (FUTURE WORK)
-                                              drivers/video/tegra/host/isp/isp_t124.c
-                                                                    ↓
-                                                            [DRAM: YUV/RGB]
-                                                                    ↓
-                                                            V4L2 output device
-                                                                    ↓
-                                                   Userspace (libcamera, GStreamer, etc.)
+[sensor entity] → link → [VI channel entity] → link → [video0: RAW Bayer]
+[focuser entity] → link → [lens channel: controls only]
 ```
+
+**Target pipeline (with ISP):**
+```
+[sensor entity] → link → [VI channel entity] → link → [ISP entity] → link → [video0: YUV]
+[focuser entity] → link → [lens channel: controls only]
+```
+
+ISP is a V4L2 subdev registered via `v4l2_async_register_subdev`, with:
+- SINK pad: accepts RAW Bayer from VI channel
+- SOURCE pad: outputs processed YUV/RGB
+- Configured via V4L2 subdev controls and ISP profile data
+- Same `media_entity_create_link()` as sensor/focuser links
+- DTS node already exists: `isp@54600000` (ISP A), `isp@54680000` (ISP B)
+
+The ISP entity receives RAW frames from VI, processes them through
+the hardware pipeline (demosaic → WB → CCM → gamma → color space),
+and outputs YUV. Userspace sees the same `/dev/video0` interface
+but gets processed frames instead of RAW Bayer.
 
 ### Why Kernel ISP Driver (not userspace library)
 
@@ -568,71 +582,80 @@ Sensor (V4L2 subdev)  →  CSI (csi.c)  →  VI (channel.c)  →  [DRAM: RAW Bay
 | Blob dependency | None | Must match libnvmm_camera ABI |
 | Host1x API | Kernel nvhost_* already available | Need custom NvRm reimplementation |
 | Debugging | printk, ftrace, debugfs | strace, gdb |
-| Integration | Fits existing V4L2 stack | Need custom pipeline |
+| Integration | Fits existing MC framework | Need custom pipeline |
 | Future | Standard Linux approach | Dead end |
 
 ### What Already Exists in Kernel
 
 | Component | File | Status |
 |-----------|------|--------|
-| V4L2 video device + buffer queues | `drivers/media/platform/tegra/camera/channel.c` (T124 direct path) | **WORKING** |
+| V4L2 video device + buffer queues | `drivers/media/platform/tegra/camera/channel.c` | **WORKING** |
 | Media controller graph | `drivers/media/platform/tegra/camera/graph.c` | **WORKING** |
 | VI capture driver (T124) | `drivers/media/platform/tegra/vi/vi.c` | **WORKING** |
 | CSI transceiver | `drivers/media/platform/tegra/csi/csi.c` | **WORKING** |
 | MIPI calibration (T124) | `drivers/media/platform/tegra/mipical/mipi_cal_t124.c` | **WORKING** |
+| T124 register headers | `drivers/media/platform/tegra/camera/t124_registers.h` | **WORKING** |
+| T210 register headers | `drivers/media/platform/tegra/camera/t210_registers.h` | **WORKING** |
 | ISP host1x client (power/clock) | `drivers/video/tegra/host/isp/isp.c` | Ready (no register programming) |
 | ISP interrupt handler | `drivers/video/tegra/host/isp/isp_isr_v1.c` | Ready |
+| **IMX179 V4L2 subdev (mocha)** | **`drivers/media/i2c/imx179_mocha.c`** | **WORKING** |
 | **OV5693 V4L2 subdev (mocha)** | **`drivers/media/i2c/ov5693_mocha.c`** | **WORKING** |
-| OV5693 V4L2 subdev (reference) | `drivers/media/i2c/ov5693.c` | Reference |
-| IMX179 legacy (miscdevice) | `drivers/media/platform/tegra/imx179.c` | Not started — needs V4L2 subdev |
-| AD5823 legacy (miscdevice) | `drivers/media/platform/tegra/ad5823.c` | Not started — needs V4L2 subdev |
-
-**Current limitation:** RAW Bayer output only. ISP kernel driver (for demosaic, color
-correction, YUV output) is future work. ~6fps at 5MP without ISP.
+| **AD5823 V4L2 focuser (mocha)** | **`drivers/media/i2c/ad5823_mocha.c`** | **WORKING** |
+| ISP calibration profiles | `docs/camera/isp-profiles/*.isp` | Extracted from stock |
+| ISP register map | Section 4 of this document | Fully extracted |
+| Diagnostic tool | `tools/camera/v4l2_diag.c` | **WORKING** (capture + focus + exposure) |
 
 ### What Needs To Be Written
 
-1. **`isp_t124.c`** — ISP register programming module
-   - Location: `drivers/video/tegra/host/isp/isp_t124.c`
+1. **ISP V4L2 subdev entity** — `drivers/media/platform/tegra/isp/isp_t124_mc.c`
+   - V4L2 subdev with SINK (RAW input) and SOURCE (YUV output) pads
+   - Register in MC graph between VI channel and video output device
+   - Program ISP registers via host1x command buffers
+   - Load calibration data from ISP profile files
+
+2. **ISP register programming** — using register map from section 4
    - Opens host1x channel for ISP-A (class 0x32)
-   - Builds command buffers using register map from section 4
+   - Builds command buffers: SET_CLASS(0x32) → enable → input → processing → output
    - Loads calibration data (lens shading, tone curves, CCM) from mocha ISP profiles
    - Submits via nvhost API, waits for syncpoint
 
-2. **`imx179_v4l2.c`** — IMX179 V4L2 subdev driver
-   - Location: `drivers/media/i2c/soc_camera/imx179_v4l2.c`
-   - Template: `ov5693_v4l2.c` or `imx135_v4l2.c` (same camera_common framework)
-   - Mode tables from JXD: `sensor_bayer_imx179.c`
-   - I2C register sequences from existing `imx179.c`
+3. **DTS integration**
+   - Add ISP entity endpoints to mocha camera DTS
+   - Link VI channel → ISP → video output in MC graph
+   - ISP profile path reference in DTS
 
 ### Step-by-Step Plan
 
 ```
-Step 1: Device Tree + Power Sequence — COMPLETE for OV5693
-  - [x] Add OV5693 nodes to mocha DTS (CSI-E, 1-lane, MCLK2)
-  - [x] Verify I2C communication, regulator enable
-  - [x] Test: sensor responds to I2C reads (chip ID=0x5690)
+Step 1: Device Tree + Power Sequence — COMPLETE
+  - [x] OV5693 front camera with CSI-E, 1-lane
+  - [x] IMX179 rear camera with CSI-A, 4-lane
+  - [x] AD5823 focuser with lens channel
+  - [x] DSI MIPI calibration fix
 
-Step 2: V4L2 RAW Capture (no ISP) — COMPLETE for OV5693
-  - [x] Write ov5693_mocha.c with mocha power sequence
-  - [x] Configure channel.c/csi.c for T124 CSI-E
-  - [x] Capture RAW Bayer frames via V4L2
-  - [x] Test: SBGGR10 format, /dev/video0 working
-  - [ ] IMX179 rear camera — NOT STARTED
+Step 2: V4L2 RAW Capture (no ISP) — COMPLETE
+  - [x] ov5693_mocha.c — front camera driver
+  - [x] imx179_mocha.c — rear camera driver
+  - [x] ad5823_mocha.c — focuser driver
+  - [x] channel.c PORT_A + PORT_B T124 bypass
+  - [x] Syncpt fix (MWA=6, MWB=7)
+  - [x] Register headers split (common/t124/t210)
+  - [x] writel→tegra_channel_write cleanup
+  - [x] OTP readout for both sensors
 
-Step 3: Minimal ISP (demosaic + output) — FUTURE WORK
-  - Write isp_t124.c with minimum registers:
+Step 3: Minimal ISP (demosaic + output) — NEXT
+  - Write ISP V4L2 subdev entity for MC graph
+  - Minimum register programming:
     SET_CLASS(0x32) → enable(0x015) → input(0x200) →
     tone_curve(0x101, linear) → output(0xE00, 0xE30-0xE33)
-  - Test: ISP produces viewable YUV output
-  - Note: OV5693 works without ISP (RAW only, ~6fps)
+  - Test: ISP produces viewable YUV output from v4l2_diag
 
-Step 4: Full ISP Calibration — FUTURE WORK
+Step 4: Full ISP Calibration
   - Load mocha calibration profiles:
     lens_shading(0xD31-0xE5C) → tone_curve(0x101) → CCM
   - Test: good quality image comparable to stock
 
-Step 5: 3A Statistics — FUTURE WORK
+Step 5: 3A Statistics
   - Configure stats engine (0x800-0x922)
   - Read AE/AWB/AF stats (0xC41-0xCC5)
   - Implement basic auto-exposure/white-balance in userspace
