@@ -243,17 +243,19 @@
 
 			/*
 			 * Regulators (string names for camera_common_regulator_get)
-			 * Matched via regulator-consumer-supply in PMIC DTS:
-			 *   "avdd_ov5693" -> LDO4 2.7V (device "2-0036")
-			 *   "dovdd"       -> LDO6 1.8V (device "2-0036")
+			 * Supply phandles silence devm_regulator_get warnings.
 			 */
 			avdd-reg = "avdd_ov5693";
 			iovdd-reg = "dovdd";
-
-			/* Mocha extra regulators */
 			dvdd-reg = "vdd_cam_1v2";
 			vcmvdd-reg = "vdd_cam_1v8";
 			afvdd-reg = "imx179_reg1";
+
+			avdd_ov5693-supply = <&palmas_ldo4>;
+			dovdd-supply = <&palmas_ldo6>;
+			vdd_cam_1v2-supply = <&vdd_cam_1v2>;
+			vdd_cam_1v8-supply = <&vdd_cam_1v8>;
+			imx179_reg1-supply = <&palmas_ldo7>;
 
 			/*
 			 * GPIOs:

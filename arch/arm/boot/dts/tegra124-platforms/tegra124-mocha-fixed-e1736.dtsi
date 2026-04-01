@@ -196,7 +196,6 @@
 				regulator-name = "vdd-cam-1v8";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
-				regulator-always-on;
 				enable-active-high;
 				gpio = <&palmas_gpio 1 0>;
 				vin-supply = <&palmas_smps8>;
@@ -213,7 +212,6 @@
 				regulator-name = "vdd-cam-1v2";
 				regulator-min-microvolt = <1200000>;
 				regulator-max-microvolt = <1200000>;
-				regulator-always-on;
 				enable-active-high;
 				gpio = <&palmas_gpio 2 0>;
 				vin-supply = <&palmas_smps8>;
