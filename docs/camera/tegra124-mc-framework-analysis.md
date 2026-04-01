@@ -405,6 +405,10 @@ Complete table of T124 syncpt conditions (from TRM and verified in code):
 
 6. **Hardware verification:** Always verify physical connections (schematics, lane count) before debugging software.
 
+7. **Register header cleanup:** VI/CSI register definitions were split into SoC-specific headers (t124_registers.h, t210_registers.h) with a common registers.h. Raw writel/readl were replaced with tegra_channel_write/read abstractions for better portability.
+
+8. **DSI MIPI calibration:** When the DSI panel is initialized by the bootloader, MIPI calibration must be skipped to avoid disrupting the already-configured MIPI pads.
+
 ---
 
 *Document updated: April 2026*

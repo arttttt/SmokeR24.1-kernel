@@ -415,7 +415,9 @@ Sensor (V4L2 subdev) → CSI → VI → [DRAM: RAW] → ISP kernel module → [D
 
 #### Architecture
 - MC framework (first T124 MC usage ever, not soc_camera)
-- Direct vi2.c register writes bypassing MC CSI framework (T124-specific)
+- T124-specific register programming via tegra_channel_write/read abstractions
+- Register headers split: t124_registers.h, t210_registers.h, common registers.h
+- DSI MIPI cal fix: skip MIPI calibration when DSI panel initialized by bootloader
 - IMX179: CILA+CILB → PP_A → VI_CSI_0 (port 0)
 - OV5693: CILE → PP_B → VI_CSI_1 (port 1)
 - AD5823: lens channel (port 2, no CSI, non-capture)
