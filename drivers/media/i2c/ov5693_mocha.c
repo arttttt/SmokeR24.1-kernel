@@ -338,19 +338,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	dev_info(&priv->i2c_client->dev, "DPD disabled for CSIE (reg=%d bit=%d)\n",
 		 csie_io.io_dpd_reg_index, csie_io.io_dpd_bit);
 
-	/* Step 1.5: enable MCLK2 (24MHz) */
-	if (pw->mclk) {
-		err = clk_set_rate(pw->mclk, 24000000);
-		if (err)
-			dev_warn(&priv->i2c_client->dev,
-				 "mclk set rate failed: %d\n", err);
-		err = clk_prepare_enable(pw->mclk);
-		if (err) {
-			dev_err(&priv->i2c_client->dev,
-				"mclk enable failed: %d\n", err);
-			goto ov5693_mclk_fail;
-		}
-	}
+	/* MCLK is managed by camera_common_s_power() — not here */
 
 	/* Step 2: drive all GPIOs low */
 	if (pw->pwdn_gpio)
@@ -418,9 +406,6 @@ ov5693_avdd_fail:
 	if (priv->afvdd)
 		regulator_disable(priv->afvdd);
 ov5693_afvdd_fail:
-	if (pw->mclk)
-		clk_disable_unprepare(pw->mclk);
-ov5693_mclk_fail:
 	tegra_io_dpd_enable(&csie_io);
 	pr_err("%s failed.\n", __func__);
 	return -ENODEV;
@@ -487,11 +472,9 @@ static int ov5693_power_off(struct camera_common_data *s_data)
 	if (priv->afvdd)
 		regulator_disable(priv->afvdd);
 
-	/* Step 9.5: disable MCLK2 */
-	if (pw->mclk)
-		clk_disable_unprepare(pw->mclk);
+	/* MCLK is managed by camera_common_s_power() — not here */
 
-	/* Step 10: enable CSI-B IO DPD */
+	/* Step 10: enable CSI-E IO DPD */
 	tegra_io_dpd_enable(&csie_io);
 
 	pw->state = SWITCH_OFF;
