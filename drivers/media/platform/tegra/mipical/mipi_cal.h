@@ -17,6 +17,8 @@
 #ifndef MIPI_CAL_H
 #define MIPI_CAL_H
 
+#include <linux/errno.h>
+
 #define DSID	(1 << 31)
 #define DSIC	(1 << 30)
 #define DSIB	(1 << 29)
@@ -28,16 +30,16 @@
 #define CSIB	(1 << 21)
 #define CSIA	(1 << 20)
 
-#if defined(CONFIG_ARCH_TEGRA_21x_SOC)
+#if defined(CONFIG_ARCH_TEGRA_21x_SOC) || defined(CONFIG_ARCH_TEGRA_12x_SOC)
 extern int tegra_mipi_bias_pad_enable(void);
 extern int tegra_mipi_bias_pad_disable(void);
 extern int tegra_mipi_calibration(int lanes);
 extern int tegra_mipi_select_mode(int mode);
 #else
-int tegra_mipi_bias_pad_enable(void) {return -ENOSYS; }
-int tegra_mipi_bias_pad_disable(void) {return -ENOSYS; }
-int tegra_mipi_calibration(int lanes) {return -ENOSYS; }
-int tegra_mipi_select_mode(int mode) {return -ENOSYS; }
+static inline int tegra_mipi_bias_pad_enable(void) { return -ENOSYS; }
+static inline int tegra_mipi_bias_pad_disable(void) { return -ENOSYS; }
+static inline int tegra_mipi_calibration(int lanes) { return -ENOSYS; }
+static inline int tegra_mipi_select_mode(int mode) { return -ENOSYS; }
 #endif
 
 #endif

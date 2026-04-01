@@ -575,7 +575,7 @@
 						};
 					};
 
-					ldo4 {
+					palmas_ldo4: ldo4 {
 						regulator-name = "avdd-cam";
 						regulator-min-microvolt = <2700000>;
 						regulator-max-microvolt = <2700000>;
@@ -660,7 +660,7 @@
 						};
 					};
 
-					ldo6 {
+					palmas_ldo6: ldo6 {
 						regulator-name = "vdd-cam-af";
 						regulator-min-microvolt = <1800000>;
 						regulator-max-microvolt = <1800000>;
@@ -709,7 +709,7 @@
 						};
 					};
 
-					ldo7 {
+					palmas_ldo7: ldo7 {
 						regulator-name = "avdd-cam-af";
 						regulator-min-microvolt = <2700000>;
 						regulator-max-microvolt = <2700000>;

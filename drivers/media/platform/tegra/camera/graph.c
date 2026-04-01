@@ -246,7 +246,39 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 			break;
 		}
 
-		tegra_channel_init_subdevices(chan);
+		if (chan->is_lens_channel) {
+			struct device_node *sensor_node;
+			unsigned int j;
+			/* Lens channel: save subdev ref for power control */
+			chan->subdev_on_csi = media_entity_to_v4l2_subdev(source);
+			chan->num_subdevs = 1;
+			/* Find associated capture channel via DT phandle */
+			sensor_node = of_parse_phandle(
+					link.remote_node, "associated-sensor", 0);
+			if (sensor_node) {
+				for (j = 0; j < vi->num_channels; j++) {
+					struct tegra_channel *cap = &vi->chans[j];
+					if (cap->is_lens_channel || !cap->subdev_on_csi)
+						continue;
+					if (cap->subdev_on_csi->dev &&
+					    cap->subdev_on_csi->dev->of_node == sensor_node) {
+						cap->lens_chan = chan;
+						dev_info(vi->dev,
+							"lens %s -> sensor %s\n",
+							source->name,
+							cap->video.name);
+						break;
+					}
+				}
+				of_node_put(sensor_node);
+			} else {
+				dev_warn(vi->dev,
+					"lens %s: no associated-sensor in DT\n",
+					source->name);
+			}
+		} else {
+			tegra_channel_init_subdevices(chan);
+		}
 	} while (next != NULL);
 
 	of_node_put(ep);
@@ -336,7 +368,7 @@ int tegra_vi_get_port_info(struct tegra_channel *chan,
 	struct device_node *ep = NULL;
 	struct device_node *ports;
 	struct device_node *port;
-	int value = 0xFFFF;
+	int value = INVALID_CSI_PORT;
 	int ret = 0, i;
 
 	ports = of_get_child_by_name(node, "ports");
@@ -360,14 +392,18 @@ int tegra_vi_get_port_info(struct tegra_channel *chan,
 
 			/* Get CSI port */
 			ret = of_property_read_u32(ep, "csi-port", &value);
-			if (ret < 0)
-				dev_err(&chan->video.dev, "csi port error\n");
+			if (ret < 0) {
+				dev_dbg(&chan->video.dev, "csi port not set (lens port?)\n");
+				value = INVALID_CSI_PORT;
+			}
 			chan->port[0] = value;
 
 			/* Get number of data lanes for the endpoint */
 			ret = of_property_read_u32(ep, "bus-width", &value);
-			if (ret < 0)
-				dev_err(&chan->video.dev, "num lanes error\n");
+			if (ret < 0) {
+				dev_dbg(&chan->video.dev, "bus-width not set (lens port?)\n");
+				value = 0;
+			}
 			chan->numlanes = value;
 
 			if (value > 12) {
@@ -544,6 +580,9 @@ int tegra_vi_graph_init(struct tegra_mc_vi *vi)
 		dev_err(vi->dev, "notifier registration failed\n");
 		goto done;
 	}
+
+	dev_info(vi->dev, "async notifier registered: %d subdevs, link_status=%d, bound=%d\n",
+		num_subdevs, vi->link_status, vi->subdevs_bound);
 
 	if (!vi->link_status) {
 		if (vi->subdevs_bound) {

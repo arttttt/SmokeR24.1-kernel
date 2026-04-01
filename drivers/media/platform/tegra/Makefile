@@ -4,7 +4,7 @@ subdir-ccflags-$(CONFIG_ARM) := -Werror
 #
 # Makefile for the video capture/playback device drivers.
 #
-obj-$(CONFIG_ARCH_TEGRA_21x_SOC)	+= mipical/
+obj-y				+= mipical/
 obj-y				+= cam_dev/
 obj-y				+= vi/
 obj-y				+= csi/

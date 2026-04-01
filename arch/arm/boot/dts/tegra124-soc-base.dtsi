@@ -952,7 +952,6 @@
 	mipical {
 		compatible = "nvidia,tegra124-mipical";
 		reg = <0x0 0x700e3000 0x0 0x00000100>;
-		status = "disabled";
 	};
 
 	pcie-controller {

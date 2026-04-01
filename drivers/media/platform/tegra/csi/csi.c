@@ -26,13 +26,13 @@
 #include "dev.h"
 #include "vi/vi.h"
 #include "csi/csi.h"
-
-#define DEBUG 0
+#include "../camera/t124_registers.h"
+#include "../camera/t210_registers.h"
 
 static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
 		u32 val, u8 port)
 {
-#if DEBUG
+#ifdef DEBUG
 	dev_info(csi->dev, "%s:port %d offset 0x%08x val:0x%08x\n",
 				__func__, port, addr, val);
 #endif
@@ -42,7 +42,7 @@ static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
 static u32 csi_read(struct tegra_csi_device *csi, unsigned int addr,
 		u8 port)
 {
-#if DEBUG
+#ifdef DEBUG
 	dev_info(csi->dev, "%s:port %d offset 0x%08x\n", __func__, port, addr);
 #endif
 	return readl((csi->iomem[port] + addr));
@@ -51,7 +51,7 @@ static u32 csi_read(struct tegra_csi_device *csi, unsigned int addr,
 /* Pixel parser registers accessors */
 static void pp_write(struct tegra_csi_port *port, u32 addr, u32 val)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x val:0x%08x\n", __func__, addr, val);
 #endif
 	writel(val, port->pixel_parser + addr);
@@ -59,7 +59,7 @@ static void pp_write(struct tegra_csi_port *port, u32 addr, u32 val)
 
 static u32 pp_read(struct tegra_csi_port *port, u32 addr)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x\n", __func__, addr);
 #endif
 	return readl(port->pixel_parser + addr);
@@ -68,7 +68,7 @@ static u32 pp_read(struct tegra_csi_port *port, u32 addr)
 /* CSI CIL registers accessors */
 static void cil_write(struct tegra_csi_port *port, u32 addr, u32 val)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x val:0x%08x\n", __func__, addr, val);
 #endif
 	writel(val, port->cil + addr);
@@ -76,7 +76,7 @@ static void cil_write(struct tegra_csi_port *port, u32 addr, u32 val)
 
 static u32 cil_read(struct tegra_csi_port *port, u32 addr)
 {
-#if DEBUG
+#ifdef DEBUG
 	pr_info("%s:offset 0x%08x\n", __func__, addr);
 #endif
 	return readl(port->cil + addr);
@@ -160,6 +160,8 @@ void set_csi_portinfo(struct tegra_csi_device *csi,
 	s_data->numlanes = numlanes;
 	s_data->def_clk_freq = TEGRA_CLOCK_CSI_PORT_MAX;
 	csi->ports[port].lanes = numlanes;
+	dev_info(csi->dev, "set_csi_portinfo: port=%d lanes=%d\n",
+		 port, numlanes);
 }
 EXPORT_SYMBOL(set_csi_portinfo);
 
@@ -235,18 +237,50 @@ int tegra_csi_channel_power(struct tegra_csi_device *csi,
 		for (i = 0; csi_port_is_valid(port_num[i]); i++) {
 			port = port_num[i];
 			cil_num = port >> 1;
+			dev_dbg(csi->dev, "channel_power ON: port=%d cil=%d\n",
+				 port, cil_num);
 			err = clock_start(csi,
 				csi->cil[cil_num], csi->clk_freq);
 			if (err)
 				dev_err(csi->dev, "cil clk start error\n");
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+			/*
+			 * T124 CSI-E (1-lane via CILE) needs cile clock (cil[2])
+			 * in addition to the brick clock. Port 1 with 1 lane
+			 * maps to CSI_C which uses CILE, not CILB.
+			 */
+			if (csi->ports[port].lanes == 1 && (port & 1)) {
+				dev_dbg(csi->dev,
+					 "channel_power ON: also enabling cile clock\n");
+				err = clock_start(csi, csi->cil[2],
+						  csi->clk_freq);
+				if (err)
+					dev_err(csi->dev,
+						"cile clk start error\n");
+				/* Also need cilcd for the C/D/E brick */
+				err = clock_start(csi, csi->cil[1],
+						  csi->clk_freq);
+				if (err)
+					dev_err(csi->dev,
+						"cilcd clk start error\n");
+			}
+#endif
 			camera_common_dpd_disable(&csi->s_data[port]);
 		}
 	} else {
 		for (i = 0; csi_port_is_valid(port_num[i]); i++) {
 			port = port_num[i];
 			cil_num = port >> 1;
+			dev_dbg(csi->dev, "channel_power OFF: port=%d cil=%d\n",
+				 port, cil_num);
 			camera_common_dpd_enable(&csi->s_data[port]);
 			clk_disable_unprepare(csi->cil[cil_num]);
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+			if (csi->ports[port].lanes == 1 && (port & 1)) {
+				clk_disable_unprepare(csi->cil[2]);
+				clk_disable_unprepare(csi->cil[1]);
+			}
+#endif
 		}
 	}
 
@@ -329,6 +363,9 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 				enum tegra_csi_port_num port_num)
 {
 	struct tegra_csi_port *port = &csi->ports[port_num];
+	int port_val = ((port_num >> 1) << 1);
+	struct tegra_csi_port *port_a = &csi->ports[port_val];
+	struct tegra_csi_port *port_b = &csi->ports[port_val+1];
 
 	csi_write(csi, TEGRA_CSI_CLKEN_OVERRIDE, 0, port_num>>1);
 
@@ -339,9 +376,96 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 
 	cil_write(port, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
 
-	/* CIL PHY registers setup */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/*
+	 * T124/T132-specific CIL setup — ported from legacy vi2.c.
+	 *
+	 * T124 CSI architecture (from schematic):
+	 *   Brick 0: CILA+CILB → CSI_A (4-lane or 2x 2-lane)
+	 *   Brick 1: CILC+CILD+CILE → CSI_B (4-lane) or CSI_C (1-lane via CILE)
+	 *
+	 * MC PORT_A(0) = legacy CSI_A, uses PP_A + CILA/CILB
+	 * MC PORT_B(1) = legacy CSI_B/CSI_C, uses PP_B + CILC/CILD or CILE
+	 *
+	 * OV5693 on mocha: CSI-E pins, 1-lane → CSI_C in legacy → PORT_B in MC
+	 * IMX179 on mocha: CSI-A/B pins, 4-lane → CSI_A in legacy → PORT_A in MC
+	 *
+	 * Key: CIL registers for CILC/D/E are NOT at port_a/port_b->cil offsets
+	 * (those point to CILA/CILB). Must use absolute offsets via csi_write.
+	 */
+	if ((port->num & 0x1) == PORT_A) {
+		/* PORT_A = CSI_A: CILA + CILB (brick 0) */
+		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, BRICK_CLOCK_A_4X);
+		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
+		cil_write(port_a, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+		cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, T124_CIL_PHY_CONTROL_DEFAULT);
+		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, T124_CIL_PHY_CONTROL_DEFAULT);
+	} else {
+		/*
+		 * PORT_B = CSI_B or CSI_C: CILC/CILD/CILE
+		 * CIL registers are at fixed offsets from iomem[0]:
+		 *   CILC_PAD_CONFIG0 = 0x15C, PHY_CILC_CONTROL0 = 0x164
+		 *   CILD_PAD_CONFIG0 = 0x190, PHY_CILD_CONTROL0 = 0x198
+		 *   CILE_PAD_CONFIG0 = 0x1D0, PHY_CILE_CONTROL0 = 0x1D8
+		 *   CIL_C_INT_MASK  = 0x168
+		 *   CIL_D_INT_MASK  = 0x19C
+		 *   CIL_E_INT_MASK  = 0x1DC
+		 */
+		/* CILC PAD_CONFIG0 = CD_BK_MODE */
+		csi_write(csi, T124_REL_CILC_PAD_CONFIG0, BRICK_CLOCK_A_4X, 0);
+		/* CILD PAD_CONFIG0 = 0 */
+		csi_write(csi, T124_REL_CILD_PAD_CONFIG0, 0x0, 0);
+		/* CILE PAD_CONFIG0 = 0 */
+		csi_write(csi, T124_REL_CILE_PAD_CONFIG0, 0x0, 0);
+		/* CIL C/D/E interrupt masks = 0 */
+		csi_write(csi, T124_REL_CILC_INT_MASK, 0x0, 0);
+		csi_write(csi, T124_REL_CILD_INT_MASK, 0x0, 0);
+		csi_write(csi, T124_REL_CILE_INT_MASK, 0x0, 0);
+
+		if (port->lanes == 1) {
+			/* CSI_C (1-lane via CILE) */
+			csi_write(csi, T124_REL_PHY_CILE_CONTROL0, 0x09, 0); /* PHY_CILE_CONTROL0: THS=9 (R21.5 stock) */
+			dev_dbg(csi->dev,
+				 "T124 CILE: PAD=0x%08x PHY=0x%08x INT=0x%08x\n",
+				 csi_read(csi, T124_REL_CILE_PAD_CONFIG0, 0),
+				 csi_read(csi, T124_REL_PHY_CILE_CONTROL0, 0),
+				 csi_read(csi, T124_REL_CILE_INT_MASK, 0));
+		} else {
+			/* CSI_B (2 or 4 lane via CILC+CILD) */
+			csi_write(csi, 0x164, 0x9, 0); /* PHY_CILC_CONTROL0 */
+			csi_write(csi, 0x198, 0x9, 0); /* PHY_CILD_CONTROL0 */
+		}
+	}
+
+	/* T124 PHY CIL command — proper RMW preserving other port's bits */
+	{
+		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+				   port_num >> 1);
+		u32 newval;
+		if ((port->num & 0x1) == PORT_A) {
+			if (port->lanes == 4)
+				newval = (val & T124_CIL_CMD_HI_MASK) | T124_CIL_AB_4LANE;
+			else
+				newval = (val & T124_CIL_CMD_HI_MASK) | T124_CIL_A_2LANE;
+		} else {
+			if (port->lanes == 4)
+				newval = (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_4LANE;
+			else if (port->lanes == 1)
+				newval = (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_1LANE;
+			else
+				newval = (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_2LANE;
+		}
+		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, newval,
+			  port_num >> 1);
+		dev_dbg(csi->dev,
+			 "T124 CSI%d: port=%d lanes=%d CIL_CMD=0x%08x->0x%08x\n",
+			 port_num, port->num, port->lanes, val, newval);
+	}
+#else
+	/* T210+ CIL PHY registers setup */
 	cil_write(port, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
-	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
+	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, T210_CIL_PHY_CONTROL_DEFAULT);
 
 	/*
 	 * The CSI unit provides for connection of up to six cameras in
@@ -352,29 +476,25 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 	 * camera.
 	 */
 	if (port->lanes == 4) {
-		int port_val = ((port_num >> 1) << 1);
-		struct tegra_csi_port *port_a = &csi->ports[port_val];
-		struct tegra_csi_port *port_b = &csi->ports[port_val+1];
-
 		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0,
 			  BRICK_CLOCK_A_4X);
 		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
 		cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
-		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
-		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
+		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, T210_CIL_PHY_CONTROL_DEFAULT);
+		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, T210_CIL_PHY_CONTROL_DEFAULT);
 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
 			CSI_A_PHY_CIL_ENABLE | CSI_B_PHY_CIL_ENABLE,
 			port_num>>1);
 	} else {
-		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND, port_num>>1);
-		int port_val = ((port_num >> 1) << 1);
-		struct tegra_csi_port *port_a = &csi->ports[port_val];
+		u32 val = csi_read(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+				   port_num >> 1);
 
 		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
 		val |= ((port->num & 0x1) == PORT_A) ? CSI_A_PHY_CIL_ENABLE :
 			CSI_B_PHY_CIL_ENABLE;
 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, val, port_num>>1);
 	}
+#endif
 
 	/* CSI pixel parser registers setup */
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_PP_COMMAND,
@@ -393,17 +513,15 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		 (0x1 << CSI_PP_TOP_FIELD_FRAME_OFFSET) |
 		 (0x1 << CSI_PP_TOP_FIELD_FRAME_MASK_OFFSET));
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_GAP,
-		 0x14 << PP_FRAME_MIN_GAP_OFFSET);
+		 T124_PP_FRAME_MIN_GAP << PP_FRAME_MIN_GAP_OFFSET);
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_EXPECTED_FRAME, 0x0);
 	pp_write(port, TEGRA_CSI_INPUT_STREAM_CONTROL,
 		 (0x3f << CSI_SKIP_PACKET_THRESHOLD_OFFSET) |
 		 (port->lanes - 1));
 
-#if DEBUG
-	/* 0x454140E1 - register setting for line counter */
-	/* 0x454340E1 - tracks frame start, line starts, hpa headers */
-	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, 0x454340E1);
-#endif
+	/* Init debug counters for error-path diagnostics (tegra_csi_status) */
+	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, T124_CSI_DEBUG_COUNTER_CFG);
+
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_PP_COMMAND,
 		 (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
 		 CSI_PP_SINGLE_SHOT_ENABLE | CSI_PP_ENABLE);
@@ -423,15 +541,15 @@ int tegra_csi_error(struct tegra_csi_device *csi,
 	 * corrected automatically
 	*/
 	val = pp_read(port, TEGRA_CSI_PIXEL_PARSER_STATUS);
-	err |= val & 0x4000;
+	err |= val & T124_CIL_ESCAPE_MODE_CMD_ERR;
 	pp_write(port, TEGRA_CSI_PIXEL_PARSER_STATUS, val);
 
 	val = cil_read(port, TEGRA_CSI_CIL_STATUS);
-	err |= val & 0x02;
+	err |= val & T124_CIL_SYNC_WORD_ERR;
 	cil_write(port, TEGRA_CSI_CIL_STATUS, val);
 
 	val = cil_read(port, TEGRA_CSI_CILX_STATUS);
-	err |= val & 0x00020020;
+	err |= val & T124_CIL_DATA_LANE_ERR;
 	cil_write(port, TEGRA_CSI_CILX_STATUS, val);
 
 	return err;
@@ -443,23 +561,35 @@ void tegra_csi_status(struct tegra_csi_device *csi,
 	struct tegra_csi_port *port = &csi->ports[port_num];
 	u32 val = pp_read(port, TEGRA_CSI_PIXEL_PARSER_STATUS);
 
-	dev_dbg(csi->dev, "TEGRA_CSI_PIXEL_PARSER_STATUS 0x%08x\n",
-		val);
+	dev_err(csi->dev, "CSI%d PP_STATUS 0x%08x\n", port_num, val);
 
 	val = cil_read(port, TEGRA_CSI_CIL_STATUS);
-	dev_dbg(csi->dev, "TEGRA_CSI_CIL_STATUS 0x%08x\n", val);
+	dev_err(csi->dev, "CSI%d CIL_STATUS 0x%08x\n", port_num, val);
 
 	val = cil_read(port, TEGRA_CSI_CILX_STATUS);
-	dev_dbg(csi->dev, "TEGRA_CSI_CILX_STATUS 0x%08x\n", val);
+	dev_err(csi->dev, "CSI%d CILX_STATUS 0x%08x\n", port_num, val);
 
-#if DEBUG
-	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_0);
-	dev_dbg(csi->dev, "TEGRA_CSI_DEBUG_COUNTER_0 0x%08x\n", val);
-	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_1);
-	dev_dbg(csi->dev, "TEGRA_CSI_DEBUG_COUNTER_1 0x%08x\n", val);
-	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_2);
-	dev_dbg(csi->dev, "TEGRA_CSI_DEBUG_COUNTER_2 0x%08x\n", val);
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/* Also dump CILE status for T124 CSI_C/CSI_E */
+	if (port->lanes == 1) {
+		dev_err(csi->dev, "CSI%d CILE_STATUS 0x%08x CILEX_STATUS 0x%08x\n",
+			port_num,
+			csi_read(csi, 0x1E0, 0),  /* CIL_E_STATUS */
+			csi_read(csi, 0x1E4, 0)); /* CIL_EX_STATUS */
+		/* Also check PP_A status — maybe data routes there */
+		dev_err(csi->dev, "CSI%d PP_A_STATUS 0x%08x PP_B_STATUS 0x%08x\n",
+			port_num,
+			readl(csi->iomem[0] + 0x1c),  /* PP_A status at PP0+0x1c */
+			readl(csi->iomem[0] + 0x34 + 0x1c)); /* PP_B status */
+	}
 #endif
+
+	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_0);
+	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_0 0x%08x\n", port_num, val);
+	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_1);
+	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_1 0x%08x\n", port_num, val);
+	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_2);
+	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_2 0x%08x\n", port_num, val);
 }
 EXPORT_SYMBOL(tegra_csi_status);
 

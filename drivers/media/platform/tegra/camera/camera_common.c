@@ -21,6 +21,8 @@
 #include <linux/string.h>
 #include <mach/io_dpd.h>
 
+#include "t124_registers.h"
+
 #define has_s_op(master, op) \
 	(master->ops && master->ops->op)
 #define call_s_op(master, op) \
@@ -45,6 +47,11 @@ static const struct camera_common_colorfmt camera_common_color_fmts[] = {
 		V4L2_MBUS_FMT_SRGGB8_1X8,
 		V4L2_COLORSPACE_SRGB,
 		V4L2_PIX_FMT_SRGGB8,
+	},
+	{
+		V4L2_MBUS_FMT_SBGGR10_1X10,
+		V4L2_COLORSPACE_SRGB,
+		V4L2_PIX_FMT_SBGGR10,
 	},
 };
 
@@ -434,7 +441,13 @@ int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 			s_data->mode = frmfmt[i].mode;
 			s_data->fmt_width = mf->width;
 			s_data->fmt_height = mf->height;
-			break;
+			/* If framerate requested, keep searching for better match */
+			if (s_data->requested_fps == 0)
+				break;
+			if (frmfmt[i].num_framerates > 0 &&
+			    frmfmt[i].framerates[0] == s_data->requested_fps)
+				break;
+			/* Continue searching for exact fps match */
 		}
 	}
 
@@ -630,9 +643,18 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 	/* disable CSI IOs DPD mode to turn on camera */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
+		/*
+		 * T124 CSI-E (1-lane via CILE): MC PORT_B(1) maps to
+		 * physical CSIE which is index 4 in the DPD array.
+		 * The default csi_port=1 would hit CSIB (index 1) which
+		 * is wrong — CSIE pads would stay in deep power down.
+		 */
+		if (s_data->csi_port == 1 && s_data->numlanes == 1)
+			io_idx = T124_CSIE_DPD_IO_IDX;
 		tegra_io_dpd_disable(&camera_common_csi_io[io_idx]);
 		dev_dbg(s_data->dev,
-			 "%s: csi %d\n", __func__, io_idx);
+			 "dpd_disable: csi_port=%d io_idx=%d numlanes=%d\n",
+			 s_data->csi_port, io_idx, s_data->numlanes);
 	}
 }
 
@@ -643,10 +665,16 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 	/* 2 lanes per port, divide by two to get numports */
 	int numports = (s_data->numlanes + 1) >> 1;
 
-	/* disable CSI IOs DPD mode to turn on camera */
+	/* enable CSI IOs DPD mode */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
+		/* T124 CSI-E fix: same as dpd_disable */
+		if (s_data->csi_port == 1 && s_data->numlanes == 1)
+			io_idx = T124_CSIE_DPD_IO_IDX;
 		tegra_io_dpd_enable(&camera_common_csi_io[io_idx]);
+		dev_dbg(s_data->dev,
+			 "dpd_enable: csi_port=%d io_idx=%d numlanes=%d\n",
+			 s_data->csi_port, io_idx, s_data->numlanes);
 		dev_dbg(s_data->dev,
 			 "%s: csi %d\n", __func__, io_idx);
 	}

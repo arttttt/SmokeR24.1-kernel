@@ -174,6 +174,8 @@ struct tegra_channel {
 	int requested_kbyteps;
 	unsigned long requested_hz;
 	int grp_id;
+	bool is_lens_channel;	/* true = focuser/lens, no CSI capture */
+	struct tegra_channel *lens_chan; /* capture chan -> associated lens */
 };
 
 #define to_tegra_channel(vdev) \

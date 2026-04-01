@@ -25,10 +25,6 @@
 #define	TEGRA_VI_SYNCPT_WAIT_TIMEOUT			200
 #define	TEGRA_VI_CFG_VI_INCR_SYNCPT			0x000
 #define	VI_CFG_VI_INCR_SYNCPT_COND(x)			(x << 8)
-#define	VI_CSI_PP_LINE_START(port)			(4 + (port) * 4)
-#define	VI_CSI_PP_FRAME_START(port)			(5 + (port) * 4)
-#define	VI_CSI_MW_REQ_DONE(port)			(6 + (port) * 4)
-#define	VI_CSI_MW_ACK_DONE(port)			(7 + (port) * 4)
 
 #define	TEGRA_VI_CFG_VI_INCR_SYNCPT_CNTRL		0x004
 #define	TEGRA_VI_CFG_VI_INCR_SYNCPT_ERROR		0x008

@@ -56,6 +56,9 @@ obj-$(CONFIG_VIDEO_UPD64083) += upd64083.o
 obj-$(CONFIG_VIDEO_IMX214) += imx2xx.o
 obj-$(CONFIG_VIDEO_IMX230) += imx2xx.o
 obj-$(CONFIG_VIDEO_I2C_OV5693) += ov5693.o
+obj-$(CONFIG_VIDEO_I2C_OV5693_MOCHA) += ov5693_mocha.o
+obj-$(CONFIG_VIDEO_IMX179_MOCHA) += imx179_mocha.o
+obj-$(CONFIG_VIDEO_AD5823_MOCHA) += ad5823_mocha.o
 obj-$(CONFIG_VIDEO_OV7640) += ov7640.o
 obj-$(CONFIG_VIDEO_OV7670) += ov7670.o
 obj-$(CONFIG_VIDEO_OV9650) += ov9650.o
@@ -84,6 +87,6 @@ obj-$(CONFIG_VIDEO_SMIAPP_PLL)	+= smiapp-pll.o
 obj-$(CONFIG_VIDEO_AK881X)		+= ak881x.o
 obj-$(CONFIG_VIDEO_IR_I2C)  += ir-kbd-i2c.o
 
-ifneq (,$(filter $(CONFIG_VIDEO_I2C_OV5693),y m))
+ifneq (,$(filter $(CONFIG_VIDEO_I2C_OV5693)$(CONFIG_VIDEO_I2C_OV5693_MOCHA),y m))
 	ccflags-y += -I$(srctree)/drivers/media/platform/tegra
 endif

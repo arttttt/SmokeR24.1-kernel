@@ -35,7 +35,7 @@ void of_i2c_register_devices(struct i2c_adapter *adap)
 		const __be32 *addr;
 		int len;
 
-		dev_dbg(&adap->dev, "of_i2c: register %s\n", node->full_name);
+		dev_info(&adap->dev, "of_i2c: register %s\n", node->full_name);
 
 		if (of_modalias_node(node, info.type, sizeof(info.type)) < 0) {
 			dev_err(&adap->dev, "of_i2c: modalias failure on %s\n",
@@ -74,6 +74,9 @@ void of_i2c_register_devices(struct i2c_adapter *adap)
 			irq_dispose_mapping(info.irq);
 			continue;
 		}
+		dev_info(&adap->dev, "of_i2c: registered %s addr 0x%02x as %s\n",
+			info.type, info.addr,
+			dev_name(&((struct i2c_client *)result)->dev));
 	}
 }
 EXPORT_SYMBOL(of_i2c_register_devices);
