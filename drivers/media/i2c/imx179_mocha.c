@@ -73,7 +73,6 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_DEFAULT_WIDTH		3280
 #define IMX179_DEFAULT_HEIGHT		2460
 #define IMX179_DEFAULT_DATAFMT		V4L2_MBUS_FMT_SRGGB10_1X10
-#define IMX179_DEFAULT_CLK_FREQ		24000000
 
 struct imx179 {
 	struct camera_common_power_rail	power;
@@ -1043,30 +1042,34 @@ static int imx179_probe(struct i2c_client *client,
 
 	/* Mandatory regulators: ext_reg1/2/3 (part of stock power sequence) */
 	err = of_property_read_string(node, "ext_reg1-reg", &ext_reg1_name);
-	if (!err && ext_reg1_name) {
-		err = camera_common_regulator_get(client,
-				&priv->ext_reg1, ext_reg1_name);
-		if (err) {
-			dev_err(&client->dev,
-				"unable to get ext_reg1 regulator %s: %d\n",
-				ext_reg1_name, err);
-			return err;
-		}
+	if (err) {
+		dev_err(&client->dev, "ext_reg1-reg missing in DT\n");
+		return -EINVAL;
+	}
+	err = camera_common_regulator_get(client,
+			&priv->ext_reg1, ext_reg1_name);
+	if (err) {
+		dev_err(&client->dev,
+			"unable to get ext_reg1 regulator %s: %d\n",
+			ext_reg1_name, err);
+		return err;
 	}
 
 	/* ext_reg2 (vdd_cam_1v2, fixed, 1.2V) */
 	{
 		const char *ext_reg2_name;
 		err = of_property_read_string(node, "ext_reg2-reg", &ext_reg2_name);
-		if (!err && ext_reg2_name) {
-			err = camera_common_regulator_get(client,
-					&priv->ext_reg2, ext_reg2_name);
-			if (err) {
-				dev_err(&client->dev,
-					"unable to get ext_reg2 regulator %s: %d\n",
-					ext_reg2_name, err);
-				return err;
-			}
+		if (err) {
+			dev_err(&client->dev, "ext_reg2-reg missing in DT\n");
+			return -EINVAL;
+		}
+		err = camera_common_regulator_get(client,
+				&priv->ext_reg2, ext_reg2_name);
+		if (err) {
+			dev_err(&client->dev,
+				"unable to get ext_reg2 regulator %s: %d\n",
+				ext_reg2_name, err);
+			return err;
 		}
 	}
 
@@ -1074,15 +1077,17 @@ static int imx179_probe(struct i2c_client *client,
 	{
 		const char *ext_reg3_name;
 		err = of_property_read_string(node, "ext_reg3-reg", &ext_reg3_name);
-		if (!err && ext_reg3_name) {
-			err = camera_common_regulator_get(client,
-					&priv->ext_reg3, ext_reg3_name);
-			if (err) {
-				dev_err(&client->dev,
-					"unable to get ext_reg3 regulator %s: %d\n",
-					ext_reg3_name, err);
-				return err;
-			}
+		if (err) {
+			dev_err(&client->dev, "ext_reg3-reg missing in DT\n");
+			return -EINVAL;
+		}
+		err = camera_common_regulator_get(client,
+				&priv->ext_reg3, ext_reg3_name);
+		if (err) {
+			dev_err(&client->dev,
+				"unable to get ext_reg3 regulator %s: %d\n",
+				ext_reg3_name, err);
+			return err;
 		}
 	}
 
