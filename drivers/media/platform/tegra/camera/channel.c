@@ -2372,6 +2372,11 @@ static void tegra_channel_csi_init(struct tegra_mc_vi *vi, unsigned int index)
 	}
 	/* based on gang mode valid ports will be updated - set default to 1 */
 	chan->valid_ports = chan->total_ports ? 1 : 0;
+
+	if (chan->valid_ports == 0) {
+		chan->is_lens_channel = true;
+		dev_dbg(vi->dev, "channel %u: lens-only (no CSI port)\n", index);
+	}
 }
 
 static int tegra_channel_init(struct tegra_mc_vi *vi, unsigned int index)
@@ -2392,6 +2397,27 @@ static int tegra_channel_init(struct tegra_mc_vi *vi, unsigned int index)
 	mutex_init(&chan->stop_kthread_lock);
 	init_completion(&chan->capture_comp);
 	atomic_set(&chan->is_streaming, DISABLE);
+
+	if (chan->is_lens_channel) {
+		/* Lens channel: only need media entity and ctrl handler.
+		 * No video format, no vb2 queue, no video device.
+		 */
+		chan->pad.flags = MEDIA_PAD_FL_SINK;
+		ret = media_entity_init(&chan->video.entity, 1, &chan->pad, 0);
+		if (ret < 0)
+			return ret;
+
+		ret = v4l2_ctrl_handler_init(&chan->ctrl_handler, MAX_CID_CONTROLS);
+		if (chan->ctrl_handler.error)
+			return chan->ctrl_handler.error;
+
+		chan->video.ctrl_handler = &chan->ctrl_handler;
+		/* Name for debug, but no video_register_device */
+		snprintf(chan->video.name, sizeof(chan->video.name), "%s-lens-%u",
+			dev_name(vi->dev), chan->port[0]);
+
+		return 0;
+	}
 
 	/* Init video format */
 	chan->fmtinfo = tegra_core_get_format_by_code(TEGRA_VF_DEF);
