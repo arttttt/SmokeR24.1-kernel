@@ -21,6 +21,8 @@
 #include <linux/string.h>
 #include <mach/io_dpd.h>
 
+#include "t124_registers.h"
+
 #define has_s_op(master, op) \
 	(master->ops && master->ops->op)
 #define call_s_op(master, op) \
@@ -648,7 +650,7 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 		 * is wrong — CSIE pads would stay in deep power down.
 		 */
 		if (s_data->csi_port == 1 && s_data->numlanes == 1)
-			io_idx = 4; /* CSIE */
+			io_idx = T124_CSIE_DPD_IO_IDX;
 		tegra_io_dpd_disable(&camera_common_csi_io[io_idx]);
 		dev_dbg(s_data->dev,
 			 "dpd_disable: csi_port=%d io_idx=%d numlanes=%d\n",
@@ -668,7 +670,7 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 		io_idx = s_data->csi_port + i;
 		/* T124 CSI-E fix: same as dpd_disable */
 		if (s_data->csi_port == 1 && s_data->numlanes == 1)
-			io_idx = 4; /* CSIE */
+			io_idx = T124_CSIE_DPD_IO_IDX;
 		tegra_io_dpd_enable(&camera_common_csi_io[io_idx]);
 		dev_dbg(s_data->dev,
 			 "dpd_enable: csi_port=%d io_idx=%d numlanes=%d\n",

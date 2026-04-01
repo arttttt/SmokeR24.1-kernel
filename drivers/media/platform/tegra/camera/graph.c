@@ -368,7 +368,7 @@ int tegra_vi_get_port_info(struct tegra_channel *chan,
 	struct device_node *ep = NULL;
 	struct device_node *ports;
 	struct device_node *port;
-	int value = 0xFFFF;
+	int value = INVALID_CSI_PORT;
 	int ret = 0, i;
 
 	ports = of_get_child_by_name(node, "ports");
@@ -394,7 +394,7 @@ int tegra_vi_get_port_info(struct tegra_channel *chan,
 			ret = of_property_read_u32(ep, "csi-port", &value);
 			if (ret < 0) {
 				dev_dbg(&chan->video.dev, "csi port not set (lens port?)\n");
-				value = 0xFFFF;
+				value = INVALID_CSI_PORT;
 			}
 			chan->port[0] = value;
 

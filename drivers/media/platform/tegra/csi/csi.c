@@ -26,6 +26,8 @@
 #include "dev.h"
 #include "vi/vi.h"
 #include "csi/csi.h"
+#include "../camera/t124_registers.h"
+#include "../camera/t210_registers.h"
 
 static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
 		u32 val, u8 port)
@@ -397,8 +399,8 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
 		cil_write(port_a, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
 		cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
-		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
-		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0x9);
+		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, T124_CIL_PHY_CONTROL_DEFAULT);
+		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, T124_CIL_PHY_CONTROL_DEFAULT);
 	} else {
 		/*
 		 * PORT_B = CSI_B or CSI_C: CILC/CILD/CILE
@@ -411,24 +413,24 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		 *   CIL_E_INT_MASK  = 0x1DC
 		 */
 		/* CILC PAD_CONFIG0 = CD_BK_MODE */
-		csi_write(csi, 0x15C, 0x10000, 0);
+		csi_write(csi, T124_REL_CILC_PAD_CONFIG0, BRICK_CLOCK_A_4X, 0);
 		/* CILD PAD_CONFIG0 = 0 */
-		csi_write(csi, 0x190, 0x0, 0);
+		csi_write(csi, T124_REL_CILD_PAD_CONFIG0, 0x0, 0);
 		/* CILE PAD_CONFIG0 = 0 */
-		csi_write(csi, 0x1D0, 0x0, 0);
+		csi_write(csi, T124_REL_CILE_PAD_CONFIG0, 0x0, 0);
 		/* CIL C/D/E interrupt masks = 0 */
-		csi_write(csi, 0x168, 0x0, 0);
-		csi_write(csi, 0x19C, 0x0, 0);
-		csi_write(csi, 0x1DC, 0x0, 0);
+		csi_write(csi, T124_REL_CILC_INT_MASK, 0x0, 0);
+		csi_write(csi, T124_REL_CILD_INT_MASK, 0x0, 0);
+		csi_write(csi, T124_REL_CILE_INT_MASK, 0x0, 0);
 
 		if (port->lanes == 1) {
 			/* CSI_C (1-lane via CILE) */
-			csi_write(csi, 0x1D8, 0x09, 0); /* PHY_CILE_CONTROL0: THS=9 (R21.5 stock) */
+			csi_write(csi, T124_REL_PHY_CILE_CONTROL0, 0x09, 0); /* PHY_CILE_CONTROL0: THS=9 (R21.5 stock) */
 			dev_dbg(csi->dev,
 				 "T124 CILE: PAD=0x%08x PHY=0x%08x INT=0x%08x\n",
-				 csi_read(csi, 0x1D0, 0),
-				 csi_read(csi, 0x1D8, 0),
-				 csi_read(csi, 0x1DC, 0));
+				 csi_read(csi, T124_REL_CILE_PAD_CONFIG0, 0),
+				 csi_read(csi, T124_REL_PHY_CILE_CONTROL0, 0),
+				 csi_read(csi, T124_REL_CILE_INT_MASK, 0));
 		} else {
 			/* CSI_B (2 or 4 lane via CILC+CILD) */
 			csi_write(csi, 0x164, 0x9, 0); /* PHY_CILC_CONTROL0 */
@@ -443,16 +445,16 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		u32 newval;
 		if ((port->num & 0x1) == PORT_A) {
 			if (port->lanes == 4)
-				newval = (val & 0xFFFF0000) | 0x0101;
+				newval = (val & T124_CIL_CMD_HI_MASK) | T124_CIL_AB_4LANE;
 			else
-				newval = (val & 0xFFFF0000) | 0x0201;
+				newval = (val & T124_CIL_CMD_HI_MASK) | T124_CIL_A_2LANE;
 		} else {
 			if (port->lanes == 4)
-				newval = (val & 0x0000FFFF) | 0x21010000;
+				newval = (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_4LANE;
 			else if (port->lanes == 1)
-				newval = (val & 0x0000FFFF) | 0x12020000;
+				newval = (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_1LANE;
 			else
-				newval = (val & 0x0000FFFF) | 0x22010000;
+				newval = (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_2LANE;
 		}
 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, newval,
 			  port_num >> 1);
@@ -463,7 +465,7 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 #else
 	/* T210+ CIL PHY registers setup */
 	cil_write(port, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
-	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
+	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, T210_CIL_PHY_CONTROL_DEFAULT);
 
 	/*
 	 * The CSI unit provides for connection of up to six cameras in
@@ -478,8 +480,8 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 			  BRICK_CLOCK_A_4X);
 		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
 		cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
-		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
-		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0xA);
+		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, T210_CIL_PHY_CONTROL_DEFAULT);
+		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, T210_CIL_PHY_CONTROL_DEFAULT);
 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
 			CSI_A_PHY_CIL_ENABLE | CSI_B_PHY_CIL_ENABLE,
 			port_num>>1);
@@ -511,14 +513,14 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		 (0x1 << CSI_PP_TOP_FIELD_FRAME_OFFSET) |
 		 (0x1 << CSI_PP_TOP_FIELD_FRAME_MASK_OFFSET));
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_GAP,
-		 0x14 << PP_FRAME_MIN_GAP_OFFSET);
+		 T124_PP_FRAME_MIN_GAP << PP_FRAME_MIN_GAP_OFFSET);
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_EXPECTED_FRAME, 0x0);
 	pp_write(port, TEGRA_CSI_INPUT_STREAM_CONTROL,
 		 (0x3f << CSI_SKIP_PACKET_THRESHOLD_OFFSET) |
 		 (port->lanes - 1));
 
 	/* Init debug counters for error-path diagnostics (tegra_csi_status) */
-	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, 0x454340E1);
+	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, T124_CSI_DEBUG_COUNTER_CFG);
 
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_PP_COMMAND,
 		 (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
@@ -539,15 +541,15 @@ int tegra_csi_error(struct tegra_csi_device *csi,
 	 * corrected automatically
 	*/
 	val = pp_read(port, TEGRA_CSI_PIXEL_PARSER_STATUS);
-	err |= val & 0x4000;
+	err |= val & T124_CIL_ESCAPE_MODE_CMD_ERR;
 	pp_write(port, TEGRA_CSI_PIXEL_PARSER_STATUS, val);
 
 	val = cil_read(port, TEGRA_CSI_CIL_STATUS);
-	err |= val & 0x02;
+	err |= val & T124_CIL_SYNC_WORD_ERR;
 	cil_write(port, TEGRA_CSI_CIL_STATUS, val);
 
 	val = cil_read(port, TEGRA_CSI_CILX_STATUS);
-	err |= val & 0x00020020;
+	err |= val & T124_CIL_DATA_LANE_ERR;
 	cil_write(port, TEGRA_CSI_CILX_STATUS, val);
 
 	return err;

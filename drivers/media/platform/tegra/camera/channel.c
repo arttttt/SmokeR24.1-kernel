@@ -41,6 +41,8 @@
 #include "vi/vi.h"
 #include "nvhost_acm.h"
 #include "mipi_cal.h"
+#include "t124_registers.h"
+#include "t210_registers.h"
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 static int t124_csi_tpg = 0;
@@ -337,7 +339,6 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 	 * Port-aware: supports PORT_A (CSI-A/B, 4-lane) and PORT_B (CSI-C/D/E, 1-lane)
 	 */
 	if (!chan->vi->pg_mode) {
-		void __iomem *vi_base = chan->vi->iomem;
 		u32 val;
 		int width = chan->format.width;
 		int height = chan->format.height;
@@ -359,43 +360,43 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		/* Select register bases based on port */
 		if (port_num == 0) {
 			/* PORT_A: CSI-A (4-lane), PP_A, VI_CSI_0 */
-			pp_cmd_reg = 0x848;		/* TEGRA_CSI_PIXEL_STREAM_PPA_COMMAND */
-			pp_int_mask_reg = 0x850;	/* TEGRA_CSI_CSI_PIXEL_PARSER_A_INTERRUPT_MASK */
-			pp_status_reg = 0x854;		/* TEGRA_CSI_CSI_PIXEL_PARSER_A_STATUS */
-			stream_ctrl0_reg = 0x83c;	/* TEGRA_CSI_PIXEL_STREAM_A_CONTROL0 */
-			stream_ctrl1_reg = 0x840;	/* TEGRA_CSI_PIXEL_STREAM_A_CONTROL1 */
-			stream_gap_reg = 0x844;		/* TEGRA_CSI_PIXEL_STREAM_A_GAP */
-			stream_expected_reg = 0x84c;	/* TEGRA_CSI_PIXEL_STREAM_A_EXPECTED_FRAME */
-			input_stream_reg = 0x838;	/* TEGRA_CSI_INPUT_STREAM_A_CONTROL */
-			vi_csi_base = 0x100;		/* TEGRA_VI_CSI_0_SW_RESET */
-			pg_ctrl_reg = 0xa68;		/* TEGRA_CSI_PATTERN_GENERATOR_CTRL_A */
-			cil_pad_cfg0 = 0x92c;		/* TEGRA_CSI_CILA_PAD_CONFIG0 */
-			cil_pad_cfg1 = 0x960;		/* TEGRA_CSI_CILB_PAD_CONFIG0 */
-			cil_pad_cfg2 = 0;		/* Not used for port 0 */
-			phy_cil_control0 = 0x934;	/* TEGRA_CSI_PHY_CILA_CONTROL0 */
-			phy_cil_control1 = 0x968;	/* TEGRA_CSI_PHY_CILB_CONTROL0 */
-			cil_int_mask0 = 0x938;		/* TEGRA_CSI_CSI_CIL_A_INTERRUPT_MASK */
-			cil_int_mask1 = 0x96c;		/* TEGRA_CSI_CSI_CIL_B_INTERRUPT_MASK */
+			pp_cmd_reg = T124_PP_A_PIXEL_STREAM_PP_COMMAND;
+			pp_int_mask_reg = T124_PP_A_PIXEL_STREAM_PP_INT_MASK;
+			pp_status_reg = T124_PP_A_PIXEL_PARSER_STATUS;
+			stream_ctrl0_reg = T124_PP_A_PIXEL_STREAM_CONTROL0;
+			stream_ctrl1_reg = T124_PP_A_PIXEL_STREAM_CONTROL1;
+			stream_gap_reg = T124_PP_A_PIXEL_STREAM_GAP;
+			stream_expected_reg = T124_PP_A_PIXEL_STREAM_EXPECTED_FRAME;
+			input_stream_reg = T124_PP_A_INPUT_STREAM_CONTROL;
+			vi_csi_base = TEGRA_VI_CSI_BASE(0);
+			pg_ctrl_reg = T124_CSI_PG_CTRL_A;
+			cil_pad_cfg0 = T124_CILA_PAD_CONFIG0;
+			cil_pad_cfg1 = T124_CILB_PAD_CONFIG0;
+			cil_pad_cfg2 = 0;
+			phy_cil_control0 = T124_PHY_CILA_CONTROL0;
+			phy_cil_control1 = T124_PHY_CILB_CONTROL0;
+			cil_int_mask0 = T124_CSI_CIL_A_INT_MASK;
+			cil_int_mask1 = T124_CSI_CIL_B_INT_MASK;
 			port_name = "CSI_A";
 		} else {
 			/* PORT_B: CSI-C (1-lane), PP_B, VI_CSI_1 */
-			pp_cmd_reg = 0x87c;		/* TEGRA_CSI_PIXEL_STREAM_PPB_COMMAND */
-			pp_int_mask_reg = 0x884;	/* TEGRA_CSI_CSI_PIXEL_PARSER_B_INTERRUPT_MASK */
-			pp_status_reg = 0x888;		/* TEGRA_CSI_CSI_PIXEL_PARSER_B_STATUS */
-			stream_ctrl0_reg = 0x870;	/* TEGRA_CSI_PIXEL_STREAM_B_CONTROL0 */
-			stream_ctrl1_reg = 0x874;	/* TEGRA_CSI_PIXEL_STREAM_B_CONTROL1 */
-			stream_gap_reg = 0x878;		/* TEGRA_CSI_PIXEL_STREAM_B_GAP */
-			stream_expected_reg = 0x880;	/* TEGRA_CSI_PIXEL_STREAM_B_EXPECTED_FRAME */
-			input_stream_reg = 0x86c;	/* TEGRA_CSI_INPUT_STREAM_B_CONTROL */
-			vi_csi_base = 0x200;		/* TEGRA_VI_CSI_1_SW_RESET */
-			pg_ctrl_reg = 0xa9c;		/* TEGRA_CSI_PATTERN_GENERATOR_CTRL_B */
-			cil_pad_cfg0 = 0x994;		/* TEGRA_CSI_CILC_PAD_CONFIG0 */
-			cil_pad_cfg1 = 0x9c8;		/* TEGRA_CSI_CILD_PAD_CONFIG0 */
-			cil_pad_cfg2 = 0xa08;		/* TEGRA_CSI_CILE_PAD_CONFIG0 */
-			phy_cil_control0 = 0x99c;	/* TEGRA_CSI_PHY_CILC_CONTROL0 */
-			phy_cil_control1 = 0x9d0;	/* TEGRA_CSI_PHY_CILD_CONTROL0 */
-			cil_int_mask0 = 0x9a0;		/* TEGRA_CSI_CSI_CIL_C_INTERRUPT_MASK */
-			cil_int_mask1 = 0x9d4;		/* TEGRA_CSI_CSI_CIL_D_INTERRUPT_MASK */
+			pp_cmd_reg = T124_PP_B_PIXEL_STREAM_PP_COMMAND;
+			pp_int_mask_reg = T124_PP_B_PIXEL_STREAM_PP_INT_MASK;
+			pp_status_reg = T124_PP_B_PIXEL_PARSER_STATUS;
+			stream_ctrl0_reg = T124_PP_B_PIXEL_STREAM_CONTROL0;
+			stream_ctrl1_reg = T124_PP_B_PIXEL_STREAM_CONTROL1;
+			stream_gap_reg = T124_PP_B_PIXEL_STREAM_GAP;
+			stream_expected_reg = T124_PP_B_PIXEL_STREAM_EXPECTED_FRAME;
+			input_stream_reg = T124_PP_B_INPUT_STREAM_CONTROL;
+			vi_csi_base = TEGRA_VI_CSI_BASE(1);
+			pg_ctrl_reg = T124_CSI_PG_CTRL_B;
+			cil_pad_cfg0 = T124_CILC_PAD_CONFIG0;
+			cil_pad_cfg1 = T124_CILD_PAD_CONFIG0;
+			cil_pad_cfg2 = T124_CILE_PAD_CONFIG0;
+			phy_cil_control0 = T124_PHY_CILC_CONTROL0;
+			phy_cil_control1 = T124_PHY_CILD_CONTROL0;
+			cil_int_mask0 = T124_CSI_CIL_C_INT_MASK;
+			cil_int_mask1 = T124_CSI_CIL_D_INT_MASK;
 			port_name = "CSI_C";
 		}
 
@@ -403,70 +404,72 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		 * Clear all CIL and PP status registers.
 		 * Always clear all for safety, regardless of port.
 		 */
-		writel(0xFFFFFFFF, vi_base + 0x93c); /* CIL_A_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x970); /* CIL_B_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x9a4); /* CIL_C_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x9d8); /* CIL_D_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0xa18); /* CIL_E_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x940); /* CILA_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x974); /* CILB_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x9a8); /* CILC_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x9dc); /* CILD_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x854); /* PP_A_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x888); /* PP_B_STATUS */
-		writel(0xFFFFFFFF, vi_base + 0x100 + 0x84); /* VI_CSI_0_ERROR */
-		writel(0xFFFFFFFF, vi_base + 0x200 + 0x84); /* VI_CSI_1_ERROR */
+		tegra_channel_write(chan, T124_CSI_CIL_A_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CIL_B_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CIL_C_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CIL_D_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CIL_E_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CILA_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CILB_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CILC_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_CSI_CILD_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_PP_A_PIXEL_PARSER_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, T124_PP_B_PIXEL_PARSER_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, TEGRA_VI_CSI_BASE(0) + TEGRA_VI_CSI_ERROR_STATUS, 0xFFFFFFFF);
+		tegra_channel_write(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_ERROR_STATUS, 0xFFFFFFFF);
 
 		/* CIL pad config — port specific */
 		if (port_num == 0) {
 			/* PORT_A: CILA = CD_BK_MODE, CILB = 0 */
-			writel(0x10000, vi_base + cil_pad_cfg0);  /* CILA_PAD_CONFIG0 */
-			writel(0x0, vi_base + cil_pad_cfg1);      /* CILB_PAD_CONFIG0 */
+			tegra_channel_write(chan, cil_pad_cfg0, 0x10000);  /* CILA_PAD_CONFIG0 */
+			tegra_channel_write(chan, cil_pad_cfg1, 0x0);      /* CILB_PAD_CONFIG0 */
 		} else {
 			/* PORT_B: CILC = CD_BK_MODE, CILD = 0, CILE = 0 */
-			writel(0x10000, vi_base + cil_pad_cfg0);  /* CILC_PAD_CONFIG0 */
-			writel(0x0, vi_base + cil_pad_cfg1);      /* CILD_PAD_CONFIG0 */
-			writel(0x0, vi_base + cil_pad_cfg2);      /* CILE_PAD_CONFIG0 */
+			tegra_channel_write(chan, cil_pad_cfg0, 0x10000);  /* CILC_PAD_CONFIG0 */
+			tegra_channel_write(chan, cil_pad_cfg1, 0x0);      /* CILD_PAD_CONFIG0 */
+			tegra_channel_write(chan, cil_pad_cfg2, 0x0);      /* CILE_PAD_CONFIG0 */
 		}
 
 		/* CIL interrupt masks */
-		writel(0x0, vi_base + cil_int_mask0);
-		writel(0x0, vi_base + cil_int_mask1);
+		tegra_channel_write(chan, cil_int_mask0, 0x0);
+		tegra_channel_write(chan, cil_int_mask1, 0x0);
 		if (port_num != 0)
-			writel(0x0, vi_base + 0xa14);  /* CIL_E_INT_MASK for port 1 */
+			tegra_channel_write(chan, 0xa14, 0x0);  /* CIL_E_INT_MASK for port 1 */
 
 		/* PHY control — R21.5 stock value (THS=9) */
 		if (port_num == 0) {
-			writel(0x09, vi_base + phy_cil_control0);  /* PHY_CILA_CONTROL0 */
-			writel(0x09, vi_base + phy_cil_control1);  /* PHY_CILB_CONTROL0 */
+			tegra_channel_write(chan, phy_cil_control0, 0x09);  /* PHY_CILA_CONTROL0 */
+			tegra_channel_write(chan, phy_cil_control1, 0x09);  /* PHY_CILB_CONTROL0 */
 		} else {
-			writel(0x09, vi_base + 0xa10);  /* PHY_CILE_CONTROL0 for port 1 */
+			tegra_channel_write(chan, 0xa10, 0x09);  /* PHY_CILE_CONTROL0 for port 1 */
 		}
 
 		/* Pixel Parser setup */
-		writel(0xf007, vi_base + pp_cmd_reg);   /* PP_COMMAND = RST+SS */
-		writel(0x0, vi_base + pp_int_mask_reg); /* PP_INT_MASK = 0 */
+		tegra_channel_write(chan, pp_cmd_reg, 0xf007);   /* PP_COMMAND = RST+SS */
+		tegra_channel_write(chan, pp_int_mask_reg, 0x0); /* PP_INT_MASK = 0 */
 		if (port_num == 0)
-			writel(0x280301f0, vi_base + stream_ctrl0_reg); /* STREAM_A_CONTROL0 (4-lane) */
+			tegra_channel_write(chan, stream_ctrl0_reg, 0x280301f0); /* STREAM_A_CONTROL0 (4-lane) */
 		else
-			writel(0x280301f1, vi_base + stream_ctrl0_reg); /* STREAM_B_CONTROL0 (1-lane) */
-		writel(0xf007, vi_base + pp_cmd_reg);   /* PP_COMMAND again */
-		writel(0x11, vi_base + stream_ctrl1_reg); /* STREAM_CONTROL1 */
-		writel(0x140000, vi_base + stream_gap_reg); /* STREAM_GAP */
-		writel(0x0, vi_base + stream_expected_reg); /* STREAM_EXPECTED_FRAME */
+			tegra_channel_write(chan, stream_ctrl0_reg, 0x280301f1); /* STREAM_B_CONTROL0 (1-lane) */
+		tegra_channel_write(chan, pp_cmd_reg, 0xf007);   /* PP_COMMAND again */
+		tegra_channel_write(chan, stream_ctrl1_reg, 0x11); /* STREAM_CONTROL1 */
+		tegra_channel_write(chan, stream_gap_reg, 0x140000); /* STREAM_GAP */
+		tegra_channel_write(chan, stream_expected_reg, 0x0); /* STREAM_EXPECTED_FRAME */
 		if (port_num == 0)
-			writel(0x3f0000 | 0x3, vi_base + input_stream_reg); /* INPUT_STREAM_A_CONTROL (4-lane) */
+			tegra_channel_write(chan, input_stream_reg, 0x3f0000 | 0x3); /* INPUT_STREAM_A_CONTROL (4-lane) */
 		else
-			writel(0x3f0000, vi_base + input_stream_reg); /* INPUT_STREAM_B_CONTROL (1-lane) */
+			tegra_channel_write(chan, input_stream_reg, 0x3f0000); /* INPUT_STREAM_B_CONTROL (1-lane) */
 
 		/* PHY CIL command — port and lane specific */
-		val = readl(vi_base + 0x908);
+		val = tegra_channel_read(chan, T124_CSI_PHY_CIL_COMMAND);
 		if (port_num == 0) {
 			/* PORT_A: 4-lane, enable CILA + CILB */
-			writel((val & 0xFFFF0000) | 0x0101, vi_base + 0x908);
+			tegra_channel_write(chan, T124_CSI_PHY_CIL_COMMAND,
+			       (val & T124_CIL_CMD_HI_MASK) | T124_CIL_AB_4LANE);
 		} else {
 			/* PORT_B: 1-lane, enable CILE */
-			writel((val & 0x0000FFFF) | 0x12020000, vi_base + 0x908);
+			tegra_channel_write(chan, T124_CSI_PHY_CIL_COMMAND,
+			       (val & T124_CIL_CMD_LO_MASK) | T124_CIL_C_1LANE);
 		}
 
 		if (t124_csi_tpg) {
@@ -494,16 +497,17 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 			 * CSI TPG mode: generate test pattern at PP level.
 			 * Register offsets from R21.5 vi2.c (absolute from VI base).
 			 */
-			writel(((0) << 2) | 0x1, vi_base + pg_ctrl_reg);
-			writel(0x0, vi_base + pg_ctrl_reg + 0x08);  /* PG_PHASE */
-			writel(0x100010, vi_base + pg_ctrl_reg + 0x0c); /* PG_RED_FREQ */
-			writel(0x0, vi_base + pg_ctrl_reg + 0x10);  /* PG_RED_FREQ_RATE */
-			writel(0x100010, vi_base + pg_ctrl_reg + 0x14); /* PG_GREEN_FREQ */
-			writel(0x0, vi_base + pg_ctrl_reg + 0x18);  /* PG_GREEN_FREQ_RATE */
-			writel(0x100010, vi_base + pg_ctrl_reg + 0x1c); /* PG_BLUE_FREQ */
-			writel(0x0, vi_base + pg_ctrl_reg + 0x20);  /* PG_BLUE_FREQ_RATE */
+			tegra_channel_write(chan, pg_ctrl_reg,
+			       (PG_DISABLE << PG_MODE_OFFSET) | PG_ENABLE);
+			tegra_channel_write(chan, pg_ctrl_reg + 0x08, 0x0);  /* PG_PHASE */
+			tegra_channel_write(chan, pg_ctrl_reg + 0x0c, 0x100010); /* PG_RED_FREQ */
+			tegra_channel_write(chan, pg_ctrl_reg + 0x10, 0x0);  /* PG_RED_FREQ_RATE */
+			tegra_channel_write(chan, pg_ctrl_reg + 0x14, 0x100010); /* PG_GREEN_FREQ */
+			tegra_channel_write(chan, pg_ctrl_reg + 0x18, 0x0);  /* PG_GREEN_FREQ_RATE */
+			tegra_channel_write(chan, pg_ctrl_reg + 0x1c, 0x100010); /* PG_BLUE_FREQ */
+			tegra_channel_write(chan, pg_ctrl_reg + 0x20, 0x0);  /* PG_BLUE_FREQ_RATE */
 			/* Override CIL_COMMAND for TPG */
-			writel(0x22020202, vi_base + 0x908);
+			tegra_channel_write(chan, T124_CSI_PHY_CIL_COMMAND, T124_CIL_ALL_ENABLE);
 
 			/* TPG uses RGB888 format */
 			format = 64;	/* TEGRA_IMAGE_FORMAT_T_A8B8G8R8 = 0x40 */
@@ -516,22 +520,25 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		}
 
 		/* VI CSI image config — port specific base */
-		writel((t124_csi_tpg ? 0 : (1 << 24)) | (format << 16) | 0x1,
-		       vi_base + vi_csi_base + 0x0c);	/* VI_CSI_IMAGE_DEF */
-		writel(data_type,
-		       vi_base + vi_csi_base + 0x20);	/* VI_CSI_IMAGE_DT */
-		writel(word_count,
-		       vi_base + vi_csi_base + 0x1c);	/* VI_CSI_IMAGE_SIZE_WC */
-		writel((height << 16) | width,
-		       vi_base + vi_csi_base + 0x18);	/* VI_CSI_IMAGE_SIZE */
+		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
+		       (t124_csi_tpg ? 0 : (1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
+		       (format << IMAGE_DEF_FORMAT_OFFSET) | IMAGE_DEF_DEST_MEM);
+		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DT,
+		       data_type);
+		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE_WC,
+		       word_count);
+		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE,
+		       (height << IMAGE_SIZE_HEIGHT_OFFSET) | width);
 
 		/* Enable pixel parser */
-		writel(0xf005, vi_base + pp_cmd_reg);	/* PP_COMMAND = ENABLE */
+		tegra_channel_write(chan, pp_cmd_reg,
+		       (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
+		       CSI_PP_SINGLE_SHOT_ENABLE | CSI_PP_ENABLE);
 
 		dev_dbg(&chan->video.dev,
 			 "T124 %s init (post-stream): %dx%d fmt=0x%x dt=0x%x wc=%d CIL_CMD=0x%08x\n",
 			 port_name, width, height, format, data_type, word_count,
-			 readl(vi_base + 0x908));
+			 tegra_channel_read(chan, T124_CSI_PHY_CIL_COMMAND));
 	}
 #endif
 
@@ -717,7 +724,7 @@ static void tegra_channel_vi_csi_recover(struct tegra_channel *chan)
 	 * and the MC CSI stop/start doesn't apply to our direct register path.
 	 */
 	for (index = 0; index < valid_ports; index++) {
-		frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
+		frame_start = (chan->port[index] == 0) ? T124_PPA_FRAME_START : T124_PPB_FRAME_START;
 		if (error_val & frame_start)
 			chan->syncpoint_fifo[index] = SYNCPT_FIFO_DEPTH;
 	}
@@ -744,7 +751,7 @@ static void tegra_channel_vi_csi_recover(struct tegra_channel *chan)
 
 	/* clear VI errors */
 	for (index = 0; index < valid_ports; index++) {
-		frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
+		frame_start = T210_VI_CSI_PP_FRAME_START(chan->port[index]);
 		if (error_val & frame_start)
 			chan->syncpoint_fifo[index] = SYNCPT_FIFO_DEPTH;
 	}
@@ -805,9 +812,9 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		/* Do not arm sync points if FIFO had entries before */
 		if (!chan->syncpoint_fifo[index]) {
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
-			frame_start = (chan->port[index] == 0) ? 9 : 10;
+			frame_start = (chan->port[index] == 0) ? T124_PPA_FRAME_START : T124_PPB_FRAME_START;
 #else
-			frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
+			frame_start = T210_VI_CSI_PP_FRAME_START(chan->port[index]);
 #endif
 			val = VI_CFG_VI_INCR_SYNCPT_COND(frame_start) |
 				chan->syncpt[index];
@@ -832,8 +839,8 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		 * Port-aware: PORT_A uses MWA_ACK_DONE=6, PORT_B uses MWB_ACK_DONE=7
 		 */
 		u32 mw_thresh;
-		int mw_ack_cond = (chan->port[0] == 0) ? 6 : 7; /* MWA=6, MWB=7 */
-		u32 pp_status_reg = (chan->port[0] == 0) ? 0x854 : 0x888; /* PP_A or PP_B */
+		int mw_ack_cond = (chan->port[0] == 0) ? T124_MWA_ACK_DONE : T124_MWB_ACK_DONE;
+		u32 pp_status_reg = (chan->port[0] == 0) ? T124_PP_A_PIXEL_PARSER_STATUS : T124_PP_B_PIXEL_PARSER_STATUS;
 		const char *pp_name = (chan->port[0] == 0) ? "PP_A" : "PP_B";
 
 		/* ARM MW_ACK_DONE (condition 6 for PP_A, 7 for PP_B) */
@@ -884,7 +891,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			if (err) {
 				dev_err(&chan->video.dev,
 					"TPG: MW_ACK_DONE timeout (%s=0x%08x)\n",
-					pp_name, readl(chan->vi->iomem + pp_status_reg));
+					pp_name, tegra_channel_read(chan, pp_status_reg));
 				state = VB2_BUF_STATE_ERROR;
 			} else {
 				dev_dbg(&chan->video.dev,
@@ -928,8 +935,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC)
 		/* Dump all VI_CSI and PP registers before single shot */
 		{
-			struct tegra_csi_device *csi = chan->vi->csi;
-			struct tegra_csi_port *pp = &csi->ports[chan->port[index]];
 			u32 syncpt_val = 0;
 			nvhost_syncpt_read_ext_check(chan->vi->ndev,
 				chan->syncpt[index], &syncpt_val);
@@ -941,8 +946,11 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				chan->syncpt[index], syncpt_val, thresh[index],
 				csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DEF),
 				csi_read(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_LSB),
-				readl(pp->pixel_parser + 0x18),  /* PP_STATUS */
-				readl(csi->iomem[0] + 0x1E0));   /* CIL_E_STATUS */
+				tegra_channel_read(chan,
+					(chan->port[index] == 0) ?
+					T124_PP_A_PIXEL_PARSER_STATUS :
+					T124_PP_B_PIXEL_PARSER_STATUS),
+				tegra_channel_read(chan, T124_CSI_CIL_E_STATUS));
 		}
 #endif
 		csi_write(chan, index,
@@ -956,7 +964,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			chan->timeout, NULL, &ts);
 		if (err) {
 			u32 errstatus;
-			void __iomem *vi_base = chan->vi->iomem;
 			dev_err(&chan->video.dev,
 				"frame start syncpt timeout!%d\n", index);
 			/* Dump CSI status for debug */
@@ -974,18 +981,18 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				"IMG_SZ=0x%08x IMG_WC=0x%08x "
 				"SURF_LSB=0x%08x STRIDE=0x%08x "
 				"INPUT_STRM=0x%08x CTRL0=0x%08x\n",
-				readl(vi_base + 0x888),
-				readl(vi_base + 0xa18),
-				readl(vi_base + 0xa1c),
-				readl(vi_base + 0xaec),
-				readl(vi_base + 0x200 + 0x0c),
-				readl(vi_base + 0x200 + 0x20),
-				readl(vi_base + 0x200 + 0x18),
-				readl(vi_base + 0x200 + 0x1c),
-				readl(vi_base + 0x200 + 0x28),
-				readl(vi_base + 0x200 + 0x54),
-				readl(vi_base + 0x86c),
-				readl(vi_base + 0x870));
+				tegra_channel_read(chan, T124_PP_B_PIXEL_PARSER_STATUS),
+				tegra_channel_read(chan, T124_CSI_CIL_E_STATUS),
+				tegra_channel_read(chan, T124_CSI_CILE_STATUS),
+				tegra_channel_read(chan, T124_CSI_READONLY_STATUS),
+				tegra_channel_read(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_IMAGE_DEF),
+				tegra_channel_read(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_IMAGE_DT),
+				tegra_channel_read(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_IMAGE_SIZE),
+				tegra_channel_read(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_IMAGE_SIZE_WC),
+				tegra_channel_read(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_SURFACE0_OFFSET_LSB),
+				tegra_channel_read(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_SURFACE0_STRIDE),
+				tegra_channel_read(chan, T124_PP_B_INPUT_STREAM_CONTROL),
+				tegra_channel_read(chan, T124_PP_B_PIXEL_STREAM_CONTROL0));
 #endif
 			state = VB2_BUF_STATE_ERROR;
 			/* perform error recovery for timeout */
@@ -1062,9 +1069,9 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 					chan->syncpt[index], 1);
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 		/* T124: MWA_ACK_DONE=6 (port 0), MWB_ACK_DONE=7 (port 1) */
-		mw_ack_done = (chan->port[index] == 0) ? 6 : 7;
+		mw_ack_done = (chan->port[index] == 0) ? T124_MWA_ACK_DONE : T124_MWB_ACK_DONE;
 #else
-		mw_ack_done = VI_CSI_MW_ACK_DONE(chan->port[index]);
+		mw_ack_done = T210_VI_CSI_MW_ACK_DONE(chan->port[index]);
 #endif
 		val = VI_CFG_VI_INCR_SYNCPT_COND(mw_ack_done) |
 				chan->syncpt[index];
@@ -1531,7 +1538,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 	}
 
 	/* Enable 2nd-level clock gating */
-	writel(0x1, chan->vi->iomem + 0x0b8);
+	tegra_channel_write(chan, TEGRA_VI_CFG_CG_CTRL, 0x1);
 
 	/* Syncpt clean for T124 direct path */
 	for (i = 0; i < chan->valid_ports; i++)
