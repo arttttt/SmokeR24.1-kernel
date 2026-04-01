@@ -135,7 +135,7 @@
 		 * 8MP, RGGB, CSI-A 4-lane, MCLK1 (24MHz)
 		 * Module: Primax
 		 */
-		imx179_a@10 {
+		mocha_imx179: imx179_a@10 {
 			compatible = "nvidia,imx179-mocha";
 			reg = <0x10>;
 			status = "okay";
@@ -225,6 +225,7 @@
 
 			devnode = "video2";
 			type = "default";
+			associated-sensor = <&mocha_imx179>;
 
 			ports {
 				#address-cells = <1>;

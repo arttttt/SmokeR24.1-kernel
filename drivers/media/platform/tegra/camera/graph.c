@@ -247,20 +247,34 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 		}
 
 		if (chan->is_lens_channel) {
+			struct device_node *sensor_node;
 			unsigned int j;
-			/* Lens channel: just save subdev ref for power control */
+			/* Lens channel: save subdev ref for power control */
 			chan->subdev_on_csi = media_entity_to_v4l2_subdev(source);
 			chan->num_subdevs = 1;
-			/* Associate lens with first capture channel */
-			for (j = 0; j < vi->num_channels; j++) {
-				struct tegra_channel *cap = &vi->chans[j];
-				if (!cap->is_lens_channel && cap->valid_ports) {
-					cap->lens_chan = chan;
-					dev_info(vi->dev,
-						"lens %s associated with %s\n",
-						source->name, cap->video.name);
-					break;
+			/* Find associated capture channel via DT phandle */
+			sensor_node = of_parse_phandle(
+					link.remote_node, "associated-sensor", 0);
+			if (sensor_node) {
+				for (j = 0; j < vi->num_channels; j++) {
+					struct tegra_channel *cap = &vi->chans[j];
+					if (cap->is_lens_channel || !cap->subdev_on_csi)
+						continue;
+					if (cap->subdev_on_csi->dev &&
+					    cap->subdev_on_csi->dev->of_node == sensor_node) {
+						cap->lens_chan = chan;
+						dev_info(vi->dev,
+							"lens %s -> sensor %s\n",
+							source->name,
+							cap->video.name);
+						break;
+					}
 				}
+				of_node_put(sensor_node);
+			} else {
+				dev_warn(vi->dev,
+					"lens %s: no associated-sensor in DT\n",
+					source->name);
 			}
 		} else {
 			tegra_channel_init_subdevices(chan);

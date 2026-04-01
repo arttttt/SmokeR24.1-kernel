@@ -1420,20 +1420,32 @@ static int tegra_channel_set_stream(struct tegra_channel *chan, bool on)
 
 static int tegra_channel_set_power(struct tegra_channel *chan, bool on)
 {
-	int ret;
+	int ret, lens_ret;
 
 	if (on) {
 		/* Power on: sensor first (rails up), then lens */
 		ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
 				chan->grp_id, core, s_power, 1);
-		if (chan->lens_chan && chan->lens_chan->subdev_on_csi)
-			v4l2_subdev_call(chan->lens_chan->subdev_on_csi,
-					 core, s_power, 1);
+		if (ret)
+			return ret;
+		if (chan->lens_chan && chan->lens_chan->subdev_on_csi) {
+			lens_ret = v4l2_subdev_call(
+					chan->lens_chan->subdev_on_csi,
+					core, s_power, 1);
+			if (lens_ret)
+				dev_warn(chan->vi->dev,
+					"lens power on failed: %d\n", lens_ret);
+		}
 	} else {
 		/* Power off: lens first (park while rails still up), then sensor */
-		if (chan->lens_chan && chan->lens_chan->subdev_on_csi)
-			v4l2_subdev_call(chan->lens_chan->subdev_on_csi,
-					 core, s_power, 0);
+		if (chan->lens_chan && chan->lens_chan->subdev_on_csi) {
+			lens_ret = v4l2_subdev_call(
+					chan->lens_chan->subdev_on_csi,
+					core, s_power, 0);
+			if (lens_ret)
+				dev_warn(chan->vi->dev,
+					"lens power off failed: %d\n", lens_ret);
+		}
 		ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
 				chan->grp_id, core, s_power, 0);
 	}
