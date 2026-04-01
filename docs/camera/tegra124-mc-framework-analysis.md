@@ -6,23 +6,28 @@
 
 ---
 
-## 0. Current Working State (March 2026)
+## 0. Current Working State (April 2026)
 
 ### Working Features
-- OV5693 front camera on CSI-E (1-lane) fully operational
-- All resolution modes tested and working:
+- **IMX179 rear camera** on CSI-A+B (4-lane) fully operational
+  - 3280x2464@30fps (8MP full)
+  - 1920x1080@30fps (1080p)
+  - 1280x720@90fps (720p high-speed)
+- **OV5693 front camera** on CSI-E (1-lane) fully operational
   - 2592x1944@30 (5MP full)
   - 2592x1458@30 (16:9 widescreen)
   - 1920x1080@30 (1080p)
   - 1280x720@60, @90, @120 (720p high-speed)
-- V4L2 interface: /dev/video0 + /dev/media0 created
-- VIDIOC_S_PARM framerate selection implemented
+- **AD5823 focuser** via lens channel (port 2, no CSI)
+  - VCM position control via V4L2_CID_FOCUS_ABSOLUTE
+  - Range: 140 (infinity) to 640 (macro)
+- V4L2 interface: /dev/video0 (IMX179), /dev/video1 (OV5693), /dev/video2 (AD5823 lens)
+- VIDIOC_S_PARM framerate selection implemented for both sensors
 - CSI TPG (Test Pattern Generator) working as diagnostic tool
 
 ### Current Limitations
 - Single-shot capture: ~6 fps throughput (buffer queue/dequeue overhead)
 - Continuous streaming mode: TODO (not yet implemented)
-- IMX179 rear camera: not yet enabled (requires additional bring-up)
 
 ---
 
@@ -152,14 +157,18 @@ Current mocha defconfig state:
 
 ### Required for basic RAW capture (Phase 1) — ALL WORKING:
 - [x] VI probe with t124_vi_info
-- [x] CSI port setup (ports A, B)
+- [x] CSI port setup (ports A, B for IMX179; port E for OV5693)
+- [x] IMX179 V4L2 subdev probe
 - [x] OV5693 V4L2 subdev probe
+- [x] AD5823 V4L2 lens subdev probe
 - [x] V4L2 async subdev matching
 - [x] VB2 DMA buffer allocation
 - [x] Streaming start/stop
+- [x] IMX179 mocha power sequence (custom imx179_mocha.c driver)
 - [x] OV5693 mocha power sequence (custom ov5693_mocha.c driver)
 - [x] DTS integration (tegra124-mocha-camera-mc.dtsi)
-- [x] VIDIOC_S_PARM framerate selection
+- [x] VIDIOC_S_PARM framerate selection for both sensors
+- [x] Lens channel support (AD5823 focuser, port 2, no CSI)
 
 ### Not required for basic capture:
 - ISP processing (isp_t124.c — future work)
@@ -212,8 +221,12 @@ We proceeded with MC framework (not falling back to soc_camera) because:
 3. The code is cleaner and better structured
 4. Future ISP integration will be easier with MC
 
-The bring-up strategy succeeded: started with OV5693 on CSI-E (simpler, 1-lane),
-got basic RAW capture working. Next: IMX179 and ISP integration.
+The bring-up strategy succeeded:
+1. Started with OV5693 on CSI-E (simpler, 1-lane), got basic RAW capture working
+2. Added IMX179 on CSI-A+B (4-lane), both cameras now working
+3. Added AD5823 focuser via lens channel (no CSI, pure V4L2 control)
+
+Next: ISP integration and continuous streaming mode.
 
 ---
 
@@ -262,7 +275,9 @@ power/clock verification) proved to be non-issues during actual bring-up.
 | Unknown T124 quirk | Unknown | Unknown | **RESOLVED** | CSI PHY init order was the quirk |
 | CSI PHY init order | High | No HS data | **RESOLVED** | See Section 9 |
 | OV5693 1-lane vs 2-lane | High | No packets | **RESOLVED** | 0x3011=0x11 (1-lane mode) |
-| T124 syncpt conditions | High | Timeout | **RESOLVED** | PPB_FRAME_START=10, MWB_ACK_DONE=7 |
+| IMX179 4-lane config | High | No packets | **RESOLVED** | bus-width=4, CILA+CILB |
+| T124 syncpt conditions | High | Timeout | **RESOLVED** | PPA_FRAME_START=9, PPB_FRAME_START=10 |
+| Lens channel support | Medium | Focuser fails | **RESOLVED** | AD5823 working on port 2 |
 
 ---
 
@@ -307,8 +322,10 @@ This section documents the actual fixes that made T124 MC framework work.
 
 | Event | T124 Condition | T210 Condition |
 |-------|---------------|----------------|
+| PPA_FRAME_START | 9 | 5 |
 | PPB_FRAME_START | 10 | 9 |
-| MWB_ACK_DONE | 7 | 6 |
+| MWA_ACK_DONE | 6 | 7 |
+| MWB_ACK_DONE | 7 | 11 |
 
 **Files modified:**
 - `vi/vi_irq.c`: `t124_syncpt_cond_table[]`
@@ -370,7 +387,7 @@ Complete table of T124 syncpt conditions (from TRM and verified in code):
 | 10 | PPB_FRAME_START | Pixel Parser B frame start |
 | ... | ... | ... |
 
-**Critical difference from T210:** T210 uses condition 9 for PPB_FRAME_START, T124 uses condition 10.
+**Critical difference from T210:** T210 uses formula (5+port*4) for FRAME_START, T124 uses fixed values (9 for port A, 10 for port B). Similarly for ACK_DONE: T210 uses (7+port*4), T124 uses 6 for port A, 7 for port B.
 
 ---
 
@@ -390,6 +407,6 @@ Complete table of T124 syncpt conditions (from TRM and verified in code):
 
 ---
 
-*Document updated: March 2026*
+*Document updated: April 2026*
 *Branch: camera/v4l2-bringup*
 *Tested on: Xiaomi Mi Pad (mocha), Tegra K1 (T124)*

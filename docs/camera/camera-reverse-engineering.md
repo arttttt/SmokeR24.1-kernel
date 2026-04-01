@@ -5,16 +5,19 @@
 
 ---
 
-## Status (March 2025)
+## Status (April 2026)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **OV5693 front camera** | **WORKING** | V4L2 RAW capture via MC framework, 5MP@30fps |
-| **IMX179 rear camera** | Not started | No driver yet |
+| **OV5693 front camera** | **WORKING** | V4L2 RAW capture via MC framework, all modes working |
+| **IMX179 rear camera** | **WORKING** | V4L2 RAW capture via MC framework, all modes working |
+| **AD5823 focuser** | **WORKING** | VCM lens control via V4L2 lens channel |
 | **ISP (demosaic, etc.)** | Not started | RAW only, no ISP processing |
 
-**OV5693 front camera is fully functional** via the Media Controller (MC) V4L2 framework.
-Captures RAW Bayer (SBGGR10) frames at 5MP, 1080p, and 720p@60fps.
+**Both cameras are fully functional** via the Media Controller (MC) V4L2 framework.
+- OV5693: Captures RAW Bayer (SBGGR10) at 5MP, 1080p, 720p@60/90/120fps
+- IMX179: Captures RAW Bayer (SRGGB10) at 8MP, 1080p, 720p@90fps
+- AD5823: Focuser control via /dev/video2 (lens channel, no CSI)
 No proprietary blobs required.
 
 ---
@@ -27,15 +30,22 @@ No proprietary blobs required.
 | Sensor | Sony IMX179 | OmnVision OV5693 |
 | Resolution | 3280x2464 (8MP) | 2592x1944 (5MP) |
 | Bayer Pattern | RGGB | BGGR |
-| CSI Port | CSI-A, 4 lanes | CSI-E, 1 lane |
-| MCLK | 24 MHz | 24 MHz |
+| CSI Port | CSI-A+B, 4 lanes | CSI-E, 1 lane |
+| MCLK | 24 MHz (MCLK1) | 24 MHz (MCLK2) |
 | PCLK | 348 MHz | — |
 | Line Length | 3440 px | — |
-| Modes | 8MP@30fps | 5MP@30, 1080p@30, 720p@60 |
-| I2C Bus | CAM I2C (i2c@7000c500, adapter 2) | CAM I2C (i2c@7000c500, adapter 2) |
-| Focuser | AD5823 VCM (macro=620, inf=70) | Fixed |
+| Modes | 8MP@30, 1080p@30, 720p@90 | 5MP@30, 1080p@30, 720p@60/90/120 |
+| I2C Bus | CAM I2C (i2c@7000c500, adapter 2), addr 0x10 | CAM I2C (i2c@7000c500, adapter 2), addr 0x36 |
+| Focuser | AD5823 VCM (macro=640, inf=140) | Fixed |
 | Module | Primax | Sunny |
 | CCM | [2.084 -0.413 -0.079; -1.102 1.817 -0.789; 0.017 -0.404 1.868] | See ov5693_sunny_v2.13.isp |
+
+### AD5823 Focuser
+- I2C address: 0x0C (on CAM I2C bus, adapter 2)
+- VCM (Voice Coil Motor) range: 140 (infinity) to 640 (macro)
+- Paired with IMX179 rear camera
+- Power managed by capture channel (lens_chan association via DT phandle)
+- GPIO 223 (CAM_AF_PWDN) owned by IMX179, enables focuser power
 
 ### SoC Camera/ISP Components
 | Component | Physical Base | Size | Host1x Class | IRQ |
@@ -59,50 +69,56 @@ Sensor → MIPI CSI → VI (class 0x30) → DMA → [DRAM: RAW Bayer]
 **VI and ISP are separate host1x clients.** Data passes through DRAM between them.
 They share the VENC power gate but have independent channels, syncpoints, and clocks.
 
+### GPIOs
+| GPIO | Pin | Function | Owner |
+|------|-----|----------|-------|
+| CAM_RSTN | PBB3 = 219 | IMX179 reset | IMX179 |
+| CAM1_PWDN | PBB5 = 221 | IMX179 power down | IMX179 (not used in power seq) |
+| CAM2_PWDN | PBB6 = 222 | OV5693 power down | OV5693 |
+| CAM_AF_PWDN | PBB7 = 223 | AD5823 / IMX179 AF enable | IMX179 (focuser power) |
+| CAM2_RSTN | PCC1 = 225 | OV5693 reset | OV5693 |
+
 ---
 
 ## 2. Kernel Driver Stack (SmokeR24.1)
 
-### Two Parallel Frameworks
+### Active Framework: Media Controller + V4L2
 
-The kernel contains two independent camera frameworks. Both exist simultaneously:
+```
+drivers/media/platform/tegra/
+├── camera/channel.c     ← V4L2 video device, vb2 buffer queues (T124 direct path)
+├── camera/graph.c       ← Media controller graph setup, lens channel support
+├── camera/mc_common.c   ← Media controller helpers
+├── camera/core.c        ← Format definitions
+├── camera/camera_common.c ← camera_common framework
+├── vi/vi.c              ← VI driver with V4L2 integration
+├── csi/csi.c            ← CSI transceiver (T124 CIL PHY init)
 
-#### Framework A: soc_camera + V4L2 (LEGACY — historical reference)
+drivers/media/i2c/
+├── imx179_mocha.c       ← IMX179 V4L2 subdev (mocha-specific, WORKING)
+├── ov5693_mocha.c       ← OV5693 V4L2 subdev (mocha-specific, WORKING)
+├── ad5823_mocha.c       ← AD5823 focuser V4L2 subdev (WORKING)
+```
+
+**This is the active framework for SmokeR24.1.** Both cameras working via MC V4L2.
+First ever T124 platform using MC framework (previously only T210+).
+
+### Legacy Frameworks (Historical Reference Only)
+
+#### soc_camera + V4L2 (LEGACY)
 ```
 drivers/media/platform/soc_camera/tegra_camera/
 ├── vi2.c           ← soc_camera host, compatible "nvidia,tegra124-vi"
-├── vi_bypass.c     ← VI bypass (T210 only, NOT for T124)
 ├── common.c        ← Shared tegra_camera utilities
 
 drivers/media/i2c/soc_camera/
 ├── ov5693_v4l2.c   ← OV5693 as V4L2 subdev (camera_common framework)
-├── imx135_v4l2.c   ← IMX135 V4L2 subdev (template for IMX179)
-├── imx214_v4l2.c   ← IMX214 V4L2 subdev
-├── ov5693_mode_tbls.h
+├── imx135_v4l2.c   ← IMX135 V4L2 subdev
 ```
 
 **Historical only.** soc_camera was deprecated upstream. MC framework is used instead.
 
-#### Framework B: Media Controller + V4L2 (ACTIVE — used for OV5693)
-```
-drivers/media/platform/tegra/
-├── camera/channel.c     ← V4L2 video device, vb2 buffer queues (T124 direct path)
-├── camera/graph.c       ← Media controller graph setup
-├── camera/mc_common.c   ← Media controller helpers
-├── camera/core.c        ← Format definitions
-├── camera/camera_common.c
-├── vi/vi.c              ← VI driver with V4L2 integration
-├── csi/csi.c            ← CSI transceiver
-
-drivers/media/i2c/
-├── ov5693_mocha.c       ← OV5693 V4L2 subdev (mocha-specific power sequence)
-├── ov5693.c             ← OV5693 V4L2 subdev (newer version, reference)
-```
-
-**This is the active framework for SmokeR24.1.** OV5693 is working via MC V4L2.
-First ever T124 platform using MC framework (previously only T210+).
-
-#### Legacy Sensor Drivers (miscdevice, custom IOCTLs)
+#### Legacy miscdevice Drivers (for blob stack)
 ```
 drivers/media/platform/tegra/
 ├── imx179.c     ← IMX179 miscdevice (/dev/imx179), custom IOCTLs
@@ -160,7 +176,6 @@ embedded ISP cal.     ↓                    ↓
 ↓                     /dev/nvhost-isp      /dev/nvhost-ctrl-vi
 /dev/imx179           /dev/nvhost-ctrl-isp /dev/nvhost-ctrl-vi.1
 /dev/ov5693                                /dev/mipi-cal
-/dev/camera.pcl
 ```
 
 **Key difference from TN8 (Shield Tablet):**
@@ -189,9 +204,9 @@ embedded ISP cal.     ↓                    ↓
 ## 4. Blob Stack Incompatibility Analysis (Historical Reference Only)
 
 **This section is preserved for historical reference.** The working V4L2 MC framework
-approach (Section 8) eliminates all blob dependencies. The blob path was analyzed
-and determined to be a dead end — no combination of available blobs could produce
-a working stack on SmokeR24.1.
+approach eliminates all blob dependencies. The blob path was analyzed and determined
+to be a dead end — no combination of available blobs could produce a working stack on
+SmokeR24.1.
 
 ### Three Available Blob Sources — None Directly Usable
 
@@ -351,9 +366,9 @@ the complete 24-register-base table and block descriptions.
 
 ---
 
-## 8. Implementation Plan
+## 8. Implementation Status
 
-### Target: V4L2 + Kernel ISP Driver (no blobs)
+### Current State: V4L2 + Direct Register Path (no blobs)
 
 ```
 Sensor (V4L2 subdev) → CSI → VI → [DRAM: RAW] → ISP kernel module → [DRAM: YUV]
@@ -363,27 +378,66 @@ Sensor (V4L2 subdev) → CSI → VI → [DRAM: RAW] → ISP kernel module → [D
                                                               libcamera / GStreamer / app
 ```
 
-### Step 1: Device Tree + Sensor Power-On
-- Add IMX179/OV5693 I2C + GPIO + regulator nodes to mocha DTS
-- Verify sensor responds to I2C (read chip ID register)
-- **Test:** `i2cdetect` sees sensor at expected address
+### Completed Work
 
-### Step 2: V4L2 RAW Capture (no ISP) — COMPLETE for OV5693
+#### IMX179 Rear Camera — WORKING
+- [x] Write `imx179_mocha.c` using `camera_common` framework
+  - Mocha-specific power sequence (GPIOs, regulators, MCLK1)
+  - Mode tables: 8MP@30, 1080p@30, 720p@90fps
+  - CSI-A 4-lane configuration
+- [x] Configure MC framework for T124 CSI-A+B
+  - T124-specific CIL PHY init in `csi.c`
+  - MIPI calibration via `mipi_cal_t124.c`
+- [x] **Test:** Capture RAW Bayer via `v4l2-ctl --stream-mmap`
+  - Working: SRGGB10 format, /dev/video0 + /dev/media0
+
+#### OV5693 Front Camera — WORKING
 - [x] Write `ov5693_mocha.c` using `camera_common` framework
   - Mocha-specific power sequence (GPIOs, regulators, MCLK2)
-  - Mode tables: 5MP@30, 1080p@30, 720p@60fps
+  - Mode tables: 5MP@30, 1080p@30, 720p@60/90/120fps
   - CSI-E 1-lane configuration
 - [x] Configure MC framework for T124 CSI-E
   - T124-specific CIL PHY init in `csi.c`
-  - T124 SLCG PLL_D CSI toggle in `channel.c`
-  - MIPI calibration via `mipi_cal_t124.c`
 - [x] **Test:** Capture RAW Bayer via `v4l2-ctl --stream-mmap`
-  - Working: SBGGR10 format, /dev/video0 + /dev/media0
-  - ~6fps at 5MP (limited by RAW bandwidth, no ISP)
+  - Working: SBGGR10 format, /dev/video1 + /dev/media0
+  - ~6fps at 5MP (limited by single-shot overhead, not hardware)
 
-**IMX179 rear camera:** Not started — needs V4L2 subdev driver
+#### AD5823 Focuser — WORKING
+- [x] Write `ad5823_mocha.c` as V4L2 lens subdev
+  - VCM position control via V4L2_CID_FOCUS_ABSOLUTE
+  - Power managed by capture channel (lens_chan association)
+- [x] DTS integration with tegra-camera-platform modules
+  - v4l2_focuser drivernode1 for lens channel
+- [x] **Test:** Focuser responds to V4L2 controls
+  - Position range 140-640 verified working
 
-### Step 3: Minimal ISP Kernel Driver
+### T124-Specific Implementation Details
+
+#### Architecture
+- MC framework (first T124 MC usage ever, not soc_camera)
+- Direct vi2.c register writes bypassing MC CSI framework (T124-specific)
+- IMX179: CILA+CILB → PP_A → VI_CSI_0 (port 0)
+- OV5693: CILE → PP_B → VI_CSI_1 (port 1)
+- AD5823: lens channel (port 2, no CSI, non-capture)
+
+#### Critical T124-Specific Fixes
+1. **Init order**: CSI PHY init AFTER sensor s_stream (R21.5 order) — eliminated CIL errors
+2. **Syncpt condition**: PPB_FRAME_START=10, PPA_FRAME_START=9 (not generic T210 formula)
+3. **MW_ACK_DONE**: MWA_ACK_DONE=6, MWB_ACK_DONE=7 for T124
+4. **ec_recover**: T124 path skips DPD toggle + MC CSI re-init (was killing MIPI pads)
+5. **bus-width**: both VI and sensor endpoints must match (1 for OV5693, 4 for IMX179)
+
+#### T124 Syncpt Event Mapping
+| Event | T124 (R21.5) | T210 (MC generic) |
+|-------|-------------|-------------------|
+| PPA_FRAME_START | 9 | 5 |
+| PPB_FRAME_START | 10 | 9 |
+| MWA_ACK_DONE | 6 | 7 |
+| MWB_ACK_DONE | 7 | 11 |
+
+### Future Work
+
+#### Step 3: Minimal ISP Kernel Driver
 - Write `isp_t124.c` in `drivers/video/tegra/host/isp/`
 - Program minimum ISP registers via host1x command buffer:
   ```
@@ -397,18 +451,23 @@ Sensor (V4L2 subdev) → CSI → VI → [DRAM: RAW] → ISP kernel module → [D
   ```
 - **Test:** ISP produces viewable YUV from RAW input
 
-### Step 4: Load Mocha Calibration
+#### Step 4: Load Mocha Calibration
 - Parse ISP profiles from `docs/camera-isp-profiles/`
 - Load lens shading tables → regs 0xD31-0xE5C
 - Load tone curves → reg 0x101 (224 entries)
 - Load CCM → color processing regs 0x100+
 - **Test:** Image quality comparable to stock camera
 
-### Step 5: 3A Statistics (optional, for auto mode)
+#### Step 5: 3A Statistics (optional, for auto mode)
 - Configure stats engine: regs 0x800-0x922
 - Read AE/AWB/AF output: regs 0xC41-0xCC5
 - Implement basic auto-exposure and white-balance in userspace
 - **Test:** Camera adapts to lighting changes
+
+#### Step 6: Continuous Capture Mode
+- Implement continuous streaming (not single-shot)
+- Target: real 60+ fps at 720p
+- Overlap capture setup with sensor readout
 
 ---
 
@@ -419,17 +478,15 @@ Sensor (V4L2 subdev) → CSI → VI → [DRAM: RAW] → ISP kernel module → [D
 docs/camera-reverse-engineering.md         ← this file (architecture overview)
 docs/camera-isp-reverse-engineering.md     ← ISP register map, reverse engineering details
 docs/camera-isp-profiles/                  ← extracted mocha-specific ISP calibration data
-  ├── imx179_primax_lfi_v3.09.isp          (6272 lines, RECOMMENDED for rear)
-  ├── imx179_primax_v2.27.isp              (6571 lines, rear)
-  ├── imx179_primax_v2.18.isp              (6234 lines, rear)
-  └── ov5693_sunny_v2.13.isp              (6560 lines, front)
+docs/tegra124-mc-framework-analysis.md     ← MC framework bring-up analysis
+docs/ov5693-register-reference.md          ← OV5693 sensor register reference
 ```
 
 ### Kernel — V4L2 Camera Stack (Working Files)
 ```
 drivers/media/platform/tegra/camera/
 ├── channel.c              ← V4L2 video device, vb2 buffer queues (T124 direct path)
-├── graph.c                ← media controller graph setup
+├── graph.c                ← media controller graph setup, lens channel support
 ├── mc_common.c            ← media controller helpers
 ├── core.c                 ← format definitions
 ├── camera_common.c        ← camera_common framework
@@ -444,13 +501,11 @@ drivers/media/platform/tegra/
 ├── mipical/mipi_cal_t124.c ← T124-specific MIPI calibration
 
 drivers/media/i2c/
+├── imx179_mocha.c         ← IMX179 V4L2 subdev (mocha-specific, WORKING)
 ├── ov5693_mocha.c         ← OV5693 V4L2 subdev (mocha-specific, WORKING)
-├── ov5693.c               ← OV5693 V4L2 subdev (reference)
-
-Historical (not used):
-drivers/media/platform/soc_camera/tegra_camera/
-├── vi2.c                  ← soc_camera VI host (legacy, not used)
-├── common.c               ← tegra_camera utilities
+├── ad5823_mocha.c         ← AD5823 focuser V4L2 subdev (WORKING)
+├── imx179_mocha_mode_tbls.h ← IMX179 mode tables
+├── ov5693_mocha_mode_tbls.h ← OV5693 mode tables
 ```
 
 ### Kernel — ISP
@@ -462,23 +517,16 @@ drivers/video/tegra/host/isp/
 ├── isp_isr_v1.h
 ```
 
-### Kernel — Sensor Drivers
-```
-V4L2 subdev (camera_common framework):
-  drivers/media/i2c/soc_camera/ov5693_v4l2.c      ← OV5693 V4L2 (ready)
-  drivers/media/i2c/soc_camera/imx135_v4l2.c      ← IMX135 V4L2 (template for IMX179)
-  drivers/media/i2c/ov5693.c                       ← OV5693 V4L2 (newer version)
-
-Legacy miscdevice (for blob stack, reference):
-  drivers/media/platform/tegra/imx179.c            ← IMX179 (mode tables, I2C regs)
-  drivers/media/platform/tegra/ov5693.c            ← OV5693
-  drivers/media/platform/tegra/ad5823.c            ← AD5823 focuser
-```
-
 ### Kernel — Device Tree
 ```
 arch/arm/boot/dts/tegra124-soc-base.dtsi           ← VI, ISP-A, ISP-B nodes
 arch/arm/boot/dts/tegra124-platforms/               ← platform-specific camera configs
+└── tegra124-mocha-camera-mc.dtsi                  ← mocha camera DT (IMX179, OV5693, AD5823)
+```
+
+### Tools
+```
+tools/camera/v4l2_diag.c   ← Capture diagnostic tool
 ```
 
 ### Stock Blobs (reference only, from android_vendor_xiaomi_mocha)
@@ -511,9 +559,6 @@ tegra/camera-partner/imager/
 ├── imager_nvc.c               ← NVC imager framework (96KB)
 └── configs/
     └── sensor_bayer_imx179_camera_config.h ← ISP calibration as C (194KB)
-
-tegra/camera-partner/android/libnvcamerategra/camera_v3/
-└── (Camera HAL3 implementation)
 
 tegra/hwinc/t12x/
 ├── class_ids.h                ← ISP A=0x32, ISP B=0x34
