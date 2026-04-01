@@ -484,7 +484,7 @@ config VIDEO_I2C_OV5693_MOCHA
 
 config VIDEO_IMX179_MOCHA
 	tristate "IMX179 camera sensor support (mocha)"
-	depends on I2C && VIDEO_V4L2 && VIDEO_TEGRA_CAMERA
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
 	---help---
 	  This is a V4L2 MC sensor driver for the Sony IMX179 camera
 	  on Xiaomi Mi Pad 1 (mocha).
