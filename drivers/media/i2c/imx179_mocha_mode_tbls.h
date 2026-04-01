@@ -285,6 +285,7 @@ static const imx179_reg *mode_table[] = {
 };
 
 /* Frame format settings for camera_common */
+#define IMX179_DEFAULT_CLK_FREQ		24000000
 static const struct camera_common_frmfmt imx179_frmfmt[] = {
 	{{3280, 2460},	IMX179_MODE_3280X2460,	1,	0,	IMX179_DEFAULT_CLK_FREQ},
 	{{1920, 1080},	IMX179_MODE_1920X1080,	1,	0,	IMX179_DEFAULT_CLK_FREQ},

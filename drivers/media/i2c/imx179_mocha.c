@@ -860,7 +860,6 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 static int imx179_ctrls_init(struct imx179 *priv)
 {
 	struct i2c_client *client = priv->i2c_client;
-	struct camera_common_data *common_data = priv->s_data;
 	struct v4l2_ctrl *ctrl;
 	int numctrls;
 	int err;
@@ -959,18 +958,7 @@ static struct camera_common_pdata *imx179_parse_dt(struct i2c_client *client)
 		dev_err(&client->dev, "avdd-reg not in DT\n");
 		goto error;
 	}
-	err = of_property_read_string(node, "iovdd-reg",
-			&board_priv_pdata->regulators.iovdd);
-	if (err) {
-		dev_err(&client->dev, "iovdd-reg not in DT\n");
-		goto error;
-	}
-	err = of_property_read_string(node, "dvdd-reg",
-			&board_priv_pdata->regulators.dvdd);
-	if (err) {
-		dev_err(&client->dev, "dvdd-reg not in DT\n");
-		goto error;
-	}
+	/* iovdd/dvdd not used — power is via ext_reg1/2/3 + avdd */
 
 	return board_priv_pdata;
 
@@ -1040,51 +1028,48 @@ static int imx179_probe(struct i2c_client *client,
 		priv->pdata->mclk_name ? priv->pdata->mclk_name : "(null)",
 		priv->pdata->reset_gpio, priv->pdata->af_gpio);
 
-	/* Mocha: ext_reg1 regulator (imx179_reg1, LDO7, 2.7V) */
+	/* Mandatory regulators: ext_reg1/2/3 (part of stock power sequence) */
 	err = of_property_read_string(node, "ext_reg1-reg", &ext_reg1_name);
 	if (!err && ext_reg1_name) {
 		err = camera_common_regulator_get(client,
 				&priv->ext_reg1, ext_reg1_name);
-		if (err)
-			dev_warn(&client->dev,
-				"unable to get ext_reg1 regulator %s\n",
-				ext_reg1_name);
-		else
-			dev_dbg(&client->dev, "ext_reg1 regulator %s: ok\n",
-				ext_reg1_name);
+		if (err) {
+			dev_err(&client->dev,
+				"unable to get ext_reg1 regulator %s: %d\n",
+				ext_reg1_name, err);
+			return err;
+		}
 	}
 
-	/* Mocha: ext_reg2 regulator (vdd_cam_1v2, fixed, 1.2V) */
+	/* ext_reg2 (vdd_cam_1v2, fixed, 1.2V) */
 	{
 		const char *ext_reg2_name;
 		err = of_property_read_string(node, "ext_reg2-reg", &ext_reg2_name);
 		if (!err && ext_reg2_name) {
 			err = camera_common_regulator_get(client,
 					&priv->ext_reg2, ext_reg2_name);
-			if (err)
-				dev_warn(&client->dev,
-					"unable to get ext_reg2 regulator %s\n",
-					ext_reg2_name);
-			else
-				dev_dbg(&client->dev, "ext_reg2 regulator %s: ok\n",
-					ext_reg2_name);
+			if (err) {
+				dev_err(&client->dev,
+					"unable to get ext_reg2 regulator %s: %d\n",
+					ext_reg2_name, err);
+				return err;
+			}
 		}
 	}
 
-	/* Mocha: ext_reg3 regulator (vdd_cam_1v8, fixed, 1.8V) */
+	/* ext_reg3 (vdd_cam_1v8, fixed, 1.8V) */
 	{
 		const char *ext_reg3_name;
 		err = of_property_read_string(node, "ext_reg3-reg", &ext_reg3_name);
 		if (!err && ext_reg3_name) {
 			err = camera_common_regulator_get(client,
 					&priv->ext_reg3, ext_reg3_name);
-			if (err)
-				dev_warn(&client->dev,
-					"unable to get ext_reg3 regulator %s\n",
-					ext_reg3_name);
-			else
-				dev_dbg(&client->dev, "ext_reg3 regulator %s: ok\n",
-					ext_reg3_name);
+			if (err) {
+				dev_err(&client->dev,
+					"unable to get ext_reg3 regulator %s: %d\n",
+					ext_reg3_name, err);
+				return err;
+			}
 		}
 	}
 
