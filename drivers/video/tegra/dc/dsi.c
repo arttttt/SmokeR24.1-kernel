@@ -4269,6 +4269,14 @@ static void tegra_dsi_setup_initialized_panel(struct tegra_dc_dsi_data *dsi)
 
 	tegra_dsi_clk_enable(dsi);
 
+	/*
+	 * Bootloader initialized DSI but kernel's common mipical driver
+	 * needs to calibrate DSI pads. Without this, the display stays
+	 * black until something else triggers MIPI calibration (e.g.
+	 * camera capture or screen off/on).
+	 */
+	tegra_dsi_pad_calibration(dsi);
+
 	dsi->enabled = true;
 }
 
