@@ -1039,6 +1039,10 @@ static int ov5693_eeprom_device_release(struct ov5693 *priv)
 			i2c_unregister_device(priv->eeprom[i].i2c_client);
 			priv->eeprom[i].i2c_client = NULL;
 		}
+		if (priv->eeprom[i].adap != NULL) {
+			i2c_put_adapter(priv->eeprom[i].adap);
+			priv->eeprom[i].adap = NULL;
+		}
 	}
 
 	return 0;
@@ -1536,7 +1540,7 @@ static int ov5693_probe(struct i2c_client *client,
 		dev_err(&client->dev, "unable to get platform data\n");
 		return -EFAULT;
 	}
-	dev_info(&client->dev, "parse_dt done: mclk=%s pwdn=%u reset=%u af=%u\n",
+	dev_dbg(&client->dev, "parse_dt done: mclk=%s pwdn=%u reset=%u af=%u\n",
 		priv->pdata->mclk_name ? priv->pdata->mclk_name : "(null)",
 		priv->pdata->pwdn_gpio, priv->pdata->reset_gpio,
 		priv->pdata->af_gpio);
@@ -1551,7 +1555,7 @@ static int ov5693_probe(struct i2c_client *client,
 				"unable to get afvdd regulator %s\n",
 				afvdd_reg_name);
 		else
-			dev_info(&client->dev, "afvdd regulator %s: ok\n",
+			dev_dbg(&client->dev, "afvdd regulator %s: ok\n",
 				afvdd_reg_name);
 	}
 
