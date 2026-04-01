@@ -361,6 +361,8 @@ static void dump_registers(const char *label)
 
 /* Tegra camera V4L2 control IDs (from camera_common.h) */
 #define V4L2_CID_TEGRA_CAMERA_BASE	(V4L2_CTRL_CLASS_CAMERA | 0x2000)
+#define V4L2_CID_FRAME_LENGTH		(V4L2_CID_TEGRA_CAMERA_BASE+0)
+#define V4L2_CID_COARSE_TIME		(V4L2_CID_TEGRA_CAMERA_BASE+1)
 #define V4L2_CID_EEPROM_DATA		(V4L2_CID_TEGRA_CAMERA_BASE+5)
 #define V4L2_CID_OTP_DATA		(V4L2_CID_TEGRA_CAMERA_BASE+6)
 #define V4L2_CID_FUSE_ID		(V4L2_CID_TEGRA_CAMERA_BASE+7)
@@ -518,7 +520,8 @@ static void show_media_info(void)
 static int do_capture(const char *dev, int width, int height,
 		      const char *outfile, int nframes, int timeout_ms,
 		      int read_regs, int poll_regs, int single_shot,
-		      int framerate)
+		      int framerate, int exposure, int gain,
+		      int focus, const char *focus_dev)
 {
 	struct buffer buffers[MAX_BUFFERS];
 	int nbuf = 0;
@@ -640,6 +643,33 @@ static int do_capture(const char *dev, int width, int height,
 		}
 	}
 
+	/* Set exposure and gain before streaming */
+	if (exposure >= 0) {
+		struct v4l2_ext_controls ctrls;
+		struct v4l2_ext_control ctrl;
+		memset(&ctrl, 0, sizeof(ctrl));
+		memset(&ctrls, 0, sizeof(ctrls));
+		ctrl.id = V4L2_CID_COARSE_TIME;
+		ctrl.value = exposure;
+		ctrls.ctrl_class = V4L2_CTRL_CLASS_CAMERA;
+		ctrls.count = 1;
+		ctrls.controls = &ctrl;
+		if (ioctl(fd, VIDIOC_S_EXT_CTRLS, &ctrls) < 0)
+			perror("set exposure");
+		else
+			printf("Exposure set to %d\n", exposure);
+	}
+	if (gain >= 0) {
+		struct v4l2_control ctrl;
+		memset(&ctrl, 0, sizeof(ctrl));
+		ctrl.id = V4L2_CID_GAIN;
+		ctrl.value = gain;
+		if (ioctl(fd, VIDIOC_S_CTRL, &ctrl) < 0)
+			perror("set gain");
+		else
+			printf("Gain set to %d\n", gain);
+	}
+
 	if (read_regs)
 		dump_registers("BEFORE STREAMON");
 
@@ -656,6 +686,27 @@ static int do_capture(const char *dev, int width, int height,
 
 	long long t_streamon = now_ms();
 	printf("STREAMON took %lld ms\n", t_streamon - t_start);
+
+	/* Set focus AFTER streamon (focuser powered by sensor stream) */
+	if (focus >= 0) {
+		const char *fdev = focus_dev ? focus_dev : dev;
+		int focus_fd = open(fdev, O_RDWR);
+		if (focus_fd < 0) {
+			fprintf(stderr, "Cannot open focus dev %s: %s\n",
+				fdev, strerror(errno));
+		} else {
+			struct v4l2_control ctrl;
+			memset(&ctrl, 0, sizeof(ctrl));
+			ctrl.id = V4L2_CID_FOCUS_ABSOLUTE;
+			ctrl.value = focus;
+			if (ioctl(focus_fd, VIDIOC_S_CTRL, &ctrl) < 0)
+				perror("set focus");
+			else
+				printf("Focus set to %d on %s\n", focus, fdev);
+			close(focus_fd);
+			usleep(100000); /* 100ms settle time for VCM */
+		}
+	}
 
 	if (read_regs)
 		dump_registers("AFTER STREAMON");
@@ -828,9 +879,13 @@ int main(int argc, char *argv[])
 	int poll_regs = 0;
 	int single_shot = 0;
 	int framerate = 0;
+	int exposure = -1;
+	int gain = -1;
+	int focus = -1;
+	const char *focus_dev = NULL;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRSf:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRSf:e:g:F:D:")) != -1) {
 		switch (opt) {
 		case 'd': dev = optarg; break;
 		case 'w': width = atoi(optarg); break;
@@ -843,6 +898,10 @@ int main(int argc, char *argv[])
 		case 'R': poll_regs = 1; read_regs = 1; break;
 		case 'S': single_shot = 1; nframes = 1; break;
 		case 'f': framerate = atoi(optarg); break;
+		case 'e': exposure = atoi(optarg); break;
+		case 'g': gain = atoi(optarg); break;
+		case 'F': focus = atoi(optarg); break;
+		case 'D': focus_dev = optarg; break;
 		default:
 			usage(argv[0]);
 			return 1;
@@ -880,7 +939,8 @@ int main(int argc, char *argv[])
 	if (!info_only) {
 		int ret = do_capture(dev, width, height, outfile,
 				     nframes, timeout_ms, read_regs, poll_regs,
-				     single_shot, framerate);
+				     single_shot, framerate, exposure, gain,
+				     focus, focus_dev);
 		unmap_vi_registers();
 		return ret < 0 ? 1 : 0;
 	}
