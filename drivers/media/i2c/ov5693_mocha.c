@@ -578,26 +578,27 @@ static int ov5693_power_get(struct ov5693 *priv)
 				"%s ERR can't register cam gpio %u!\n",
 				 __func__, pw->pwdn_gpio);
 	} else {
+		int gpio_err;
 		if (pw->pwdn_gpio) {
-			err = gpio_request_one(pw->pwdn_gpio,
+			gpio_err = gpio_request_one(pw->pwdn_gpio,
 					 GPIOF_OUT_INIT_LOW, "cam2_pwdn_gpio");
-			if (err)
+			if (gpio_err)
 				dev_warn(&priv->i2c_client->dev,
-					"pwdn gpio request failed: %d\n", err);
+					"pwdn gpio request failed: %d\n", gpio_err);
 		}
 		if (pw->reset_gpio) {
-			err = gpio_request_one(pw->reset_gpio,
+			gpio_err = gpio_request_one(pw->reset_gpio,
 					 GPIOF_OUT_INIT_LOW, "cam2_reset_gpio");
-			if (err)
+			if (gpio_err)
 				dev_warn(&priv->i2c_client->dev,
-					"reset gpio request failed: %d\n", err);
+					"reset gpio request failed: %d\n", gpio_err);
 		}
 		if (pw->af_gpio) {
-			err = gpio_request_one(pw->af_gpio,
+			gpio_err = gpio_request_one(pw->af_gpio,
 					 GPIOF_OUT_INIT_LOW, "cam_af_pwdn_gpio");
-			if (err)
+			if (gpio_err)
 				dev_warn(&priv->i2c_client->dev,
-					"af gpio request failed: %d\n", err);
+					"af gpio request failed: %d\n", gpio_err);
 		}
 	}
 
