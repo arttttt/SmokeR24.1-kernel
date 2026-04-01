@@ -55,6 +55,9 @@ static struct tegra_io_dpd csib_io = {
 
 #define IMX179_MAX_COARSE_DIFF		6
 
+#define IMX179_OTP_SIZE			803
+#define IMX179_OTP_STR_SIZE		(IMX179_OTP_SIZE * 2)
+
 #define IMX179_GAIN_SHIFT		8
 #define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)
 #define IMX179_MAX_GAIN			(16 << IMX179_GAIN_SHIFT)
@@ -170,6 +173,16 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 		.menu_skip_mask = 0,
 		.def = 0,
 		.qmenu_int = switch_ctrl_qmenu,
+	},
+	{
+		.ops = &imx179_ctrl_ops,
+		.id = V4L2_CID_OTP_DATA,
+		.name = "OTP Data",
+		.type = V4L2_CTRL_TYPE_STRING,
+		.flags = V4L2_CTRL_FLAG_READ_ONLY,
+		.min = 0,
+		.max = IMX179_OTP_STR_SIZE,
+		.step = 2,
 	},
 };
 
@@ -871,6 +884,97 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 	return err;
 }
 
+static int imx179_otp_setup(struct imx179 *priv)
+{
+	int err = 0;
+	int i, j;
+	struct v4l2_ctrl *ctrl;
+	u8 otp_buf[IMX179_OTP_SIZE];
+	u8 *otp = otp_buf;
+	u8 bak = 0;
+
+	err = camera_common_s_power(priv->subdev, true);
+	if (err)
+		return -ENODEV;
+
+	/* Setup OTP read mode */
+	imx179_write_reg(priv->s_data, 0x0100, 0x00);  /* standby */
+	imx179_write_reg(priv->s_data, 0x3382, 0x05);
+	imx179_write_reg(priv->s_data, 0x3383, 0xa0);
+	imx179_write_reg(priv->s_data, 0x3368, 0x24);
+	imx179_write_reg(priv->s_data, 0x3369, 0x00);
+
+	/* Check OTP write result */
+	imx179_write_reg(priv->s_data, 0x3380, 0x08);
+	imx179_write_reg(priv->s_data, 0x3400, 0x01);
+	imx179_write_reg(priv->s_data, 0x3402, 0x12);
+	udelay(10);
+	for (i = 0x3443; i >= 0x3442; i--) {
+		imx179_read_reg(priv->s_data, i, &bak);
+		if ((bak == 0x11) || (bak == 0xEE))
+			break;
+	}
+
+	if (bak == 0xEE) {
+		dev_warn(&priv->i2c_client->dev, "OTP write check failed\n");
+		goto ret;
+	}
+
+	/* Read bank 0: 45 bytes at 0x3417-0x3443 */
+	imx179_write_reg(priv->s_data, 0x3380, 0x08);
+	imx179_write_reg(priv->s_data, 0x3400, 0x01);
+	imx179_write_reg(priv->s_data, 0x3402, 0x00);
+	udelay(10);
+	for (i = 0; i < 45; i++) {
+		err |= imx179_read_reg(priv->s_data, 0x3417 + i, otp);
+		otp++;
+	}
+
+	/* Read banks 1-11: 64 bytes each at 0x3404-0x3443 */
+	for (j = 1; j <= 11; j++) {
+		imx179_write_reg(priv->s_data, 0x3380, 0x08);
+		imx179_write_reg(priv->s_data, 0x3400, 0x01);
+		imx179_write_reg(priv->s_data, 0x3402, j);
+		udelay(10);
+		for (i = 0; i < 64; i++) {
+			err |= imx179_read_reg(priv->s_data, 0x3404 + i, otp);
+			otp++;
+		}
+	}
+
+	/* Read bank 12: 54 bytes at 0x3404-0x3439 */
+	imx179_write_reg(priv->s_data, 0x3380, 0x08);
+	imx179_write_reg(priv->s_data, 0x3400, 0x01);
+	imx179_write_reg(priv->s_data, 0x3402, 12);
+	udelay(10);
+	for (i = 0; i < 54; i++) {
+		err |= imx179_read_reg(priv->s_data, 0x3404 + i, otp);
+		otp++;
+	}
+
+	if (err) {
+		dev_err(&priv->i2c_client->dev, "OTP read failed\n");
+		goto ret;
+	}
+
+	ctrl = v4l2_ctrl_find(&priv->ctrl_handler, V4L2_CID_OTP_DATA);
+	if (!ctrl) {
+		dev_err(&priv->i2c_client->dev, "could not find OTP ctrl\n");
+		err = -EINVAL;
+		goto ret;
+	}
+
+	for (i = 0; i < IMX179_OTP_SIZE; i++)
+		sprintf(&ctrl->string[i * 2], "%02x", otp_buf[i]);
+	ctrl->cur.string = ctrl->string;
+
+	dev_dbg(&priv->i2c_client->dev, "OTP data read successfully\n");
+
+ret:
+	camera_common_s_power(priv->subdev, false);
+	return err;
+}
+
 static int imx179_ctrls_init(struct imx179 *priv)
 {
 	struct i2c_client *client = priv->i2c_client;
@@ -892,6 +996,14 @@ static int imx179_ctrls_init(struct imx179 *priv)
 				ctrl_config_list[i].name);
 			continue;
 		}
+
+		if (ctrl_config_list[i].type == V4L2_CTRL_TYPE_STRING &&
+			ctrl_config_list[i].flags & V4L2_CTRL_FLAG_READ_ONLY) {
+			ctrl->string = devm_kzalloc(&client->dev,
+				ctrl_config_list[i].max + 1, GFP_KERNEL);
+			if (!ctrl->string)
+				return -ENOMEM;
+		}
 		priv->ctrls[i] = ctrl;
 	}
 
@@ -910,6 +1022,10 @@ static int imx179_ctrls_init(struct imx179 *priv)
 			"Error %d setting default controls\n", err);
 		goto error;
 	}
+
+	err = imx179_otp_setup(priv);
+	if (err)
+		dev_warn(&client->dev, "OTP read failed: %d (non-fatal)\n", err);
 
 	return 0;
 
