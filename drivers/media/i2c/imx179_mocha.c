@@ -161,6 +161,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 		.def = 0,
 		.qmenu_int = switch_ctrl_qmenu,
 	},
+	{
+		.ops = &imx179_ctrl_ops,
+		.id = V4L2_CID_HDR_EN,
+		.name = "HDR enable",
+		.type = V4L2_CTRL_TYPE_INTEGER_MENU,
+		.min = 0,
+		.max = ARRAY_SIZE(switch_ctrl_qmenu) - 1,
+		.menu_skip_mask = 0,
+		.def = 0,
+		.qmenu_int = switch_ctrl_qmenu,
+	},
 };
 
 static inline void imx179_get_frame_length_regs(imx179_reg *regs,
@@ -847,6 +858,8 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 			priv->group_hold_en = false;
 			err = imx179_set_group_hold(priv);
 		}
+		break;
+	case V4L2_CID_HDR_EN:
 		break;
 	default:
 		dev_err(&priv->i2c_client->dev,

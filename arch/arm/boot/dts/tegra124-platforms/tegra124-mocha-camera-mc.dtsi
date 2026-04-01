@@ -64,32 +64,32 @@
 				#size-cells = <0>;
 
 				/*
-				 * Channel 0: CSI-E (1-lane)
+				 * Channel 0: CSI-A (4-lane)
+				 * IMX179 rear camera on CSI-A pins
+				 * Uses Pixel Parser A (MC PORT_A = port 0)
+				 */
+				port@0 {
+					reg = <0>;
+					mocha_vi_in0: endpoint {
+						csi-port = <0>;
+						bus-width = <4>;
+						remote-endpoint = <&mocha_imx179_out0>;
+					};
+				};
+
+				/*
+				 * Channel 1: CSI-E (1-lane)
 				 * OV5693 front camera is wired to CSI-E pins
 				 * (CILE data + CILE clock).
 				 * In legacy vi2.c this is CSI_C port, which uses
 				 * Pixel Parser B (same as MC PORT_B = port 1).
 				 */
-				port@0 {
-					reg = <0>;
-					mocha_vi_in0: endpoint {
-						csi-port = <1>;
-						bus-width = <1>;
-						remote-endpoint = <&mocha_ov5693_out0>;
-					};
-				};
-
-				/*
-				 * Channel 1: CSI-A (4-lane)
-				 * IMX179 rear camera on CSI-A pins
-				 * Uses Pixel Parser A (MC PORT_A = port 0)
-				 */
 				port@1 {
 					reg = <1>;
 					mocha_vi_in1: endpoint {
-						csi-port = <0>;
-						bus-width = <4>;
-						remote-endpoint = <&mocha_imx179_out0>;
+						csi-port = <1>;
+						bus-width = <1>;
+						remote-endpoint = <&mocha_ov5693_out0>;
 					};
 				};
 			};
@@ -198,7 +198,7 @@
 					mocha_imx179_out0: endpoint {
 						csi-port = <0>;
 						bus-width = <4>;
-						remote-endpoint = <&mocha_vi_in1>;
+						remote-endpoint = <&mocha_vi_in0>;
 					};
 				};
 			};
@@ -362,7 +362,7 @@
 					mocha_ov5693_out0: endpoint {
 						csi-port = <1>;
 						bus-width = <1>;
-						remote-endpoint = <&mocha_vi_in0>;
+						remote-endpoint = <&mocha_vi_in1>;
 					};
 				};
 			};
