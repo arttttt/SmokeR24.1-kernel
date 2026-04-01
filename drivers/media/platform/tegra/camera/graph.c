@@ -247,9 +247,21 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 		}
 
 		if (chan->is_lens_channel) {
+			unsigned int j;
 			/* Lens channel: just save subdev ref for power control */
 			chan->subdev_on_csi = media_entity_to_v4l2_subdev(source);
 			chan->num_subdevs = 1;
+			/* Associate lens with first capture channel */
+			for (j = 0; j < vi->num_channels; j++) {
+				struct tegra_channel *cap = &vi->chans[j];
+				if (!cap->is_lens_channel && cap->valid_ports) {
+					cap->lens_chan = chan;
+					dev_info(vi->dev,
+						"lens %s associated with %s\n",
+						source->name, cap->video.name);
+					break;
+				}
+			}
 		} else {
 			tegra_channel_init_subdevices(chan);
 		}

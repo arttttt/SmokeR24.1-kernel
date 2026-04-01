@@ -311,7 +311,6 @@
 			 */
 			pwdn-gpios = <&gpio TEGRA_GPIO(BB, 6) GPIO_ACTIVE_HIGH>;
 			reset-gpios = <&gpio TEGRA_GPIO(CC, 1) GPIO_ACTIVE_HIGH>;
-			af-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_HIGH>;
 
 			mode0 { /* 5MP 30fps */
 				mclk_khz = "24000";
