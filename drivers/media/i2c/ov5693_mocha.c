@@ -27,7 +27,6 @@
 #include <linux/gpio.h>
 #include <linux/module.h>
 
-#include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
@@ -41,7 +40,7 @@
 
 #include "ov5693_mocha_mode_tbls.h"
 
-/* CSI-B DPD for OV5693 on CSI-B port */
+/* CSI-E DPD for OV5693 on CSI-E port */
 static struct tegra_io_dpd csie_io = {
 	.name			= "CSIE",
 	.io_dpd_reg_index	= 1,
@@ -83,7 +82,6 @@ struct ov5693 {
 	struct v4l2_subdev		*subdev;
 	struct media_pad		pad;
 
-	int				reg_offset;
 
 	s32				group_hold_prev;
 	bool				group_hold_en;
@@ -253,8 +251,6 @@ static inline void ov5693_get_gain_regs(ov5693_reg *regs,
 	(regs + 1)->val = (gain) & 0xff;
 }
 
-static int test_mode;
-module_param(test_mode, int, 0644);
 
 static inline int ov5693_read_reg(struct camera_common_data *s_data,
 				u16 addr, u8 *val)
@@ -322,7 +318,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	struct ov5693 *priv = (struct ov5693 *)s_data->priv;
 	struct camera_common_power_rail *pw = &priv->power;
 
-	dev_info(&priv->i2c_client->dev, "%s: power on\n", __func__);
+	dev_dbg(&priv->i2c_client->dev, "%s: power on\n", __func__);
 
 	if (priv->pdata && priv->pdata->power_on) {
 		err = priv->pdata->power_on(pw);
@@ -335,7 +331,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 
 	/* Step 1: disable CSI-E IO DPD */
 	tegra_io_dpd_disable(&csie_io);
-	dev_info(&priv->i2c_client->dev, "DPD disabled for CSIE (reg=%d bit=%d)\n",
+	dev_dbg(&priv->i2c_client->dev, "DPD disabled for CSIE (reg=%d bit=%d)\n",
 		 csie_io.io_dpd_reg_index, csie_io.io_dpd_bit);
 
 	/* MCLK is managed by camera_common_s_power() — not here */
@@ -582,18 +578,27 @@ static int ov5693_power_get(struct ov5693 *priv)
 				"%s ERR can't register cam gpio %u!\n",
 				 __func__, pw->pwdn_gpio);
 	} else {
-		if (pw->pwdn_gpio)
-			gpio_request_one(pw->pwdn_gpio,
-					 GPIOF_OUT_INIT_LOW,
-					 "cam2_pwdn_gpio");
-		if (pw->reset_gpio)
-			gpio_request_one(pw->reset_gpio,
-					 GPIOF_OUT_INIT_LOW,
-					 "cam2_reset_gpio");
-		if (pw->af_gpio)
-			gpio_request_one(pw->af_gpio,
-					 GPIOF_OUT_INIT_LOW,
-					 "cam_af_pwdn_gpio");
+		if (pw->pwdn_gpio) {
+			err = gpio_request_one(pw->pwdn_gpio,
+					 GPIOF_OUT_INIT_LOW, "cam2_pwdn_gpio");
+			if (err)
+				dev_warn(&priv->i2c_client->dev,
+					"pwdn gpio request failed: %d\n", err);
+		}
+		if (pw->reset_gpio) {
+			err = gpio_request_one(pw->reset_gpio,
+					 GPIOF_OUT_INIT_LOW, "cam2_reset_gpio");
+			if (err)
+				dev_warn(&priv->i2c_client->dev,
+					"reset gpio request failed: %d\n", err);
+		}
+		if (pw->af_gpio) {
+			err = gpio_request_one(pw->af_gpio,
+					 GPIOF_OUT_INIT_LOW, "cam_af_pwdn_gpio");
+			if (err)
+				dev_warn(&priv->i2c_client->dev,
+					"af gpio request failed: %d\n", err);
+		}
 	}
 
 	pw->state = SWITCH_OFF;
@@ -613,7 +618,7 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	struct v4l2_control control;
 	int err;
 
-	dev_info(&client->dev, "%s: enable=%d mode=%d\n",
+	dev_dbg(&client->dev, "%s: enable=%d mode=%d\n",
 		 __func__, enable, s_data->mode);
 
 	if (!enable) {
@@ -668,70 +673,6 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)
 		goto exit;
-
-	/* Verify sensor state after stream start */
-	{
-		unsigned int chip_id_h = 0, chip_id_l = 0;
-		unsigned int stream_mode = 0, mipi_ctrl = 0, mipi_sc = 0;
-		unsigned int pll1 = 0, pll2 = 0, pll3 = 0;
-		unsigned int lane_mode = 0, test_pat = 0;
-		unsigned int mipi_ctrl2 = 0, pll_mult = 0;
-		int rd_err;
-		rd_err = regmap_read(priv->regmap, 0x300A, &chip_id_h);
-		rd_err |= regmap_read(priv->regmap, 0x300B, &chip_id_l);
-		regmap_read(priv->regmap, 0x0100, &stream_mode);
-		regmap_read(priv->regmap, 0x3018, &mipi_ctrl);
-		regmap_read(priv->regmap, 0x3022, &mipi_sc);
-		regmap_read(priv->regmap, 0x3098, &pll1);
-		regmap_read(priv->regmap, 0x3099, &pll2);
-		regmap_read(priv->regmap, 0x30b3, &pll3);
-		regmap_read(priv->regmap, 0x3011, &lane_mode);
-		regmap_read(priv->regmap, 0x5e00, &test_pat);
-		regmap_read(priv->regmap, 0x3019, &mipi_ctrl2);
-		regmap_read(priv->regmap, 0x3090, &pll_mult);
-		dev_info(&client->dev,
-			 "%s: chip=0x%02x%02x strm=0x%02x "
-			 "mipi=0x%02x sc=0x%02x "
-			 "pll(3098/99/b3)=0x%02x/0x%02x/0x%02x "
-			 "lane=0x%02x tp=0x%02x "
-			 "ctrl2=0x%02x mul=0x%02x (err=%d)\n",
-			 __func__, chip_id_h, chip_id_l, stream_mode,
-			 mipi_ctrl, mipi_sc, pll1, pll2, pll3,
-			 lane_mode, test_pat, mipi_ctrl2, pll_mult, rd_err);
-
-		/* Read OTP/fuse and MIPI TX status for deep hardware check */
-		{
-			unsigned int fuse_id0 = 0, fuse_id1 = 0;
-			unsigned int otp_ctrl = 0, otp_data = 0;
-			unsigned int mipi_tx_ctrl = 0, mipi_tx_status = 0;
-			unsigned int sccb_ctrl = 0, pad_out = 0;
-			unsigned int sc_cmmn_chip_id = 0;
-			unsigned int r4800 = 0, r4801 = 0, r4802 = 0;
-			/* Fuse ID (unique per chip) */
-			regmap_read(priv->regmap, 0x300C, &fuse_id0);
-			regmap_read(priv->regmap, 0x300D, &fuse_id1);
-			/* SC common chip ID & rev */
-			regmap_read(priv->regmap, 0x302A, &sc_cmmn_chip_id);
-			/* SCCB/system control */
-			regmap_read(priv->regmap, 0x3100, &sccb_ctrl);
-			regmap_read(priv->regmap, 0x3002, &pad_out);
-			/* MIPI control regs */
-			regmap_read(priv->regmap, 0x4800, &r4800);
-			regmap_read(priv->regmap, 0x4801, &r4801);
-			regmap_read(priv->regmap, 0x4802, &r4802);
-			dev_info(&client->dev,
-				 "HW: fuse=0x%02x%02x sc_id=0x%02x "
-				 "sccb=0x%02x pad_out=0x%02x "
-				 "mipi(4800/01/02)=0x%02x/0x%02x/0x%02x\n",
-				 fuse_id0, fuse_id1, sc_cmmn_chip_id,
-				 sccb_ctrl, pad_out,
-				 r4800, r4801, r4802);
-		}
-	}
-
-	if (test_mode)
-		err = ov5693_write_table(priv,
-			mode_table[OV5693_MODE_TEST_PATTERN]);
 
 	dev_dbg(&client->dev, "%s--\n", __func__);
 	return 0;
@@ -1642,14 +1583,13 @@ static int ov5693_probe(struct i2c_client *client,
 		dev_err(&client->dev, "power_get failed: %d\n", err);
 		return err;
 	}
-	dev_info(&client->dev, "power_get done: avdd=%p iovdd=%p dvdd=%p vcmvdd=%p afvdd=%p\n",
+	dev_dbg(&client->dev, "power_get done: avdd=%p iovdd=%p dvdd=%p vcmvdd=%p afvdd=%p\n",
 		priv->power.avdd, priv->power.iovdd, priv->power.dvdd,
 		priv->power.vcmvdd, priv->afvdd);
 
 	err = camera_common_parse_ports(client, common_data);
 	if (err) {
 		dev_err(&client->dev, "Failed to find port info: %d\n", err);
-		dev_err(&client->dev, "Failed to find port info\n");
 		return err;
 	}
 	sprintf(debugfs_name, "ov5693_%c", common_data->csi_port + 'a');
@@ -1660,7 +1600,7 @@ static int ov5693_probe(struct i2c_client *client,
 
 	/* eeprom interface */
 	err = ov5693_eeprom_device_init(priv);
-	if (err)
+	if (err && err != -EINVAL)
 		dev_err(&client->dev,
 			"Failed to allocate eeprom reg map: %d\n", err);
 
@@ -1704,6 +1644,7 @@ ov5693_remove(struct i2c_client *client)
 #endif
 
 	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	ov5693_eeprom_device_release(priv);
 	ov5693_power_put(priv);
 	camera_common_remove_debugfs(s_data);
 
