@@ -60,7 +60,6 @@ struct ad5823 {
 	struct camera_common_focuser_data	*s_data;
 	struct regmap				*regmap;
 	int					numctrls;
-	u32					cached_position;
 	struct v4l2_ctrl			*ctrls[];
 };
 
@@ -109,13 +108,9 @@ static int ad5823_s_ctrl(struct v4l2_ctrl *ctrl)
 
 	dev_dbg(&priv->s_data->i2c_client->dev, "%s++\n", __func__);
 
-	/* check for power state */
-	if (priv->s_data->pwr_dev == AD5823_PWR_DEV_OFF) {
-		/* Cache position, apply on next power_on */
-		if (ctrl->id == V4L2_CID_FOCUS_ABSOLUTE)
-			priv->cached_position = ctrl->val;
-		return 0;
-	}
+	/* Power is managed by capture channel via s_power */
+	if (priv->s_data->pwr_dev == AD5823_PWR_DEV_OFF)
+		return -ENODEV;
 
 	switch (ctrl->id) {
 	case V4L2_CID_FOCUS_ABSOLUTE:
@@ -239,12 +234,6 @@ static int ad5823_power_on(struct camera_common_focuser_data *s_data)
 	if (err)
 		return err;
 
-	/* Apply cached focus position */
-	err = ad5823_set_position(priv, priv->cached_position);
-	if (err)
-		dev_warn(&s_data->i2c_client->dev,
-			"failed to apply cached focus position: %d\n", err);
-
 	s_data->pwr_dev = AD5823_PWR_DEV_ON;
 	return 0;
 }
@@ -328,7 +317,6 @@ static int ad5823_probe(struct i2c_client *client,
 	common_data->priv = (void *)priv;
 	common_data->def_position = AD5823_FOCUS_INFINITY;
 
-	priv->cached_position = AD5823_FOCUS_INFINITY;
 	priv->numctrls = NUM_FOCUS_CTRLS;
 	priv->i2c_client = client;
 	priv->s_data = common_data;

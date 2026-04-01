@@ -1420,8 +1420,20 @@ static int tegra_channel_set_stream(struct tegra_channel *chan, bool on)
 
 static int tegra_channel_set_power(struct tegra_channel *chan, bool on)
 {
-	return v4l2_device_call_until_err(chan->video.v4l2_dev,
+	int ret;
+	unsigned int i;
+
+	ret = v4l2_device_call_until_err(chan->video.v4l2_dev,
 			chan->grp_id, core, s_power, on);
+
+	/* Also power associated lens channels (focuser/VCM) */
+	for (i = 0; i < chan->vi->num_channels; i++) {
+		struct tegra_channel *ch = &chan->vi->chans[i];
+		if (ch->is_lens_channel && ch->subdev_on_csi)
+			v4l2_subdev_call(ch->subdev_on_csi, core, s_power, on);
+	}
+
+	return ret;
 }
 
 static int update_clk(struct tegra_mc_vi *vi)

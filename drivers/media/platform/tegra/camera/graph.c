@@ -246,8 +246,13 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 			break;
 		}
 
-		if (!chan->is_lens_channel)
+		if (chan->is_lens_channel) {
+			/* Lens channel: just save subdev ref for power control */
+			chan->subdev_on_csi = media_entity_to_v4l2_subdev(source);
+			chan->num_subdevs = 1;
+		} else {
 			tegra_channel_init_subdevices(chan);
+		}
 	} while (next != NULL);
 
 	of_node_put(ep);
@@ -361,14 +366,18 @@ int tegra_vi_get_port_info(struct tegra_channel *chan,
 
 			/* Get CSI port */
 			ret = of_property_read_u32(ep, "csi-port", &value);
-			if (ret < 0)
+			if (ret < 0) {
 				dev_dbg(&chan->video.dev, "csi port not set (lens port?)\n");
+				value = 0xFFFF;
+			}
 			chan->port[0] = value;
 
 			/* Get number of data lanes for the endpoint */
 			ret = of_property_read_u32(ep, "bus-width", &value);
-			if (ret < 0)
+			if (ret < 0) {
 				dev_dbg(&chan->video.dev, "bus-width not set (lens port?)\n");
+				value = 0;
+			}
 			chan->numlanes = value;
 
 			if (value > 12) {
