@@ -267,7 +267,8 @@ static int ov5693_write_reg(struct camera_common_data *s_data, u16 addr, u8 val)
 
 	err = regmap_write(priv->regmap, addr, val);
 	if (err)
-		pr_err("%s:i2c write failed, %x = %x\n",
+		dev_err(&priv->i2c_client->dev,
+			"%s: i2c write failed, 0x%x = 0x%x\n",
 			__func__, addr, val);
 
 	return err;
@@ -323,7 +324,7 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	if (priv->pdata && priv->pdata->power_on) {
 		err = priv->pdata->power_on(pw);
 		if (err)
-			pr_err("%s failed.\n", __func__);
+			dev_err(&priv->i2c_client->dev, "%s failed\n", __func__);
 		else
 			pw->state = SWITCH_ON;
 		return err;
@@ -403,7 +404,7 @@ ov5693_avdd_fail:
 		regulator_disable(priv->afvdd);
 ov5693_afvdd_fail:
 	tegra_io_dpd_enable(&csie_io);
-	pr_err("%s failed.\n", __func__);
+	dev_err(&priv->i2c_client->dev, "%s failed\n", __func__);
 	return -ENODEV;
 }
 
@@ -434,7 +435,7 @@ static int ov5693_power_off(struct camera_common_data *s_data)
 		if (!err)
 			pw->state = SWITCH_OFF;
 		else
-			pr_err("%s failed.\n", __func__);
+			dev_err(&priv->i2c_client->dev, "%s failed\n", __func__);
 		return err;
 	}
 
@@ -1285,8 +1286,9 @@ static int ov5693_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 			return err;
 		break;
 	default:
-			pr_err("%s: unknown ctrl id.\n", __func__);
-			return -EINVAL;
+		dev_err(&priv->i2c_client->dev,
+			"%s: unknown ctrl id %d\n", __func__, ctrl->id);
+		return -EINVAL;
 	}
 
 	return err;
@@ -1332,7 +1334,8 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_HDR_EN:
 		break;
 	default:
-		pr_err("%s: unknown ctrl id.\n", __func__);
+		dev_err(&priv->i2c_client->dev,
+			"%s: unknown ctrl id %d\n", __func__, ctrl->id);
 		return -EINVAL;
 	}
 
@@ -1528,7 +1531,7 @@ static int ov5693_probe(struct i2c_client *client,
 	char debugfs_name[10];
 	int err;
 
-	pr_info("[OV5693-mocha]: probing v4l2 sensor on %s.\n",
+	dev_dbg(&client->dev, "probing v4l2 sensor on %s\n",
 		dev_name(&client->dev));
 
 	if (!IS_ENABLED(CONFIG_OF) || !node)
