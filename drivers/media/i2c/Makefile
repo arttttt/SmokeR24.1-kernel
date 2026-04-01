@@ -57,6 +57,7 @@ obj-$(CONFIG_VIDEO_IMX214) += imx2xx.o
 obj-$(CONFIG_VIDEO_IMX230) += imx2xx.o
 obj-$(CONFIG_VIDEO_I2C_OV5693) += ov5693.o
 obj-$(CONFIG_VIDEO_I2C_OV5693_MOCHA) += ov5693_mocha.o
+obj-$(CONFIG_VIDEO_IMX179_MOCHA) += imx179_mocha.o
 obj-$(CONFIG_VIDEO_OV7640) += ov7640.o
 obj-$(CONFIG_VIDEO_OV7670) += ov7670.o
 obj-$(CONFIG_VIDEO_OV9650) += ov9650.o

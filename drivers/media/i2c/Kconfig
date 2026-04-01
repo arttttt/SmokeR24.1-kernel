@@ -482,6 +482,13 @@ config VIDEO_I2C_OV5693_MOCHA
 	  To compile this driver as a module, choose M here: the module
 	  will be called ov5693_mocha.
 
+config VIDEO_IMX179_MOCHA
+	tristate "IMX179 camera sensor support (mocha)"
+	depends on I2C && VIDEO_V4L2 && VIDEO_TEGRA_CAMERA
+	---help---
+	  This is a V4L2 MC sensor driver for the Sony IMX179 camera
+	  on Xiaomi Mi Pad 1 (mocha).
+
 config VIDEO_OV7640
 	tristate "OmniVision OV7640 sensor support"
 	depends on I2C && VIDEO_V4L2
