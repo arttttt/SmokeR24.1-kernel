@@ -170,7 +170,7 @@
 				cil_settletime = "0";
 
 				active_w = "3280";
-				active_h = "2464";
+				active_h = "2460";
 				pixel_t = "bayer_rggb";
 				readout_orientation = "0";
 				line_length = "3440";
