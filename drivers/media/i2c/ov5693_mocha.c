@@ -582,23 +582,29 @@ static int ov5693_power_get(struct ov5693 *priv)
 		if (pw->pwdn_gpio) {
 			gpio_err = gpio_request_one(pw->pwdn_gpio,
 					 GPIOF_OUT_INIT_LOW, "cam2_pwdn_gpio");
-			if (gpio_err)
+			if (gpio_err) {
 				dev_warn(&priv->i2c_client->dev,
 					"pwdn gpio request failed: %d\n", gpio_err);
+				pw->pwdn_gpio = 0;
+			}
 		}
 		if (pw->reset_gpio) {
 			gpio_err = gpio_request_one(pw->reset_gpio,
 					 GPIOF_OUT_INIT_LOW, "cam2_reset_gpio");
-			if (gpio_err)
+			if (gpio_err) {
 				dev_warn(&priv->i2c_client->dev,
 					"reset gpio request failed: %d\n", gpio_err);
+				pw->reset_gpio = 0;
+			}
 		}
 		if (pw->af_gpio) {
 			gpio_err = gpio_request_one(pw->af_gpio,
 					 GPIOF_OUT_INIT_LOW, "cam_af_pwdn_gpio");
-			if (gpio_err)
+			if (gpio_err) {
 				dev_warn(&priv->i2c_client->dev,
 					"af gpio request failed: %d\n", gpio_err);
+				pw->af_gpio = 0;
+			}
 		}
 	}
 
@@ -1064,12 +1070,24 @@ static int ov5693_eeprom_device_init(struct ov5693 *priv)
 	for (i = 0; i < OV5693_EEPROM_NUM_BLOCKS; i++) {
 		priv->eeprom[i].adap = i2c_get_adapter(
 				priv->i2c_client->adapter->nr);
+		if (!priv->eeprom[i].adap) {
+			dev_err(&priv->i2c_client->dev,
+				"eeprom: failed to get i2c adapter\n");
+			ov5693_eeprom_device_release(priv);
+			return -ENODEV;
+		}
 		memset(&priv->eeprom[i].brd, 0, sizeof(priv->eeprom[i].brd));
 		strncpy(priv->eeprom[i].brd.type, dev_name,
 				sizeof(priv->eeprom[i].brd.type));
 		priv->eeprom[i].brd.addr = OV5693_EEPROM_ADDRESS + i;
 		priv->eeprom[i].i2c_client = i2c_new_device(
 				priv->eeprom[i].adap, &priv->eeprom[i].brd);
+		if (!priv->eeprom[i].i2c_client) {
+			dev_err(&priv->i2c_client->dev,
+				"eeprom: failed to create i2c device\n");
+			ov5693_eeprom_device_release(priv);
+			return -ENODEV;
+		}
 
 		priv->eeprom[i].regmap = devm_regmap_init_i2c(
 			priv->eeprom[i].i2c_client, &eeprom_regmap_config);
