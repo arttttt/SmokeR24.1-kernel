@@ -3,7 +3,7 @@
  *
  * Fork of imx179.c with mocha-specific power sequence:
  * - 4 lanes on CSI-A
- * - 4 regulators + 2 ext_reg (6 total)
+ * - 3 ext regulators + avdd (4 total)
  * - 2 GPIOs (reset, af)
  * - CSI-A/B DPD control
  * - RGGB Bayer format
@@ -89,9 +89,16 @@ struct imx179 {
 	struct camera_common_data	*s_data;
 	struct camera_common_pdata	*pdata;
 
-	/* Mocha-specific: ext_reg1, ext_reg2 not in camera_common_power_rail */
+	/*
+	 * Mocha-specific regulators (not in camera_common_power_rail):
+	 *   ext_reg1 = imx179_reg1 (LDO7, 2.7V)
+	 *   ext_reg2 = vdd_cam_1v2 (fixed, 1.2V)
+	 *   ext_reg3 = vdd_cam_1v8 (fixed, 1.8V)
+	 * avdd = LDO4 (2.7V) via camera_common pw->avdd
+	 */
 	struct regulator		*ext_reg1;
 	struct regulator		*ext_reg2;
+	struct regulator		*ext_reg3;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -230,10 +237,10 @@ static void imx179_gpio_set(struct imx179 *priv,
  * ardbeg_imx179_power_on():
  *
  *   1. DPD disable (csia_io + csib_io)
- *   2. ext_reg1 ON (imx179_reg1, LDO7)
- *   3. ext_reg2 ON (vdd_cam_1v2)
- *   4. iovdd ON (vdd_cam_1v8)
- *   5. avdd ON (LDO4)
+ *   2. ext_reg1 ON (imx179_reg1, LDO7, 2.7V)
+ *   3. ext_reg2 ON (vdd_cam_1v2, fixed, 1.2V)
+ *   4. ext_reg3 ON (vdd_cam_1v8, fixed, 1.8V)
+ *   5. avdd ON (LDO4, 2.7V)
  *   6. usleep(1, 2)
  *   7. CAM_AF_PWDN=1, CAM_RSTN=0
  *   8. usleep(10, 20)
@@ -260,9 +267,8 @@ static int imx179_power_on(struct camera_common_data *s_data)
 	/* Step 1: disable CSI-A/B IO DPD */
 	tegra_io_dpd_disable(&csia_io);
 	tegra_io_dpd_disable(&csib_io);
-	dev_dbg(&priv->i2c_client->dev, "DPD disabled for CSIA/B\n");
 
-	/* MCLK is managed by camera_common_s_power() - not here */
+	/* MCLK is managed by camera_common_s_power() — not here */
 
 	/* Step 2: ext_reg1 ON (imx179_reg1, LDO7, 2.7V) */
 	if (priv->ext_reg1) {
@@ -271,18 +277,18 @@ static int imx179_power_on(struct camera_common_data *s_data)
 			goto imx179_ext_reg1_fail;
 	}
 
-	/* Step 3: ext_reg2 ON (vdd_cam_1v2, 1.2V) - mapped to dvdd */
-	if (pw->dvdd) {
-		err = regulator_enable(pw->dvdd);
+	/* Step 3: ext_reg2 ON (vdd_cam_1v2, fixed, 1.2V) */
+	if (priv->ext_reg2) {
+		err = regulator_enable(priv->ext_reg2);
 		if (err)
-			goto imx179_dvdd_fail;
+			goto imx179_ext_reg2_fail;
 	}
 
-	/* Step 4: iovdd ON (vdd_cam_1v8, 1.8V) */
-	if (pw->iovdd) {
-		err = regulator_enable(pw->iovdd);
+	/* Step 4: ext_reg3 ON (vdd_cam_1v8, fixed, 1.8V) */
+	if (priv->ext_reg3) {
+		err = regulator_enable(priv->ext_reg3);
 		if (err)
-			goto imx179_iovdd_fail;
+			goto imx179_ext_reg3_fail;
 	}
 
 	/* Step 5: avdd ON (LDO4, 2.7V) */
@@ -315,14 +321,12 @@ static int imx179_power_on(struct camera_common_data *s_data)
 	return 0;
 
 imx179_avdd_fail:
-	if (pw->avdd)
-		regulator_disable(pw->avdd);
-imx179_iovdd_fail:
-	if (pw->iovdd)
-		regulator_disable(pw->iovdd);
-imx179_dvdd_fail:
-	if (pw->dvdd)
-		regulator_disable(pw->dvdd);
+	if (priv->ext_reg3)
+		regulator_disable(priv->ext_reg3);
+imx179_ext_reg3_fail:
+	if (priv->ext_reg2)
+		regulator_disable(priv->ext_reg2);
+imx179_ext_reg2_fail:
 	if (priv->ext_reg1)
 		regulator_disable(priv->ext_reg1);
 imx179_ext_reg1_fail:
@@ -339,9 +343,9 @@ imx179_ext_reg1_fail:
  *   1. CAM_RSTN=0, CAM_AF_PWDN=0
  *   2. usleep(1, 2)
  *   3. avdd OFF
- *   4. iovdd OFF
- *   5. dvdd OFF
- *   6. ext_reg1 OFF
+ *   4. ext_reg1 OFF
+ *   5. ext_reg2 OFF
+ *   6. ext_reg3 OFF
  *   7. DPD enable (csia + csib)
  */
 static int imx179_power_off(struct camera_common_data *s_data)
@@ -373,17 +377,17 @@ static int imx179_power_off(struct camera_common_data *s_data)
 	if (pw->avdd)
 		regulator_disable(pw->avdd);
 
-	/* Step 4: iovdd OFF */
-	if (pw->iovdd)
-		regulator_disable(pw->iovdd);
-
-	/* Step 5: dvdd OFF (ext_reg2/vdd_cam_1v2) */
-	if (pw->dvdd)
-		regulator_disable(pw->dvdd);
-
-	/* Step 6: ext_reg1 OFF */
+	/* Step 4: ext_reg1 OFF */
 	if (priv->ext_reg1)
 		regulator_disable(priv->ext_reg1);
+
+	/* Step 5: ext_reg2 OFF */
+	if (priv->ext_reg2)
+		regulator_disable(priv->ext_reg2);
+
+	/* Step 6: ext_reg3 OFF */
+	if (priv->ext_reg3)
+		regulator_disable(priv->ext_reg3);
 
 	/* MCLK is managed by camera_common_s_power() - not here */
 
@@ -405,23 +409,19 @@ static int imx179_power_put(struct imx179 *priv)
 	if (likely(pw->avdd))
 		regulator_put(pw->avdd);
 
-	if (likely(pw->iovdd))
-		regulator_put(pw->iovdd);
-
-	if (likely(pw->dvdd))
-		regulator_put(pw->dvdd);
-
 	if (likely(priv->ext_reg1))
 		regulator_put(priv->ext_reg1);
 
 	if (likely(priv->ext_reg2))
 		regulator_put(priv->ext_reg2);
 
+	if (likely(priv->ext_reg3))
+		regulator_put(priv->ext_reg3);
+
 	pw->avdd = NULL;
-	pw->iovdd = NULL;
-	pw->dvdd = NULL;
 	priv->ext_reg1 = NULL;
 	priv->ext_reg2 = NULL;
+	priv->ext_reg3 = NULL;
 
 	if (priv->pdata->use_cam_gpio) {
 		cam_gpio_deregister(priv->i2c_client, pw->reset_gpio);
@@ -464,16 +464,9 @@ static int imx179_power_get(struct imx179 *priv)
 			clk_set_parent(pw->mclk, parent);
 	}
 
-	/* analog 2.7V (LDO4) */
+	/* analog 2.7V (LDO4) — only standard rail, rest are ext_reg in probe */
 	err |= camera_common_regulator_get(priv->i2c_client,
 			&pw->avdd, pdata->regulators.avdd);
-	/* IO 1.8V (fixed regulator vdd_cam_1v8) */
-	err |= camera_common_regulator_get(priv->i2c_client,
-			&pw->iovdd, pdata->regulators.iovdd);
-	/* digital core 1.2V (fixed regulator vdd_cam_1v2) */
-	if (pdata->regulators.dvdd)
-		err |= camera_common_regulator_get(priv->i2c_client,
-				&pw->dvdd, pdata->regulators.dvdd);
 
 	if (!err) {
 		pw->reset_gpio = pdata->reset_gpio;
@@ -1009,9 +1002,8 @@ static int imx179_probe(struct i2c_client *client,
 	struct device_node *node = client->dev.of_node;
 	struct imx179 *priv;
 	const char *ext_reg1_name;
-	const char *ext_reg2_name;
 	char debugfs_name[10];
-	u8 chip_id;
+	u16 chip_id;
 	int err;
 
 	dev_dbg(&client->dev, "probing v4l2 sensor on %s\n",
@@ -1062,18 +1054,38 @@ static int imx179_probe(struct i2c_client *client,
 				ext_reg1_name);
 	}
 
-	/* Mocha: ext_reg2 regulator (imx179_reg2, LDO2, 1.8V) - optional */
-	err = of_property_read_string(node, "ext_reg2-reg", &ext_reg2_name);
-	if (!err && ext_reg2_name) {
-		err = camera_common_regulator_get(client,
-				&priv->ext_reg2, ext_reg2_name);
-		if (err)
-			dev_warn(&client->dev,
-				"unable to get ext_reg2 regulator %s\n",
-				ext_reg2_name);
-		else
-			dev_dbg(&client->dev, "ext_reg2 regulator %s: ok\n",
-				ext_reg2_name);
+	/* Mocha: ext_reg2 regulator (vdd_cam_1v2, fixed, 1.2V) */
+	{
+		const char *ext_reg2_name;
+		err = of_property_read_string(node, "ext_reg2-reg", &ext_reg2_name);
+		if (!err && ext_reg2_name) {
+			err = camera_common_regulator_get(client,
+					&priv->ext_reg2, ext_reg2_name);
+			if (err)
+				dev_warn(&client->dev,
+					"unable to get ext_reg2 regulator %s\n",
+					ext_reg2_name);
+			else
+				dev_dbg(&client->dev, "ext_reg2 regulator %s: ok\n",
+					ext_reg2_name);
+		}
+	}
+
+	/* Mocha: ext_reg3 regulator (vdd_cam_1v8, fixed, 1.8V) */
+	{
+		const char *ext_reg3_name;
+		err = of_property_read_string(node, "ext_reg3-reg", &ext_reg3_name);
+		if (!err && ext_reg3_name) {
+			err = camera_common_regulator_get(client,
+					&priv->ext_reg3, ext_reg3_name);
+			if (err)
+				dev_warn(&client->dev,
+					"unable to get ext_reg3 regulator %s\n",
+					ext_reg3_name);
+			else
+				dev_dbg(&client->dev, "ext_reg3 regulator %s: ok\n",
+					ext_reg3_name);
+		}
 	}
 
 	common_data->ops		= &imx179_common_ops;
@@ -1146,24 +1158,29 @@ static int imx179_probe(struct i2c_client *client,
 		goto error;
 	}
 
-	/* Read chip ID */
-	err = imx179_read_reg(common_data, IMX179_CHIP_ID_ADDR, &chip_id);
-	if (err) {
-		dev_err(&client->dev, "Failed to read chip ID: %d\n", err);
-		camera_common_s_power(priv->subdev, false);
-		goto error;
+	/* Read 16-bit chip ID from two 8-bit registers */
+	{
+		u8 id_msb, id_lsb;
+		err = imx179_read_reg(common_data, IMX179_CHIP_ID_ADDR_MSB, &id_msb);
+		err |= imx179_read_reg(common_data, IMX179_CHIP_ID_ADDR_LSB, &id_lsb);
+		if (err) {
+			dev_err(&client->dev, "Failed to read chip ID: %d\n", err);
+			camera_common_s_power(priv->subdev, false);
+			goto error;
+		}
+		chip_id = (id_msb << 8) | id_lsb;
 	}
 
 	if (chip_id != IMX179_CHIP_ID) {
 		dev_err(&client->dev,
-			"Chip ID mismatch: expected 0x%02x, got 0x%02x\n",
+			"Chip ID mismatch: expected 0x%04x, got 0x%04x\n",
 			IMX179_CHIP_ID, chip_id);
 		camera_common_s_power(priv->subdev, false);
 		err = -ENODEV;
 		goto error;
 	}
 
-	dev_info(&client->dev, "Detected IMX179 sensor (chip ID 0x%02x)\n", chip_id);
+	dev_info(&client->dev, "Detected IMX179 sensor (chip ID 0x%04x)\n", chip_id);
 
 	camera_common_s_power(priv->subdev, false);
 

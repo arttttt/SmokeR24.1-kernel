@@ -140,33 +140,26 @@
 			post_crop_frame_drop = "0";
 
 			/*
-			 * Regulators (string names for camera_common_regulator_get)
-			 * Matched via regulator-consumer-supply in PMIC DTS:
-			 *   "vana"        -> LDO4 2.7V (avdd-cam)
-			 *   "vif"         -> LDO6 1.8V (vdd-cam-af)
-			 *   "vdd_cam_1v2" -> fixed 1.2V (dvdd)
-			 *   "vdd_cam_1v8" -> fixed 1.8V (vcmvdd)
-			 *   "imx179_reg1" -> LDO7 2.7V (avdd-cam-af)
-			 *   "imx179_reg2" -> LDO2 1.8V (vdd-lcd-io)
+			 * Regulators — matches R21.5 ardbeg_imx179_power_on:
+			 *   avdd         -> LDO4 2.7V (pw->avdd)
+			 *   ext_reg1     -> imx179_reg1 = LDO7 2.7V
+			 *   ext_reg2     -> vdd_cam_1v2 = fixed 1.2V
+			 *   ext_reg3     -> vdd_cam_1v8 = fixed 1.8V
 			 */
 			avdd-reg = "vana";
-			iovdd-reg = "vif";
-			dvdd-reg = "vdd_cam_1v2";
-			vcmvdd-reg = "vdd_cam_1v8";
 			ext_reg1-reg = "imx179_reg1";
-			ext_reg2-reg = "imx179_reg2";
+			ext_reg2-reg = "vdd_cam_1v2";
+			ext_reg3-reg = "vdd_cam_1v8";
 
 			/* Supply phandles for devm_regulator_get */
 			vana-supply = <&palmas_ldo4>;
-			vif-supply = <&palmas_ldo6>;
+			imx179_reg1-supply = <&palmas_ldo7>;
 			vdd_cam_1v2-supply = <&vdd_cam_1v2>;
 			vdd_cam_1v8-supply = <&vdd_cam_1v8>;
-			imx179_reg1-supply = <&palmas_ldo7>;
-			imx179_reg2-supply = <&palmas_ldo2>;
 
-			/* GPIOs */
+			/* GPIOs: CAM_RSTN=219(PBB3), CAM_AF_PWDN=223(PBB7) */
 			reset-gpios = <&gpio TEGRA_GPIO(BB, 3) GPIO_ACTIVE_HIGH>;
-			pwdn-gpios = <&gpio TEGRA_GPIO(BB, 5) GPIO_ACTIVE_HIGH>;
+			af-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_HIGH>;
 
 			mode0 { /* 8MP 30fps */
 				mclk_khz = "24000";

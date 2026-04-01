@@ -34,9 +34,10 @@
 #define IMX179_GAIN_ADDR		0x0205
 #define IMX179_GROUP_HOLD_ADDR		0x0104
 
-/* Chip ID register and expected value */
-#define IMX179_CHIP_ID_ADDR		0x0002
-#define IMX179_CHIP_ID			0x0179
+/* Chip ID: 16-bit read from reg 0x0002, expected 0x8179 */
+#define IMX179_CHIP_ID_ADDR_MSB		0x0002
+#define IMX179_CHIP_ID_ADDR_LSB		0x0003
+#define IMX179_CHIP_ID			0x8179
 
 static const imx179_reg imx179_start[] = {
 	{0x0100, 0x01},
