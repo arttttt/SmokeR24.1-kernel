@@ -285,11 +285,14 @@ static const imx179_reg *mode_table[] = {
 };
 
 /* Frame format settings for camera_common */
+static const int imx179_30fps[] = {30};
+static const int imx179_90fps[] = {90};
+
 #define IMX179_DEFAULT_CLK_FREQ		24000000
 static const struct camera_common_frmfmt imx179_frmfmt[] = {
-	{{3280, 2460},	IMX179_MODE_3280X2460,	1,	0,	IMX179_DEFAULT_CLK_FREQ},
-	{{1920, 1080},	IMX179_MODE_1920X1080,	1,	0,	IMX179_DEFAULT_CLK_FREQ},
-	{{1280, 720},	IMX179_MODE_1280X720_90FPS,	1,	0,	IMX179_DEFAULT_CLK_FREQ},
+	{{3280, 2460},	imx179_30fps,	1, 0,	IMX179_MODE_3280X2460},
+	{{1920, 1080},	imx179_30fps,	1, 0,	IMX179_MODE_1920X1080},
+	{{1280, 720},	imx179_90fps,	1, 0,	IMX179_MODE_1280X720_90FPS},
 };
 
 #endif /* __IMX179_MOCHA_TABLES__ */
