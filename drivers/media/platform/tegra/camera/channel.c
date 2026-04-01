@@ -1422,6 +1422,9 @@ static int tegra_channel_set_power(struct tegra_channel *chan, bool on)
 {
 	int ret, lens_ret;
 
+	dev_dbg(chan->vi->dev, "set_power(%d) lens_chan=%p\n",
+		on, chan->lens_chan);
+
 	if (on) {
 		/* Power on: sensor first (rails up), then lens */
 		ret = v4l2_device_call_until_err(chan->video.v4l2_dev,

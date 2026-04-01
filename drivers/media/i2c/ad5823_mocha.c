@@ -234,7 +234,11 @@ static int ad5823_power_on(struct camera_common_focuser_data *s_data)
 	if (err)
 		return err;
 
+	/* Park lens at infinity after init */
+	ad5823_set_position(priv, AD5823_FOCUS_INFINITY);
+
 	s_data->pwr_dev = AD5823_PWR_DEV_ON;
+	dev_info(&s_data->i2c_client->dev, "focuser powered on\n");
 	return 0;
 }
 
