@@ -29,6 +29,7 @@
 #include <media/media-entity.h>
 
 #include "isp_t124.h"
+#include "isp_t124_cal.h"
 
 /* Include host1x internals for opcode macros and job API */
 #include "dev.h"
@@ -36,6 +37,13 @@
 #include "nvhost_acm.h"
 #include "host1x/host1x01_hardware.h"
 #include "class_ids.h"
+
+/* ISP-A test dimensions (match stock calibration) */
+#define ISP_TEST_W		3280
+#define ISP_TEST_H		2460
+#define ISP_TEST_Y_STRIDE	3328	/* 3280 aligned to 64 */
+#define ISP_TEST_UV_STRIDE	1664	/* half Y stride */
+#define ISP_TEST_INPUT_SIZE	(256 * 1024) /* 256KB: 128KB working + 128KB stats */
 
 /* ----------------------------------------------------------------
  * Host1x channel + job submission
@@ -263,6 +271,294 @@ static int isp_t124_probe_methods(struct tegra_isp_t124 *isp,
 }
 
 /* ----------------------------------------------------------------
+ * DMA frame processing test
+ * ---------------------------------------------------------------- */
+
+struct isp_dma_buf {
+	struct page *pages;
+	int order;
+	void *cpu;
+	dma_addr_t dma;
+	size_t size;
+};
+
+static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
+			     size_t size)
+{
+	buf->order = get_order(size);
+	buf->size = PAGE_SIZE << buf->order;
+	buf->pages = alloc_pages(GFP_KERNEL | __GFP_ZERO, buf->order);
+	if (!buf->pages)
+		return -ENOMEM;
+
+	buf->cpu = page_address(buf->pages);
+	buf->dma = dma_map_page(dev, buf->pages, 0, buf->size,
+				DMA_BIDIRECTIONAL);
+	if (dma_mapping_error(dev, buf->dma)) {
+		__free_pages(buf->pages, buf->order);
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+static void isp_dma_buf_free(struct device *dev, struct isp_dma_buf *buf)
+{
+	if (!buf->pages)
+		return;
+	dma_unmap_page(dev, buf->dma, buf->size, DMA_BIDIRECTIONAL);
+	__free_pages(buf->pages, buf->order);
+	buf->pages = NULL;
+}
+
+/**
+ * isp_t124_dma_test() - Test ISP DMA frame processing
+ *
+ * Submits stock calibration + per-frame output command buffer to ISP-A,
+ * checks if output Y plane contains non-zero data.
+ */
+static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
+{
+	struct device *dev = &isp->pdev->dev;
+	struct isp_dma_buf in_buf = {}, out_y = {}, out_u = {}, out_v = {};
+	u32 *cmdbuf, *frame_cmdbuf;
+	dma_addr_t cmdbuf_phys, frame_phys;
+	int err, n, nonzero, i;
+	size_t y_size, uv_size;
+	ktime_t start;
+	s64 us;
+
+	if (!isp->channel || !isp->syncpt_id)
+		return -ENODEV;
+
+	y_size = ISP_TEST_Y_STRIDE * ISP_TEST_H;
+	uv_size = ISP_TEST_UV_STRIDE * (ISP_TEST_H / 2);
+
+	seq_printf(s, "ISP DMA test: %dx%d, Y=%zuKB, UV=%zuKB each\n",
+		   ISP_TEST_W, ISP_TEST_H, y_size / 1024, uv_size / 1024);
+
+	err = nvhost_module_busy(isp->pdev);
+	if (err)
+		return err;
+
+	/* Allocate buffers */
+	err = isp_dma_buf_alloc(dev, &in_buf, ISP_TEST_INPUT_SIZE);
+	if (err) {
+		seq_printf(s, "input alloc failed: %d\n", err);
+		goto idle;
+	}
+	err = isp_dma_buf_alloc(dev, &out_y, y_size);
+	if (err) {
+		seq_printf(s, "output Y alloc failed: %d\n", err);
+		goto free_in;
+	}
+	err = isp_dma_buf_alloc(dev, &out_u, uv_size);
+	if (err) {
+		seq_printf(s, "output U alloc failed: %d\n", err);
+		goto free_y;
+	}
+	err = isp_dma_buf_alloc(dev, &out_v, uv_size);
+	if (err) {
+		seq_printf(s, "output V alloc failed: %d\n", err);
+		goto free_u;
+	}
+
+	/* Command buffer for calibration (need ~1550 words, use 2 pages) */
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE * 2, &cmdbuf_phys,
+				    GFP_KERNEL);
+	if (!cmdbuf) {
+		err = -ENOMEM;
+		seq_printf(s, "cmdbuf alloc failed\n");
+		goto free_v;
+	}
+
+	/* Per-frame command buffer (separate page) */
+	frame_cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &frame_phys,
+					  GFP_KERNEL);
+	if (!frame_cmdbuf) {
+		err = -ENOMEM;
+		seq_printf(s, "frame cmdbuf alloc failed\n");
+		goto free_cmdbuf;
+	}
+
+	/* Fill input with test pattern */
+	memset(in_buf.cpu, 0xA5, ISP_TEST_INPUT_SIZE);
+
+	seq_printf(s, "  input:  dma=0x%pad, %d KB\n",
+		   &in_buf.dma, ISP_TEST_INPUT_SIZE / 1024);
+	seq_printf(s, "  out_y:  dma=0x%pad, %zu KB\n",
+		   &out_y.dma, y_size / 1024);
+	seq_printf(s, "  out_u:  dma=0x%pad, %zu KB\n",
+		   &out_u.dma, uv_size / 1024);
+	seq_printf(s, "  out_v:  dma=0x%pad, %zu KB\n",
+		   &out_v.dma, uv_size / 1024);
+
+	/*
+	 * Submit 1: Calibration (stock ISP-A data, SET_CLASS stripped)
+	 * Copy calibration, patch last word (buffer IOVA) with our input.
+	 * Append syncpt increment for submit completion.
+	 */
+	n = ARRAY_SIZE(isp_a_cal_data);
+	memcpy(cmdbuf, isp_a_cal_data, sizeof(isp_a_cal_data));
+	/* Last word of calibration is the stock buffer IOVA — replace */
+	cmdbuf[n - 1] = (u32)in_buf.dma;
+	/* Append syncpt REG_WR_SAFE increment */
+	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_reg_wr_safe_v(),
+		isp->syncpt_id);
+	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
+
+	seq_printf(s, "  cal submit: %d words (cal=%zu + syncpt)\n",
+		   n, ARRAY_SIZE(isp_a_cal_data));
+
+	start = ktime_get();
+	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
+	us = ktime_us_delta(ktime_get(), start);
+	if (err) {
+		seq_printf(s, "  cal submit FAILED: %d (%lld us)\n", err, us);
+		goto free_frame;
+	}
+	seq_printf(s, "  cal submit OK (%lld us)\n", us);
+
+	/*
+	 * Submit 2: Per-frame output config + trigger
+	 * Matches stock 45-word block but without SET_CLASS opcodes.
+	 * Also adds the "0x60D8-like" registers from isp_test.c.
+	 */
+	n = 0;
+
+	/* Output enable block (from isp_test.c 0x60D8 path) */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
+	frame_cmdbuf[n++] = ISP_TEST_W | (ISP_TEST_H << 16);
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FMT2, 1);
+	frame_cmdbuf[n++] = ISP_FORMAT_STOCK;
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_STRIDE, 1);
+	frame_cmdbuf[n++] = ISP_TEST_Y_STRIDE;
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	frame_cmdbuf[n++] = 0x00000007;
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_ENABLE, 1);
+	frame_cmdbuf[n++] = 0x00000001;
+
+	/* Output dimensions (from stock 45-word block) */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
+	frame_cmdbuf[n++] = ((ISP_TEST_W - 1) & 0x3FFF) << 16;
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
+	frame_cmdbuf[n++] = ((ISP_TEST_H - 1) & 0x3FFF) << 16;
+
+	/* Output format */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
+	frame_cmdbuf[n++] = ISP_FORMAT_STOCK;
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
+	frame_cmdbuf[n++] = 0x00000000;
+
+	/* Output surface Y: [IOVA, 0, stride] */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
+	frame_cmdbuf[n++] = (u32)out_y.dma;
+	frame_cmdbuf[n++] = ISP_SURF_WORD1;
+	frame_cmdbuf[n++] = ISP_TEST_Y_STRIDE;
+
+	/* Output surface U */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
+	frame_cmdbuf[n++] = (u32)out_u.dma;
+	frame_cmdbuf[n++] = ISP_SURF_WORD1;
+	frame_cmdbuf[n++] = ISP_TEST_UV_STRIDE;
+
+	/* Output surface V */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
+	frame_cmdbuf[n++] = (u32)out_v.dma;
+	frame_cmdbuf[n++] = ISP_SURF_WORD1;
+	frame_cmdbuf[n++] = ISP_TEST_UV_STRIDE;
+
+	/* Processing: 5 zeros + (H << 16) | W */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = (ISP_TEST_H << 16) | ISP_TEST_W;
+
+	/* Input buffer */
+	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
+	frame_cmdbuf[n++] = (u32)in_buf.dma;
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = 0;
+	frame_cmdbuf[n++] = 0;
+
+	/* Trigger */
+	frame_cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	frame_cmdbuf[n++] = ISP_TRIGGER_RUNTIME;
+
+	/* Syncpt OP_DONE */
+	frame_cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		isp->syncpt_id);
+	frame_cmdbuf[n++] = NVHOST_OPCODE_NOOP;
+
+	seq_printf(s, "  frame submit: %d words\n", n);
+
+	start = ktime_get();
+	err = isp_t124_submit(isp, frame_cmdbuf, frame_phys, n);
+	us = ktime_us_delta(ktime_get(), start);
+	if (err) {
+		seq_printf(s, "  frame submit FAILED: %d (%lld us)\n", err, us);
+		goto free_frame;
+	}
+	seq_printf(s, "  frame submit OK (%lld us)\n", us);
+
+	/* Sync DMA for CPU read */
+	dma_sync_single_for_cpu(dev, out_y.dma,
+				min(out_y.size, (size_t)4096),
+				DMA_FROM_DEVICE);
+
+	/* Check output Y plane for non-zero data */
+	nonzero = 0;
+	for (i = 0; i < 4096; i++) {
+		if (((u8 *)out_y.cpu)[i] != 0)
+			nonzero++;
+	}
+
+	seq_printf(s, "\n  output Y: %d/4096 bytes non-zero%s\n",
+		   nonzero,
+		   nonzero ? " (ISP WROTE DATA!)" : " (untouched)");
+
+	/* Hex dump first 64 bytes */
+	seq_printf(s, "  Y hex[0..63]: ");
+	for (i = 0; i < 64; i++)
+		seq_printf(s, "%02x ", ((u8 *)out_y.cpu)[i]);
+	seq_printf(s, "\n");
+
+	/* Check stats region in input buffer at +0x20000 */
+	if (ISP_TEST_INPUT_SIZE >= 0x20000 + 64) {
+		u8 *stats = (u8 *)in_buf.cpu + 0x20000;
+		dma_sync_single_for_cpu(dev, in_buf.dma + 0x20000,
+					4096, DMA_FROM_DEVICE);
+		nonzero = 0;
+		for (i = 0; i < 4096; i++) {
+			if (stats[i] != 0xA5)
+				nonzero++;
+		}
+		seq_printf(s, "  stats region: %d/4096 bytes changed\n",
+			   nonzero);
+	}
+
+free_frame:
+	dma_free_coherent(dev, PAGE_SIZE, frame_cmdbuf, frame_phys);
+free_cmdbuf:
+	dma_free_coherent(dev, PAGE_SIZE * 2, cmdbuf, cmdbuf_phys);
+free_v:
+	isp_dma_buf_free(dev, &out_v);
+free_u:
+	isp_dma_buf_free(dev, &out_u);
+free_y:
+	isp_dma_buf_free(dev, &out_y);
+free_in:
+	isp_dma_buf_free(dev, &in_buf);
+idle:
+	nvhost_module_idle(isp->pdev);
+	return err;
+}
+
+/* ----------------------------------------------------------------
  * debugfs
  * ---------------------------------------------------------------- */
 
@@ -307,6 +603,23 @@ static const struct file_operations isp_t124_debugfs_probe_fops = {
 	.release = single_release,
 };
 
+static int isp_t124_debugfs_dma_show(struct seq_file *s, void *data)
+{
+	return isp_t124_dma_test(s->private, s);
+}
+
+static int isp_t124_debugfs_dma_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_t124_debugfs_dma_show, inode->i_private);
+}
+
+static const struct file_operations isp_t124_debugfs_dma_fops = {
+	.open    = isp_t124_debugfs_dma_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
 static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp)
 {
 	isp->debugfs_dir = debugfs_create_dir("isp_t124", NULL);
@@ -316,6 +629,8 @@ static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp)
 			    isp, &isp_t124_debugfs_ping_fops);
 	debugfs_create_file("probe", 0444, isp->debugfs_dir,
 			    isp, &isp_t124_debugfs_probe_fops);
+	debugfs_create_file("dma_test", 0444, isp->debugfs_dir,
+			    isp, &isp_t124_debugfs_dma_fops);
 }
 
 static void isp_t124_debugfs_cleanup(struct tegra_isp_t124 *isp)
