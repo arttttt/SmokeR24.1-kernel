@@ -21,6 +21,7 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_graph.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 
@@ -2413,10 +2414,10 @@ static void tegra_channel_csi_init(struct tegra_mc_vi *vi, unsigned int index)
 
 	if (chan->valid_ports == 0) {
 		/* No CSI port — check if this is an ISP or lens channel.
-		 * Walk the DT graph to find the remote endpoint's parent
-		 * and check its compatible string.
+		 * Use of_graph_get_remote_port_parent() to find the device
+		 * node of the remote endpoint and check its compatible.
 		 */
-		struct device_node *ports, *port, *ep, *remote, *remote_parent;
+		struct device_node *ports, *port, *ep, *remote_dev;
 		bool found_isp = false;
 
 		ports = of_get_child_by_name(vi->dev->of_node, "ports");
@@ -2432,23 +2433,13 @@ static void tegra_channel_csi_init(struct tegra_mc_vi *vi, unsigned int index)
 				ep = of_get_next_child(port, NULL);
 				if (!ep)
 					break;
-				remote = of_parse_phandle(ep, "remote-endpoint", 0);
+				remote_dev = of_graph_get_remote_port_parent(ep);
 				of_node_put(ep);
-				if (!remote)
-					break;
-				remote_parent = of_get_parent(remote);
-				if (remote_parent)
-					remote_parent = of_get_parent(remote_parent);
-				/* ports/port@0/endpoint -> ports -> isp@54600000 */
-				if (remote_parent)
-					remote_parent = of_get_parent(remote_parent);
-				of_node_put(remote);
-				if (remote_parent &&
-				    of_device_is_compatible(remote_parent,
-							   "nvidia,tegra124-isp")) {
+				if (remote_dev &&
+				    of_device_is_compatible(remote_dev,
+							   "nvidia,tegra124-isp"))
 					found_isp = true;
-				}
-				of_node_put(remote_parent);
+				of_node_put(remote_dev);
 				of_node_put(port);
 				break;
 			}
@@ -2610,6 +2601,14 @@ vb2_init_error:
 
 static int tegra_channel_cleanup(struct tegra_channel *chan)
 {
+	if (chan->is_lens_channel || chan->is_isp_channel) {
+		/* These channels have no video device or VB2 queue */
+		media_entity_cleanup(&chan->video.entity);
+		if (chan->is_lens_channel)
+			v4l2_ctrl_handler_free(&chan->ctrl_handler);
+		return 0;
+	}
+
 	video_unregister_device(&chan->video);
 
 	v4l2_ctrl_handler_free(&chan->ctrl_handler);

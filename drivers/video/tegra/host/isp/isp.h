@@ -45,7 +45,7 @@ struct isp {
 
 	/* V4L2 Media Controller integration */
 	struct v4l2_subdev subdev;
-	struct media_pad pads[2]; /* [0]=SINK (RAW), [1]=SOURCE (processed) */
+	struct media_pad pads[2]; /* [0]=SOURCE (to VI chan), [1]=SINK (RAW input) */
 };
 
 extern const struct file_operations tegra_isp_ctrl_ops;

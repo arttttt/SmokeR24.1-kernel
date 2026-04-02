@@ -301,8 +301,8 @@ static int tegra_isp_register_subdev(struct isp *tegra_isp)
 	snprintf(sd->name, sizeof(sd->name), "%s",
 		 dev_name(dev));
 
-	tegra_isp->pads[0].flags = MEDIA_PAD_FL_SINK;
-	tegra_isp->pads[1].flags = MEDIA_PAD_FL_SOURCE;
+	tegra_isp->pads[0].flags = MEDIA_PAD_FL_SOURCE;
+	tegra_isp->pads[1].flags = MEDIA_PAD_FL_SINK;
 
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
