@@ -314,8 +314,8 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 {
 	struct device *dev = &isp->pdev->dev;
 	struct isp_dma_buf in_buf = {}, out_y = {}, out_u = {}, out_v = {};
-	u32 *cmdbuf, *frame_cmdbuf;
-	dma_addr_t cmdbuf_phys, frame_phys;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
 	int err, n, nonzero, i;
 	size_t y_size, uv_size;
 	ktime_t start;
@@ -356,22 +356,13 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		goto free_u;
 	}
 
-	/* Command buffer for calibration (need ~1550 words, use 2 pages) */
+	/* Command buffer: cal(1544) + frame(~50) + padding, use 2 pages */
 	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE * 2, &cmdbuf_phys,
 				    GFP_KERNEL);
 	if (!cmdbuf) {
 		err = -ENOMEM;
 		seq_printf(s, "cmdbuf alloc failed\n");
 		goto free_v;
-	}
-
-	/* Per-frame command buffer (separate page) */
-	frame_cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &frame_phys,
-					  GFP_KERNEL);
-	if (!frame_cmdbuf) {
-		err = -ENOMEM;
-		seq_printf(s, "frame cmdbuf alloc failed\n");
-		goto free_cmdbuf;
 	}
 
 	/* Fill input with test pattern */
@@ -387,117 +378,99 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		   &out_v.dma, uv_size / 1024);
 
 	/*
-	 * Submit 1: Calibration (stock ISP-A data, SET_CLASS stripped)
-	 * Copy calibration, patch last word (buffer IOVA) with our input.
-	 * Append syncpt increment for submit completion.
+	 * Build SINGLE combined command buffer:
+	 * calibration + output config + surfaces + trigger + syncpt
+	 * (like isp_test.c on stock — everything in one gather)
+	 *
+	 * All SET_CLASS opcodes stripped — class set by
+	 * nvhost_job_add_client_gather_address() in pushbuffer.
 	 */
+
+	/* Part 1: Calibration data (1544 words, SET_CLASS stripped) */
 	n = ARRAY_SIZE(isp_a_cal_data);
 	memcpy(cmdbuf, isp_a_cal_data, sizeof(isp_a_cal_data));
-	/* Last word of calibration is the stock buffer IOVA — replace */
+	/* Patch stock buffer IOVA → our input buffer */
 	cmdbuf[n - 1] = (u32)in_buf.dma;
-	/* Append syncpt REG_WR_SAFE increment */
+
+	/* Part 2: Output enable block (from isp_test.c 0x60D8 path) */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
+	cmdbuf[n++] = ISP_TEST_W | (ISP_TEST_H << 16);
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FMT2, 1);
+	cmdbuf[n++] = ISP_FORMAT_STOCK;
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_STRIDE, 1);
+	cmdbuf[n++] = ISP_TEST_Y_STRIDE;
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmdbuf[n++] = ISP_ENABLE_MODE;
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_ENABLE, 1);
+	cmdbuf[n++] = 0x00000001;
+
+	/* Part 3: Output dimensions (stock 45-word block) */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
+	cmdbuf[n++] = ((ISP_TEST_W - 1) & 0x3FFF) << 16;
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
+	cmdbuf[n++] = ((ISP_TEST_H - 1) & 0x3FFF) << 16;
+
+	/* Output format */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
+	cmdbuf[n++] = ISP_FORMAT_STOCK;
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
+	cmdbuf[n++] = 0x00000000;
+
+	/* Output surface Y: [IOVA, 0, stride] */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
+	cmdbuf[n++] = (u32)out_y.dma;
+	cmdbuf[n++] = ISP_SURF_WORD1;
+	cmdbuf[n++] = ISP_TEST_Y_STRIDE;
+
+	/* Output surface U */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
+	cmdbuf[n++] = (u32)out_u.dma;
+	cmdbuf[n++] = ISP_SURF_WORD1;
+	cmdbuf[n++] = ISP_TEST_UV_STRIDE;
+
+	/* Output surface V */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
+	cmdbuf[n++] = (u32)out_v.dma;
+	cmdbuf[n++] = ISP_SURF_WORD1;
+	cmdbuf[n++] = ISP_TEST_UV_STRIDE;
+
+	/* Processing: 5 zeros + (H << 16) | W */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = (ISP_TEST_H << 16) | ISP_TEST_W;
+
+	/* Input buffer */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
+	cmdbuf[n++] = (u32)in_buf.dma;
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = 0;
+	cmdbuf[n++] = 0;
+
+	/* Trigger */
+	cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	cmdbuf[n++] = ISP_TRIGGER_RUNTIME;
+
+	/* Syncpt OP_DONE */
 	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_reg_wr_safe_v(),
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
 		isp->syncpt_id);
 	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
-	seq_printf(s, "  cal submit: %d words (cal=%zu + syncpt)\n",
+	seq_printf(s, "  combined submit: %d words (cal=%zu + frame)\n",
 		   n, ARRAY_SIZE(isp_a_cal_data));
 
 	start = ktime_get();
 	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
 	us = ktime_us_delta(ktime_get(), start);
 	if (err) {
-		seq_printf(s, "  cal submit FAILED: %d (%lld us)\n", err, us);
-		goto free_frame;
+		seq_printf(s, "  submit FAILED: %d (%lld us)\n", err, us);
+		goto free_cmdbuf;
 	}
-	seq_printf(s, "  cal submit OK (%lld us)\n", us);
-
-	/*
-	 * Submit 2: Per-frame output config + trigger
-	 * Matches stock 45-word block but without SET_CLASS opcodes.
-	 * Also adds the "0x60D8-like" registers from isp_test.c.
-	 */
-	n = 0;
-
-	/* Output enable block (from isp_test.c 0x60D8 path) */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
-	frame_cmdbuf[n++] = ISP_TEST_W | (ISP_TEST_H << 16);
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FMT2, 1);
-	frame_cmdbuf[n++] = ISP_FORMAT_STOCK;
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_STRIDE, 1);
-	frame_cmdbuf[n++] = ISP_TEST_Y_STRIDE;
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	frame_cmdbuf[n++] = 0x00000007;
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_ENABLE, 1);
-	frame_cmdbuf[n++] = 0x00000001;
-
-	/* Output dimensions (from stock 45-word block) */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
-	frame_cmdbuf[n++] = ((ISP_TEST_W - 1) & 0x3FFF) << 16;
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
-	frame_cmdbuf[n++] = ((ISP_TEST_H - 1) & 0x3FFF) << 16;
-
-	/* Output format */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	frame_cmdbuf[n++] = ISP_FORMAT_STOCK;
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
-	frame_cmdbuf[n++] = 0x00000000;
-
-	/* Output surface Y: [IOVA, 0, stride] */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
-	frame_cmdbuf[n++] = (u32)out_y.dma;
-	frame_cmdbuf[n++] = ISP_SURF_WORD1;
-	frame_cmdbuf[n++] = ISP_TEST_Y_STRIDE;
-
-	/* Output surface U */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
-	frame_cmdbuf[n++] = (u32)out_u.dma;
-	frame_cmdbuf[n++] = ISP_SURF_WORD1;
-	frame_cmdbuf[n++] = ISP_TEST_UV_STRIDE;
-
-	/* Output surface V */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
-	frame_cmdbuf[n++] = (u32)out_v.dma;
-	frame_cmdbuf[n++] = ISP_SURF_WORD1;
-	frame_cmdbuf[n++] = ISP_TEST_UV_STRIDE;
-
-	/* Processing: 5 zeros + (H << 16) | W */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = (ISP_TEST_H << 16) | ISP_TEST_W;
-
-	/* Input buffer */
-	frame_cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
-	frame_cmdbuf[n++] = (u32)in_buf.dma;
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = 0;
-	frame_cmdbuf[n++] = 0;
-
-	/* Trigger */
-	frame_cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	frame_cmdbuf[n++] = ISP_TRIGGER_RUNTIME;
-
-	/* Syncpt OP_DONE */
-	frame_cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
-		isp->syncpt_id);
-	frame_cmdbuf[n++] = NVHOST_OPCODE_NOOP;
-
-	seq_printf(s, "  frame submit: %d words\n", n);
-
-	start = ktime_get();
-	err = isp_t124_submit(isp, frame_cmdbuf, frame_phys, n);
-	us = ktime_us_delta(ktime_get(), start);
-	if (err) {
-		seq_printf(s, "  frame submit FAILED: %d (%lld us)\n", err, us);
-		goto free_frame;
-	}
-	seq_printf(s, "  frame submit OK (%lld us)\n", us);
+	seq_printf(s, "  submit OK (%lld us)\n", us);
 
 	/* Check output Y plane for non-zero data
 	 * (dma_alloc_coherent buffers are always CPU-coherent, no sync needed)
@@ -530,8 +503,6 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 			   nonzero);
 	}
 
-free_frame:
-	dma_free_coherent(dev, PAGE_SIZE, frame_cmdbuf, frame_phys);
 free_cmdbuf:
 	dma_free_coherent(dev, PAGE_SIZE * 2, cmdbuf, cmdbuf_phys);
 free_v:
