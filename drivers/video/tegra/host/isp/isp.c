@@ -660,6 +660,238 @@ idle:
 	return 0;
 }
 
+/* DMA buffer sizes for ISP test */
+#define ISP_TEST_WIDTH		64
+#define ISP_TEST_HEIGHT		64
+#define ISP_TEST_BPP_IN		2	/* 10-bit Bayer packed or 16-bit */
+#define ISP_TEST_BPP_OUT	2	/* YUV422 or similar */
+#define ISP_TEST_IN_SIZE	(ISP_TEST_WIDTH * ISP_TEST_HEIGHT * ISP_TEST_BPP_IN)
+#define ISP_TEST_OUT_SIZE	(ISP_TEST_WIDTH * ISP_TEST_HEIGHT * ISP_TEST_BPP_OUT)
+
+/**
+ * tegra_isp_dma_test() - Attempt minimal ISP frame processing
+ *
+ * Allocates input/output DMA buffers, fills input with a pattern,
+ * programs ISP registers via host1x methods, triggers processing,
+ * and checks if output buffer was modified.
+ *
+ * Register bit-field encoding is unknown — we try plausible layouts
+ * based on reverse engineering of libnvisp_v3.so.
+ */
+static int tegra_isp_dma_test(struct isp *tegra_isp, struct seq_file *s)
+{
+	struct device *dev = &tegra_isp->ndev->dev;
+	struct nvhost_job *job;
+	u32 *cmdbuf = NULL, *in_buf = NULL, *out_buf = NULL;
+	dma_addr_t cmdbuf_phys, in_phys, out_phys;
+	int err, i;
+	int num_words;
+	u32 in_stride = ISP_TEST_WIDTH * ISP_TEST_BPP_IN;
+	u32 out_stride = ISP_TEST_WIDTH * ISP_TEST_BPP_OUT;
+	int out_nonzero = 0;
+	ktime_t start;
+	s64 us;
+
+	if (!tegra_isp->channel || !tegra_isp->syncpt_id)
+		return -ENODEV;
+
+	err = nvhost_module_busy(tegra_isp->ndev);
+	if (err)
+		return err;
+
+	/* Allocate DMA buffers */
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	in_buf = dma_alloc_coherent(dev, ISP_TEST_IN_SIZE, &in_phys, GFP_KERNEL);
+	out_buf = dma_alloc_coherent(dev, ISP_TEST_OUT_SIZE, &out_phys, GFP_KERNEL);
+	if (!cmdbuf || !in_buf || !out_buf) {
+		err = -ENOMEM;
+		goto free_all;
+	}
+
+	/* Fill input with recognizable pattern, clear output */
+	for (i = 0; i < ISP_TEST_IN_SIZE / 4; i++)
+		in_buf[i] = 0xA5A50000 | i;
+	memset(out_buf, 0, ISP_TEST_OUT_SIZE);
+
+	seq_printf(s, "ISP DMA test: %dx%d, in=%pad out=%pad\n",
+		ISP_TEST_WIDTH, ISP_TEST_HEIGHT, &in_phys, &out_phys);
+
+	/*
+	 * ISP frame processing requires MULTIPLE host1x submits,
+	 * matching the blob's NvIspSetConfiguration flow:
+	 *
+	 * Submit 1: Buffer address via INCR(0x100, 4) + reloc
+	 * Submit 2: Processing settings + output surface + syncpts
+	 *
+	 * Discovered from libnvisp_v3.so disassembly:
+	 * - NvRmStreamBegin/End pairs = separate submits
+	 * - NvCameraHwSettingsApply emits descriptor-based methods
+	 * - NvIspFlush does final submit with syncpt increments
+	 */
+
+	/* === Submit 1: Input buffer address === */
+	num_words = 0;
+	cmdbuf[num_words++] = nvhost_opcode_incr(0x100, 4);
+	cmdbuf[num_words++] = (u32)in_phys;	/* buffer address */
+	cmdbuf[num_words++] = 0;
+	cmdbuf[num_words++] = 0;
+	cmdbuf[num_words++] = 0;
+	/* IMMEDIATE syncpt to confirm this submit completed */
+	cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		tegra_isp->syncpt_id);
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+	job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+	if (!job) { err = -ENOMEM; goto free_all; }
+	job->sp->id = tegra_isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+	err = nvhost_job_add_client_gather_address(job, num_words,
+		NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) { nvhost_job_put(job); goto free_all; }
+	err = nvhost_channel_submit(job);
+	if (err) { nvhost_job_put(job); goto free_all; }
+	err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+		job->sp->id, job->sp->fence, msecs_to_jiffies(500), NULL, NULL);
+	nvhost_job_put(job);
+	seq_printf(s, "  submit1 (input buf): %s\n", err ? "FAIL" : "OK");
+	if (err) goto free_all;
+
+	/* === Submit 2: Full runtime ISP frame path ===
+	 *
+	 * Combining 3 runtime blocks from ProcessFrame3 RE:
+	 *
+	 * Block 1 (0x60D8-like): 0xE30-0xE33 format/size + 0x015 enable
+	 * Block 2 (0x31C0-like): 0x500 processing + 0xE00-0xE03 output dims
+	 *                         + 0xE04+3*i output surface + 0xE34+3*i input
+	 * Block 3 (0x76F8-like): 0x00C control trigger + syncpt
+	 */
+	num_words = 0;
+
+	/* --- Block 1: Format/size registers (from 0x60D8 RE) --- */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE31, 1);
+	cmdbuf[num_words++] = ISP_TEST_WIDTH | (ISP_TEST_HEIGHT << 16);
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE33, 1);
+	cmdbuf[num_words++] = 0x20;  /* format code */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE32, 1);
+	cmdbuf[num_words++] = out_stride;  /* stride/block-size */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0x015, 1);
+	cmdbuf[num_words++] = 0x00000007;  /* ISP enable, mode bits */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE30, 1);
+	cmdbuf[num_words++] = 0x00000001;  /* output enable */
+
+	/* --- Block 2: Processing + output dims + surfaces (from 0x31C0 RE) --- */
+	/* Processing: INCR(0x500, 6) — blob fills from float conversion,
+	 * try non-zero defaults. From RE: these are demosaic/color params.
+	 * Setting to simple passthrough-like values.
+	 */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0x500, 6);
+	cmdbuf[num_words++] = 0x00000001;  /* enable? */
+	cmdbuf[num_words++] = ISP_TEST_WIDTH;
+	cmdbuf[num_words++] = ISP_TEST_HEIGHT;
+	cmdbuf[num_words++] = in_stride;
+	cmdbuf[num_words++] = 0x00000001;
+	cmdbuf[num_words++] = 0x00000000;
+
+	/* Output dimensions */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE00, 1);
+	cmdbuf[num_words++] = ((ISP_TEST_WIDTH - 1) & 0x3FFF) << 16;
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE01, 1);
+	cmdbuf[num_words++] = ((ISP_TEST_HEIGHT - 1) & 0x3FFF) << 16;
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE02, 1);
+	cmdbuf[num_words++] = 0x20;  /* format code */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE03, 1);
+	cmdbuf[num_words++] = 0;     /* color params */
+
+	/* Output surface: INCR(0xE04, 3) = [addr, stride_low6|word, fullword] */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE04, 3);
+	cmdbuf[num_words++] = (u32)out_phys;
+	cmdbuf[num_words++] = out_stride;
+	cmdbuf[num_words++] = ((ISP_TEST_HEIGHT - 1) << 16) | (ISP_TEST_WIDTH - 1);
+
+	/* Input surface: INCR(0xE34, 3) */
+	cmdbuf[num_words++] = nvhost_opcode_incr(0xE34, 3);
+	cmdbuf[num_words++] = (u32)in_phys;
+	cmdbuf[num_words++] = in_stride;
+	cmdbuf[num_words++] = ((ISP_TEST_HEIGHT - 1) << 16) | (ISP_TEST_WIDTH - 1);
+
+	/* --- Block 3: Control triggers (from 0x76F8 RE) ---
+	 * 0x00C has multiple modes: 0x0F (post-apply), 0x05/0x07/0x09 (runtime)
+	 * Try sequence: 0x0F first (commit config), then 0x05 (start frame)
+	 */
+	cmdbuf[num_words++] = nvhost_opcode_nonincr(0x00C, 1);
+	cmdbuf[num_words++] = 0x0000000F;
+	cmdbuf[num_words++] = nvhost_opcode_nonincr(0x00C, 1);
+	cmdbuf[num_words++] = 0x00000005;
+
+	/* OP_DONE syncpt */
+	cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		tegra_isp->syncpt_id);
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+	seq_printf(s, "  cmdbuf: %d words\n", num_words);
+
+	/* Submit */
+	job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+	if (!job) { err = -ENOMEM; goto free_all; }
+	job->sp->id = tegra_isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+	err = nvhost_job_add_client_gather_address(job, num_words,
+		NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) {
+		nvhost_job_put(job);
+		seq_printf(s, "  gather FAIL: %d\n", err);
+		goto free_all;
+	}
+
+	start = ktime_get();
+	err = nvhost_channel_submit(job);
+	if (err) {
+		nvhost_job_put(job);
+		seq_printf(s, "  submit FAIL: %d\n", err);
+		goto free_all;
+	}
+
+	err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+		job->sp->id, job->sp->fence,
+		msecs_to_jiffies(1000), NULL, NULL);
+	us = ktime_us_delta(ktime_get(), start);
+	nvhost_job_put(job);
+
+	seq_printf(s, "  submit+wait: %s (%lld us)\n",
+		err ? "TIMEOUT" : "OK", us);
+
+	/* Check if ISP wrote anything to output buffer */
+	for (i = 0; i < ISP_TEST_OUT_SIZE / 4; i++) {
+		if (out_buf[i] != 0) {
+			out_nonzero++;
+			if (out_nonzero <= 4)
+				seq_printf(s, "  out[%d] = 0x%08x\n",
+					i, out_buf[i]);
+		}
+	}
+	seq_printf(s, "  output: %d/%d words non-zero%s\n",
+		out_nonzero, ISP_TEST_OUT_SIZE / 4,
+		out_nonzero ? " (ISP wrote data!)" : " (untouched)");
+
+	/* Dump first few input words for reference */
+	seq_printf(s, "  in[0..3]: 0x%08x 0x%08x 0x%08x 0x%08x\n",
+		in_buf[0], in_buf[1], in_buf[2], in_buf[3]);
+
+free_all:
+	if (out_buf)
+		dma_free_coherent(dev, ISP_TEST_OUT_SIZE, out_buf, out_phys);
+	if (in_buf)
+		dma_free_coherent(dev, ISP_TEST_IN_SIZE, in_buf, in_phys);
+	if (cmdbuf)
+		dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+	nvhost_module_idle(tegra_isp->ndev);
+	return 0;
+}
+
 /* ----------------------------------------------------------------
  * debugfs
  * ---------------------------------------------------------------- */
@@ -731,6 +963,23 @@ static const struct file_operations isp_debugfs_probe_fops = {
 	.release	= single_release,
 };
 
+static int isp_debugfs_dma_test_show(struct seq_file *s, void *data)
+{
+	return tegra_isp_dma_test(s->private, s);
+}
+
+static int isp_debugfs_dma_test_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_debugfs_dma_test_show, inode->i_private);
+}
+
+static const struct file_operations isp_debugfs_dma_test_fops = {
+	.open		= isp_debugfs_dma_test_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static void tegra_isp_debugfs_init(struct isp *tegra_isp)
 {
 	const char *name = tegra_isp->dev_id == 0 ? "isp_a" : "isp_b";
@@ -745,6 +994,8 @@ static void tegra_isp_debugfs_init(struct isp *tegra_isp)
 			    tegra_isp, &isp_debugfs_regtest_fops);
 	debugfs_create_file("probe", 0444, tegra_isp->debugfs_dir,
 			    tegra_isp, &isp_debugfs_probe_fops);
+	debugfs_create_file("dma_test", 0444, tegra_isp->debugfs_dir,
+			    tegra_isp, &isp_debugfs_dma_test_fops);
 }
 
 static void tegra_isp_debugfs_cleanup(struct isp *tegra_isp)
