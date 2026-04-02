@@ -275,39 +275,33 @@ static int isp_t124_probe_methods(struct tegra_isp_t124 *isp,
  * ---------------------------------------------------------------- */
 
 struct isp_dma_buf {
-	struct page *pages;
-	int order;
 	void *cpu;
 	dma_addr_t dma;
 	size_t size;
 };
 
+/*
+ * Allocate DMA buffer via dma_alloc_coherent.
+ * On SMMU-attached devices (like ISP), this allocates individual pages
+ * and maps them into a contiguous IOVA range — same as nvmap IOVMM.
+ * No physically contiguous memory needed.
+ */
 static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
 			     size_t size)
 {
-	buf->order = get_order(size);
-	buf->size = PAGE_SIZE << buf->order;
-	buf->pages = alloc_pages(GFP_KERNEL | __GFP_ZERO, buf->order);
-	if (!buf->pages)
+	buf->size = PAGE_ALIGN(size);
+	buf->cpu = dma_alloc_coherent(dev, buf->size, &buf->dma, GFP_KERNEL);
+	if (!buf->cpu)
 		return -ENOMEM;
-
-	buf->cpu = page_address(buf->pages);
-	buf->dma = dma_map_page(dev, buf->pages, 0, buf->size,
-				DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(dev, buf->dma)) {
-		__free_pages(buf->pages, buf->order);
-		return -ENOMEM;
-	}
 	return 0;
 }
 
 static void isp_dma_buf_free(struct device *dev, struct isp_dma_buf *buf)
 {
-	if (!buf->pages)
+	if (!buf->cpu)
 		return;
-	dma_unmap_page(dev, buf->dma, buf->size, DMA_BIDIRECTIONAL);
-	__free_pages(buf->pages, buf->order);
-	buf->pages = NULL;
+	dma_free_coherent(dev, buf->size, buf->cpu, buf->dma);
+	buf->cpu = NULL;
 }
 
 /**
@@ -505,12 +499,9 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	}
 	seq_printf(s, "  frame submit OK (%lld us)\n", us);
 
-	/* Sync DMA for CPU read */
-	dma_sync_single_for_cpu(dev, out_y.dma,
-				min(out_y.size, (size_t)4096),
-				DMA_FROM_DEVICE);
-
-	/* Check output Y plane for non-zero data */
+	/* Check output Y plane for non-zero data
+	 * (dma_alloc_coherent buffers are always CPU-coherent, no sync needed)
+	 */
 	nonzero = 0;
 	for (i = 0; i < 4096; i++) {
 		if (((u8 *)out_y.cpu)[i] != 0)
@@ -530,8 +521,6 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	/* Check stats region in input buffer at +0x20000 */
 	if (ISP_TEST_INPUT_SIZE >= 0x20000 + 64) {
 		u8 *stats = (u8 *)in_buf.cpu + 0x20000;
-		dma_sync_single_for_cpu(dev, in_buf.dma + 0x20000,
-					4096, DMA_FROM_DEVICE);
 		nonzero = 0;
 		for (i = 0; i < 4096; i++) {
 			if (stats[i] != 0xA5)
