@@ -530,6 +530,43 @@ Audio: BCM4354 FM I2S → RT5671 AIF4 → amixer "FM Switch" on → headphones
 
 ---
 
+## Stock MIUI Dump (2026-04-03)
+
+Captured from stock MIUI KitKat (Android 4.4.4) with working FM radio via ADB.
+Full dump in `docs/fm-radio/stock-dump/`.
+
+### Confirmed Facts
+
+1. **FM chip**: BCM4354, silicon revision BCM4350 C0 (patchram `BCM4350C0.hcd`, 41KB)
+2. **BT UART**: `/dev/ttyTHS2`, rfkill managed by `bluedroid_pm`
+3. **FM lives in `com.android.bluetooth`** process — Broadcom BTA FM stack compiled into `bluetooth.default.so`
+4. **FM works without BT UI enabled** — `RADIO_STATE_CHANGED state=14` activates radio independently
+5. **No kernel FM driver** — no `/dev/fm*`, `/dev/radio*`, no V4L2 radio device nodes
+6. **Audio path**: BCM4354 I2S → RT5671 AIF4 (direct, not through Tegra AHUB)
+7. **NVIDIA audio HAL** has `nvaudio_fm` module for FM volume control (`ro.audio.fm_scale`)
+8. **Stock init sequence**: FM_CHIP_ON → FM_ON(enableFmNative) → SET_AUDIO_PATH(1=I2S) → SET_VOLUME → TUNE_RADIO
+9. **FM signal confirmed**: RSSI=124, SNR=2 at 88.50 MHz
+
+### Answered Questions
+
+- **FM audio routing**: Confirmed BCM4354 → RT5671 AIF4 direct I2S (matches DTS DAI link 4)
+- **FM control path**: Confirmed HCI VSC through Bluedroid HAL (not raw HCI socket)
+- **BT dependency**: FM uses Bluedroid internally but doesn't require BT UI/adapter to be ON from user perspective
+
+### Stock Files Captured
+
+| File | Location on device | Size |
+|------|-------------------|------|
+| BCM4350C0.hcd | /system/etc/firmware/ | 41KB |
+| bluetooth.default.so | /system/lib/hw/ | 1.1MB |
+| libbt-vendor.so | /vendor/lib/ | 18KB |
+| com.broadcom.bt.jar | /system/framework/ | 13KB |
+| FM.apk (com.miui.fm) | /system/app/ | 279KB |
+| bt_vendor.conf | /system/etc/bluetooth/ | 147B |
+| bt_stack.conf | /system/etc/bluetooth/ | 947B |
+
+---
+
 ## External Reference Sources
 
 - `drivers/bluetooth/broadcom/v4l2_fm_driver/` — complete Broadcom FM protocol implementation

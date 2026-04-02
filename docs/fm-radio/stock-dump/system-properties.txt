@@ -1,0 +1,9 @@
+# Stock MIUI KitKat (Android 4.4) - Xiaomi Mi Pad 1 (mocha)
+# Bluetooth/FM related properties captured via adb
+
+[ro.btconfig.chip]: [BCM4354]
+[ro.btconfig.dev]: [/dev/ttyTHS2]
+[ro.btconfig.if]: [uart]
+[ro.btconfig.vendor]: [broadcom]
+[ro.bt.bdaddr_path]: [/mnt/factory/bluetooth/bt_mac.txt]
+[net.bt.name]: [Android]
