@@ -301,15 +301,24 @@ static int test_ping(uint32_t syncpt_id)
 
 static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_val, const char *tag)
 {
-	#define W 3280
-	#define H 2460
-	#define BPP 2
-	#define Y_STRIDE ((W + 63) & ~63)     /* 3280 -> 3328, align to 64 */
-	#define UV_STRIDE (Y_STRIDE / 2)       /* 1664 */
-	#define IN_SIZE  (W * H * BPP)         /* ~16MB */
-	#define Y_SIZE   (Y_STRIDE * H)
-	#define UV_SIZE  (UV_STRIDE * H / 2)
-	#define OUT_SIZE (Y_SIZE + UV_SIZE * 2)
+	/* Detect ISP-B mode */
+	int is_ispb = 0;
+	FILE *marker = fopen("/data/local/tmp/.isp_b_mode", "r");
+	if (marker) { is_ispb = 1; fclose(marker); }
+
+	int W, H;
+	if (is_ispb) {
+		W = 2592; H = 1944;
+	} else {
+		W = 3280; H = 2460;
+	}
+	int Y_STRIDE = (W + 63) & ~63;
+	int UV_STRIDE = Y_STRIDE / 2;
+	int BPP = 2;
+	int IN_SIZE = W * H * BPP;
+	int Y_SIZE = Y_STRIDE * H;
+	int UV_SIZE = UV_STRIDE * H / 2;
+	int OUT_SIZE = Y_SIZE + UV_SIZE * 2;
 
 	/* Allocate buffers via nvmap */
 	uint32_t cmdbuf_h = nvmap_create(16384);  /* 4 pages for calibration + output */
@@ -355,8 +364,10 @@ static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_va
 	 */
 	int n = 0;
 
-	/* Load calibration block from file if available, else minimal */
-	FILE *cal = fopen("/data/local/tmp/isp_cal.bin", "rb");
+	/* Load calibration block from file */
+	const char *cal_path = is_ispb ? "/data/local/tmp/isp_cal_b.bin"
+	                               : "/data/local/tmp/isp_cal.bin";
+	FILE *cal = fopen(cal_path, "rb");
 	if (cal) {
 		uint32_t cal_words;
 		fread(&cal_words, 4, 1, cal);
@@ -635,6 +646,29 @@ int main(int argc, char **argv)
 		test_dma(syncpt_id, 0x0F, 0x000000CA, "t6_fmtCA");
 
 		return 0;
+	} else if (strcmp(mode, "dma_b") == 0) {
+		/* ISP-B test: close ISP-A, open ISP-B */
+		close(isp_fd);
+		isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
+		if (isp_fd < 0) { perror("open nvhost-isp.1"); return 1; }
+		struct nvhost_set_nvmap_fd_args nfa2 = { .fd = nvmap_fd };
+		ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &nfa2);
+		/* Get ISP-B syncpoint */
+		struct nvhost_get_param_arg sp2 = { .param = 0, .value = 0 };
+		if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &sp2) == 0 && sp2.value)
+			syncpt_id = sp2.value;
+		else {
+			struct nvhost_get_param_args spa2;
+			ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINTS, &spa2);
+			syncpt_id = spa2.value;
+		}
+		printf("ISP-B syncpt = %u\n", syncpt_id);
+		/* Create marker file so test_dma detects ISP-B */
+		FILE *marker = fopen("/data/local/tmp/.isp_b_mode", "w");
+		if (marker) fclose(marker);
+		int ret = test_dma(syncpt_id, 0x05, 0x04FE00E6, "ispb_stock");
+		remove("/data/local/tmp/.isp_b_mode");
+		return ret;
 	} else {
 		printf("Usage: %s [ping|dma|tests]\n", argv[0]);
 		return 1;
