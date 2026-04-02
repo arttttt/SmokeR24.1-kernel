@@ -570,6 +570,74 @@ static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_va
 		}
 	}
 
+	/* Stats readback: read from input buffer at offset 0x20000 */
+	{
+		uint8_t stats_buf[4096];
+		memset(stats_buf, 0, sizeof(stats_buf));
+		struct {
+			uint32_t addr;
+			uint32_t handle;
+			uint32_t offset;
+			uint32_t elem_size;
+			uint32_t hmem_stride;
+			uint32_t user_stride;
+			uint32_t count;
+		} __attribute__((packed)) rw;
+		rw.addr = (uint32_t)(uintptr_t)stats_buf;
+		rw.handle = in_h;
+		rw.offset = 0x20000;  /* stats at +128KB */
+		rw.elem_size = sizeof(stats_buf);
+		rw.hmem_stride = sizeof(stats_buf);
+		rw.user_stride = sizeof(stats_buf);
+		rw.count = 1;
+		if (ioctl(nvmap_fd, _IOW('N', 7, rw), &rw) < 0) {
+			perror("nvmap read stats");
+		} else {
+			int nonzero = 0;
+			for (int i = 0; i < (int)sizeof(stats_buf); i++)
+				if (stats_buf[i] != 0) nonzero++;
+			printf("\nstats region (in_buf+0x20000): %d/4096 bytes non-zero\n", nonzero);
+			if (nonzero > 0) {
+				/* Parse stats header */
+				uint32_t *sw = (uint32_t *)stats_buf;
+				printf("  header: 0x%08x 0x%08x 0x%08x 0x%08x\n",
+				       sw[0], sw[1], sw[2], sw[3]);
+				uint32_t type_word = sw[3]; /* offset 0x0C */
+				uint32_t type = (type_word >> 24) & 0xFF;
+				uint32_t count = type_word & 0x00FFFFFF;
+				printf("  type_word=0x%08x -> type=%u, count=%u\n",
+				       type_word, type, count);
+				printf("  first data words: 0x%08x 0x%08x 0x%08x 0x%08x\n",
+				       sw[4], sw[5], sw[6], sw[7]);
+				printf("  hex[0..63]: ");
+				for (int i = 0; i < 64; i++)
+					printf("%02x ", stats_buf[i]);
+				printf("\n");
+			}
+
+			/* Also dump stats to file */
+			FILE *sf = fopen("/data/local/tmp/isp_stats.raw", "wb");
+			if (sf) {
+				/* Read full 128KB stats region */
+				uint8_t *sbuf = malloc(0x20000);
+				if (sbuf) {
+					rw.addr = (uint32_t)(uintptr_t)sbuf;
+					rw.offset = 0x20000;
+					rw.elem_size = 0x20000;
+					rw.hmem_stride = 0x20000;
+					rw.user_stride = 0x20000;
+					rw.count = 1;
+					if (ioctl(nvmap_fd, _IOW('N', 7, rw), &rw) == 0) {
+						fwrite(sbuf, 1, 0x20000, sf);
+						printf("  stats dumped: 128KB to /data/local/tmp/isp_stats.raw\n");
+					}
+					free(sbuf);
+				}
+				fclose(sf);
+			}
+		}
+	}
+
 	munmap(cmd, 16384);
 	if (in_map) munmap(in_map, IN_SIZE);
 	return 0;
@@ -623,7 +691,7 @@ int main(int argc, char **argv)
 	if (strcmp(mode, "ping") == 0) {
 		return test_ping(syncpt_id);
 	} else if (strcmp(mode, "dma") == 0) {
-		return test_dma(syncpt_id, 0x0F, 0x04FE00E6, "stock_0F");
+		return test_dma(syncpt_id, 0x05, 0x04FE00E6, "stock_05");
 	} else if (strcmp(mode, "tests") == 0) {
 		printf("=== Test suite ===\n\n");
 
