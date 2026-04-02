@@ -663,7 +663,176 @@ Step 5: 3A Statistics
 
 ---
 
-## 11. File Index
+## 11. Stock Command Buffer Capture (April 2026)
+
+### Method
+
+Modified Smoke kernel 1.2 (tag `1.2` from `Insei/Smoke-kernel-mocha`) with ISP
+cmdbuf hex dump in `nvhost_cdma.c` `trace_write_gather` path. Built with
+Linaro 4.9.4, flashed to device, launched stock camera app.
+
+### Per-Frame ISP Command Buffer Structure
+
+Each frame consists of 6 submits in order:
+
+| Submit | Words | Content |
+|--------|-------|---------|
+| 1 | 2 | Syncpt increment (host1x class) |
+| 2 | 45 | **Output config + surfaces + input + trigger** |
+| 3 | 2 | Syncpt increment |
+| 4 | 8 | Syncpt wait (host1x WAIT_SYNCPT for VI completion) |
+| 5 | 2 | Syncpt increment |
+| 6 | ~1545 | **Full ISP calibration (lens shading, tone curve, etc.)** |
+
+### Decoded 45-Word Output Block (ISP-A, IMX179 3280x2460)
+
+```
+[000] 0x00000C80 = SET_CLASS(0x32)
+[001] 0x1E000001 = INCR(0xE00, 1)
+[002] 0x0CCF0000 = ((width-1) & 0x3FFF) << 16 = (3279 << 16)
+[003] 0x1E010001 = INCR(0xE01, 1)
+[004] 0x099B0000 = ((height-1) & 0x3FFF) << 16 = (2459 << 16)
+[005] 0x1E020001 = INCR(0xE02, 1)
+[006] 0x04FE00E6 = output format (0xE6) + flags (0x04FE00)
+[007] 0x1E030001 = INCR(0xE03, 1)
+[008] 0x00000000 = color space params
+
+[009] 0x1E040003 = INCR(0xE04, 3) — output surface Y plane
+[010] IOVA address (changes per frame)
+[011] 0x00000000
+[012] 0x00000D00 = stride 3328 (3280 aligned to 64)
+
+[013] 0x1E070003 = INCR(0xE07, 3) — output surface U plane
+[014] IOVA address
+[015] 0x00000000
+[016] 0x00000680 = stride 1664 (half Y stride)
+
+[017] 0x1E0A0003 = INCR(0xE0A, 3) — output surface V plane
+[018] IOVA address
+[019] 0x00000000
+[020] 0x00000680 = stride 1664
+
+[021] 0x15000006 = INCR(0x500, 6) — processing/demosaic
+[022-026] 0x00000000 (5 zeros)
+[027] 0x099C0CD0 = (height << 16) | width = (2460 << 16) | 3280
+
+[028] 0x00000C80 = SET_CLASS(0x32)
+[029] 0x11000004 = INCR(0x100, 4) — input buffer
+[030] IOVA address (changes per frame)
+[031-033] 0x00000000
+
+[034-035] SET_CLASS(0x32)
+[036-041] 3x NONINCR(0x000, 1) — syncpt increments (host1x method)
+         values: 0x420, 0x521, 0x623 (syncpt IDs + conditions)
+
+[042] SET_CLASS(0x32)
+[043] 0x200C0001 = NONINCR(0x00C, 1) — control trigger
+[044] 0x00000005 = trigger value
+```
+
+### ISP-B Comparison (OV5693 2592x1944)
+
+```
+SET_CLASS: 0x0D00 (class 0x34 = ISP-B)
+0xE00: 0x0A1F0000 = (2591 << 16)
+0xE01: 0x07970000 = (1943 << 16)
+0xE02: 0x04FE00E6 = same format
+Y stride: 0x0A40 (2624, 2592 aligned to 64)
+UV stride: 0x0540 (1344)
+0x500 dims: 0x07980A20 = (1944 << 16) | 2592
+0x00C trigger: 0x05 = same
+Calibration: different values (per-sensor), same structure
+```
+
+### Surface Descriptor Format
+
+```
+INCR(0xE04 + 3*i, 3):
+  Word 0: IOVA buffer address
+  Word 1: 0 (always zero in stock)
+  Word 2: stride in bytes (aligned to 64)
+```
+
+3 surfaces for YUV planar: Y at 0xE04, U at 0xE07, V at 0xE0A.
+Input at 0xE34+3*i follows same format (confirmed from RE).
+
+### Syncpt Wait Block (8 words)
+
+```
+[0] 0x00000040 = SET_CLASS(0x01) — host1x class
+[1] 0x20080001 = NONINCR(0x008, 1) — WAIT_SYNCPT
+[2] syncpt_id | (value << 8)
+[3] SET_CLASS(ISP) — back to ISP class
+[4-7] repeat for second syncpt wait
+```
+
+### Per-Frame Dynamic Values
+
+Only buffer addresses change per frame (rotating pool):
+- Output Y/U/V addresses ([010], [014], [018])
+- Input address ([030])
+
+All register values, format codes, strides, calibration — **constant** across frames.
+
+### MMIO Register Values During Streaming
+
+```
+Method  MMIO    ISP-A (rear)    ISP-B (front)   Description
+0x008   0x20    0xF000F800      0xF000F800      Input config (hw default)
+0x00C   0x30    0x00000004      0x00000004      Control (streaming state)
+0x00D   0x34    0x00000100      0x00000100      Status
+0x015   0x54    0x04040007      0x04040007      ISP enable + mode
+0x018   0x60    0x0A00500A      0x0A00500A      Processing params
+0x019   0x64    0x00008089      0x00008089      Processing params
+0x01A   0x68    0x013645CB      0x013645CB      Calibration
+0x01B   0x6C    0x000001E7      0x000001E7      Calibration
+0x01C   0x70    0x00000001      0x00000001      Clock gate
+0x01D   0x74    0x00000001      0x00000001      ISP_CG_CTRL
+0x01F   0x7C    0x00000003      0x00000003      Mode
+```
+
+Note: 0x00C shows 0x04 during streaming, not 0x05 (trigger value) or 0x0F
+(post-apply). This suggests 0x04 is the "streaming active" state after
+the trigger write completes.
+
+### Calibration Block Structure (~1545 words for ISP-A, ~1538 for ISP-B)
+
+```
+SET_CLASS(ISP)
+INCR(0xD00, 10)     — lens shading control (10 regs)
+INCR(0xD0A, 1)      — lens shading param
+NONINCR(0xD0B, 480) — lens shading table (480 entries)
+...                  — tone curve, demosaic, stats config, etc.
+```
+
+Full calibration data saved in:
+- `docs/camera/stock-isp-a-calibration.txt` (1545 words, IMX179)
+- `docs/camera/stock-isp-b-calibration.txt` (1538 words, OV5693)
+
+### Key Corrections from Stock Capture
+
+| What | Our assumption | Stock reality |
+|------|---------------|---------------|
+| SET_CLASS in gather | Blocked by filter | Works in stock kernel |
+| Surface word order | [addr, stride, dims] | [addr, 0, stride] |
+| Output format | Simple | YUV planar (3 surfaces Y/U/V) |
+| 0x500 processing | All zeros | 5 zeros + (h<<16)\|w |
+| 0x00C trigger | 0x0F or 0x01 | 0x05 |
+| 0x015 enable | 0x01 | 0x04040007 |
+| Input via 0x200 | DMA descriptor | Wrong — 0x200 is coefficients |
+| Input via 0x100 | reloc + zeros | Confirmed: INCR(0x100,4) |
+
+### Stock Firmware Build for ISP Tracing
+
+Source: `Insei/Smoke-kernel-mocha` tag `1.2`
+Modification: unconditional ISP cmdbuf hex dump in `nvhost_cdma.c`
+Toolchain: Linaro 4.9.4 (same as SmokeR24.1)
+Ramdisk: extracted from stock boot partition via `dd`
+Built with: `/home/artem/Projects/Smoke-kernel-mocha/` on build server
+
+---
+
+## 12. File Index
 
 ### Documentation:
 - `docs/camera-isp-reverse-engineering.md` — this file (ISP register map + reverse engineering)
