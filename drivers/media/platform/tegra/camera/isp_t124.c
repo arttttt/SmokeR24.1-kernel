@@ -1,0 +1,439 @@
+/*
+ * Tegra T124 ISP Media Controller Driver
+ *
+ * Copyright (c) 2025-2026, Smoke Team. All rights reserved.
+ *
+ * V4L2 subdev driver for T124 ISP integrated into the MC framework.
+ * Separate from legacy nvhost ISP driver (drivers/video/tegra/host/isp/isp.c).
+ *
+ * This driver:
+ * - Registers ISP-A as V4L2 subdev entity in the MC graph
+ * - Manages host1x channel + syncpoint for command buffer submission
+ * - Provides debugfs interface for hardware testing
+ * - Will integrate into VI capture pipeline for RAW→YUV processing
+ */
+
+#include <linux/module.h>
+#include <linux/platform_device.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
+#include <linux/of_graph.h>
+#include <linux/dma-mapping.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/ktime.h>
+#include <linux/nvhost.h>
+
+#include <media/v4l2-subdev.h>
+#include <media/v4l2-async.h>
+#include <media/media-entity.h>
+
+#include "isp_t124.h"
+
+/* Include host1x internals for opcode macros and job API */
+#include "dev.h"
+#include "nvhost_job.h"
+#include "nvhost_acm.h"
+#include "host1x/host1x01_hardware.h"
+#include "class_ids.h"
+
+/* ----------------------------------------------------------------
+ * Host1x channel + job submission
+ * ---------------------------------------------------------------- */
+
+static int isp_t124_channel_init(struct tegra_isp_t124 *isp)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(isp->pdev);
+	int err;
+
+	err = nvhost_channel_map(pdata, &isp->channel, isp);
+	if (err) {
+		dev_err(&isp->pdev->dev, "host1x channel map failed: %d\n", err);
+		return err;
+	}
+
+	isp->syncpt_id = nvhost_get_syncpt_host_managed(isp->pdev, 0, "isp_mc");
+	if (!isp->syncpt_id) {
+		dev_err(&isp->pdev->dev, "syncpt allocation failed\n");
+		nvhost_putchannel(isp->channel, 1);
+		isp->channel = NULL;
+		return -ENOMEM;
+	}
+
+	dev_info(&isp->pdev->dev, "host1x channel mapped, syncpt=%u\n",
+		 isp->syncpt_id);
+	return 0;
+}
+
+static void isp_t124_channel_cleanup(struct tegra_isp_t124 *isp)
+{
+	if (isp->syncpt_id) {
+		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_id);
+		isp->syncpt_id = 0;
+	}
+	if (isp->channel) {
+		nvhost_putchannel(isp->channel, 1);
+		isp->channel = NULL;
+	}
+}
+
+/**
+ * isp_t124_submit() - Submit command buffer to ISP via host1x
+ * @isp: ISP device
+ * @cmdbuf: DMA-coherent command buffer (CPU virtual)
+ * @cmdbuf_phys: DMA address of command buffer
+ * @num_words: number of 32-bit words in command buffer
+ *
+ * Submits a gather to ISP class (0x32) with OP_DONE syncpt.
+ * Returns 0 on success, negative on error or timeout.
+ */
+static int isp_t124_submit(struct tegra_isp_t124 *isp,
+			    u32 *cmdbuf, dma_addr_t cmdbuf_phys,
+			    int num_words)
+{
+	struct nvhost_job *job;
+	int err;
+
+	if (!isp->channel || !isp->syncpt_id)
+		return -ENODEV;
+
+	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+	if (!job)
+		return -ENOMEM;
+
+	job->sp->id = isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+
+	err = nvhost_job_add_client_gather_address(job, num_words,
+			NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) {
+		nvhost_job_put(job);
+		return err;
+	}
+
+	err = nvhost_channel_submit(job);
+	if (err) {
+		nvhost_job_put(job);
+		return err;
+	}
+
+	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(500), NULL, NULL);
+
+	nvhost_job_put(job);
+	return err;
+}
+
+/**
+ * isp_t124_ping() - Verify ISP hardware responds
+ */
+static int isp_t124_ping(struct tegra_isp_t124 *isp)
+{
+	struct device *dev = &isp->pdev->dev;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
+	int err, n = 0;
+
+	err = nvhost_module_busy(isp->pdev);
+	if (err)
+		return err;
+
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	if (!cmdbuf) {
+		err = -ENOMEM;
+		goto idle;
+	}
+
+	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		isp->syncpt_id);
+	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
+
+	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
+
+	dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+idle:
+	nvhost_module_idle(isp->pdev);
+	return err;
+}
+
+/**
+ * isp_t124_probe_methods() - Test all known ISP method offsets
+ */
+static int isp_t124_probe_methods(struct tegra_isp_t124 *isp,
+				  struct seq_file *s)
+{
+	static const struct {
+		u16 offset;
+		const char *name;
+	} methods[] = {
+		{ 0x00C, "control" },
+		{ 0x015, "enable" },
+		{ 0x053, "isp_enable" },
+		{ 0x100, "input_buf" },
+		{ 0x500, "processing" },
+		{ 0x651, "tc_ch0_ctrl" },
+		{ 0x652, "tc_ch0_lut" },
+		{ 0x902, "stats_ctrl" },
+		{ 0x903, "stats_aewb" },
+		{ 0x906, "stats_af_ctrl" },
+		{ 0x907, "stats_af" },
+		{ 0xD00, "ls_ctrl" },
+		{ 0xD0A, "ls_enable" },
+		{ 0xD0B, "ls_table" },
+		{ 0xE00, "out_width" },
+		{ 0xE01, "out_height" },
+		{ 0xE02, "out_format" },
+		{ 0xE03, "out_color" },
+		{ 0xE04, "out_surf_y" },
+		{ 0xE07, "out_surf_u" },
+		{ 0xE0A, "out_surf_v" },
+		{ 0xE30, "out_enable" },
+		{ 0xE31, "out_dims" },
+		{ 0xE32, "out_stride" },
+		{ 0xE33, "out_fmt2" },
+	};
+	struct device *dev = &isp->pdev->dev;
+	struct nvhost_job *job;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
+	int err, i, n;
+	ktime_t start;
+	s64 us;
+
+	if (!isp->channel || !isp->syncpt_id)
+		return -ENODEV;
+
+	err = nvhost_module_busy(isp->pdev);
+	if (err)
+		return err;
+
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	if (!cmdbuf) {
+		nvhost_module_idle(isp->pdev);
+		return -ENOMEM;
+	}
+
+	seq_printf(s, "Probing %zu ISP methods (write 0 + REG_WR_SAFE):\n",
+		   ARRAY_SIZE(methods));
+
+	for (i = 0; i < ARRAY_SIZE(methods); i++) {
+		n = 0;
+		cmdbuf[n++] = nvhost_opcode_incr(methods[i].offset, 1);
+		cmdbuf[n++] = 0;
+		cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
+			host1x_uclass_incr_syncpt_cond_reg_wr_safe_v(),
+			isp->syncpt_id);
+		cmdbuf[n++] = NVHOST_OPCODE_NOOP;
+
+		job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+		if (!job) continue;
+		job->sp->id = isp->syncpt_id;
+		job->sp->incrs = 1;
+		job->num_syncpts = 1;
+
+		err = nvhost_job_add_client_gather_address(job, n,
+			NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+		if (err) { nvhost_job_put(job); continue; }
+
+		start = ktime_get();
+		err = nvhost_channel_submit(job);
+		if (err) { nvhost_job_put(job); continue; }
+
+		err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(100), NULL, NULL);
+		us = ktime_us_delta(ktime_get(), start);
+		nvhost_job_put(job);
+
+		seq_printf(s, "  0x%03x %-14s %s (%lld us)\n",
+			   methods[i].offset, methods[i].name,
+			   err ? "TIMEOUT" : "OK", us);
+		if (err) {
+			seq_printf(s, "  *** stopped at first timeout\n");
+			break;
+		}
+	}
+
+	dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+	nvhost_module_idle(isp->pdev);
+	return 0;
+}
+
+/* ----------------------------------------------------------------
+ * debugfs
+ * ---------------------------------------------------------------- */
+
+static int isp_t124_debugfs_ping_show(struct seq_file *s, void *data)
+{
+	struct tegra_isp_t124 *isp = s->private;
+	ktime_t start = ktime_get();
+	int ret = isp_t124_ping(isp);
+	s64 us = ktime_us_delta(ktime_get(), start);
+
+	seq_printf(s, "ISP-A %s, syncpt %u (%lld us)\n",
+		   ret ? "FAILED" : "alive", isp->syncpt_id, us);
+	return 0;
+}
+
+static int isp_t124_debugfs_ping_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_t124_debugfs_ping_show, inode->i_private);
+}
+
+static const struct file_operations isp_t124_debugfs_ping_fops = {
+	.open    = isp_t124_debugfs_ping_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
+static int isp_t124_debugfs_probe_show(struct seq_file *s, void *data)
+{
+	return isp_t124_probe_methods(s->private, s);
+}
+
+static int isp_t124_debugfs_probe_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_t124_debugfs_probe_show, inode->i_private);
+}
+
+static const struct file_operations isp_t124_debugfs_probe_fops = {
+	.open    = isp_t124_debugfs_probe_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
+static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp)
+{
+	isp->debugfs_dir = debugfs_create_dir("isp_t124", NULL);
+	if (!isp->debugfs_dir)
+		return;
+	debugfs_create_file("ping", 0444, isp->debugfs_dir,
+			    isp, &isp_t124_debugfs_ping_fops);
+	debugfs_create_file("probe", 0444, isp->debugfs_dir,
+			    isp, &isp_t124_debugfs_probe_fops);
+}
+
+static void isp_t124_debugfs_cleanup(struct tegra_isp_t124 *isp)
+{
+	debugfs_remove_recursive(isp->debugfs_dir);
+	isp->debugfs_dir = NULL;
+}
+
+/* ----------------------------------------------------------------
+ * V4L2 subdev
+ * ---------------------------------------------------------------- */
+
+static int isp_t124_subdev_s_power(struct v4l2_subdev *sd, int on)
+{
+	return 0; /* nvhost PM handles power */
+}
+
+static const struct v4l2_subdev_core_ops isp_t124_subdev_core_ops = {
+	.s_power = isp_t124_subdev_s_power,
+};
+
+static const struct v4l2_subdev_ops isp_t124_subdev_ops = {
+	.core = &isp_t124_subdev_core_ops,
+};
+
+#if defined(CONFIG_MEDIA_CONTROLLER)
+static const struct media_entity_operations isp_t124_media_ops = {
+	.link_validate = v4l2_subdev_link_validate,
+};
+#endif
+
+static int isp_t124_register_subdev(struct tegra_isp_t124 *isp)
+{
+	struct v4l2_subdev *sd = &isp->subdev;
+	struct device *dev = &isp->pdev->dev;
+	int ret;
+
+	v4l2_subdev_init(sd, &isp_t124_subdev_ops);
+	sd->dev = dev;
+	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	snprintf(sd->name, sizeof(sd->name), "%s", dev_name(dev));
+
+	isp->pads[0].flags = MEDIA_PAD_FL_SOURCE;
+	isp->pads[1].flags = MEDIA_PAD_FL_SINK;
+
+#if defined(CONFIG_MEDIA_CONTROLLER)
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+	sd->entity.ops = &isp_t124_media_ops;
+	ret = media_entity_init(&sd->entity, 2, isp->pads, 0);
+	if (ret < 0)
+		return ret;
+#endif
+
+	ret = v4l2_async_register_subdev(sd);
+	if (ret < 0) {
+		media_entity_cleanup(&sd->entity);
+		return ret;
+	}
+
+	dev_info(dev, "V4L2 subdev registered\n");
+	return 0;
+}
+
+static void isp_t124_unregister_subdev(struct tegra_isp_t124 *isp)
+{
+	v4l2_async_unregister_subdev(&isp->subdev);
+	media_entity_cleanup(&isp->subdev.entity);
+}
+
+/* ----------------------------------------------------------------
+ * Init/cleanup — called from legacy isp.c probe
+ * ---------------------------------------------------------------- */
+
+static struct tegra_isp_t124 *g_isp_t124;
+
+int tegra_isp_t124_mc_init(struct platform_device *pdev)
+{
+	struct tegra_isp_t124 *isp;
+	int err;
+
+	if (!of_device_is_compatible(pdev->dev.of_node, "nvidia,tegra124-isp"))
+		return -ENODEV;
+
+	isp = devm_kzalloc(&pdev->dev, sizeof(*isp), GFP_KERNEL);
+	if (!isp)
+		return -ENOMEM;
+
+	isp->pdev = pdev;
+
+	err = isp_t124_register_subdev(isp);
+	if (err) {
+		dev_warn(&pdev->dev, "V4L2 subdev failed: %d\n", err);
+		return err;
+	}
+
+	err = isp_t124_channel_init(isp);
+	if (err) {
+		dev_warn(&pdev->dev, "host1x channel failed: %d\n", err);
+	} else {
+		isp_t124_debugfs_init(isp);
+	}
+
+	g_isp_t124 = isp;
+	dev_info(&pdev->dev, "T124 ISP MC driver initialized\n");
+	return 0;
+}
+EXPORT_SYMBOL(tegra_isp_t124_mc_init);
+
+void tegra_isp_t124_mc_cleanup(struct platform_device *pdev)
+{
+	if (!g_isp_t124)
+		return;
+	isp_t124_debugfs_cleanup(g_isp_t124);
+	isp_t124_channel_cleanup(g_isp_t124);
+	isp_t124_unregister_subdev(g_isp_t124);
+	g_isp_t124 = NULL;
+}
+EXPORT_SYMBOL(tegra_isp_t124_mc_cleanup);
+
+MODULE_DESCRIPTION("Tegra T124 ISP Media Controller Driver");
+MODULE_LICENSE("GPL v2");
