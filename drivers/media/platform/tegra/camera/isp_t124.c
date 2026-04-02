@@ -19,6 +19,7 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/dma-mapping.h>
+#include <linux/delay.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/ktime.h>
@@ -471,6 +472,9 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		goto free_cmdbuf;
 	}
 	seq_printf(s, "  submit OK (%lld us)\n", us);
+
+	/* Wait for ISP to potentially finish async processing */
+	msleep(100);
 
 	/* Check output Y plane for non-zero data
 	 * (dma_alloc_coherent buffers are always CPU-coherent, no sync needed)
