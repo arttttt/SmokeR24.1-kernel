@@ -218,8 +218,10 @@ static int syncpt_wait(uint32_t id, uint32_t thresh, int timeout_ms)
 	return ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &a);
 }
 
-static int submit(uint32_t cmdbuf_handle, uint32_t num_words,
+static int submit_with_relocs(uint32_t cmdbuf_handle, uint32_t num_words,
 		  uint32_t syncpt_id, uint32_t syncpt_incrs,
+		  struct nvhost_reloc *relocs, struct nvhost_reloc_shift *reloc_shifts,
+		  int num_relocs,
 		  uint32_t *fence_out)
 {
 	struct nvhost_cmdbuf cb = {
@@ -236,11 +238,13 @@ static int submit(uint32_t cmdbuf_handle, uint32_t num_words,
 	sa.submit_version = 0;
 	sa.num_syncpt_incrs = 1;
 	sa.num_cmdbufs = 1;
-	sa.num_relocs = 0;
+	sa.num_relocs = num_relocs;
 	sa.num_waitchks = 0;
 	sa.timeout = 1000;
 	sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
 	sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
+	sa.relocs = (uint32_t)(uintptr_t)relocs;
+	sa.reloc_shifts = (uint32_t)(uintptr_t)reloc_shifts;
 	sa.class_ids = (uint32_t)(uintptr_t)&class_id;
 	sa.fences = (uint32_t)(uintptr_t)&fence;
 
@@ -250,6 +254,14 @@ static int submit(uint32_t cmdbuf_handle, uint32_t num_words,
 	}
 	if (fence_out) *fence_out = fence.value;
 	return 0;
+}
+
+static int submit(uint32_t cmdbuf_handle, uint32_t num_words,
+		  uint32_t syncpt_id, uint32_t syncpt_incrs,
+		  uint32_t *fence_out)
+{
+	return submit_with_relocs(cmdbuf_handle, num_words, syncpt_id,
+				  syncpt_incrs, NULL, NULL, 0, fence_out);
 }
 
 /* ---- tests ---- */
@@ -287,14 +299,14 @@ static int test_ping(uint32_t syncpt_id)
 	return ret;
 }
 
-static int test_dma(uint32_t syncpt_id)
+static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_val, const char *tag)
 {
-	#define W 64
-	#define H 64
+	#define W 3280
+	#define H 2460
 	#define BPP 2
-	#define Y_STRIDE ((W * BPP + 63) & ~63)  /* align to 64 */
-	#define UV_STRIDE (Y_STRIDE / 2)
-	#define IN_SIZE  (W * H * BPP)
+	#define Y_STRIDE ((W + 63) & ~63)     /* 3280 -> 3328, align to 64 */
+	#define UV_STRIDE (Y_STRIDE / 2)       /* 1664 */
+	#define IN_SIZE  (W * H * BPP)         /* ~16MB */
 	#define Y_SIZE   (Y_STRIDE * H)
 	#define UV_SIZE  (UV_STRIDE * H / 2)
 	#define OUT_SIZE (Y_SIZE + UV_SIZE * 2)
@@ -310,9 +322,20 @@ static int test_dma(uint32_t syncpt_id)
 	nvmap_alloc(out_h, 4096);
 
 	uint32_t *cmd = nvmap_mmap(cmdbuf_h, 16384);
-	uint32_t *in = nvmap_mmap(in_h, IN_SIZE);
-	uint8_t *out = nvmap_mmap(out_h, OUT_SIZE);
-	if (!cmd || !in || !out) return -1;
+	/* For large buffers, mmap may fail — ok, we use NVMAP_IOC_READ to check output */
+	uint8_t *in_map = nvmap_mmap(in_h, IN_SIZE);
+	/* Don't even try to mmap output — use NVMAP_IOC_READ later */
+
+	if (!cmd) { printf("cmdbuf mmap failed\n"); return -1; }
+
+	/* Fill input if mapped */
+	if (in_map) {
+		uint32_t *in32 = (uint32_t *)in_map;
+		for (int i = 0; i < IN_SIZE / 4; i++) in32[i] = 0xA5A50000 | (i & 0xFFFF);
+		printf("input: filled with pattern\n");
+	} else {
+		printf("input: mmap failed (using uninitialized)\n");
+	}
 
 	uint32_t in_phys = nvmap_pin(in_h);
 	uint32_t out_phys = nvmap_pin(out_h);
@@ -323,10 +346,6 @@ static int test_dma(uint32_t syncpt_id)
 	printf("in_phys=0x%08x out_phys=0x%08x (Y=+0 U=+0x%x V=+0x%x)\n",
 	       in_phys, out_phys, Y_SIZE, Y_SIZE + UV_SIZE);
 	printf("Y_STRIDE=%d UV_STRIDE=%d\n", Y_STRIDE, UV_STRIDE);
-
-	/* Fill input with pattern, clear output */
-	for (int i = 0; i < IN_SIZE / 4; i++) in[i] = 0xA5A50000 | i;
-	memset(out, 0, OUT_SIZE);
 
 	/*
 	 * Build command buffer matching stock sequence:
@@ -375,9 +394,9 @@ static int test_dma(uint32_t syncpt_id)
 	cmd[n++] = host1x_opcode_incr(0xE01, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
 
-	/* Output format — exact stock value */
+	/* Output format */
 	cmd[n++] = host1x_opcode_incr(0xE02, 1);
-	cmd[n++] = 0x04FE00E6;
+	cmd[n++] = format_val;
 	cmd[n++] = host1x_opcode_incr(0xE03, 1);
 	cmd[n++] = 0x00000000;
 
@@ -416,10 +435,10 @@ static int test_dma(uint32_t syncpt_id)
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Control trigger — stock value 0x05 */
+	/* Control trigger */
 	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
 	cmd[n++] = host1x_opcode_nonincr(0x00C, 1);
-	cmd[n++] = 0x00000005;
+	cmd[n++] = trigger_val;
 
 	/* Syncpt OP_DONE */
 	cmd[n++] = host1x_opcode_imm_incr_syncpt(1 /* OP_DONE */, syncpt_id);
@@ -427,41 +446,128 @@ static int test_dma(uint32_t syncpt_id)
 
 	printf("cmdbuf: %d words\n", n);
 
+	/* Build relocs — tell kernel to pin buffers and patch addresses */
+	#define MAX_RELOCS 8
+	struct nvhost_reloc relocs[MAX_RELOCS];
+	struct nvhost_reloc_shift reloc_shifts[MAX_RELOCS];
+	int nr = 0;
+
+	for (int i = 0; i < n; i++) {
+		if (cmd[i] == out_y || cmd[i] == out_u || cmd[i] == out_v) {
+			uint32_t target_off = 0;
+			if (cmd[i] == out_u) target_off = Y_SIZE;
+			else if (cmd[i] == out_v) target_off = Y_SIZE + UV_SIZE;
+
+			relocs[nr].cmdbuf_mem = cmdbuf_h;
+			relocs[nr].cmdbuf_offset = i * 4;
+			relocs[nr].target = out_h;
+			relocs[nr].target_offset = target_off;
+			reloc_shifts[nr].shift = 0;
+			nr++;
+		}
+		if (cmd[i] == in_phys) {
+			relocs[nr].cmdbuf_mem = cmdbuf_h;
+			relocs[nr].cmdbuf_offset = i * 4;
+			relocs[nr].target = in_h;
+			relocs[nr].target_offset = 0;
+			reloc_shifts[nr].shift = 0;
+			nr++;
+		}
+	}
+	printf("  relocs: %d\n", nr);
+
 	struct timespec t0, t1;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 
 	uint32_t fence;
-	if (submit(cmdbuf_h, n, syncpt_id, 1, &fence) < 0) return -1;
+	if (submit_with_relocs(cmdbuf_h, n, syncpt_id, 1,
+			       relocs, reloc_shifts, nr, &fence) < 0)
+		return -1;
 	int ret = syncpt_wait(syncpt_id, fence, 1000);
 
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	long us = (t1.tv_sec - t0.tv_sec) * 1000000L +
 		  (t1.tv_nsec - t0.tv_nsec) / 1000;
 
-	printf("submit+wait: %s (%ld us)\n", ret ? "TIMEOUT" : "OK", us);
+	printf("[%s] submit+wait: %s (%ld us)\n", tag, ret ? "TIMEOUT" : "OK", us);
 
+	/* Invalidate output buffer cache to see ISP writes */
 	/* Check if ISP wrote anything to output buffer */
-	int nonzero = 0;
-	for (int i = 0; i < OUT_SIZE; i++) {
-		if (out[i] != 0) {
-			if (nonzero < 16)
-				printf("  out[%d] = 0x%02x\n", i, out[i]);
-			nonzero++;
+	/* Use NVMAP_IOC_READ since mmap fails for large buffers */
+	{
+		/* Read first 4KB for quick check */
+		uint8_t check_buf[4096];
+		memset(check_buf, 0, sizeof(check_buf));
+		struct {
+			uint32_t addr;
+			uint32_t handle;
+			uint32_t offset;
+			uint32_t elem_size;
+			uint32_t hmem_stride;
+			uint32_t user_stride;
+			uint32_t count;
+		} __attribute__((packed)) rw;
+		rw.addr = (uint32_t)(uintptr_t)check_buf;
+		rw.handle = out_h;
+		rw.offset = 0;
+		rw.elem_size = sizeof(check_buf);
+		rw.hmem_stride = sizeof(check_buf);
+		rw.user_stride = sizeof(check_buf);
+		rw.count = 1;
+		if (ioctl(nvmap_fd, _IOW('N', 7, rw), &rw) < 0) {
+			perror("nvmap read");
+		} else {
+			int nonzero = 0;
+			for (int i = 0; i < (int)sizeof(check_buf); i++) {
+				if (check_buf[i] != 0) nonzero++;
+			}
+			printf("output: %d/4096 bytes non-zero%s\n",
+			       nonzero,
+			       nonzero ? " (ISP WROTE DATA!)" : " (untouched)");
+			/* Show first 32 bytes as hex */
+			printf("  hex: ");
+			for (int i = 0; i < 32; i++)
+				printf("%02x ", check_buf[i]);
+			printf("\n");
+		}
+
+		/* Dump full Y plane to file for viewing */
+		char fname[128];
+		snprintf(fname, sizeof(fname), "/data/local/tmp/isp_%s.raw", tag);
+		FILE *fp = fopen(fname, "wb");
+		if (fp) {
+			int chunk = 65536;
+			uint8_t *buf = malloc(chunk);
+			if (buf) {
+				int off;
+				for (off = 0; off < Y_SIZE; off += chunk) {
+					int sz = (Y_SIZE - off < chunk) ? Y_SIZE - off : chunk;
+					rw.addr = (uint32_t)(uintptr_t)buf;
+					rw.handle = out_h;
+					rw.offset = off;
+					rw.elem_size = sz;
+					rw.hmem_stride = sz;
+					rw.user_stride = sz;
+					rw.count = 1;
+					if (ioctl(nvmap_fd, _IOW('N', 7, rw), &rw) < 0) break;
+					fwrite(buf, 1, sz, fp);
+				}
+				free(buf);
+				printf("Y plane dumped: %d bytes to /data/local/tmp/isp_output.raw\n", off);
+			}
+			fclose(fp);
 		}
 	}
-	printf("output: %d/%d bytes non-zero%s\n",
-	       nonzero, OUT_SIZE,
-	       nonzero ? " (ISP wrote data!)" : " (untouched)");
 
-	munmap(cmd, 4096);
-	munmap(in, IN_SIZE);
-	munmap(out, OUT_SIZE);
+	munmap(cmd, 16384);
+	if (in_map) munmap(in_map, IN_SIZE);
 	return 0;
 }
 
 int main(int argc, char **argv)
 {
 	const char *mode = argc > 1 ? argv[1] : "ping";
+	const char *extra = argc > 2 ? argv[2] : NULL;
 
 	nvmap_fd = open("/dev/nvmap", O_RDWR);
 	if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
@@ -506,9 +612,31 @@ int main(int argc, char **argv)
 	if (strcmp(mode, "ping") == 0) {
 		return test_ping(syncpt_id);
 	} else if (strcmp(mode, "dma") == 0) {
-		return test_dma(syncpt_id);
+		return test_dma(syncpt_id, 0x0F, 0x04FE00E6, "stock_0F");
+	} else if (strcmp(mode, "tests") == 0) {
+		printf("=== Test suite ===\n\n");
+
+		printf("--- Test 1: Stock values (trigger=0x0F, format=0xE6) ---\n");
+		test_dma(syncpt_id, 0x0F, 0x04FE00E6, "t1_stock");
+
+		printf("\n--- Test 2: Trigger 0x05 (runtime) ---\n");
+		test_dma(syncpt_id, 0x05, 0x04FE00E6, "t2_trig05");
+
+		printf("\n--- Test 3: Trigger 0x09 ---\n");
+		test_dma(syncpt_id, 0x09, 0x04FE00E6, "t3_trig09");
+
+		printf("\n--- Test 4: Format 0x20 (minimal/default) ---\n");
+		test_dma(syncpt_id, 0x0F, 0x00000020, "t4_fmt20");
+
+		printf("\n--- Test 5: Format 0x22 ---\n");
+		test_dma(syncpt_id, 0x0F, 0x00000022, "t5_fmt22");
+
+		printf("\n--- Test 6: Format 0xCA ---\n");
+		test_dma(syncpt_id, 0x0F, 0x000000CA, "t6_fmtCA");
+
+		return 0;
 	} else {
-		printf("Usage: %s [ping|dma]\n", argv[0]);
+		printf("Usage: %s [ping|dma|tests]\n", argv[0]);
 		return 1;
 	}
 }
