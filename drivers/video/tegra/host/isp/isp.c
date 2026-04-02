@@ -407,6 +407,136 @@ idle:
 	return err;
 }
 
+/* ISP method offsets (word-addressed, from libnvisp_v3.so reverse engineering) */
+#define ISP_METHOD_CONTROL	0x00C	/* ISP control register */
+#define ISP_METHOD_ENABLE	0x015	/* ISP enable/mode */
+
+/**
+ * tegra_isp_regwrite_test() - Test ISP register write via host1x method
+ *
+ * Writes to known ISP method offsets (from reverse engineering) and uses
+ * REG_WR_SAFE syncpoint condition to confirm the write completed.
+ * This proves ISP accepts method writes through the host1x class interface.
+ */
+static int tegra_isp_regwrite_test(struct isp *tegra_isp,
+				   struct seq_file *s)
+{
+	struct device *dev = &tegra_isp->ndev->dev;
+	struct nvhost_job *job = NULL;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
+	int err;
+	int num_words;
+	ktime_t start;
+	s64 us;
+
+	if (!tegra_isp->channel || !tegra_isp->syncpt_id)
+		return -ENODEV;
+
+	err = nvhost_module_busy(tegra_isp->ndev);
+	if (err)
+		return err;
+
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	if (!cmdbuf) {
+		err = -ENOMEM;
+		goto idle;
+	}
+
+	/* Test 1: IMMEDIATE syncpt (baseline, should always pass) */
+	num_words = 0;
+	cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		tegra_isp->syncpt_id);
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+	job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+	if (!job) { err = -ENOMEM; goto free_cmdbuf; }
+	job->sp->id = tegra_isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+	err = nvhost_job_add_client_gather_address(job, num_words,
+		NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) goto put_job;
+	start = ktime_get();
+	err = nvhost_channel_submit(job);
+	if (err) goto put_job;
+	err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+		job->sp->id, job->sp->fence, msecs_to_jiffies(500), NULL, NULL);
+	us = ktime_us_delta(ktime_get(), start);
+	seq_printf(s, "test1 IMMEDIATE: %s (%lld us)\n",
+		err ? "FAIL" : "OK", us);
+	nvhost_job_put(job);
+	job = NULL;
+	if (err)
+		goto free_cmdbuf;
+
+	/* Test 2: Write ISP_METHOD_ENABLE=1 + REG_WR_SAFE syncpt */
+	num_words = 0;
+	cmdbuf[num_words++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmdbuf[num_words++] = 0x00000001; /* enable ISP */
+	cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_reg_wr_safe_v(),
+		tegra_isp->syncpt_id);
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+	job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+	if (!job) { err = -ENOMEM; goto free_cmdbuf; }
+	job->sp->id = tegra_isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+	err = nvhost_job_add_client_gather_address(job, num_words,
+		NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) goto put_job;
+	start = ktime_get();
+	err = nvhost_channel_submit(job);
+	if (err) goto put_job;
+	err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+		job->sp->id, job->sp->fence, msecs_to_jiffies(500), NULL, NULL);
+	us = ktime_us_delta(ktime_get(), start);
+	seq_printf(s, "test2 ENABLE(0x%03x)=1 REG_WR_SAFE: %s (%lld us)\n",
+		ISP_METHOD_ENABLE, err ? "FAIL" : "OK", us);
+	nvhost_job_put(job);
+	job = NULL;
+	if (err)
+		goto free_cmdbuf;
+
+	/* Test 3: Write ISP_METHOD_ENABLE + OP_DONE syncpt */
+	num_words = 0;
+	cmdbuf[num_words++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmdbuf[num_words++] = 0x00000001;
+	cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		tegra_isp->syncpt_id);
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+	job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+	if (!job) { err = -ENOMEM; goto free_cmdbuf; }
+	job->sp->id = tegra_isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+	err = nvhost_job_add_client_gather_address(job, num_words,
+		NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) goto put_job;
+	start = ktime_get();
+	err = nvhost_channel_submit(job);
+	if (err) goto put_job;
+	err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+		job->sp->id, job->sp->fence, msecs_to_jiffies(500), NULL, NULL);
+	us = ktime_us_delta(ktime_get(), start);
+	seq_printf(s, "test3 ENABLE(0x%03x)=1 OP_DONE: %s (%lld us)\n",
+		ISP_METHOD_ENABLE, err ? "FAIL" : "OK", us);
+
+put_job:
+	if (job)
+		nvhost_job_put(job);
+free_cmdbuf:
+	dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+idle:
+	nvhost_module_idle(tegra_isp->ndev);
+	return 0; /* always return 0 so seq_file shows results */
+}
+
 /* ----------------------------------------------------------------
  * debugfs
  * ---------------------------------------------------------------- */
@@ -444,6 +574,23 @@ static const struct file_operations isp_debugfs_ping_fops = {
 	.release	= single_release,
 };
 
+static int isp_debugfs_regtest_show(struct seq_file *s, void *data)
+{
+	return tegra_isp_regwrite_test(s->private, s);
+}
+
+static int isp_debugfs_regtest_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_debugfs_regtest_show, inode->i_private);
+}
+
+static const struct file_operations isp_debugfs_regtest_fops = {
+	.open		= isp_debugfs_regtest_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static void tegra_isp_debugfs_init(struct isp *tegra_isp)
 {
 	const char *name = tegra_isp->dev_id == 0 ? "isp_a" : "isp_b";
@@ -454,6 +601,8 @@ static void tegra_isp_debugfs_init(struct isp *tegra_isp)
 
 	debugfs_create_file("ping", 0444, tegra_isp->debugfs_dir,
 			    tegra_isp, &isp_debugfs_ping_fops);
+	debugfs_create_file("regtest", 0444, tegra_isp->debugfs_dir,
+			    tegra_isp, &isp_debugfs_regtest_fops);
 }
 
 static void tegra_isp_debugfs_cleanup(struct isp *tegra_isp)
