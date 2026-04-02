@@ -537,6 +537,129 @@ idle:
 	return 0; /* always return 0 so seq_file shows results */
 }
 
+/**
+ * tegra_isp_probe_methods() - Probe all 24 known ISP method offsets
+ *
+ * For each method offset from the reverse-engineered register map,
+ * submit a single write (value=0) + REG_WR_SAFE syncpt and report
+ * whether the ISP engine accepted it.
+ */
+static int tegra_isp_probe_methods(struct isp *tegra_isp,
+				   struct seq_file *s)
+{
+	static const struct {
+		u16 offset;
+		const char *name;
+	} methods[] = {
+		{ 0x00C, "control" },
+		{ 0x015, "enable" },
+		{ 0x100, "color_proc" },
+		{ 0x101, "tone_curve_fifo" },
+		{ 0x200, "input_ch_a" },
+		{ 0x300, "input_ch_b" },
+		{ 0x500, "processing" },
+		{ 0x800, "stats_cfg" },
+		{ 0x87A, "histogram" },
+		{ 0x902, "stats_ctrl" },
+		{ 0xC41, "stats_out_1" },
+		{ 0xC43, "stats_out_2" },
+		{ 0xC45, "focus_stats" },
+		{ 0xC47, "hist_stats" },
+		{ 0xC5A, "stats_extra" },
+		{ 0xD31, "lens_shading_a" },
+		{ 0xDAF, "lens_shading_b" },
+		{ 0xE00, "output_ctrl_0" },
+		{ 0xE01, "output_ctrl_1" },
+		{ 0xE02, "output_ctrl_2" },
+		{ 0xE30, "output_fmt_0" },
+		{ 0xE31, "output_fmt_1" },
+		{ 0xE32, "output_fmt_2" },
+		{ 0xE33, "output_fmt_3" },
+	};
+	struct device *dev = &tegra_isp->ndev->dev;
+	struct nvhost_job *job;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
+	int err, i;
+	int num_words;
+	ktime_t start;
+	s64 us;
+
+	if (!tegra_isp->channel || !tegra_isp->syncpt_id)
+		return -ENODEV;
+
+	err = nvhost_module_busy(tegra_isp->ndev);
+	if (err)
+		return err;
+
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	if (!cmdbuf) {
+		err = -ENOMEM;
+		goto idle;
+	}
+
+	seq_printf(s, "Probing %zu ISP method offsets (write 0 + REG_WR_SAFE):\n",
+		ARRAY_SIZE(methods));
+
+	for (i = 0; i < ARRAY_SIZE(methods); i++) {
+		num_words = 0;
+		cmdbuf[num_words++] = nvhost_opcode_incr(methods[i].offset, 1);
+		cmdbuf[num_words++] = 0x00000000;
+		cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+			host1x_uclass_incr_syncpt_cond_reg_wr_safe_v(),
+			tegra_isp->syncpt_id);
+		cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+		job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+		if (!job) {
+			seq_printf(s, "  0x%03x %-16s job_alloc FAIL\n",
+				methods[i].offset, methods[i].name);
+			continue;
+		}
+		job->sp->id = tegra_isp->syncpt_id;
+		job->sp->incrs = 1;
+		job->num_syncpts = 1;
+
+		err = nvhost_job_add_client_gather_address(job, num_words,
+			NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+		if (err) {
+			nvhost_job_put(job);
+			seq_printf(s, "  0x%03x %-16s gather FAIL\n",
+				methods[i].offset, methods[i].name);
+			continue;
+		}
+
+		start = ktime_get();
+		err = nvhost_channel_submit(job);
+		if (err) {
+			nvhost_job_put(job);
+			seq_printf(s, "  0x%03x %-16s submit FAIL (%d)\n",
+				methods[i].offset, methods[i].name, err);
+			continue;
+		}
+
+		err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(100), NULL, NULL);
+		us = ktime_us_delta(ktime_get(), start);
+		nvhost_job_put(job);
+
+		seq_printf(s, "  0x%03x %-16s %s (%lld us)\n",
+			methods[i].offset, methods[i].name,
+			err ? "TIMEOUT" : "OK", us);
+
+		if (err) {
+			seq_printf(s, "  *** stopped after first timeout\n");
+			break;
+		}
+	}
+
+	dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+idle:
+	nvhost_module_idle(tegra_isp->ndev);
+	return 0;
+}
+
 /* ----------------------------------------------------------------
  * debugfs
  * ---------------------------------------------------------------- */
@@ -591,6 +714,23 @@ static const struct file_operations isp_debugfs_regtest_fops = {
 	.release	= single_release,
 };
 
+static int isp_debugfs_probe_show(struct seq_file *s, void *data)
+{
+	return tegra_isp_probe_methods(s->private, s);
+}
+
+static int isp_debugfs_probe_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_debugfs_probe_show, inode->i_private);
+}
+
+static const struct file_operations isp_debugfs_probe_fops = {
+	.open		= isp_debugfs_probe_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static void tegra_isp_debugfs_init(struct isp *tegra_isp)
 {
 	const char *name = tegra_isp->dev_id == 0 ? "isp_a" : "isp_b";
@@ -603,6 +743,8 @@ static void tegra_isp_debugfs_init(struct isp *tegra_isp)
 			    tegra_isp, &isp_debugfs_ping_fops);
 	debugfs_create_file("regtest", 0444, tegra_isp->debugfs_dir,
 			    tegra_isp, &isp_debugfs_regtest_fops);
+	debugfs_create_file("probe", 0444, tegra_isp->debugfs_dir,
+			    tegra_isp, &isp_debugfs_probe_fops);
 }
 
 static void tegra_isp_debugfs_cleanup(struct isp *tegra_isp)
