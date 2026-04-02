@@ -276,6 +276,12 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 					"lens %s: no associated-sensor in DT\n",
 					source->name);
 			}
+		} else if (chan->is_isp_channel) {
+			/* ISP channel: save subdev ref */
+			chan->subdev_on_csi = media_entity_to_v4l2_subdev(source);
+			chan->num_subdevs = 1;
+			dev_info(vi->dev, "ISP %s bound to channel %u\n",
+				source->name, link.local_port);
 		} else {
 			tegra_channel_init_subdevices(chan);
 		}

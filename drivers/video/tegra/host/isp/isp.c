@@ -41,6 +41,7 @@
 #include <linux/fs.h>
 #include <linux/nvhost_isp_ioctl.h>
 #include <linux/platform/tegra/latency_allowance.h>
+#include <media/v4l2-async.h>
 #include "isp.h"
 
 #define T12_ISP_CG_CTRL		0x74
@@ -261,6 +262,75 @@ void nvhost_isp_queue_isr_work(struct isp *tegra_isp)
 	queue_work(tegra_isp->isp_workqueue, &tegra_isp->my_isr_work->work);
 }
 
+/* ----------------------------------------------------------------
+ * V4L2 subdev / Media Controller integration
+ * ISP registers as a V4L2 subdev entity in the MC graph so that
+ * media-ctl can discover it. No frame processing yet.
+ * ---------------------------------------------------------------- */
+
+static int tegra_isp_subdev_s_power(struct v4l2_subdev *sd, int on)
+{
+	/* Power is managed by nvhost runtime PM — nothing to do here */
+	return 0;
+}
+
+static const struct v4l2_subdev_core_ops tegra_isp_subdev_core_ops = {
+	.s_power = tegra_isp_subdev_s_power,
+};
+
+static const struct v4l2_subdev_ops tegra_isp_subdev_ops = {
+	.core = &tegra_isp_subdev_core_ops,
+};
+
+#if defined(CONFIG_MEDIA_CONTROLLER)
+static const struct media_entity_operations tegra_isp_media_ops = {
+	.link_validate = v4l2_subdev_link_validate,
+};
+#endif
+
+static int tegra_isp_register_subdev(struct isp *tegra_isp)
+{
+	struct v4l2_subdev *sd = &tegra_isp->subdev;
+	struct device *dev = &tegra_isp->ndev->dev;
+	int ret;
+
+	v4l2_subdev_init(sd, &tegra_isp_subdev_ops);
+	sd->dev = dev;
+	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+
+	snprintf(sd->name, sizeof(sd->name), "%s",
+		 dev_name(dev));
+
+	tegra_isp->pads[0].flags = MEDIA_PAD_FL_SINK;
+	tegra_isp->pads[1].flags = MEDIA_PAD_FL_SOURCE;
+
+#if defined(CONFIG_MEDIA_CONTROLLER)
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+	sd->entity.ops = &tegra_isp_media_ops;
+	ret = media_entity_init(&sd->entity, 2, tegra_isp->pads, 0);
+	if (ret < 0) {
+		dev_err(dev, "failed to init ISP media entity: %d\n", ret);
+		return ret;
+	}
+#endif
+
+	ret = v4l2_async_register_subdev(sd);
+	if (ret < 0) {
+		dev_err(dev, "failed to register ISP V4L2 subdev: %d\n", ret);
+		media_entity_cleanup(&sd->entity);
+		return ret;
+	}
+
+	dev_info(dev, "ISP V4L2 subdev registered\n");
+	return 0;
+}
+
+static void tegra_isp_unregister_subdev(struct isp *tegra_isp)
+{
+	v4l2_async_unregister_subdev(&tegra_isp->subdev);
+	media_entity_cleanup(&tegra_isp->subdev.entity);
+}
+
 static int isp_probe(struct platform_device *dev)
 {
 	int err = 0;
@@ -386,6 +456,17 @@ static int isp_probe(struct platform_device *dev)
 	if (err)
 		goto free_isr;
 
+	/* Register V4L2 subdev for ISP-A only (ISP-B later) */
+	if (dev_id == ISPA_DEV_ID) {
+		err = tegra_isp_register_subdev(tegra_isp);
+		if (err) {
+			dev_warn(&dev->dev,
+				"ISP V4L2 subdev registration failed: %d\n",
+				err);
+			/* Non-fatal: legacy ioctl interface still works */
+		}
+	}
+
 	return 0;
 free_isr:
 	kfree(tegra_isp->my_isr_work);
@@ -404,6 +485,8 @@ static int __exit isp_remove(struct platform_device *dev)
 	if (tegra_isp->isomgr_handle)
 		isp_isomgr_unregister(tegra_isp);
 #endif
+	if (tegra_isp->dev_id == ISPA_DEV_ID)
+		tegra_isp_unregister_subdev(tegra_isp);
 	nvhost_client_device_release(dev);
 	disable_irq(tegra_isp->irq);
 	kfree(tegra_isp->my_isr_work);

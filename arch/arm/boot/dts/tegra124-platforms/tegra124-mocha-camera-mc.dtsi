@@ -53,9 +53,10 @@
 		vi {
 			/*
 			 * T124 VI with MC framework support
-			 * 3 channels: IMX179 (CSI-A), OV5693 (CSI-E), AD5823 (focuser)
+			 * 4 channels: IMX179 (CSI-A), OV5693 (CSI-E),
+			 *             AD5823 (focuser), ISP-A (processor)
 			 */
-			num-channels = <3>;
+			num-channels = <4>;
 			status = "okay";
 
 			ports {
@@ -102,12 +103,35 @@
 						remote-endpoint = <&mocha_ad5823_out0>;
 					};
 				};
+
+				/*
+				 * Channel 3: ISP-A
+				 * ISP entity in MC graph for image processing
+				 */
+				port@3 {
+					reg = <3>;
+					mocha_vi_in3: endpoint {
+						remote-endpoint = <&mocha_isp_a_out0>;
+					};
+				};
 			};
 		};
 
 		/* ISP A */
 		isp@54600000 {
 			status = "okay";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mocha_isp_a_out0: endpoint {
+						remote-endpoint = <&mocha_vi_in3>;
+					};
+				};
+			};
 		};
 
 		/* ISP B */

@@ -21,6 +21,9 @@
 
 #include "camera_priv_defs.h"
 
+#include <media/v4l2-subdev.h>
+#include <media/media-entity.h>
+
 typedef void (*callback)(void *);
 
 struct tegra_isp_mfi {
@@ -39,6 +42,10 @@ struct isp {
 	uint max_bw;
 	struct workqueue_struct *isp_workqueue;
 	struct tegra_isp_mfi *my_isr_work;
+
+	/* V4L2 Media Controller integration */
+	struct v4l2_subdev subdev;
+	struct media_pad pads[2]; /* [0]=SINK (RAW), [1]=SOURCE (processed) */
 };
 
 extern const struct file_operations tegra_isp_ctrl_ops;

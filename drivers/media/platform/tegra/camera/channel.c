@@ -2412,8 +2412,58 @@ static void tegra_channel_csi_init(struct tegra_mc_vi *vi, unsigned int index)
 	chan->valid_ports = chan->total_ports ? 1 : 0;
 
 	if (chan->valid_ports == 0) {
-		chan->is_lens_channel = true;
-		dev_dbg(vi->dev, "channel %u: lens-only (no CSI port)\n", index);
+		/* No CSI port — check if this is an ISP or lens channel.
+		 * Walk the DT graph to find the remote endpoint's parent
+		 * and check its compatible string.
+		 */
+		struct device_node *ports, *port, *ep, *remote, *remote_parent;
+		bool found_isp = false;
+
+		ports = of_get_child_by_name(vi->dev->of_node, "ports");
+		if (ports) {
+			for_each_child_of_node(ports, port) {
+				u32 reg;
+				if (of_node_cmp(port->name, "port"))
+					continue;
+				if (of_property_read_u32(port, "reg", &reg))
+					continue;
+				if (reg != index)
+					continue;
+				ep = of_get_next_child(port, NULL);
+				if (!ep)
+					break;
+				remote = of_parse_phandle(ep, "remote-endpoint", 0);
+				of_node_put(ep);
+				if (!remote)
+					break;
+				remote_parent = of_get_parent(remote);
+				if (remote_parent)
+					remote_parent = of_get_parent(remote_parent);
+				/* ports/port@0/endpoint -> ports -> isp@54600000 */
+				if (remote_parent)
+					remote_parent = of_get_parent(remote_parent);
+				of_node_put(remote);
+				if (remote_parent &&
+				    of_device_is_compatible(remote_parent,
+							   "nvidia,tegra124-isp")) {
+					found_isp = true;
+				}
+				of_node_put(remote_parent);
+				of_node_put(port);
+				break;
+			}
+			of_node_put(ports);
+		}
+
+		if (found_isp) {
+			chan->is_isp_channel = true;
+			dev_dbg(vi->dev, "channel %u: ISP (no CSI port)\n",
+				index);
+		} else {
+			chan->is_lens_channel = true;
+			dev_dbg(vi->dev, "channel %u: lens-only (no CSI port)\n",
+				index);
+		}
 	}
 }
 
@@ -2453,6 +2503,21 @@ static int tegra_channel_init(struct tegra_mc_vi *vi, unsigned int index)
 		/* Name for debug, but no video_register_device */
 		snprintf(chan->video.name, sizeof(chan->video.name), "%s-lens-%u",
 			dev_name(vi->dev), chan->port[0]);
+
+		return 0;
+	}
+
+	if (chan->is_isp_channel) {
+		/* ISP channel: media entity only, no video device or VB2 queue.
+		 * ISP subdev will be bound via async notifier.
+		 */
+		chan->pad.flags = MEDIA_PAD_FL_SINK;
+		ret = media_entity_init(&chan->video.entity, 1, &chan->pad, 0);
+		if (ret < 0)
+			return ret;
+
+		snprintf(chan->video.name, sizeof(chan->video.name), "%s-isp-%u",
+			dev_name(vi->dev), index);
 
 		return 0;
 	}
