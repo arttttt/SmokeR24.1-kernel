@@ -357,7 +357,19 @@ static int test_dma(uint32_t syncpt_id)
 	/* Output config — exact stock values, adapted for 64x64 */
 	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
 
-	/* Output dimensions */
+	/* 0x60D8-like block: E31/E33/E32/015/E30 */
+	cmd[n++] = host1x_opcode_incr(0xE31, 1);
+	cmd[n++] = W | (H << 16);         /* width | (height << 16) */
+	cmd[n++] = host1x_opcode_incr(0xE33, 1);
+	cmd[n++] = 0x04FE00E6;            /* same format as 0xE02 */
+	cmd[n++] = host1x_opcode_incr(0xE32, 1);
+	cmd[n++] = Y_STRIDE;              /* stride */
+	cmd[n++] = host1x_opcode_incr(0x015, 1);
+	cmd[n++] = 0x00000007;            /* enable mode */
+	cmd[n++] = host1x_opcode_incr(0xE30, 1);
+	cmd[n++] = 0x00000001;            /* output enable */
+
+	/* 0x31C0-like block: Output dimensions */
 	cmd[n++] = host1x_opcode_incr(0xE00, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = host1x_opcode_incr(0xE01, 1);
