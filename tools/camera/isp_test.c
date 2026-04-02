@@ -292,11 +292,15 @@ static int test_dma(uint32_t syncpt_id)
 	#define W 64
 	#define H 64
 	#define BPP 2
+	#define Y_STRIDE ((W * BPP + 63) & ~63)  /* align to 64 */
+	#define UV_STRIDE (Y_STRIDE / 2)
 	#define IN_SIZE  (W * H * BPP)
-	#define OUT_SIZE (W * H * BPP)
+	#define Y_SIZE   (Y_STRIDE * H)
+	#define UV_SIZE  (UV_STRIDE * H / 2)
+	#define OUT_SIZE (Y_SIZE + UV_SIZE * 2)
 
 	/* Allocate buffers via nvmap */
-	uint32_t cmdbuf_h = nvmap_create(4096);
+	uint32_t cmdbuf_h = nvmap_create(16384);  /* 4 pages for calibration + output */
 	uint32_t in_h = nvmap_create(IN_SIZE);
 	uint32_t out_h = nvmap_create(OUT_SIZE);
 	if (!cmdbuf_h || !in_h || !out_h) return -1;
@@ -305,78 +309,105 @@ static int test_dma(uint32_t syncpt_id)
 	nvmap_alloc(in_h, 4096);
 	nvmap_alloc(out_h, 4096);
 
-	uint32_t *cmd = nvmap_mmap(cmdbuf_h, 4096);
+	uint32_t *cmd = nvmap_mmap(cmdbuf_h, 16384);
 	uint32_t *in = nvmap_mmap(in_h, IN_SIZE);
-	uint32_t *out = nvmap_mmap(out_h, OUT_SIZE);
+	uint8_t *out = nvmap_mmap(out_h, OUT_SIZE);
 	if (!cmd || !in || !out) return -1;
 
 	uint32_t in_phys = nvmap_pin(in_h);
 	uint32_t out_phys = nvmap_pin(out_h);
-	printf("in_phys=0x%08x out_phys=0x%08x\n", in_phys, out_phys);
+	uint32_t out_y = out_phys;
+	uint32_t out_u = out_phys + Y_SIZE;
+	uint32_t out_v = out_phys + Y_SIZE + UV_SIZE;
+
+	printf("in_phys=0x%08x out_phys=0x%08x (Y=+0 U=+0x%x V=+0x%x)\n",
+	       in_phys, out_phys, Y_SIZE, Y_SIZE + UV_SIZE);
+	printf("Y_STRIDE=%d UV_STRIDE=%d\n", Y_STRIDE, UV_STRIDE);
 
 	/* Fill input with pattern, clear output */
 	for (int i = 0; i < IN_SIZE / 4; i++) in[i] = 0xA5A50000 | i;
 	memset(out, 0, OUT_SIZE);
 
-	uint32_t in_stride = W * BPP;
-	uint32_t out_stride = W * BPP;
-
-	/* Build command buffer using stock register values */
+	/*
+	 * Build command buffer matching stock sequence:
+	 * 1. SET_CLASS(0x32) — required, works on stock kernel
+	 * 2. Calibration block (1545 words from stock capture)
+	 * 3. Output config + surfaces + input + trigger (45 words)
+	 */
 	int n = 0;
 
-	/* Block 1 (0x60D8-like): format/size + enable */
-	cmd[n++] = host1x_opcode_incr(0xE31, 1);
-	cmd[n++] = W | (H << 16);
-	cmd[n++] = host1x_opcode_incr(0xE33, 1);
-	cmd[n++] = 0x20;
-	cmd[n++] = host1x_opcode_incr(0xE32, 1);
-	cmd[n++] = out_stride;
-	cmd[n++] = host1x_opcode_incr(0x015, 1);
-	cmd[n++] = 0x04040007;  /* from stock dump */
-	cmd[n++] = host1x_opcode_incr(0xE30, 1);
-	cmd[n++] = 0x00000001;
+	/* Load calibration block from file if available, else minimal */
+	FILE *cal = fopen("/data/local/tmp/isp_cal.bin", "rb");
+	if (cal) {
+		uint32_t cal_words;
+		fread(&cal_words, 4, 1, cal);
+		fseek(cal, 0, SEEK_SET);
+		int nread = fread(&cmd[n], 4, 2048, cal);
+		fclose(cal);
+		printf("loaded calibration: %d words\n", nread);
+		n += nread;
+	} else {
+		printf("no calibration file, using minimal config\n");
+		/* Minimal: SET_CLASS + enable */
+		cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
+		cmd[n++] = host1x_opcode_incr(0x015, 1);
+		cmd[n++] = 0x04040007;
+	}
 
-	/* Block 2 (0x31C0-like): processing + output dims + surfaces */
-	cmd[n++] = host1x_opcode_incr(0x500, 6);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = W;
-	cmd[n++] = H;
-	cmd[n++] = in_stride;
-	cmd[n++] = 0x00000001;
-	cmd[n++] = 0x00000000;
+	/* Output config — exact stock values, adapted for 64x64 */
+	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
 
+	/* Output dimensions */
 	cmd[n++] = host1x_opcode_incr(0xE00, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = host1x_opcode_incr(0xE01, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
+
+	/* Output format — exact stock value */
 	cmd[n++] = host1x_opcode_incr(0xE02, 1);
-	cmd[n++] = 0x20;
+	cmd[n++] = 0x04FE00E6;
 	cmd[n++] = host1x_opcode_incr(0xE03, 1);
+	cmd[n++] = 0x00000000;
+
+	/* Output surface Y */
+	cmd[n++] = host1x_opcode_incr(0xE04, 3);
+	cmd[n++] = out_y;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = Y_STRIDE;
+
+	/* Output surface U */
+	cmd[n++] = host1x_opcode_incr(0xE07, 3);
+	cmd[n++] = out_u;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = UV_STRIDE;
+
+	/* Output surface V */
+	cmd[n++] = host1x_opcode_incr(0xE0A, 3);
+	cmd[n++] = out_v;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = UV_STRIDE;
+
+	/* Processing — stock: 5 zeros + (h<<16)|w */
+	cmd[n++] = host1x_opcode_incr(0x500, 6);
+	cmd[n++] = 0;
+	cmd[n++] = 0;
+	cmd[n++] = 0;
+	cmd[n++] = 0;
+	cmd[n++] = 0;
+	cmd[n++] = (H << 16) | W;
+
+	/* Input buffer */
+	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
+	cmd[n++] = host1x_opcode_incr(0x100, 4);
+	cmd[n++] = in_phys;
+	cmd[n++] = 0;
+	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Output surface */
-	cmd[n++] = host1x_opcode_incr(0xE04, 3);
-	cmd[n++] = out_phys;
-	cmd[n++] = out_stride;
-	cmd[n++] = ((H - 1) << 16) | (W - 1);
-
-	/* Input surface */
-	cmd[n++] = host1x_opcode_incr(0xE34, 3);
-	cmd[n++] = in_phys;
-	cmd[n++] = in_stride;
-	cmd[n++] = ((H - 1) << 16) | (W - 1);
-
-	/* Stock control register values */
-	cmd[n++] = host1x_opcode_incr(0x008, 1);
-	cmd[n++] = 0xF000F800;  /* from stock dump */
-	cmd[n++] = host1x_opcode_incr(0x018, 1);
-	cmd[n++] = 0x0A00500A;  /* from stock dump */
-	cmd[n++] = host1x_opcode_incr(0x019, 1);
-	cmd[n++] = 0x00008089;  /* from stock dump */
-
-	/* Trigger */
+	/* Control trigger — stock value 0x05 */
+	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
 	cmd[n++] = host1x_opcode_nonincr(0x00C, 1);
-	cmd[n++] = 0x0000000F;
+	cmd[n++] = 0x00000005;
 
 	/* Syncpt OP_DONE */
 	cmd[n++] = host1x_opcode_imm_incr_syncpt(1 /* OP_DONE */, syncpt_id);
@@ -397,18 +428,18 @@ static int test_dma(uint32_t syncpt_id)
 
 	printf("submit+wait: %s (%ld us)\n", ret ? "TIMEOUT" : "OK", us);
 
-	/* Check output */
+	/* Check if ISP wrote anything to output buffer */
 	int nonzero = 0;
-	for (int i = 0; i < OUT_SIZE / 4; i++) {
+	for (int i = 0; i < OUT_SIZE; i++) {
 		if (out[i] != 0) {
-			if (nonzero < 4)
-				printf("  out[%d] = 0x%08x\n", i, out[i]);
+			if (nonzero < 16)
+				printf("  out[%d] = 0x%02x\n", i, out[i]);
 			nonzero++;
 		}
 	}
-	printf("output: %d/%d words non-zero%s\n",
-	       nonzero, OUT_SIZE / 4,
-	       nonzero ? " (ISP wrote!)" : " (untouched)");
+	printf("output: %d/%d bytes non-zero%s\n",
+	       nonzero, OUT_SIZE,
+	       nonzero ? " (ISP wrote data!)" : " (untouched)");
 
 	munmap(cmd, 4096);
 	munmap(in, IN_SIZE);

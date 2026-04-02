@@ -797,17 +797,33 @@ the trigger write completes.
 
 ### Calibration Block Structure (~1545 words for ISP-A, ~1538 for ISP-B)
 
+Fully decoded in `docs/camera/isp-calibration-decoded.md`.
+
 ```
 SET_CLASS(ISP)
-INCR(0xD00, 10)     — lens shading control (10 regs)
-INCR(0xD0A, 1)      — lens shading param
-NONINCR(0xD0B, 480) — lens shading table (480 entries)
-...                  — tone curve, demosaic, stats config, etc.
+INCR(0xD00, 10)      — Lens shading control (per-sensor coefficients)
+INCR(0xD0A, 1)       — Lens shading enable
+NONINCR(0xD0B, 480)  — Lens shading correction table (FIFO, 4ch x 120 points)
+INCR(0xD20, 6)       — Lens shading extra (ISP-A only, absent in ISP-B)
+4x {
+  INCR(0x65N, 1)     — Tone curve channel N control
+  NONINCR(0x65(N+1), 257) — Tone curve channel N LUT (FIFO)
+}
+INCR(0x053, 2)       — ISP enable + buffer address
 ```
 
-Full calibration data saved in:
-- `docs/camera/stock-isp-a-calibration.txt` (1545 words, IMX179)
-- `docs/camera/stock-isp-b-calibration.txt` (1538 words, OV5693)
+Note: Tone curve methods (0x651-0x658) differ from original RE (0x101).
+Lens shading methods (0xD00-0xD20) differ from original RE (0xD31/0xDAF).
+This is because stock uses a different binary (Shield 63KB) vs original
+RE (Mocha 50KB), or different code paths.
+
+Stock tone curves are **all linear** (0x1000 = 1.0 for all 257 entries).
+Real gamma/tone mapping would come from ISP calibration profiles in
+`docs/camera-isp-profiles/`:
+- `imx179_primax_lfi_v3.09.isp` — IMX179 rear (latest)
+- `imx179_primax_v2.27.isp` — IMX179 rear
+- `imx179_primax_v2.18.isp` — IMX179 rear
+- `ov5693_sunny_v2.13.isp` — OV5693 front
 
 ### Key Corrections from Stock Capture
 
@@ -835,40 +851,44 @@ Built with: `/home/artem/Projects/Smoke-kernel-mocha/` on build server
 ## 12. File Index
 
 ### Documentation:
-- `docs/camera-isp-reverse-engineering.md` — this file (ISP register map + reverse engineering)
-- `docs/camera-reverse-engineering.md` — camera architecture overview
-- `docs/camera-isp-profiles/` — extracted ISP calibration data from Xiaomi stock
+- `docs/camera/camera-isp-reverse-engineering.md` — this file
+- `docs/camera/camera-reverse-engineering.md` — camera architecture overview
+- `docs/camera/isp-calibration-decoded.md` — decoded calibration block structure
+- `docs/camera/isp-reverse-engineering-status.md` — current RE status for assistant
+- `docs/camera-isp-profiles/` — extracted ISP calibration data from Xiaomi stock (.isp text files)
 
-### Kernel (existing):
-- `drivers/video/tegra/host/isp/isp.c` — ISP host1x platform driver
+### Stock Command Buffer Captures:
+- `docs/camera/stock-isp-a-cmdbuf-dump.txt` — full ISP-A dmesg trace (IMX179 rear)
+- `docs/camera/stock-isp-b-cmdbuf-dump.txt` — full ISP-B dmesg trace (OV5693 front)
+- `docs/camera/stock-isp-a-calibration.txt` — ISP-A calibration block (1545 words)
+- `docs/camera/stock-isp-b-calibration.txt` — ISP-B calibration block (1538 words)
+- `docs/camera/stock-isp-mmio-rear.txt` — MMIO register dump during rear streaming
+- `docs/camera/stock-isp-mmio-front.txt` — MMIO register dump during front streaming
+
+### Kernel (SmokeR24.1, isp/v4l2-driver branch):
+- `drivers/video/tegra/host/isp/isp.c` — ISP host1x driver + V4L2 subdev + debugfs
+- `drivers/video/tegra/host/isp/isp.h` — ISP struct with host1x channel + syncpt
 - `drivers/video/tegra/host/isp/isp_isr_v1.c` — ISP interrupt handler
-- `drivers/video/tegra/host/t124/hardware_t124.h` — host1x opcode definitions
-- `drivers/video/tegra/host/class_ids.h` — ISP class IDs
-- `drivers/media/platform/soc_camera/tegra_camera/vi2.c` — V4L2 VI host (T124)
-- `drivers/media/platform/tegra/camera/channel.c` — V4L2 video device
-- `drivers/media/platform/tegra/camera/graph.c` — media controller graph
-- `drivers/media/platform/tegra/csi/csi.c` — CSI transceiver
-- `drivers/media/i2c/soc_camera/ov5693_v4l2.c` — OV5693 V4L2 subdev
-- `drivers/media/i2c/soc_camera/imx135_v4l2.c` — IMX135 V4L2 subdev (template for IMX179)
-- `drivers/media/platform/tegra/imx179.c` — IMX179 legacy miscdevice driver
-- `drivers/media/platform/tegra/ov5693.c` — OV5693 legacy miscdevice driver
-- `drivers/media/platform/tegra/ad5823.c` — AD5823 focuser legacy driver
-- `arch/arm/boot/dts/tegra124-soc-base.dtsi` — VI/ISP device tree nodes
+- `drivers/media/platform/tegra/camera/channel.c` — V4L2 video device + ISP channel
+- `drivers/media/platform/tegra/camera/graph.c` — media controller graph + ISP entity
+- `drivers/media/platform/tegra/camera/mc_common.h` — is_isp_channel flag
+- `arch/arm/boot/dts/tegra124-platforms/tegra124-mocha-camera-mc.dtsi` — camera DTS
+
+### Tools:
+- `tools/camera/v4l2_diag.c` — capture diagnostic tool (existing, works)
+- `tools/camera/isp_test.c` — userspace ISP test for stock kernel (nvmap + nvhost ioctl)
 
 ### Stock blobs (reference only):
-- `libnvisp_v3.so` (50KB) — ISP HW programming, 6 blocks, 39 exports
-- `libnvvicsi_v3.so` (17KB) — VI/CSI HW programming
+- `libnvisp_v3.so` — ISP HW programming (Shield 63KB variant used for RE)
 - `libnvmm_camera_v3.so` (1.4MB) — pipeline orchestrator, 3A
 - `libnvrm_graphics.so` (21KB) — host1x command buffer — **SOURCE OBTAINED**
 - `libnvodm_imager.so` (2.4MB) — sensor drivers + ISP calibration
 
 ### JXD S192 vendor source:
 - `tegra/core/drivers/nvrm/graphics/nvrm_stream.c` — NvRmStream* full source (37KB)
-- `tegra/core/drivers/nvrm/graphics/nvrm_channel_linux.c` — NvRmChannel* Linux impl (42KB)
 - `tegra/core/include/nvrm_channel.h` — Public API + opcode macros (75KB)
+- `tegra/core/include/nvrm_surface.h` — NvRmSurface (0x30 bytes)
+- `tegra/multimedia-partner/nvmm/include/nvmm_buffertype.h` — NvMMSurfaceDescriptor (0xB0)
 - `tegra/camera/core_v3/include/nvcamera_isp.h` — ISP attribute API (49KB)
-- `tegra/camera-partner/imager/sensor_bayer_imx179.c` — IMX179 sensor driver source
-- `tegra/camera-partner/imager/sensor_bayer_ov5693.c` — OV5693 sensor driver source
-- `tegra/camera-partner/imager/focuser_ad5823.c` — AD5823 focuser driver source
 - `tegra/camera-partner/imager/configs/sensor_bayer_imx179_camera_config.h` — ISP cal (194KB)
 - `tegra/camera-partner/android/libnvcamerategra/camera_v3/` — Camera HAL3 source
