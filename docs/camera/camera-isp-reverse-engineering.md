@@ -536,14 +536,25 @@ This is why the **V4L2 + kernel ISP driver** approach is recommended (see sectio
 |------|--------|-------|
 | Step 1: Device Tree + Power | **COMPLETE** | Both cameras + focuser |
 | Step 2: V4L2 RAW Capture | **COMPLETE** | IMX179 + OV5693 + AD5823 via MC framework |
-| Step 3: Minimal ISP | **NOT STARTED** | Next step — kernel ISP entity |
-| Step 4: Full ISP Calibration | **NOT STARTED** | Load mocha ISP profiles |
-| Step 5: 3A Statistics | **NOT STARTED** | AE/AWB/AF |
+| Step 3: Minimal ISP | **IN PROGRESS** | ISP entity in MC graph, host1x submit works, DMA confirmed on stock |
+| Step 4: Full ISP Calibration | **NOT STARTED** | Stock calibration captured (binary blobs ready) |
+| Step 5: 3A Statistics | **NOT STARTED** | Stats readback mechanism decoded (DMA buffer at +0x20000) |
 
-**All cameras work without ISP**, producing RAW Bayer frames directly via V4L2:
-- IMX179 rear: RGGB 10-bit, 3 modes (3280x2460, 1920x1080, 1280x720@90)
-- OV5693 front: BGGR 10-bit, 6 capture + 2 HDR modes
-- AD5823 focuser: VCM control via lens channel in MC graph
+**ISP T124 MC driver** (`drivers/media/platform/tegra/camera/isp_t124.c`):
+- V4L2 subdev registered in MC graph
+- Host1x channel + syncpoint working (ping 438 µs)
+- All ISP methods probed and accepted
+- Separate from legacy `isp.c` (stock, untouched)
+- Called from legacy `isp_probe()` via `tegra_isp_t124_mc_init()` hook
+
+**ISP DMA confirmed** on stock kernel via userspace test (`tools/camera/isp_test.c`):
+- ISP-A (IMX179): full BGRA output with trigger 0x05
+- ISP-B (OV5693): output confirmed with trigger 0x05
+- Requires: stock calibration block + stock dimensions + relocs for SMMU
+
+**Gather filter**: SmokeR24.1 kernel has `t124_channel_init_gather_filter` enabled.
+Stock kernel does not. ISP driver must not use SET_CLASS inside gathers —
+use `class_id` parameter in `nvhost_job_add_client_gather_address()` instead.
 
 ### Architecture: ISP as MC Entity
 
