@@ -41,8 +41,15 @@
 #include <linux/fs.h>
 #include <linux/nvhost_isp_ioctl.h>
 #include <linux/platform/tegra/latency_allowance.h>
+#include <linux/dma-mapping.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/ktime.h>
 #include <media/v4l2-async.h>
 #include "isp.h"
+#include "nvhost_job.h"
+#include "host1x/host1x01_hardware.h"
+#include "class_ids.h"
 
 #define T12_ISP_CG_CTRL		0x74
 #define T12_CG_2ND_LEVEL_EN	1
@@ -263,6 +270,199 @@ void nvhost_isp_queue_isr_work(struct isp *tegra_isp)
 }
 
 /* ----------------------------------------------------------------
+ * Host1x channel + job submission infrastructure
+ * ---------------------------------------------------------------- */
+
+static int tegra_isp_channel_init(struct isp *tegra_isp)
+{
+	struct nvhost_device_data *pdata =
+		platform_get_drvdata(tegra_isp->ndev);
+	int err;
+
+	err = nvhost_channel_map(pdata, &tegra_isp->channel, tegra_isp);
+	if (err) {
+		dev_err(&tegra_isp->ndev->dev,
+			"ISP host1x channel map failed: %d\n", err);
+		return err;
+	}
+
+	tegra_isp->syncpt_id = nvhost_get_syncpt_host_managed(
+		tegra_isp->ndev, 0, "isp");
+	if (!tegra_isp->syncpt_id) {
+		dev_err(&tegra_isp->ndev->dev,
+			"ISP syncpt allocation failed\n");
+		nvhost_putchannel(tegra_isp->channel, 1);
+		tegra_isp->channel = NULL;
+		return -ENOMEM;
+	}
+
+	dev_info(&tegra_isp->ndev->dev,
+		"ISP host1x channel mapped, syncpt=%u\n",
+		tegra_isp->syncpt_id);
+	return 0;
+}
+
+static void tegra_isp_channel_cleanup(struct isp *tegra_isp)
+{
+	if (tegra_isp->syncpt_id) {
+		nvhost_syncpt_put_ref_ext(tegra_isp->ndev,
+					  tegra_isp->syncpt_id);
+		tegra_isp->syncpt_id = 0;
+	}
+	if (tegra_isp->channel) {
+		nvhost_putchannel(tegra_isp->channel, 1);
+		tegra_isp->channel = NULL;
+	}
+}
+
+/**
+ * tegra_isp_ping() - Submit minimal host1x job to verify ISP hardware
+ *
+ * Sends SET_CLASS(ISP-A) + ISP_ENABLE write + syncpoint OP_DONE increment.
+ * If the syncpoint fires, ISP hardware actually executed the method.
+ */
+static int tegra_isp_ping(struct isp *tegra_isp)
+{
+	struct device *dev = &tegra_isp->ndev->dev;
+	struct nvhost_job *job = NULL;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
+	int err;
+	int num_words;
+
+	if (!tegra_isp->channel || !tegra_isp->syncpt_id)
+		return -ENODEV;
+
+	/* Power on ISP */
+	err = nvhost_module_busy(tegra_isp->ndev);
+	if (err) {
+		dev_err(dev, "ISP power on failed: %d\n", err);
+		return err;
+	}
+
+	/* Allocate DMA command buffer (page aligned) */
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	if (!cmdbuf) {
+		err = -ENOMEM;
+		goto idle;
+	}
+
+	/* Build command buffer: absolute minimum
+	 * NOTE: SET_CLASS is NOT allowed inside gathers (gather filter
+	 * blocks it). The class is set via nvhost_job_add_client_gather_address
+	 * class_id parameter instead.
+	 * Just: INCR_SYNCPT(IMMEDIATE) + NOOP padding
+	 */
+	num_words = 0;
+	cmdbuf[num_words++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		tegra_isp->syncpt_id);
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+	cmdbuf[num_words++] = NVHOST_OPCODE_NOOP;
+
+	/* Allocate and configure job */
+	job = nvhost_job_alloc(tegra_isp->channel, 1, 0, 0, 1);
+	if (!job) {
+		err = -ENOMEM;
+		goto free_cmdbuf;
+	}
+
+	job->sp->id = tegra_isp->syncpt_id;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+
+	err = nvhost_job_add_client_gather_address(job, num_words,
+		NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+	if (err) {
+		dev_err(dev, "ISP gather add failed: %d\n", err);
+		goto put_job;
+	}
+
+	/* Submit */
+	err = nvhost_channel_submit(job);
+	if (err) {
+		dev_err(dev, "ISP submit failed: %d\n", err);
+		goto put_job;
+	}
+
+	/* Wait for syncpoint (500ms timeout) */
+	err = nvhost_syncpt_wait_timeout_ext(tegra_isp->ndev,
+		job->sp->id, job->sp->fence,
+		msecs_to_jiffies(500), NULL, NULL);
+	if (err)
+		dev_err(dev, "ISP syncpt wait timeout: %d\n", err);
+
+put_job:
+	nvhost_job_put(job);
+	/*
+	 * Free cmdbuf only after job_put. On timeout the CDMA may still
+	 * reference the gather buffer; job_put handles that cleanup.
+	 * Using coherent DMA so no explicit sync needed.
+	 */
+free_cmdbuf:
+	dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+idle:
+	nvhost_module_idle(tegra_isp->ndev);
+	return err;
+}
+
+/* ----------------------------------------------------------------
+ * debugfs
+ * ---------------------------------------------------------------- */
+
+static int isp_debugfs_ping_show(struct seq_file *s, void *data)
+{
+	struct isp *tegra_isp = s->private;
+	ktime_t start;
+	s64 us;
+	int ret;
+
+	start = ktime_get();
+	ret = tegra_isp_ping(tegra_isp);
+	us = ktime_us_delta(ktime_get(), start);
+
+	if (ret == 0)
+		seq_printf(s, "ISP-%s alive, syncpt %u completed in %lld us\n",
+			tegra_isp->dev_id == 0 ? "A" : "B",
+			tegra_isp->syncpt_id, us);
+	else
+		seq_printf(s, "ISP-%s FAILED (err=%d, %lld us)\n",
+			tegra_isp->dev_id == 0 ? "A" : "B", ret, us);
+	return 0;
+}
+
+static int isp_debugfs_ping_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_debugfs_ping_show, inode->i_private);
+}
+
+static const struct file_operations isp_debugfs_ping_fops = {
+	.open		= isp_debugfs_ping_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static void tegra_isp_debugfs_init(struct isp *tegra_isp)
+{
+	const char *name = tegra_isp->dev_id == 0 ? "isp_a" : "isp_b";
+
+	tegra_isp->debugfs_dir = debugfs_create_dir(name, NULL);
+	if (!tegra_isp->debugfs_dir)
+		return;
+
+	debugfs_create_file("ping", 0444, tegra_isp->debugfs_dir,
+			    tegra_isp, &isp_debugfs_ping_fops);
+}
+
+static void tegra_isp_debugfs_cleanup(struct isp *tegra_isp)
+{
+	debugfs_remove_recursive(tegra_isp->debugfs_dir);
+	tegra_isp->debugfs_dir = NULL;
+}
+
+/* ----------------------------------------------------------------
  * V4L2 subdev / Media Controller integration
  * ISP registers as a V4L2 subdev entity in the MC graph so that
  * media-ctl can discover it. No frame processing yet.
@@ -467,6 +667,16 @@ static int isp_probe(struct platform_device *dev)
 		}
 	}
 
+	/* Init host1x channel for job submission (ISP-A only for now) */
+	if (dev_id == ISPA_DEV_ID) {
+		err = tegra_isp_channel_init(tegra_isp);
+		if (err)
+			dev_warn(&dev->dev,
+				"ISP host1x channel init failed: %d\n", err);
+		else
+			tegra_isp_debugfs_init(tegra_isp);
+	}
+
 	return 0;
 free_isr:
 	kfree(tegra_isp->my_isr_work);
@@ -485,8 +695,11 @@ static int __exit isp_remove(struct platform_device *dev)
 	if (tegra_isp->isomgr_handle)
 		isp_isomgr_unregister(tegra_isp);
 #endif
-	if (tegra_isp->dev_id == ISPA_DEV_ID)
+	if (tegra_isp->dev_id == ISPA_DEV_ID) {
+		tegra_isp_debugfs_cleanup(tegra_isp);
+		tegra_isp_channel_cleanup(tegra_isp);
 		tegra_isp_unregister_subdev(tegra_isp);
+	}
 	nvhost_client_device_release(dev);
 	disable_irq(tegra_isp->irq);
 	kfree(tegra_isp->my_isr_work);
