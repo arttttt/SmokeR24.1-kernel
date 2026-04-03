@@ -674,10 +674,10 @@ static int isp_t124_mmio_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	int err, i, nonzero;
 	size_t y_size, uv_size, out_total;
 
-	/* Small test: 64x64 to minimize resources */
-	const int W = 64, H = 64;
-	const int Y_STRIDE = 64;
-	const int UV_STRIDE = 32;
+	/* Real sensor dimensions — 64x64 doesn't work on stock either */
+	const int W = 3280, H = 2460;
+	const int Y_STRIDE = (W + 63) & ~63;  /* 3328 */
+	const int UV_STRIDE = Y_STRIDE / 2;   /* 1664 */
 
 	y_size = Y_STRIDE * H;
 	uv_size = UV_STRIDE * (H / 2);
