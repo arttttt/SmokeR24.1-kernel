@@ -141,11 +141,15 @@ static inline uint32_t host1x_opcode_imm_incr_syncpt(uint32_t cond, uint32_t id)
 
 #define NOOP host1x_opcode_nonincr(0, 0)
 #define ISP_CLASS_ID 0x32
+#define ISP_B_CLASS_ID 0x34
 
 /* ---- helpers ---- */
 static int nvmap_fd = -1;
 static int isp_fd = -1;
 static int ctrl_fd = -1;
+static uint32_t isp_class = ISP_CLASS_ID;
+static uint32_t g_syncpt_stats = 0;
+static uint32_t g_syncpt_loadv = 0;
 
 static uint32_t nvmap_create(uint32_t size)
 {
@@ -260,7 +264,7 @@ static int submit_with_relocs(uint32_t cmdbuf_handle, uint32_t num_words,
 	struct nvhost_syncpt_incr si = {
 		.syncpt_id = syncpt_id, .syncpt_incrs = syncpt_incrs,
 	};
-	uint32_t class_id = ISP_CLASS_ID;
+	uint32_t class_id = isp_class;
 	struct nvhost_fence fence = { 0, 0 };
 
 	struct nvhost32_submit_args sa;
@@ -329,12 +333,54 @@ static int test_ping(uint32_t syncpt_id)
 	return ret;
 }
 
+static int submit_multi(struct nvhost_cmdbuf *cmdbufs, int num_cmdbufs,
+		  uint32_t syncpt_id, uint32_t syncpt_incrs,
+		  struct nvhost_reloc *relocs, struct nvhost_reloc_shift *reloc_shifts,
+		  int num_relocs,
+		  uint32_t *fence_out)
+{
+	struct nvhost_syncpt_incr si = {
+		.syncpt_id = syncpt_id, .syncpt_incrs = syncpt_incrs,
+	};
+	/* One class_id per cmdbuf */
+	uint32_t class_ids[8];
+	for (int i = 0; i < num_cmdbufs && i < 8; i++)
+		class_ids[i] = isp_class;
+	struct nvhost_fence fence = { 0, 0 };
+
+	struct nvhost32_submit_args sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.submit_version = 0;
+	sa.num_syncpt_incrs = 1;
+	sa.num_cmdbufs = num_cmdbufs;
+	sa.num_relocs = num_relocs;
+	sa.num_waitchks = 0;
+	sa.timeout = 1000;
+	sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
+	sa.cmdbufs = (uint32_t)(uintptr_t)cmdbufs;
+	sa.relocs = (uint32_t)(uintptr_t)relocs;
+	sa.reloc_shifts = (uint32_t)(uintptr_t)reloc_shifts;
+	sa.class_ids = (uint32_t)(uintptr_t)class_ids;
+	sa.fences = (uint32_t)(uintptr_t)&fence;
+
+	if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa) < 0) {
+		perror("submit_multi");
+		return -1;
+	}
+	if (fence_out) *fence_out = fence.value;
+	return 0;
+}
+
 static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_val, const char *tag)
 {
 	/* Detect ISP-B mode */
 	int is_ispb = 0;
 	FILE *marker = fopen("/data/local/tmp/.isp_b_mode", "r");
 	if (marker) { is_ispb = 1; fclose(marker); }
+
+	uint32_t isp_class_local = is_ispb ? ISP_B_CLASS_ID : ISP_CLASS_ID;
+	/* Update global for submit */
+	isp_class = isp_class_local;
 
 	int W, H;
 	if (is_ispb) {
@@ -343,7 +389,7 @@ static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_va
 		W = 3280; H = 2460;
 	}
 	int Y_STRIDE = (W + 63) & ~63;
-	int UV_STRIDE = Y_STRIDE / 2;
+	int UV_STRIDE = ((W / 2) + 63) & ~63;  /* stock: align W/2 to 64 */
 	int BPP = 2;
 	int IN_SIZE = W * H * BPP;
 	int Y_SIZE = Y_STRIDE * H;
@@ -360,20 +406,43 @@ static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_va
 	nvmap_alloc(in_h, 4096);
 	nvmap_alloc(out_h, 4096);
 
-	/* Build cmdbuf locally, then write to nvmap handle */
-	uint32_t cmd[4096]; /* max 4096 words = 16KB */
-
-	/* Fill input with pattern via nvmap_write */
+	/* Fill input: try raw file first, fallback to pattern */
 	{
-		uint32_t *in_tmp = malloc(IN_SIZE);
-		if (in_tmp) {
-			for (int i = 0; i < IN_SIZE / 4; i++)
-				in_tmp[i] = 0xA5A50000 | (i & 0xFFFF);
-			nvmap_write(in_h, 0, in_tmp, IN_SIZE);
-			free(in_tmp);
-			printf("input: filled with pattern via nvmap_write\n");
+		const char *raw_path = is_ispb ? "/data/local/tmp/raw_ov5693.raw"
+		                               : "/data/local/tmp/raw_imx179.raw";
+		FILE *rf = fopen(raw_path, "rb");
+		if (rf) {
+			uint8_t *in_tmp = malloc(IN_SIZE);
+			if (in_tmp) {
+				int nread = fread(in_tmp, 1, IN_SIZE, rf);
+				nvmap_write(in_h, 0, in_tmp, IN_SIZE);
+				free(in_tmp);
+				printf("input: loaded %d bytes from %s\n", nread, raw_path);
+			}
+			fclose(rf);
 		} else {
-			printf("input: malloc failed, using uninitialized\n");
+			uint32_t *in_tmp = malloc(IN_SIZE);
+			if (in_tmp) {
+				for (int i = 0; i < IN_SIZE / 4; i++)
+					in_tmp[i] = 0xA5A50000 | (i & 0xFFFF);
+				nvmap_write(in_h, 0, in_tmp, IN_SIZE);
+				free(in_tmp);
+				printf("input: filled with pattern (no %s)\n", raw_path);
+			}
+		}
+	}
+
+	/* Zero-fill output buffer so we can distinguish ISP writes from stale data */
+	{
+		uint8_t *zeros = calloc(1, OUT_SIZE > 65536 ? 65536 : OUT_SIZE);
+		if (zeros) {
+			int off;
+			for (off = 0; off < OUT_SIZE; off += 65536) {
+				int sz = (OUT_SIZE - off < 65536) ? OUT_SIZE - off : 65536;
+				nvmap_write(out_h, off, zeros, sz);
+			}
+			free(zeros);
+			printf("output: zeroed %d bytes\n", off);
 		}
 	}
 
@@ -388,118 +457,129 @@ static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_va
 	printf("Y_STRIDE=%d UV_STRIDE=%d\n", Y_STRIDE, UV_STRIDE);
 
 	/*
-	 * Build command buffer matching stock sequence:
-	 * 1. SET_CLASS(0x32) — required, works on stock kernel
-	 * 2. Calibration block (1545 words from stock capture)
-	 * 3. Output config + surfaces + input + trigger (45 words)
+	 * 6-gather submit matching stock layout:
+	 * G1: syncpt incr (immediate)
+	 * G2: output config + surfaces + input + trigger (45 words)
+	 * G3: syncpt incr
+	 * G4: WAIT block (NOOPs — no VI available)
+	 * G5: syncpt incr
+	 * G6: calibration + INCR(0x053)
 	 */
+	uint32_t cmd[4096];
 	int n = 0;
 
-	/* Load calibration block from file */
-	const char *cal_path = is_ispb ? "/data/local/tmp/isp_cal_b.bin"
-	                               : "/data/local/tmp/isp_cal.bin";
-	FILE *cal = fopen(cal_path, "rb");
-	if (cal) {
-		uint32_t cal_words;
-		fread(&cal_words, 4, 1, cal);
-		fseek(cal, 0, SEEK_SET);
-		int nread = fread(&cmd[n], 4, 2048, cal);
-		fclose(cal);
-		printf("loaded calibration: %d words\n", nread);
-		n += nread;
-	} else {
-		printf("no calibration file, using minimal config\n");
-		/* Minimal: SET_CLASS + enable */
-		cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
-		cmd[n++] = host1x_opcode_incr(0x015, 1);
-		cmd[n++] = 0x04040007;
-	}
+	#define MAX_GATHERS 8
+	int gather_start[MAX_GATHERS];
+	int gather_words[MAX_GATHERS];
+	int ng = 0;
 
-	/* Output config — exact stock values, adapted for 64x64 */
-	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
+	/* === G1: syncpt incr (2 words) === */
+	gather_start[ng] = n;
+	cmd[n++] = host1x_opcode_imm_incr_syncpt(0, syncpt_id);
+	cmd[n++] = NOOP;
+	gather_words[ng] = n - gather_start[ng]; ng++;
 
-	/* 0x60D8-like block: E31/E33/E32/015/E30 */
-	cmd[n++] = host1x_opcode_incr(0xE31, 1);
-	cmd[n++] = W | (H << 16);         /* width | (height << 16) */
-	cmd[n++] = host1x_opcode_incr(0xE33, 1);
-	cmd[n++] = 0x04FE00E6;            /* same format as 0xE02 */
-	cmd[n++] = host1x_opcode_incr(0xE32, 1);
-	cmd[n++] = Y_STRIDE;              /* stride */
-	cmd[n++] = host1x_opcode_incr(0x015, 1);
-	cmd[n++] = 0x00000007;            /* enable mode */
-	cmd[n++] = host1x_opcode_incr(0xE30, 1);
-	cmd[n++] = 0x00000001;            /* output enable */
+	/* === G2: output block — stock 45-word layout === */
+	gather_start[ng] = n;
+	cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
 
-	/* 0x31C0-like block: Output dimensions */
 	cmd[n++] = host1x_opcode_incr(0xE00, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = host1x_opcode_incr(0xE01, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
-
-	/* Output format */
 	cmd[n++] = host1x_opcode_incr(0xE02, 1);
 	cmd[n++] = format_val;
 	cmd[n++] = host1x_opcode_incr(0xE03, 1);
 	cmd[n++] = 0x00000000;
 
-	/* Output surface Y */
 	cmd[n++] = host1x_opcode_incr(0xE04, 3);
-	cmd[n++] = out_y;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = Y_STRIDE;
-
-	/* Output surface U */
+	cmd[n++] = out_y;   cmd[n++] = 0; cmd[n++] = Y_STRIDE;
 	cmd[n++] = host1x_opcode_incr(0xE07, 3);
-	cmd[n++] = out_u;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = UV_STRIDE;
-
-	/* Output surface V */
+	cmd[n++] = out_u;   cmd[n++] = 0; cmd[n++] = UV_STRIDE;
 	cmd[n++] = host1x_opcode_incr(0xE0A, 3);
-	cmd[n++] = out_v;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = UV_STRIDE;
+	cmd[n++] = out_v;   cmd[n++] = 0; cmd[n++] = UV_STRIDE;
 
-	/* Processing — stock: 5 zeros + (h<<16)|w */
 	cmd[n++] = host1x_opcode_incr(0x500, 6);
-	cmd[n++] = 0;
-	cmd[n++] = 0;
-	cmd[n++] = 0;
-	cmd[n++] = 0;
-	cmd[n++] = 0;
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+	cmd[n++] = 0; cmd[n++] = 0;
 	cmd[n++] = (H << 16) | W;
 
-	/* Input buffer */
-	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
+	cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
 	cmd[n++] = host1x_opcode_incr(0x100, 4);
-	cmd[n++] = in_phys;
-	cmd[n++] = 0;
-	cmd[n++] = 0;
-	cmd[n++] = 0;
+	cmd[n++] = in_phys;  cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
 
-	/* Control trigger */
-	cmd[n++] = host1x_opcode_setclass(ISP_CLASS_ID, 0, 0);
+	/* Stock uses conditional syncpt incrs — ISP fires them when processing completes */
+	/* cond4 → memory syncpt, cond5 → stats syncpt, cond6 → loadv syncpt */
+	cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
+	cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
+	cmd[n++] = host1x_opcode_nonincr(0x000, 1);
+	cmd[n++] = (4 << 8) | syncpt_id;           /* cond 4: memory */
+	cmd[n++] = host1x_opcode_nonincr(0x000, 1);
+	cmd[n++] = (5 << 8) | g_syncpt_stats;      /* cond 5: stats */
+	cmd[n++] = host1x_opcode_nonincr(0x000, 1);
+	cmd[n++] = (6 << 8) | g_syncpt_loadv;      /* cond 6: loadv */
+
+	cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
 	cmd[n++] = host1x_opcode_nonincr(0x00C, 1);
 	cmd[n++] = trigger_val;
 
-	/* Syncpt OP_DONE */
-	cmd[n++] = host1x_opcode_imm_incr_syncpt(1 /* OP_DONE */, syncpt_id);
+	gather_words[ng] = n - gather_start[ng]; ng++;
+
+	/* === G3: syncpt incr === */
+	gather_start[ng] = n;
+	cmd[n++] = host1x_opcode_imm_incr_syncpt(0, syncpt_id);
 	cmd[n++] = NOOP;
+	gather_words[ng] = n - gather_start[ng]; ng++;
 
-	printf("cmdbuf: %d words\n", n);
+	/* === G4: WAIT block (8 words) — NOOPs for now === */
+	gather_start[ng] = n;
+	cmd[n++] = host1x_opcode_setclass(0x01, 0, 0);
+	cmd[n++] = NOOP; cmd[n++] = NOOP;
+	cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
+	cmd[n++] = NOOP; cmd[n++] = NOOP;
+	cmd[n++] = NOOP; cmd[n++] = NOOP;
+	gather_words[ng] = n - gather_start[ng]; ng++;
 
-	/* Build relocs — tell kernel to pin buffers and patch addresses */
-	#define MAX_RELOCS 8
+	/* === G5: syncpt incr === */
+	gather_start[ng] = n;
+	cmd[n++] = host1x_opcode_imm_incr_syncpt(0, syncpt_id);
+	cmd[n++] = NOOP;
+	gather_words[ng] = n - gather_start[ng]; ng++;
+
+	/* === G6: calibration + INCR(0x053) === */
+	gather_start[ng] = n;
+	const char *cal_path = is_ispb ? "/data/local/tmp/isp_cal_b.bin"
+	                               : "/data/local/tmp/isp_cal.bin";
+	FILE *cal = fopen(cal_path, "rb");
+	if (cal) {
+		int nread = fread(&cmd[n], 4, 2048, cal);
+		fclose(cal);
+		printf("loaded calibration: %d words\n", nread);
+		n += nread;
+	} else {
+		printf("no calibration file\n");
+		cmd[n++] = host1x_opcode_setclass(isp_class, 0, 0);
+	}
+	cmd[n++] = host1x_opcode_incr(0x053, 2);
+	cmd[n++] = 0x00000001;
+	cmd[n++] = in_phys;
+	gather_words[ng] = n - gather_start[ng]; ng++;
+
+	printf("cmdbuf: %d words in %d gathers\n", n, ng);
+	for (int i = 0; i < ng; i++)
+		printf("  G%d: %d words @ offset %d\n",
+		       i+1, gather_words[i], gather_start[i]*4);
+
+	/* Build relocs */
+	#define MAX_RELOCS 16
 	struct nvhost_reloc relocs[MAX_RELOCS];
 	struct nvhost_reloc_shift reloc_shifts[MAX_RELOCS];
 	int nr = 0;
-
 	for (int i = 0; i < n; i++) {
 		if (cmd[i] == out_y || cmd[i] == out_u || cmd[i] == out_v) {
 			uint32_t target_off = 0;
 			if (cmd[i] == out_u) target_off = Y_SIZE;
 			else if (cmd[i] == out_v) target_off = Y_SIZE + UV_SIZE;
-
 			relocs[nr].cmdbuf_mem = cmdbuf_h;
 			relocs[nr].cmdbuf_offset = i * 4;
 			relocs[nr].target = out_h;
@@ -518,20 +598,27 @@ static int test_dma(uint32_t syncpt_id, uint32_t trigger_val, uint32_t format_va
 	}
 	printf("  relocs: %d\n", nr);
 
-	/* Write cmdbuf to nvmap handle */
 	if (nvmap_write(cmdbuf_h, 0, cmd, n * 4) < 0) {
 		printf("cmdbuf write failed\n");
 		return -1;
+	}
+
+	struct nvhost_cmdbuf cmdbufs[MAX_GATHERS];
+	for (int i = 0; i < ng; i++) {
+		cmdbufs[i].mem = cmdbuf_h;
+		cmdbufs[i].offset = gather_start[i] * 4;
+		cmdbufs[i].words = gather_words[i];
 	}
 
 	struct timespec t0, t1;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 
 	uint32_t fence;
-	if (submit_with_relocs(cmdbuf_h, n, syncpt_id, 1,
-			       relocs, reloc_shifts, nr, &fence) < 0)
+	/* G1(1 imm) + G2(cond4 on memory) + G3(1 imm) + G5(1 imm) = 4 incrs on memory syncpt */
+	if (submit_multi(cmdbufs, ng, syncpt_id, 4,
+			 relocs, reloc_shifts, nr, &fence) < 0)
 		return -1;
-	int ret = syncpt_wait(syncpt_id, fence, 1000);
+	int ret = syncpt_wait(syncpt_id, fence, 2000);
 
 	clock_gettime(CLOCK_MONOTONIC, &t1);
 	long us = (t1.tv_sec - t0.tv_sec) * 1000000L +
@@ -686,8 +773,15 @@ int main(int argc, char **argv)
 	nvmap_fd = open("/dev/nvmap", O_RDWR);
 	if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
-	isp_fd = open("/dev/nvhost-isp", O_RDWR);
-	if (isp_fd < 0) { perror("open nvhost-isp"); return 1; }
+	/* For dma_b, open ISP-B directly */
+	if (strcmp(mode, "dma_b") == 0) {
+		isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
+		if (isp_fd < 0) { perror("open nvhost-isp.1"); return 1; }
+		isp_class = ISP_B_CLASS_ID;
+	} else {
+		isp_fd = open("/dev/nvhost-isp", O_RDWR);
+		if (isp_fd < 0) { perror("open nvhost-isp"); return 1; }
+	}
 
 	ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
 	if (ctrl_fd < 0) { perror("open nvhost-ctrl"); return 1; }
@@ -698,30 +792,31 @@ int main(int argc, char **argv)
 		perror("set nvmap fd");
 	}
 
-	/* Get syncpoint — try GET_SYNCPOINT(param=0) first, fallback to GET_SYNCPOINTS */
-	uint32_t syncpt_id = 0;
-	struct nvhost_get_param_arg sp_arg = { .param = 0, .value = 0 };
-	if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &sp_arg) == 0 && sp_arg.value) {
+	/* Get all 3 syncpoints: param 0=memory, 1=stats, 3=loadv */
+	uint32_t syncpt_id = 0, syncpt_stats = 0, syncpt_loadv = 0;
+	struct nvhost_get_param_arg sp_arg;
+
+	sp_arg.param = 0; sp_arg.value = 0;
+	if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &sp_arg) == 0)
 		syncpt_id = sp_arg.value;
-	} else {
-		/* Try client-managed syncpoint */
-		char name[] = "isp_test";
-		struct nvhost_get_client_managed_syncpt_arg cms = {
-			.name = (uint64_t)(uintptr_t)name,
-			.param = 0,
-			.value = 0,
-		};
-		if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_CLIENT_MANAGED_SYNCPOINT, &cms) == 0) {
-			syncpt_id = cms.value;
-		} else {
-			/* Last resort: GET_SYNCPOINTS */
-			struct nvhost_get_param_args spa;
-			if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINTS, &spa) == 0)
-				syncpt_id = spa.value;
-		}
+
+	sp_arg.param = 1; sp_arg.value = 0;
+	if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &sp_arg) == 0)
+		syncpt_stats = sp_arg.value;
+
+	sp_arg.param = 3; sp_arg.value = 0;
+	if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &sp_arg) == 0)
+		syncpt_loadv = sp_arg.value;
+
+	if (!syncpt_id) {
+		struct nvhost_get_param_args spa;
+		if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINTS, &spa) == 0)
+			syncpt_id = spa.value;
 	}
-	printf("ISP syncpt = %u, current = %u\n",
-	       syncpt_id, syncpt_read(syncpt_id));
+	printf("ISP syncpts: memory=%u stats=%u loadv=%u, current=%u\n",
+	       syncpt_id, syncpt_stats, syncpt_loadv, syncpt_read(syncpt_id));
+	g_syncpt_stats = syncpt_stats;
+	g_syncpt_loadv = syncpt_loadv;
 
 	if (strcmp(mode, "ping") == 0) {
 		return test_ping(syncpt_id);
@@ -750,23 +845,8 @@ int main(int argc, char **argv)
 
 		return 0;
 	} else if (strcmp(mode, "dma_b") == 0) {
-		/* ISP-B test: close ISP-A, open ISP-B */
-		close(isp_fd);
-		isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
-		if (isp_fd < 0) { perror("open nvhost-isp.1"); return 1; }
-		struct nvhost_set_nvmap_fd_args nfa2 = { .fd = nvmap_fd };
-		ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &nfa2);
-		/* Get ISP-B syncpoint */
-		struct nvhost_get_param_arg sp2 = { .param = 0, .value = 0 };
-		if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &sp2) == 0 && sp2.value)
-			syncpt_id = sp2.value;
-		else {
-			struct nvhost_get_param_args spa2;
-			ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINTS, &spa2);
-			syncpt_id = spa2.value;
-		}
+		/* ISP-B already opened in main(), just get syncpt and run */
 		printf("ISP-B syncpt = %u\n", syncpt_id);
-		/* Create marker file so test_dma detects ISP-B */
 		FILE *marker = fopen("/data/local/tmp/.isp_b_mode", "w");
 		if (marker) fclose(marker);
 		int ret = test_dma(syncpt_id, 0x05, 0x04FE00E6, "ispb_stock");
