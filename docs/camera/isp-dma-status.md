@@ -123,18 +123,41 @@ UV_STRIDE = ((W/2) + 63) & ~63    (NOT Y_STRIDE/2)
 
 ## Working Hypothesis
 
-ISP hardware pipeline requires something to start output DMA that we're not providing:
-1. **Missing init-only registers** — first-frame init submit may have registers not in calibration
-2. **ISP state machine** — needs to be stepped through init → config → process sequence
-3. **Hardware requires real CSI input** — ISP may only process frames from VI/CSI, not from memory
-4. **Register 0x053** — `[enable, addr]` may need a specific address (stats buffer? not input buffer)
+ISP conditional syncpts (cond4 OP_DONE) never fire without real VI input. ISP reads memory
+buffers for stats (lightweight operation) but does NOT start full output DMA pipeline without
+a proper frame event — likely tied to VI syncpt or internal frame counter.
 
-## Next Steps
+Evidence:
+- Stats contain real bayer data from nvmap input buffer → ISP DMA read works
+- cond4 (OP_DONE) never fires → ISP never completes processing → output stays zero
+- Same behavior on stock AND 24.1 → not a kernel/nvhost issue
+- Even with ISP pre-initialized by stock camera HAL → still no output from our submit
+- Stock ISP WAIT_SYNCPT waits on its own stats/loadv syncpts (inter-frame sync), not VI
 
-1. **Compare stock init submit vs calibration file** — check for init-only registers we're missing
-2. **Try on real pipeline** — integrate ISP in 24.1 VI→ISP→output path with real camera
-3. **Instrument stock** — verify stock ISP actually writes to output buffer during real camera streaming
-4. **MMIO register dump** — compare ISP state after HAL init vs our init
+## Blob Injection Experiment
+
+Attempted to call NvIsp API from within stock mediaserver process:
+- LD_PRELOAD injection into mediaserver works (delayed thread after NvRm init)
+- `NvIspOpen()` returns err=4 (cannot create second ISP instance)
+- `NvCameraIspGetNvIspHandle()` returns opaque NvRm handle (0xe9000002)
+- Direct NvIsp* calls with this handle crash — it's an opaque ID, not a pointer
+- **Conclusion**: blob wrapper approach requires full RE of NvIsp struct layouts (weeks of Ghidra work), not practical
+
+## Next Step: Kernel Integration
+
+**Integrate ISP into real VI→ISP→output pipeline on 24.1 kernel.** This is the correct path because:
+1. VI already works, streams from OV5693
+2. ISP-B registered as V4L2 subdev in MC graph
+3. Full stock cmdbuf sequence decoded
+4. ISP syncpt architecture known (memory/stats/stream/loadv)
+5. VI will provide the frame event that ISP needs to start output DMA
+6. All userspace test findings feed directly into kernel driver
+
+Implementation plan:
+- Wire ISP-B subdev into channel.c capture path
+- After VI captures frame into raw buffer, submit ISP cmdbuf with that buffer as input
+- Use VI frame_done syncpt as ISP's "input ready" signal
+- Output to separate YUV buffer → userspace gets processed frame
 
 ## Files
 
@@ -143,7 +166,10 @@ ISP hardware pipeline requires something to start output DMA that we're not prov
 | `drivers/media/platform/tegra/camera/isp_t124.c` | ISP MC driver + kernel dma_test |
 | `drivers/media/platform/tegra/camera/isp_t124.h` | ISP defines |
 | `drivers/media/platform/tegra/camera/isp_t124_cal.h` | Stock calibration data |
-| `tools/camera/isp_test_24.c` | Userspace ISP DMA test (only test file, others removed) |
+| `tools/camera/isp_test_24.c` | Userspace ISP DMA test (correct syncpts, 6-gather, ISP-B class) |
+| `tools/camera/isp_blob_test.c` | Standalone NvIsp dlopen test (NvIspOpen hangs without NvRm) |
+| `tools/camera/isp_payload.c` | LD_PRELOAD payload for mediaserver injection |
+| `tools/camera/isp_injector.c` | ptrace-based .so injector |
 | `docs/camera/isp-dma-debug-24.1.md` | Full debug data dump |
 | `docs/camera/camera-isp-reverse-engineering.md` | Main ISP RE document |
 | `docs/camera/stock-isp-a-cmdbuf-dump.txt` | Stock ISP-A cmdbuf (52K lines) |
