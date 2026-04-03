@@ -239,6 +239,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 		goto free_work;
 	}
 
+	dev_info(dev, "stream_init: cmdbuf_phys=0x%pad work_buf=0x%pad host1x_dev=%s\n",
+		 &isp->cmdbuf_phys, &isp->work_buf.dma,
+		 dev_name(host1x_dev));
+
 	/*
 	 * Build init command buffer: calibration + trigger 0x0F
 	 * No SET_CLASS needed — class set by gather_address.
@@ -400,6 +404,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
+	dev_info(&isp->pdev->dev,
+		 "process_frame: cmdbuf_phys=0x%pad cmd_phys=0x%pad in=0x%pad out=0x%pad\n",
+		 &isp->cmdbuf_phys, &cmd_phys, &in_dma, &out_dma);
+
 	/* ---- G1: syncpt_memory IMMEDIATE incr (2 words) ---- */
 	g1_off = n;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
@@ -509,35 +517,42 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	job->sp->incrs = 4;
 	job->num_syncpts = 1;
 
+	/*
+	 * Add 6 gathers manually — nvhost_job_add_client_gather_address()
+	 * has a bug: it always writes mem_base to gathers[0], so only the
+	 * last call's address survives. We use nvhost_job_add_gather() and
+	 * patch mem_base on the correct index ourselves.
+	 */
 	/* G1: ISP class */
-	err = nvhost_job_add_client_gather_address(job, g1_words,
-			isp->class_id, cmd_phys + g1_off * 4);
-	if (err) goto fail;
+	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
+	job->gathers[0].mem_base = cmd_phys + g1_off * 4;
 
 	/* G2: ISP class */
-	err = nvhost_job_add_client_gather_address(job, g2_words,
-			isp->class_id, cmd_phys + g2_off * 4);
-	if (err) goto fail;
+	nvhost_job_add_gather(job, 0, g2_words, 0, isp->class_id, 0);
+	job->gathers[1].mem_base = cmd_phys + g2_off * 4;
 
 	/* G3: ISP class */
-	err = nvhost_job_add_client_gather_address(job, g3_words,
-			isp->class_id, cmd_phys + g3_off * 4);
-	if (err) goto fail;
+	nvhost_job_add_gather(job, 0, g3_words, 0, isp->class_id, 0);
+	job->gathers[2].mem_base = cmd_phys + g3_off * 4;
 
 	/* G4: host1x class (WAIT_SYNCPT) */
-	err = nvhost_job_add_client_gather_address(job, g4_words,
-			NV_HOST1X_CLASS_ID, cmd_phys + g4_off * 4);
-	if (err) goto fail;
+	nvhost_job_add_gather(job, 0, g4_words, 0, NV_HOST1X_CLASS_ID, 0);
+	job->gathers[3].mem_base = cmd_phys + g4_off * 4;
 
 	/* G5: ISP class */
-	err = nvhost_job_add_client_gather_address(job, g5_words,
-			isp->class_id, cmd_phys + g5_off * 4);
-	if (err) goto fail;
+	nvhost_job_add_gather(job, 0, g5_words, 0, isp->class_id, 0);
+	job->gathers[4].mem_base = cmd_phys + g5_off * 4;
 
 	/* G6: ISP class */
-	err = nvhost_job_add_client_gather_address(job, g6_words,
-			isp->class_id, cmd_phys + g6_off * 4);
-	if (err) goto fail;
+	nvhost_job_add_gather(job, 0, g6_words, 0, isp->class_id, 0);
+	job->gathers[5].mem_base = cmd_phys + g6_off * 4;
+
+	dev_info(&isp->pdev->dev,
+		 "gathers: [0]=0x%x [1]=0x%x [2]=0x%x [3]=0x%x [4]=0x%x [5]=0x%x num=%d\n",
+		 (u32)job->gathers[0].mem_base, (u32)job->gathers[1].mem_base,
+		 (u32)job->gathers[2].mem_base, (u32)job->gathers[3].mem_base,
+		 (u32)job->gathers[4].mem_base, (u32)job->gathers[5].mem_base,
+		 job->num_gathers);
 
 	err = nvhost_channel_submit(job);
 	if (err) {
