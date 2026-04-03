@@ -104,6 +104,7 @@ struct nvmap_pin_handle {
 #define NVMAP_IOC_PIN_MULT _IOWR(NVMAP_IOC_MAGIC, 10, struct nvmap_pin_handle)
 
 #define NVMAP_HEAP_IOVMM           (1 << 30)
+#define NVMAP_HEAP_CARVEOUT_GENERIC (1 << 0)
 #define NVMAP_HANDLE_WRITE_COMBINE 2
 
 /* ---- nvhost ctrl ---- */
@@ -154,6 +155,27 @@ static int nvmap_alloc(uint32_t handle, uint32_t align) {
 	};
 	if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah) < 0) {
 		perror("nvmap alloc"); return -1;
+	}
+	return 0;
+}
+
+/* Allocate physically contiguous (for host1x CDMA gathers) */
+static int nvmap_alloc_contig(uint32_t handle, uint32_t align) {
+	struct nvmap_alloc_handle ah = {
+		.handle = handle,
+		.heap_mask = NVMAP_HEAP_CARVEOUT_GENERIC,
+		.flags = NVMAP_HANDLE_WRITE_COMBINE,
+		.align = align,
+	};
+	if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah) < 0) {
+		/* Fallback to IOVMM if carveout unavailable */
+		perror("nvmap alloc contig (trying IOVMM)");
+		ah.heap_mask = NVMAP_HEAP_IOVMM;
+		if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah) < 0) {
+			perror("nvmap alloc iovmm fallback");
+			return -1;
+		}
+		printf("  WARNING: cmdbuf on IOVMM, may not work for large gathers!\n");
 	}
 	return 0;
 }
@@ -578,7 +600,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if (nvmap_alloc(cmdbuf_h, 256) < 0 ||
+	if (nvmap_alloc_contig(cmdbuf_h, 4096) < 0 ||
 	    nvmap_alloc(in_h, 4096) < 0 ||
 	    nvmap_alloc(out_h, 4096) < 0 ||
 	    nvmap_alloc(work_h, 4096) < 0) {
