@@ -859,13 +859,169 @@ Built with: `/home/artem/Projects/Smoke-kernel-mocha/` on build server
 
 ---
 
-## 12. File Index
+## 13. ISP DMA Breakthrough — Dual Trigger Discovery (April 2026)
+
+### Summary
+
+ISP requires **two-phase trigger** to process a frame:
+1. **Trigger 0x0F** (static config apply) — loads calibration into ISP pipeline
+2. **Trigger 0x05** (runtime frame processing) — starts DMA read/write
+
+Both must be sent via `NONINCR(0x00C, 1)` in sequential host1x submits.
+Trigger 0x0F alone produces no output. Trigger 0x05 alone (without prior 0x0F)
+produces no output. Only 0x0F followed by 0x05 produces ISP DMA output.
+
+### Discovery Method
+
+Running `isp_test tests` on stock Smoke kernel 1.2 (cold boot, no camera app):
+
+```
+Test 1: trigger=0x0F, format=0x04FE00E6 → output: 0/4096 non-zero (untouched)
+Test 2: trigger=0x05, format=0x04FE00E6 → output: 4096/4096 non-zero (ISP WROTE DATA!)
+  hex: 86 63 d9 ff 86 63 d9 ff 86 63 d9 ff ...  (BGRA pattern)
+```
+
+Test 1 (0x0F) initialized ISP but produced no output.
+Test 2 (0x05) ran on already-initialized ISP and produced DMA output.
+
+### Test Conditions
+
+- **Kernel**: Stock Smoke 1.2, unmodified, freshly flashed MiuiSmoke_V8_MiPad_7.2.9_4.4.4
+- **Boot state**: Cold boot, NO camera app launched, NO prior ISP init
+- **Power**: ISP power-on via `open(/dev/nvhost-isp)` → `nvhost_module_busy()`
+- **Calibration**: Loaded from `/data/local/tmp/isp_cal.bin` (1545 words, stock ISP-A)
+- **Input buffer**: Uninitialized (nvmap mmap failed on stock, using zero-filled memory)
+- **Output buffer**: nvmap IOVMM allocation, checked via `NVMAP_IOC_READ`
+- **Relocs**: 4 relocs (3 output Y/U/V + 1 input), patched by kernel at submit
+- **Syncpt**: ISP-A syncpt 32, OP_DONE condition
+- **Submit**: Single gather with SET_CLASS(0x32) + calibration + output config + trigger
+
+### Cold Boot Verification
+
+Confirmed ISP does NOT work on cold boot with single trigger:
+
+```
+Cold boot + trigger 0x05 only → output untouched
+Cold boot + trigger 0x0F only → output untouched
+Cold boot + trigger 0x0F then 0x05 (sequential submits) → ISP WROTE DATA!
+```
+
+Also confirmed on SmokeR24.1 kernel:
+```
+24.1 kernel + trigger 0x05 only → output untouched (tested extensively)
+24.1 kernel + MMIO init + trigger 0x05 → output untouched
+24.1 userspace isp_test_24 + relocs + trigger 0x05 → output untouched
+```
+
+### MMIO Register State
+
+**Cold boot (power gated)**: All 0xFFFFFFFF — ISP completely off
+
+**After power-on (pre-init)**: All 0x00000000 — hardware defaults
+
+**During stock camera streaming** (captured via devmem):
+```
+Method  MMIO    Value           Description
+0x008   0x020   0xF000F800      Input config
+0x00C   0x030   0x00000004      Control (streaming active state)
+0x00D   0x034   0x00000100      Status
+0x014   0x050   0x000000A9      Per-sensor parameter
+0x015   0x054   0x04040007      ISP enable mode
+0x018   0x060   0x0A00500A      Processing params
+0x019   0x064   0x00008089      Processing params
+0x01A   0x068   0x013645CB      Calibration coefficient
+0x01B   0x06c   0x000001E7      Calibration coefficient
+0x01C   0x070   0x00000001      Unknown
+0x01D   0x074   0x00000001      ISP_CG_CTRL (clock gating)
+0x01F   0x07c   0x00000003      Mode
+0x024   0x090   0xC6BFF67C      Unknown (same for A and B)
+0x038   0x0e0   0x242CB07B      Unknown
+0x03F   0x0fc   0x00000020      Unknown
+0x051   0x144   0x017BA537      Unknown
+0x053   0x14C   0x00000001      ISP_ENABLE
+0x054   0x150   0x00585B18      Working buffer address (IOVA)
+0x05E   0x178   0x00003232      Unknown
+```
+
+**After camera close**: Immediately 0xFFFFFFFF — ISP power gated by nvhost idle.
+
+### Key Finding: ISP Power Gate Timing
+
+After `am force-stop` camera app, ISP is **immediately** power gated.
+Register 0x054 = 0xFFFFFFFF within 1 second of camera close.
+Previous successful tests likely had camera still partially active,
+or ISP power gate was slower on earlier firmware.
+
+### Ruled Out Hypotheses
+
+| Hypothesis | Result |
+|-----------|--------|
+| Gather filter blocks ISP gathers | NO — disabled filter, same result |
+| Need relocs for SMMU mapping | NO — userspace with relocs, same result |
+| Need contiguous Y/U/V buffer | NO — tested contiguous, same result |
+| Need valid ISP working buffer (0x054) | NO — patched address, same result |
+| Need MMIO pre-init | NO — wrote all known MMIO values, same result |
+| Single trigger 0x05 sufficient | NO — needs 0x0F first |
+| ISP works only with real RAW data | NO — works with uninitialized input |
+| Problem specific to 24.1 kernel | NO — same on stock without dual trigger |
+
+### Trigger Semantics
+
+```
+0x0F = NvCameraHwSettingsApply post-apply callback (static config commit)
+       Loads calibration (lens shading, tone curves) into ISP pipeline registers.
+       Must be sent BEFORE runtime trigger. Does not produce output.
+
+0x05 = NvIspProcessFrame3 runtime trigger (frame processing)
+       Starts ISP DMA: reads input buffer, processes, writes output Y/U/V.
+       Only works AFTER 0x0F has been sent on the same channel.
+
+0x04 = Hardware state during active streaming (read from MMIO 0x030).
+       Not a trigger value — this is the ISP "busy" state.
+
+0x09 = Unknown runtime mode (tested, no output)
+```
+
+### Stock Per-Frame Submit Sequence (6 submits)
+
+From stock cmdbuf capture (Section 11), each frame has 6 submits:
+```
+Submit 1: 2 words  — Syncpt increment
+Submit 2: 45 words — Output config + surfaces + input + trigger 0x05
+Submit 3: 2 words  — Syncpt increment
+Submit 4: 8 words  — Syncpt WAIT (wait for VI frame)
+Submit 5: 2 words  — Syncpt increment
+Submit 6: ~1545 words — Calibration + trigger 0x0F (via static callback)
+```
+
+Note: trigger 0x0F (submit 6) comes AFTER trigger 0x05 (submit 2) in the
+per-frame sequence. This means on the FIRST frame, 0x0F was already sent
+during `NvIspSetConfiguration` (static init phase). Subsequent frames
+send 0x05 first (new frame), then 0x0F (update calibration for next frame).
+
+### Historical Note
+
+Commit `4b45d0c3eb7` "ISP DMA CONFIRMED WORKING" (on stock kernel) used
+`isp_test tests` which runs test suite: trigger 0x0F first, then 0x05.
+The dependency was not noticed at the time — both triggers appeared to
+"work" independently, but in reality 0x05 only worked because 0x0F had
+already been sent in the previous test. This is confirmed by running
+each trigger independently on cold boot (both produce zero output).
+   - Submit 1: calibration + output config + trigger 0x0F (init)
+   - Submit 2: input + output surfaces + trigger 0x05 (process)
+2. Test on 24.1 kernel with dual trigger
+3. If works: integrate into VI capture pipeline (channel.c)
+
+---
+
+## 14. File Index (updated)
 
 ### Documentation:
 - `docs/camera/camera-isp-reverse-engineering.md` — this file
 - `docs/camera/camera-reverse-engineering.md` — camera architecture overview
 - `docs/camera/isp-calibration-decoded.md` — decoded calibration block structure
 - `docs/camera/isp-reverse-engineering-status.md` — current RE status for assistant
+- `docs/camera/isp-stats-readback.md` — stats readback mechanism
 - `docs/camera-isp-profiles/` — extracted ISP calibration data from Xiaomi stock (.isp text files)
 
 ### Stock Command Buffer Captures:
@@ -877,9 +1033,10 @@ Built with: `/home/artem/Projects/Smoke-kernel-mocha/` on build server
 - `docs/camera/stock-isp-mmio-front.txt` — MMIO register dump during front streaming
 
 ### Kernel (SmokeR24.1, isp/v4l2-driver branch):
-- `drivers/video/tegra/host/isp/isp.c` — ISP host1x driver + V4L2 subdev + debugfs
-- `drivers/video/tegra/host/isp/isp.h` — ISP struct with host1x channel + syncpt
-- `drivers/video/tegra/host/isp/isp_isr_v1.c` — ISP interrupt handler
+- `drivers/media/platform/tegra/camera/isp_t124.c` — T124 ISP MC driver (V4L2 subdev + host1x + debugfs)
+- `drivers/media/platform/tegra/camera/isp_t124.h` — ISP method offsets and stock values
+- `drivers/media/platform/tegra/camera/isp_t124_cal.h` — stock calibration data arrays
+- `drivers/video/tegra/host/isp/isp.c` — legacy nvhost ISP (stock + mc_init hook)
 - `drivers/media/platform/tegra/camera/channel.c` — V4L2 video device + ISP channel
 - `drivers/media/platform/tegra/camera/graph.c` — media controller graph + ISP entity
 - `drivers/media/platform/tegra/camera/mc_common.h` — is_isp_channel flag
@@ -888,6 +1045,8 @@ Built with: `/home/artem/Projects/Smoke-kernel-mocha/` on build server
 ### Tools:
 - `tools/camera/v4l2_diag.c` — capture diagnostic tool (existing, works)
 - `tools/camera/isp_test.c` — userspace ISP test for stock kernel (nvmap + nvhost ioctl)
+- `tools/camera/isp_test_24.c` — userspace ISP test adapted for SmokeR24.1 (nvmap write/read)
+- `tools/camera/isp_init_test.c` — ISP blob init test (NvIspOpen via vendor blob)
 
 ### Stock blobs (reference only):
 - `libnvisp_v3.so` — ISP HW programming (Shield 63KB variant used for RE)
