@@ -317,6 +317,8 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	struct isp_dma_buf in_buf = {}, out_buf = {}, work_buf = {};
 	u32 *cmdbuf;
 	dma_addr_t cmdbuf_phys;
+	struct platform_device *host1x_pdev;
+	struct device *phys_dev;
 	dma_addr_t out_y_dma, out_u_dma, out_v_dma;
 	int err, n, nonzero, i, cal_last_idx, trigger_idx;
 	size_t y_size, uv_size, out_total;
@@ -338,24 +340,27 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		return err;
 
 	/*
-	 * Allocate buffers matching stock memory model:
-	 * - input: full RAW frame (W*H*2), also used as ISP working memory
-	 * - output: single contiguous Y+U+V (like stock nvmap handle with offsets)
-	 * - work_buf: ISP runtime working buffer for method 0x054
-	 *   (stock calibration has IOVA 0x00745f5c which is invalid here)
+	 * DIRTY HACK: Allocate ALL buffers through host1x parent device
+	 * to get PHYSICAL addresses (not ISP SMMU IOVA).
+	 * Hypothesis: ISP SMMU page tables broken on 24.1 — ISP DMA
+	 * engine reads zeros from unmapped IOVA addresses.
+	 * Physical addresses bypass SMMU entirely.
 	 */
-	err = isp_dma_buf_alloc(dev, &in_buf, ISP_TEST_INPUT_SIZE);
+	host1x_pdev = nvhost_get_parent(isp->pdev);
+	phys_dev = host1x_pdev ? &host1x_pdev->dev : dev;
+	seq_printf(s, "  HACK: alloc ALL via %s (physical, no SMMU)\n",
+		   dev_name(phys_dev));
+	err = isp_dma_buf_alloc(phys_dev, &in_buf, ISP_TEST_INPUT_SIZE);
 	if (err) {
 		seq_printf(s, "input alloc failed: %d\n", err);
 		goto idle;
 	}
-	err = isp_dma_buf_alloc(dev, &out_buf, out_total);
+	err = isp_dma_buf_alloc(phys_dev, &out_buf, out_total);
 	if (err) {
 		seq_printf(s, "output alloc failed: %d\n", err);
 		goto free_in;
 	}
-	/* ISP working buffer — stock uses ~512KB, allocate 256KB */
-	err = isp_dma_buf_alloc(dev, &work_buf, 256 * 1024);
+	err = isp_dma_buf_alloc(phys_dev, &work_buf, 256 * 1024);
 	if (err) {
 		seq_printf(s, "work buf alloc failed: %d\n", err);
 		goto free_out;
@@ -605,11 +610,11 @@ free_cmdbuf:
 		dma_free_coherent(host1x_dev, PAGE_SIZE * 2, cmdbuf, cmdbuf_phys);
 	}
 free_work:
-	isp_dma_buf_free(dev, &work_buf);
+	isp_dma_buf_free(phys_dev, &work_buf);
 free_out:
-	isp_dma_buf_free(dev, &out_buf);
+	isp_dma_buf_free(phys_dev, &out_buf);
 free_in:
-	isp_dma_buf_free(dev, &in_buf);
+	isp_dma_buf_free(phys_dev, &in_buf);
 idle:
 	nvhost_module_idle(isp->pdev);
 	return err;
