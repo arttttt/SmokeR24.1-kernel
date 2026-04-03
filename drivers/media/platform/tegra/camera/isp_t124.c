@@ -467,9 +467,9 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
 
-	/* Trigger */
+	/* Trigger — will be patched for each phase */
 	cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmdbuf[n++] = ISP_TRIGGER_RUNTIME;
+	cmdbuf[n++] = ISP_TRIGGER_POST_APPLY; /* placeholder, patched below */
 
 	/* Syncpt OP_DONE */
 	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -477,19 +477,45 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		isp->syncpt_id);
 	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
-	seq_printf(s, "  submit: %d words (cal=%zu + frame)\n",
+	/* Remember trigger word position for patching */
+	#define TRIGGER_WORD_OFFSET (n - 3) /* points to trigger value word */
+
+	seq_printf(s, "  cmdbuf: %d words (cal=%zu + frame)\n",
 		   n, ARRAY_SIZE(isp_a_cal_data));
+
+	/*
+	 * Phase 1: Static config apply (trigger 0x0F)
+	 * Loads calibration into ISP pipeline. No DMA output.
+	 */
+	cmdbuf[TRIGGER_WORD_OFFSET] = ISP_TRIGGER_POST_APPLY;
 
 	start = ktime_get();
 	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
 	us = ktime_us_delta(ktime_get(), start);
 	if (err) {
-		seq_printf(s, "  submit FAILED: %d (%lld us)\n", err, us);
+		seq_printf(s, "  phase 1 (0x0F init) FAILED: %d (%lld us)\n",
+			   err, us);
 		goto free_cmdbuf;
 	}
-	seq_printf(s, "  submit OK (%lld us)\n", us);
+	seq_printf(s, "  phase 1 (0x0F init) OK (%lld us)\n", us);
 
-	/* Wait for ISP to potentially finish async processing */
+	/*
+	 * Phase 2: Runtime frame processing (trigger 0x05)
+	 * Starts ISP DMA: reads input, processes, writes output.
+	 */
+	cmdbuf[TRIGGER_WORD_OFFSET] = ISP_TRIGGER_RUNTIME;
+
+	start = ktime_get();
+	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
+	us = ktime_us_delta(ktime_get(), start);
+	if (err) {
+		seq_printf(s, "  phase 2 (0x05 run) FAILED: %d (%lld us)\n",
+			   err, us);
+		goto free_cmdbuf;
+	}
+	seq_printf(s, "  phase 2 (0x05 run) OK (%lld us)\n", us);
+
+	/* Wait for ISP DMA to complete */
 	msleep(200);
 
 	/* Check output Y plane for non-zero data */
