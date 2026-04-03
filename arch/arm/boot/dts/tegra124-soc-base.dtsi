@@ -815,8 +815,8 @@
 			power-domains = <&ve_pd>;
 			reg = <0x54600000 0x00040000>;
 			interrupts = <0 71 0x04>;
-			/* iommus removed: stock kernel had no iommus on ISP.
-			 * Testing if 24.1 tegra-smmu.c breaks ISP DMA. */
+			iommus = <&smmu TEGRA_SWGROUP_ISP>,
+				 <&smmu TEGRA_SWGROUP_ISP2B>;
 			status = "disabled";
 		};
 
@@ -825,7 +825,8 @@
 			power-domains = <&ve_pd>;
 			reg = <0x54680000 0x00040000>;
 			interrupts = <0 70 0x04>;
-			/* iommus removed: same as ISP-A */
+			iommus = <&smmu TEGRA_SWGROUP_ISP>,
+				 <&smmu TEGRA_SWGROUP_ISP2B>;
 			status = "disabled";
 		};
 
