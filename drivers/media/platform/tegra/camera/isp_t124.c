@@ -431,8 +431,12 @@ EXPORT_SYMBOL(isp_t124_stream_stop);
 /**
  * isp_t124_process_frame() - Submit one frame through ISP
  *
- * Single-gather approach: cal + output config + input + trigger + OP_DONE.
- * Simpler than stock 6-gather layout, for debugging.
+ * Two-step approach:
+ * 1. stream_init already loaded cal + trigger 0x0F (ISP primed)
+ * 2. Per-frame: output + input + trigger 0x05 (no cal — use existing)
+ *
+ * On stock, trigger 0x05 is in G2, cal is in G6 (loaded AFTER trigger
+ * for the NEXT frame). ISP processes with previously loaded cal.
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t in_dma, dma_addr_t out_dma,
@@ -460,16 +464,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	n = 0;
 
 	dev_info(&isp->pdev->dev,
-		 "process_frame: cmdbuf_phys=0x%pad cmd_phys=0x%pad in=0x%pad out=0x%pad\n",
-		 &isp->cmdbuf_phys, &cmd_phys, &in_dma, &out_dma);
+		 "process_frame: in=0x%pad out=0x%pad %ux%u\n",
+		 &in_dma, &out_dma, W, H);
 
-	/* --- Calibration data --- */
-	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
-	n += isp->cal_words;
-	/* Patch work buffer address (last word of cal) */
-	cmd[n - 1] = (u32)isp->work_buf.dma;
-
-	/* --- Output config --- */
+	/* --- Output config (matches stock G2) --- */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
@@ -513,9 +511,9 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (4 << 8) | isp->syncpt_memory;
 
-	/* Trigger POST_APPLY */
+	/* Trigger RUNTIME (0x05) — ISP uses cal from stream_init */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_POST_APPLY;
+	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
 	/* IMMEDIATE syncpt incr */
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -523,8 +521,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		isp->syncpt_memory);
 	cmd[n++] = NVHOST_OPCODE_NOOP;
 
-	dev_info(&isp->pdev->dev,
-		 "process_frame: single gather, %d words\n", n);
+	dev_info(&isp->pdev->dev, "process_frame: %d words, no cal\n", n);
 
 	/* Single-gather job */
 	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
