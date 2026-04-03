@@ -507,9 +507,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Conditional OP_DONE syncpt incr */
+	/* Conditional OP_DONE syncpt incr — use cond=1 (standard host1x OP_DONE) */
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (4 << 8) | isp->syncpt_memory;
+	cmd[n++] = (host1x_uclass_incr_syncpt_cond_op_done_v() << 8) |
+		   isp->syncpt_memory;
 
 	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
