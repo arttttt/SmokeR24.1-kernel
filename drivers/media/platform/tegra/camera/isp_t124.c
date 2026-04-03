@@ -484,9 +484,16 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		   n, ARRAY_SIZE(isp_a_cal_data));
 
 	/*
-	 * Phase 1: Static config apply (trigger 0x0F)
-	 * Loads calibration into ISP pipeline. No DMA output.
+	 * ISP requires two submits to produce output:
+	 * Submit 1: initializes ISP pipeline (output empty)
+	 * Submit 2+: ISP processes and writes output
+	 *
+	 * On stock kernel: trigger 0x05 works for both phases.
+	 * On 24.1: also try 0x0F for phase 1, 0x05 for phase 2.
+	 * Submit the same full cmdbuf each time.
 	 */
+
+	/* Phase 1: Init (trigger 0x0F) */
 	cmdbuf[TRIGGER_WORD_OFFSET] = ISP_TRIGGER_POST_APPLY;
 
 	start = ktime_get();
@@ -499,10 +506,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	}
 	seq_printf(s, "  phase 1 (0x0F init) OK (%lld us)\n", us);
 
-	/*
-	 * Phase 2: Runtime frame processing (trigger 0x05)
-	 * Starts ISP DMA: reads input, processes, writes output.
-	 */
+	/* Phase 2: Frame (trigger 0x05) */
 	cmdbuf[TRIGGER_WORD_OFFSET] = ISP_TRIGGER_RUNTIME;
 
 	start = ktime_get();
@@ -514,6 +518,17 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		goto free_cmdbuf;
 	}
 	seq_printf(s, "  phase 2 (0x05 run) OK (%lld us)\n", us);
+
+	/* Phase 3: Another frame (trigger 0x05, may be needed for pipeline) */
+	start = ktime_get();
+	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
+	us = ktime_us_delta(ktime_get(), start);
+	if (err) {
+		seq_printf(s, "  phase 3 (0x05 run2) FAILED: %d (%lld us)\n",
+			   err, us);
+		goto free_cmdbuf;
+	}
+	seq_printf(s, "  phase 3 (0x05 run2) OK (%lld us)\n", us);
 
 	/* Wait for ISP DMA to complete */
 	msleep(200);
