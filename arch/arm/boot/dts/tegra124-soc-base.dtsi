@@ -790,12 +790,7 @@
 		interrupts = <0 65 0x04   /* mpcore syncpt */
 			      0 67 0x04>; /* mpcore general */
 		iommus = <&smmu TEGRA_SWGROUP_EPP>,
-			 /* TEGRA_SWGROUP_HC removed: host1x CDMA must use
-			  * physical addresses for gather fetch, not IOVA.
-			  * Stock kernel did not have HC behind SMMU.
-			  * With HC behind SMMU, gather buffers (physical/carveout)
-			  * are not mapped in host1x SMMU domain → CDMA reads
-			  * zeros → ISP/VI/etc never receive methods from gathers */
+			 <&smmu TEGRA_SWGROUP_HC>,
 			 <&smmu TEGRA_SWGROUP_HDA>,
 			 <&smmu TEGRA_SWGROUP_VDE>;
 
@@ -820,8 +815,8 @@
 			power-domains = <&ve_pd>;
 			reg = <0x54600000 0x00040000>;
 			interrupts = <0 71 0x04>;
-			iommus = <&smmu TEGRA_SWGROUP_ISP>,
-				 <&smmu TEGRA_SWGROUP_ISP2B>;
+			/* iommus removed: stock kernel had no iommus on ISP.
+			 * Testing if 24.1 tegra-smmu.c breaks ISP DMA. */
 			status = "disabled";
 		};
 
@@ -830,8 +825,7 @@
 			power-domains = <&ve_pd>;
 			reg = <0x54680000 0x00040000>;
 			interrupts = <0 70 0x04>;
-			iommus = <&smmu TEGRA_SWGROUP_ISP>,
-				 <&smmu TEGRA_SWGROUP_ISP2B>;
+			/* iommus removed: same as ISP-A */
 			status = "disabled";
 		};
 
