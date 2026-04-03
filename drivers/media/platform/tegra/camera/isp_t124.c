@@ -111,7 +111,7 @@ static int isp_t124_submit(struct tegra_isp_t124 *isp,
 		return -ENOMEM;
 
 	job->sp->id = isp->syncpt_id;
-	job->sp->incrs = 1;
+	job->sp->incrs = 2; /* 1 IMMEDIATE before trigger + 1 OP_DONE at end */
 	job->num_syncpts = 1;
 
 	err = nvhost_job_add_client_gather_address(job, num_words,
@@ -485,6 +485,19 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
+
+	/*
+	 * Stock per-frame block has INCR(0x053, 2) = ISP enable + work buf
+	 * BEFORE trigger in EVERY frame, not just in calibration.
+	 * Also has syncpt incr before trigger.
+	 */
+	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_ISP_ENABLE, 2);
+	cmdbuf[n++] = 0x00000001;        /* ISP enable */
+	cmdbuf[n++] = (u32)work_buf.dma; /* work buffer address */
+
+	/* Syncpt incr before trigger (stock has this) */
+	cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmdbuf[n++] = (0 << 8) | isp->syncpt_id; /* IMMEDIATE incr */
 
 	/* Trigger — will be patched for each phase */
 	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
