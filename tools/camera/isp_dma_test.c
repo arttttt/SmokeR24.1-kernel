@@ -526,6 +526,18 @@ static int build_frame_cmdbuf(uint32_t *cmd, int max_words,
 	cmd[n++] = h1x_incr(0xE30, 1);
 	cmd[n++] = 0x00000001;
 
+	/* Stock has 3 syncpt incrs before trigger:
+	 * NONINCR(0x000, 1) → syncpt_id | (cond << 8)
+	 * Conditions: 0x4=OP_DONE, 0x5=???, 0x6=???
+	 * These may be required to arm ISP DMA engine */
+	cmd[n++] = h1x_setclass(class_id, 0, 0);
+	cmd[n++] = h1x_nonincr(0x000, 1);
+	cmd[n++] = (4 << 8) | syncpt_id;  /* cond 4 = OP_DONE */
+	cmd[n++] = h1x_nonincr(0x000, 1);
+	cmd[n++] = (5 << 8) | syncpt_id;  /* cond 5 */
+	cmd[n++] = h1x_nonincr(0x000, 1);
+	cmd[n++] = (6 << 8) | syncpt_id;  /* cond 6 */
+
 	/* Control trigger */
 	cmd[n++] = h1x_setclass(class_id, 0, 0);
 	cmd[n++] = h1x_nonincr(0x00C, 1);
