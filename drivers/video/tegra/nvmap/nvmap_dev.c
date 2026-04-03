@@ -69,6 +69,7 @@ size_t cache_maint_outer_threshold = SZ_1M;
 #endif
 
 struct nvmap_device *nvmap_dev;
+EXPORT_SYMBOL(nvmap_dev);
 struct nvmap_stats nvmap_stats;
 
 static struct backing_dev_info nvmap_bdi = {
@@ -443,6 +444,7 @@ struct nvmap_client *__nvmap_create_client(struct nvmap_device *dev,
 	mutex_unlock(&dev->clients_lock);
 	return client;
 }
+EXPORT_SYMBOL(__nvmap_create_client);
 
 static void destroy_client(struct nvmap_client *client)
 {

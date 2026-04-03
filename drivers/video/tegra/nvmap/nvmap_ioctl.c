@@ -68,6 +68,7 @@ struct nvmap_handle *__nvmap_ref_to_handle(struct nvmap_handle_ref *ref)
 		return NULL;
 	return ref->handle;
 }
+EXPORT_SYMBOL(__nvmap_ref_to_handle);
 
 int nvmap_ioctl_pinop(struct file *filp, bool is_pin, void __user *arg,
 		      bool is32)

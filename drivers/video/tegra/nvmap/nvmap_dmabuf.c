@@ -670,8 +670,7 @@ int nvmap_get_dmabuf_fd(struct nvmap_client *client, struct nvmap_handle *h)
 		dma_buf_put(dmabuf);
 	return fd;
 }
-
-struct dma_buf *__nvmap_dmabuf_export(struct nvmap_client *client,
+EXPORT_SYMBOL(nvmap_get_dmabuf_fd);(struct nvmap_client *client,
 				 struct nvmap_handle *handle)
 {
 	struct dma_buf *buf;
