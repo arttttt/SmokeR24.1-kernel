@@ -215,9 +215,23 @@ static int syncpt_wait(uint32_t id, uint32_t thresh, int timeout_ms) {
 	return ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &a);
 }
 
-/* ---- submit (no relocs, pinned IOVA baked in) ---- */
+/* ---- reloc definitions ---- */
+struct nvhost_reloc {
+	uint32_t cmdbuf_mem;
+	uint32_t cmdbuf_offset;
+	uint32_t target;
+	uint32_t target_offset;
+};
+struct nvhost_reloc_shift { uint32_t shift; } __attribute__((packed));
+
+#define MAX_RELOCS 16
+
+/* ---- submit with relocs ---- */
 static int isp_submit(uint32_t cmdbuf_h, uint32_t num_words,
 		      uint32_t syncpt_id, uint32_t class_id,
+		      struct nvhost_reloc *relocs,
+		      struct nvhost_reloc_shift *reloc_shifts,
+		      int num_relocs,
 		      uint32_t *fence_out) {
 	struct nvhost_cmdbuf cb = {
 		.mem = cmdbuf_h, .offset = 0, .words = num_words,
@@ -233,13 +247,13 @@ static int isp_submit(uint32_t cmdbuf_h, uint32_t num_words,
 	sa.submit_version = 0;
 	sa.num_syncpt_incrs = 1;
 	sa.num_cmdbufs = 1;
-	sa.num_relocs = 0;
+	sa.num_relocs = num_relocs;
 	sa.num_waitchks = 0;
 	sa.timeout = 2000;
 	sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
 	sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
-	sa.relocs = 0;
-	sa.reloc_shifts = 0;
+	sa.relocs = num_relocs ? (uint32_t)(uintptr_t)relocs : 0;
+	sa.reloc_shifts = num_relocs ? (uint32_t)(uintptr_t)reloc_shifts : 0;
 	sa.class_ids = (uint32_t)(uintptr_t)&cid;
 	sa.fences = (uint32_t)(uintptr_t)&fence;
 
@@ -249,6 +263,14 @@ static int isp_submit(uint32_t cmdbuf_h, uint32_t num_words,
 	}
 	if (fence_out) *fence_out = fence.value;
 	return 0;
+}
+
+/* Convenience: submit without relocs */
+static int isp_submit_simple(uint32_t cmdbuf_h, uint32_t num_words,
+			     uint32_t syncpt_id, uint32_t class_id,
+			     uint32_t *fence_out) {
+	return isp_submit(cmdbuf_h, num_words, syncpt_id, class_id,
+			  NULL, NULL, 0, fence_out);
 }
 
 /* ---- time helper ---- */
@@ -615,7 +637,7 @@ int main(int argc, char **argv)
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		uint32_t fence;
-		if (isp_submit(cmdbuf_h, 2, syncpt_id, class_id, &fence) < 0) {
+		if (isp_submit_simple(cmdbuf_h, 2, syncpt_id, class_id, &fence) < 0) {
 			printf("Ping submit failed!\n");
 			return 1;
 		}
@@ -628,20 +650,46 @@ int main(int argc, char **argv)
 
 	/* ==== SUBMIT 1: Init (calibration + MMIO init + trigger 0x0F) ==== */
 	printf("\n--- Submit 1: Init (0x0F) ---\n");
+	int init_work_reloc_offset = -1;  /* byte offset of work_buf IOVA in cmdbuf */
 	{
 		uint32_t cmd[4096];
 		int n = build_init_cmdbuf(cmd, 4096, class_id, syncpt_id,
 					  work_iova, cal_path);
 		printf("  init cmdbuf: %d words\n", n);
 
+		/* Find work_buf IOVA position for reloc */
+		for (int i = 0; i < n; i++) {
+			if (cmd[i] == work_iova && i > 0) {
+				init_work_reloc_offset = i * 4;
+				printf("  work_buf reloc at word %d (offset 0x%x)\n",
+				       i, init_work_reloc_offset);
+				break;
+			}
+		}
+
 		if (nvmap_write(cmdbuf_h, 0, cmd, n * 4) < 0) {
 			printf("cmdbuf write failed\n"); return 1;
 		}
 
+		/* Build relocs for init: work buffer */
+		struct nvhost_reloc relocs[MAX_RELOCS];
+		struct nvhost_reloc_shift shifts[MAX_RELOCS];
+		int nr = 0;
+		if (init_work_reloc_offset >= 0) {
+			relocs[nr].cmdbuf_mem = cmdbuf_h;
+			relocs[nr].cmdbuf_offset = init_work_reloc_offset;
+			relocs[nr].target = work_h;
+			relocs[nr].target_offset = 0;
+			shifts[nr].shift = 0;
+			nr++;
+		}
+		printf("  init relocs: %d\n", nr);
+
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		uint32_t fence;
-		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id, &fence) < 0) {
+		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id,
+			       relocs, shifts, nr, &fence) < 0) {
 			printf("Init submit FAILED\n"); return 1;
 		}
 		int ret = syncpt_wait(syncpt_id, fence, 2000);
@@ -669,6 +717,44 @@ int main(int argc, char **argv)
 					   0x05);
 		printf("  frame cmdbuf: %d words\n", n);
 
+		/* Build relocs: find IOVA positions in cmdbuf */
+		struct nvhost_reloc relocs[MAX_RELOCS];
+		struct nvhost_reloc_shift shifts[MAX_RELOCS];
+		int nr = 0;
+
+		for (int i = 0; i < n; i++) {
+			if (cmd[i] == out_y_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_u_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = Y_SIZE;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_v_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = Y_SIZE + UV_SIZE;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == in_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = in_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			}
+		}
+		printf("  frame relocs: %d\n", nr);
+
 		if (nvmap_write(cmdbuf_h, 0, cmd, n * 4) < 0) {
 			printf("cmdbuf write failed\n"); return 1;
 		}
@@ -676,7 +762,8 @@ int main(int argc, char **argv)
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		uint32_t fence;
-		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id, &fence) < 0) {
+		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id,
+			       relocs, shifts, nr, &fence) < 0) {
 			printf("Frame submit FAILED\n"); goto cleanup;
 		}
 		int ret = syncpt_wait(syncpt_id, fence, 2000);
@@ -697,6 +784,43 @@ int main(int argc, char **argv)
 					   out_y_iova, out_u_iova, out_v_iova,
 					   0x05);
 
+		/* Same relocs as submit 2 */
+		struct nvhost_reloc relocs[MAX_RELOCS];
+		struct nvhost_reloc_shift shifts[MAX_RELOCS];
+		int nr = 0;
+
+		for (int i = 0; i < n; i++) {
+			if (cmd[i] == out_y_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_u_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = Y_SIZE;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_v_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = Y_SIZE + UV_SIZE;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == in_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = in_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			}
+		}
+
 		if (nvmap_write(cmdbuf_h, 0, cmd, n * 4) < 0) {
 			printf("cmdbuf write failed\n"); return 1;
 		}
@@ -704,7 +828,8 @@ int main(int argc, char **argv)
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		uint32_t fence;
-		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id, &fence) < 0) {
+		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id,
+			       relocs, shifts, nr, &fence) < 0) {
 			printf("Frame 2 submit FAILED\n"); goto cleanup;
 		}
 		int ret = syncpt_wait(syncpt_id, fence, 2000);
