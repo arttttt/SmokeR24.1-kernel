@@ -838,6 +838,98 @@ int main(int argc, char **argv)
 		       elapsed_us(&t0, &t1));
 	}
 
+	/* ==== SUBMIT 4: Combined (cal + init_regs + output + trigger 0x0F, then 0x05) ==== */
+	printf("\n--- Submit 4: Combined single submit ---\n");
+	{
+		/* Re-fill output with sentinel */
+		fill_sentinel(out_h, 0, OUT_SIZE > 4096 ? 4096 : OUT_SIZE);
+		fill_sentinel(work_h, 0, 4096);
+
+		uint32_t cmd[4096];
+		/* First: build init part (calibration + init regs + trigger 0x0F) */
+		int n = build_init_cmdbuf(cmd, 4096, class_id, syncpt_id,
+					  work_iova, cal_path);
+		/* Remove syncpt + noop at end (last 2 words) to continue */
+		n -= 2;
+
+		/* Then: add frame part (output + input + trigger 0x05) */
+		int frame_start = n;
+		uint32_t frame_cmd[256];
+		int fn = build_frame_cmdbuf(frame_cmd, 256, class_id, syncpt_id,
+					    W, H, in_iova,
+					    out_y_iova, out_u_iova, out_v_iova,
+					    0x05);
+		memcpy(&cmd[n], frame_cmd, fn * 4);
+		n += fn;
+
+		printf("  combined cmdbuf: %d words\n", n);
+
+		/* Build relocs for combined */
+		struct nvhost_reloc relocs[MAX_RELOCS];
+		struct nvhost_reloc_shift shifts[MAX_RELOCS];
+		int nr = 0;
+
+		for (int i = 0; i < n; i++) {
+			if (cmd[i] == work_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = work_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_y_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_u_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = Y_SIZE;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == out_v_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = out_h;
+				relocs[nr].target_offset = Y_SIZE + UV_SIZE;
+				shifts[nr].shift = 0;
+				nr++;
+			} else if (cmd[i] == in_iova) {
+				relocs[nr].cmdbuf_mem = cmdbuf_h;
+				relocs[nr].cmdbuf_offset = i * 4;
+				relocs[nr].target = in_h;
+				relocs[nr].target_offset = 0;
+				shifts[nr].shift = 0;
+				nr++;
+			}
+		}
+		printf("  combined relocs: %d\n", nr);
+
+		if (nvmap_write(cmdbuf_h, 0, cmd, n * 4) < 0) {
+			printf("cmdbuf write failed\n"); return 1;
+		}
+
+		struct timespec t0, t1;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		uint32_t fence;
+		/* 2 syncpt incrs: 1 from init trigger implicit, 1 from OP_DONE */
+		if (isp_submit(cmdbuf_h, n, syncpt_id, class_id,
+			       relocs, shifts, nr, &fence) < 0) {
+			printf("Combined submit FAILED\n"); goto cleanup;
+		}
+		int ret = syncpt_wait(syncpt_id, fence, 2000);
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		printf("  Combined: %s (%ld us)\n", ret ? "TIMEOUT" : "OK",
+		       elapsed_us(&t0, &t1));
+
+		check_sentinel(out_h, 0, 4096, "output Y[0..4K]");
+		check_sentinel(work_h, 0, 4096, "work[0..4K]");
+	}
+
 	/* ==== Results ==== */
 	printf("\n--- Results ---\n");
 	check_sentinel(out_h, 0, 4096, "output Y[0..4K]");
