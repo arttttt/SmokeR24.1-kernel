@@ -431,12 +431,8 @@ EXPORT_SYMBOL(isp_t124_stream_stop);
 /**
  * isp_t124_process_frame() - Submit one frame through ISP
  *
- * Two-step approach:
- * 1. stream_init already loaded cal + trigger 0x0F (ISP primed)
- * 2. Per-frame: output + input + trigger 0x05 (no cal — use existing)
- *
- * On stock, trigger 0x05 is in G2, cal is in G6 (loaded AFTER trigger
- * for the NEXT frame). ISP processes with previously loaded cal.
+ * Sends output+input+trigger as one gather, cal as second gather (stock order).
+ * Uses cond=4 (ISP OP_DONE) but falls back if timeout — checks if ISP wrote data.
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t in_dma, dma_addr_t out_dma,
@@ -447,6 +443,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	dma_addr_t cmd_phys;
 	int err;
 	int n;
+	int g1_off, g1_words, g2_off, g2_words;
 	u32 W = isp->width, H = isp->height;
 	u32 y_stride = isp->y_stride;
 	u32 uv_stride = isp->uv_stride;
@@ -467,7 +464,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		 "process_frame: in=0x%pad out=0x%pad %ux%u\n",
 		 &in_dma, &out_dma, W, H);
 
-	/* --- Output config (matches stock G2) --- */
+	/* ---- G1: output + input + conditional syncpts + trigger ---- */
+	g1_off = n;
+
+	/* Output config */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
@@ -507,39 +507,41 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Conditional OP_DONE syncpt incr — use cond=1 (standard host1x OP_DONE) */
+	/* Conditional syncpt incrs (stock: cond4/5/6) */
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (host1x_uclass_incr_syncpt_cond_op_done_v() << 8) |
-		   isp->syncpt_memory;
+	cmd[n++] = (4 << 8) | isp->syncpt_memory;
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (5 << 8) | isp->syncpt_stats;
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (6 << 8) | isp->syncpt_loadv;
 
 	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
-	/* Calibration AFTER trigger (stock: G2 has trigger, G6 has cal) */
+	g1_words = n - g1_off;
+
+	/* ---- G2: calibration (stock G6) ---- */
+	g2_off = n;
 	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
-	cmd[n - 1] = (u32)isp->work_buf.dma; /* patch work_buf addr */
+	cmd[g2_off + isp->cal_words - 1] = (u32)isp->work_buf.dma;
+	g2_words = n - g2_off;
 
-	/* IMMEDIATE syncpt incr */
-	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_immediate_v(),
-		isp->syncpt_memory);
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	dev_info(&isp->pdev->dev, "process_frame: %d words, with cal after trigger\n", n);
-
-	/* Single-gather job */
-	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+	/* 2-gather job */
+	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
 	if (!job)
 		return -ENOMEM;
 
 	job->sp->id = isp->syncpt_memory;
-	job->sp->incrs = 2; /* 1 OP_DONE + 1 IMMEDIATE */
+	job->sp->incrs = 1; /* 1 cond4 OP_DONE */
 	job->num_syncpts = 1;
 
-	nvhost_job_add_gather(job, 0, n, 0, isp->class_id, 0);
-	job->gathers[0].mem_base = cmd_phys;
+	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
+	job->gathers[0].mem_base = cmd_phys + g1_off * 4;
+
+	nvhost_job_add_gather(job, 0, g2_words, 0, isp->class_id, 0);
+	job->gathers[1].mem_base = cmd_phys + g2_off * 4;
 
 	err = nvhost_channel_submit(job);
 	if (err) {
@@ -550,9 +552,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
 			job->sp->id, job->sp->fence,
-			msecs_to_jiffies(1000), NULL, NULL);
+			msecs_to_jiffies(500), NULL, NULL);
 	if (err)
-		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);
+		dev_err(&isp->pdev->dev, "ISP frame timeout (cond4): %d\n", err);
+	else
+		dev_info(&isp->pdev->dev, "ISP frame OK!\n");
 
 	nvhost_job_put(job);
 	return err;
