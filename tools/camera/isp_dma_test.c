@@ -248,7 +248,58 @@ struct nvhost_reloc_shift { uint32_t shift; } __attribute__((packed));
 
 #define MAX_RELOCS 16
 
-/* ---- submit with relocs ---- */
+/* ---- multi-gather submit (stock uses 6 gathers per frame) ---- */
+#define MAX_GATHERS 8
+
+struct gather_desc {
+	uint32_t handle;
+	uint32_t offset;   /* byte offset within handle */
+	uint32_t words;
+	uint32_t class_id; /* 0 = no SET_CLASS prefix */
+};
+
+static int isp_submit_multi(struct gather_desc *gathers, int num_gathers,
+			    uint32_t syncpt_id, uint32_t syncpt_incrs,
+			    struct nvhost_reloc *relocs,
+			    struct nvhost_reloc_shift *reloc_shifts,
+			    int num_relocs,
+			    uint32_t *fence_out) {
+	struct nvhost_cmdbuf cbs[MAX_GATHERS];
+	uint32_t class_ids[MAX_GATHERS];
+	struct nvhost_syncpt_incr si = {
+		.syncpt_id = syncpt_id, .syncpt_incrs = syncpt_incrs,
+	};
+	struct nvhost_fence fence = { 0, 0 };
+
+	for (int i = 0; i < num_gathers; i++) {
+		cbs[i].mem = gathers[i].handle;
+		cbs[i].offset = gathers[i].offset;
+		cbs[i].words = gathers[i].words;
+		class_ids[i] = gathers[i].class_id;
+	}
+
+	struct nvhost32_submit_args sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.submit_version = 0;
+	sa.num_syncpt_incrs = 1;
+	sa.num_cmdbufs = num_gathers;
+	sa.num_relocs = num_relocs;
+	sa.num_waitchks = 0;
+	sa.timeout = 2000;
+	sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
+	sa.cmdbufs = (uint32_t)(uintptr_t)cbs;
+	sa.relocs = num_relocs ? (uint32_t)(uintptr_t)relocs : 0;
+	sa.reloc_shifts = num_relocs ? (uint32_t)(uintptr_t)reloc_shifts : 0;
+	sa.class_ids = (uint32_t)(uintptr_t)class_ids;
+	sa.fences = (uint32_t)(uintptr_t)&fence;
+
+	if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa) < 0) {
+		perror("submit_multi");
+		return -1;
+	}
+	if (fence_out) *fence_out = fence.value;
+	return 0;
+}
 static int isp_submit(uint32_t cmdbuf_h, uint32_t num_words,
 		      uint32_t syncpt_id, uint32_t class_id,
 		      struct nvhost_reloc *relocs,
@@ -421,7 +472,7 @@ static int build_init_cmdbuf(uint32_t *cmd, int max_words,
 
 	/* 0x014 = sensor-specific param */
 	cmd[n++] = h1x_incr(0x014, 1);
-	cmd[n++] = (class_id == 0x32) ? 0x000000EB : 0x0000019B;
+	cmd[n++] = (class_id == 0x32) ? 0x00000339 : 0x0000019B;
 
 	/* 0x015 = 0x04040007 — ISP enable + mode (stock value) */
 	cmd[n++] = h1x_incr(0x015, 1);
@@ -439,7 +490,7 @@ static int build_init_cmdbuf(uint32_t *cmd, int max_words,
 	cmd[n++] = h1x_incr(0x01D, 1);
 	cmd[n++] = 0x00000001;
 	cmd[n++] = h1x_incr(0x01F, 1);
-	cmd[n++] = 0x00000003;
+	cmd[n++] = (class_id == 0x32) ? 0x00000001 : 0x00000003;
 
 	/* 0x05E = 0x00003232 */
 	cmd[n++] = h1x_incr(0x05E, 1);
@@ -964,6 +1015,247 @@ int main(int argc, char **argv)
 		check_sentinel(work_h, 0, 4096, "work[0..4K]");
 	}
 
+	/* ==== SUBMIT 5: Stock-style 6-gather single job ==== */
+	printf("\n--- Submit 5: Stock 6-gather layout ---\n");
+	{
+		/* Re-fill output + work with sentinel */
+		fill_sentinel(out_h, 0, OUT_SIZE > 65536 ? 65536 : OUT_SIZE);
+		fill_sentinel(work_h, 0, 4096);
+
+		/*
+		 * Stock per-frame layout: 6 gathers in one job
+		 * G1: 2 words  — syncpt incr
+		 * G2: 45 words — output + surfaces + input + trigger 0x05
+		 * G3: 2 words  — syncpt incr
+		 * G4: 8 words  — syncpt wait (for VI) — skip, use NOOPs
+		 * G5: 2 words  — syncpt incr
+		 * G6: ~1545 words — calibration + init regs + trigger 0x0F
+		 *
+		 * NOTE: stock sends calibration LAST (G6), trigger 0x05 BEFORE (G2)!
+		 * This means ISP sees: frame config → trigger 0x05 → cal → trigger 0x0F
+		 * The 0x0F at end applies config for NEXT frame.
+		 */
+
+		/* Pack all gathers into one cmdbuf handle at different offsets */
+		uint32_t cmd[4096];
+		int offsets[6], sizes[6];
+		int pos = 0;
+
+		/* G1: syncpt incr (host1x class) */
+		offsets[0] = pos;
+		cmd[pos++] = h1x_setclass(0x01, 0, 0); /* host1x class */
+		cmd[pos++] = h1x_imm_incr_syncpt(1 /* OP_DONE */, syncpt_id);
+		sizes[0] = pos - offsets[0];
+
+		/* G2: output + surfaces + input + trigger 0x05 (stock 45 words) */
+		offsets[1] = pos;
+		cmd[pos++] = h1x_setclass(class_id, 0, 0);
+		/* Output dimensions */
+		cmd[pos++] = h1x_incr(0xE00, 1);
+		cmd[pos++] = ((W - 1) & 0x3FFF) << 16;
+		cmd[pos++] = h1x_incr(0xE01, 1);
+		cmd[pos++] = ((H - 1) & 0x3FFF) << 16;
+		cmd[pos++] = h1x_incr(0xE02, 1);
+		cmd[pos++] = 0x04FE00E6;
+		cmd[pos++] = h1x_incr(0xE03, 1);
+		cmd[pos++] = 0x00000000;
+		/* Y surface */
+		cmd[pos++] = h1x_incr(0xE04, 3);
+		int reloc_y_pos = pos;
+		cmd[pos++] = out_y_iova;
+		cmd[pos++] = 0;
+		cmd[pos++] = Y_STRIDE;
+		/* U surface */
+		cmd[pos++] = h1x_incr(0xE07, 3);
+		int reloc_u_pos = pos;
+		cmd[pos++] = out_u_iova;
+		cmd[pos++] = 0;
+		cmd[pos++] = UV_STRIDE;
+		/* V surface */
+		cmd[pos++] = h1x_incr(0xE0A, 3);
+		int reloc_v_pos = pos;
+		cmd[pos++] = out_v_iova;
+		cmd[pos++] = 0;
+		cmd[pos++] = UV_STRIDE;
+		/* Processing */
+		cmd[pos++] = h1x_incr(0x500, 6);
+		cmd[pos++] = 0; cmd[pos++] = 0; cmd[pos++] = 0;
+		cmd[pos++] = 0; cmd[pos++] = 0;
+		cmd[pos++] = (H << 16) | W;
+		/* Input */
+		cmd[pos++] = h1x_setclass(class_id, 0, 0);
+		cmd[pos++] = h1x_incr(0x100, 4);
+		int reloc_in_pos = pos;
+		cmd[pos++] = in_iova;
+		cmd[pos++] = 0; cmd[pos++] = 0; cmd[pos++] = 0;
+		/* Syncpt incrs (stock has 3 before trigger) */
+		cmd[pos++] = h1x_setclass(class_id, 0, 0);
+		cmd[pos++] = h1x_nonincr(0x000, 1);
+		cmd[pos++] = (4 << 8) | syncpt_id;
+		cmd[pos++] = h1x_nonincr(0x000, 1);
+		cmd[pos++] = (5 << 8) | syncpt_id;
+		cmd[pos++] = h1x_nonincr(0x000, 1);
+		cmd[pos++] = (6 << 8) | syncpt_id;
+		/* Trigger 0x05 */
+		cmd[pos++] = h1x_setclass(class_id, 0, 0);
+		cmd[pos++] = h1x_nonincr(0x00C, 1);
+		cmd[pos++] = 0x00000005;
+		sizes[1] = pos - offsets[1];
+
+		/* G3: syncpt incr */
+		offsets[2] = pos;
+		cmd[pos++] = h1x_setclass(0x01, 0, 0);
+		cmd[pos++] = h1x_imm_incr_syncpt(1, syncpt_id);
+		sizes[2] = pos - offsets[2];
+
+		/* G4: syncpt wait — stock waits for VI, we skip */
+		offsets[3] = pos;
+		cmd[pos++] = NOOP;
+		cmd[pos++] = NOOP;
+		sizes[3] = pos - offsets[3];
+
+		/* G5: syncpt incr */
+		offsets[4] = pos;
+		cmd[pos++] = h1x_setclass(0x01, 0, 0);
+		cmd[pos++] = h1x_imm_incr_syncpt(1, syncpt_id);
+		sizes[4] = pos - offsets[4];
+
+		/* G6: calibration + init regs + trigger 0x0F */
+		offsets[5] = pos;
+		cmd[pos++] = h1x_setclass(class_id, 0, 0);
+		/* Load cal */
+		FILE *cal = fopen(cal_path, "rb");
+		if (cal) {
+			uint32_t first;
+			fread(&first, 4, 1, cal);
+			if ((first >> 28) == 0) { /* skip SET_CLASS */ }
+			else cmd[pos++] = first;
+			int nr = fread(&cmd[pos], 4, 3000, cal);
+			fclose(cal);
+			pos += nr;
+			/* Patch work buf addr */
+			for (int i = offsets[5]; i < pos - 1; i++) {
+				if (cmd[i] == h1x_incr(0x053, 2)) {
+					cmd[i + 2] = work_iova;
+					break;
+				}
+			}
+		}
+		/* Init regs */
+		cmd[pos++] = h1x_setclass(class_id, 0, 0);
+		cmd[pos++] = h1x_incr(0x008, 1); cmd[pos++] = 0xF000F800;
+		cmd[pos++] = h1x_incr(0x014, 1); cmd[pos++] = 0x00000339;
+		cmd[pos++] = h1x_incr(0x015, 1); cmd[pos++] = 0x04040007;
+		cmd[pos++] = h1x_incr(0x018, 5);
+		cmd[pos++] = 0x0A00500A; cmd[pos++] = 0x00008089;
+		cmd[pos++] = 0x013645CB; cmd[pos++] = 0x000001E7;
+		cmd[pos++] = 0x00000001;
+		cmd[pos++] = h1x_incr(0x01D, 1); cmd[pos++] = 0x00000001;
+		cmd[pos++] = h1x_incr(0x01F, 1); cmd[pos++] = 0x00000001;
+		cmd[pos++] = h1x_incr(0x05E, 1); cmd[pos++] = 0x00003232;
+		/* Secondary output config */
+		cmd[pos++] = h1x_incr(0xE31, 1); cmd[pos++] = W | (H << 16);
+		cmd[pos++] = h1x_incr(0xE33, 1); cmd[pos++] = 0x04FE00E6;
+		cmd[pos++] = h1x_incr(0xE32, 1); cmd[pos++] = Y_STRIDE;
+		cmd[pos++] = h1x_incr(0xE30, 1); cmd[pos++] = 0x00000001;
+		/* Trigger 0x0F */
+		cmd[pos++] = h1x_nonincr(0x00C, 1); cmd[pos++] = 0x0000000F;
+		/* Final syncpt */
+		cmd[pos++] = h1x_imm_incr_syncpt(1, syncpt_id);
+		cmd[pos++] = NOOP;
+		sizes[5] = pos - offsets[5];
+
+		printf("  total: %d words, gathers: ", pos);
+		for (int i = 0; i < 6; i++)
+			printf("G%d=%d ", i + 1, sizes[i]);
+		printf("\n");
+
+		/* Write to cmdbuf handle */
+		if (nvmap_write(cmdbuf_h, 0, cmd, pos * 4) < 0) {
+			printf("cmdbuf write failed\n"); goto cleanup;
+		}
+
+		/* Build gathers */
+		struct gather_desc gathers[6];
+		for (int i = 0; i < 6; i++) {
+			gathers[i].handle = cmdbuf_h;
+			gathers[i].offset = offsets[i] * 4;
+			gathers[i].words = sizes[i];
+			gathers[i].class_id = class_id;
+		}
+		/* G1, G3, G5 are syncpt — host1x class, no ISP SET_CLASS */
+		gathers[0].class_id = 0;
+		gathers[2].class_id = 0;
+		gathers[3].class_id = 0; /* NOOP */
+		gathers[4].class_id = 0;
+
+		/* Relocs for G2 (output + input) */
+		struct nvhost_reloc relocs[MAX_RELOCS];
+		struct nvhost_reloc_shift shifts[MAX_RELOCS];
+		int rnr = 0;
+
+		relocs[rnr].cmdbuf_mem = cmdbuf_h;
+		relocs[rnr].cmdbuf_offset = reloc_y_pos * 4;
+		relocs[rnr].target = out_h;
+		relocs[rnr].target_offset = 0;
+		shifts[rnr].shift = 0; rnr++;
+
+		relocs[rnr].cmdbuf_mem = cmdbuf_h;
+		relocs[rnr].cmdbuf_offset = reloc_u_pos * 4;
+		relocs[rnr].target = out_h;
+		relocs[rnr].target_offset = Y_SIZE;
+		shifts[rnr].shift = 0; rnr++;
+
+		relocs[rnr].cmdbuf_mem = cmdbuf_h;
+		relocs[rnr].cmdbuf_offset = reloc_v_pos * 4;
+		relocs[rnr].target = out_h;
+		relocs[rnr].target_offset = Y_SIZE + UV_SIZE;
+		shifts[rnr].shift = 0; rnr++;
+
+		relocs[rnr].cmdbuf_mem = cmdbuf_h;
+		relocs[rnr].cmdbuf_offset = reloc_in_pos * 4;
+		relocs[rnr].target = in_h;
+		relocs[rnr].target_offset = 0;
+		shifts[rnr].shift = 0; rnr++;
+
+		/* work buf reloc in G6 */
+		for (int i = offsets[5]; i < pos - 1; i++) {
+			if (cmd[i] == work_iova) {
+				relocs[rnr].cmdbuf_mem = cmdbuf_h;
+				relocs[rnr].cmdbuf_offset = i * 4;
+				relocs[rnr].target = work_h;
+				relocs[rnr].target_offset = 0;
+				shifts[rnr].shift = 0; rnr++;
+				break;
+			}
+		}
+		printf("  relocs: %d\n", rnr);
+
+		/* syncpt_incrs = 4: G1 + G3 + G5 + G6_tail = 4 OP_DONE
+		 * plus 3 ISP-internal in G2 = 7 total. But submit counts
+		 * only the ones kernel needs to track. Stock uses 4. */
+		struct timespec t0, t1;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		uint32_t fence;
+		if (isp_submit_multi(gathers, 6, syncpt_id, 4,
+				     relocs, shifts, rnr, &fence) < 0) {
+			printf("Stock-style submit FAILED\n");
+			/* Try with different syncpt count */
+			if (isp_submit_multi(gathers, 6, syncpt_id, 1,
+					     relocs, shifts, rnr, &fence) < 0) {
+				printf("Also failed with incrs=1\n");
+				goto cleanup;
+			}
+		}
+		int ret = syncpt_wait(syncpt_id, fence, 3000);
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		printf("  Stock-style: %s (%ld us)\n",
+		       ret ? "TIMEOUT" : "OK", elapsed_us(&t0, &t1));
+
+		check_sentinel(out_h, 0, 4096, "output Y[0..4K]");
+		check_sentinel(work_h, 0, 4096, "work[0..4K]");
+	}
+
 	/* ==== Results ==== */
 	printf("\n--- Results ---\n");
 	check_sentinel(out_h, 0, 4096, "output Y[0..4K]");
@@ -1060,6 +1352,28 @@ int main(int argc, char **argv)
 			close(mem_fd);
 		} else {
 			printf("  (cannot open /dev/mem for MMIO read)\n");
+		}
+	}
+
+	/* Full MMIO dump — all 128 regs for comparison with stock */
+	printf("\n--- Full MMIO dump (methods 0x000-0x07F) ---\n");
+	{
+		int mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
+		if (mem_fd >= 0) {
+			uint32_t isp_base = (class_id == 0x32) ? 0x54600000 : 0x54680000;
+			void *map = mmap(NULL, 4096, PROT_READ, MAP_SHARED,
+					 mem_fd, isp_base);
+			if (map != MAP_FAILED) {
+				volatile uint32_t *regs = (volatile uint32_t *)map;
+				for (int i = 0; i < 128; i++) {
+					uint32_t v = regs[i];
+					if (v != 0)
+						printf("  %03x %04x = 0x%08X\n",
+						       i, i * 4, v);
+				}
+				munmap(map, 4096);
+			}
+			close(mem_fd);
 		}
 	}
 
