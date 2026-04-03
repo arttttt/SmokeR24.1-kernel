@@ -325,6 +325,18 @@ static int pin_array_ids(struct platform_device *dev,
 			sg_dma_address(sgt->sgl) = sg_phys(sgt->sgl);
 
 		phys_addr[ids[i].index] = sg_dma_address(sgt->sgl);
+
+		/* ISP debug: show what address pin returns */
+		{
+			struct nvhost_device_data *pdata = platform_get_drvdata(dev);
+			if (pdata && (pdata->class == 0x32 || pdata->class == 0x34))
+				dev_info(&dev->dev,
+					"pin id=%u -> dma=0x%pad phys=0x%lx dev=%s\n",
+					ids[i].id,
+					&sg_dma_address(sgt->sgl),
+					(unsigned long)sg_phys(sgt->sgl),
+					dev_name(&dev->dev));
+		}
 		unpin_data[pin_count].buf = buf;
 		unpin_data[pin_count].attach = attach;
 		unpin_data[pin_count++].sgt = sgt;
@@ -420,6 +432,22 @@ static int do_relocs(struct nvhost_job *job,
 			(void __iomem *)(cmdbuf_page_addr +
 				(reloc->cmdbuf_offset & ~PAGE_MASK)));
 
+		/* ISP debug: show reloc patch */
+		{
+			struct nvhost_device_data *pdata =
+				platform_get_drvdata(job->ch->dev);
+			if (pdata && (pdata->class == 0x32 ||
+				      pdata->class == 0x34))
+				pr_info("isp reloc: cmdbuf_off=0x%x "
+					"phys=0x%x+0x%x=0x%x\n",
+					reloc->cmdbuf_offset,
+					(u32)job->reloc_addr_phys[i],
+					reloc->target_offset,
+					(u32)((job->reloc_addr_phys[i] +
+					reloc->target_offset) >>
+					shift->shift));
+		}
+
 		/* remove completed reloc from the job */
 		if (i != job->num_relocs - 1) {
 			struct nvhost_reloc *reloc_last =
@@ -482,6 +510,19 @@ int nvhost_job_pin(struct nvhost_job *job, struct nvhost_syncpt *sp)
 			}
 
 			g->mem_base = job->gather_addr_phys[i];
+
+			/* ISP: show gather physical address */
+			{
+				struct nvhost_device_data *pdata =
+					platform_get_drvdata(job->ch->dev);
+				if (pdata && (pdata->class == 0x32 ||
+					      pdata->class == 0x34))
+					pr_info("isp gather[%d]: mem_id=%lu "
+						"mem_base=0x%x words=%u\n",
+						i, (unsigned long)g->mem_id,
+						(u32)g->mem_base,
+						g->words);
+			}
 
 			for (j = 0; j < job->num_gathers; j++) {
 				struct nvhost_job_gather *tmp =
