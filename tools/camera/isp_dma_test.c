@@ -463,22 +463,27 @@ static int build_init_cmdbuf(uint32_t *cmd, int max_words,
 	 * Missing init registers from stock MMIO dump.
 	 * These are set by NvIspSetConfiguration before first frame
 	 * and never appear in per-frame cmdbuf.
+	 * Write ALL non-zero stock MMIO registers.
 	 */
 	cmd[n++] = h1x_setclass(class_id, 0, 0);
 
-	/* 0x008 = 0xF000F800 — input config (always this value on stock) */
+	/* 0x008 = 0xF000F800 — input config */
 	cmd[n++] = h1x_incr(0x008, 1);
 	cmd[n++] = 0xF000F800;
+
+	/* 0x00D = 0x00000100 — status (may be read-only, write anyway) */
+	cmd[n++] = h1x_incr(0x00D, 1);
+	cmd[n++] = 0x00000100;
 
 	/* 0x014 = sensor-specific param */
 	cmd[n++] = h1x_incr(0x014, 1);
 	cmd[n++] = (class_id == 0x32) ? 0x00000339 : 0x0000019B;
 
-	/* 0x015 = 0x04040007 — ISP enable + mode (stock value) */
+	/* 0x015 = 0x04040007 — ISP enable + mode */
 	cmd[n++] = h1x_incr(0x015, 1);
 	cmd[n++] = 0x04040007;
 
-	/* 0x018-0x01C — processing params (same for both ISPs on stock) */
+	/* 0x018-0x01C — processing params */
 	cmd[n++] = h1x_incr(0x018, 5);
 	cmd[n++] = 0x0A00500A;  /* 0x018 */
 	cmd[n++] = 0x00008089;  /* 0x019 */
@@ -486,15 +491,46 @@ static int build_init_cmdbuf(uint32_t *cmd, int max_words,
 	cmd[n++] = 0x000001E7;  /* 0x01B */
 	cmd[n++] = 0x00000001;  /* 0x01C */
 
-	/* 0x01D = ISP_CG_CTRL, 0x01F = mode */
+	/* 0x01D = ISP_CG_CTRL */
 	cmd[n++] = h1x_incr(0x01D, 1);
 	cmd[n++] = 0x00000001;
+
+	/* 0x01F = mode (1 for ISP-A, 3 for ISP-B per stock MMIO) */
 	cmd[n++] = h1x_incr(0x01F, 1);
 	cmd[n++] = (class_id == 0x32) ? 0x00000001 : 0x00000003;
 
-	/* 0x05E = 0x00003232 */
-	cmd[n++] = h1x_incr(0x05E, 1);
-	cmd[n++] = 0x00003232;
+	/* 0x024-0x026 — unknown, constant on stock (may be hash/signature) */
+	cmd[n++] = h1x_incr(0x024, 3);
+	cmd[n++] = 0xC6BFF67C;  /* 0x024 — same for A and B */
+	cmd[n++] = 0x70C9A9EA;  /* 0x025 — per-session on stock */
+	cmd[n++] = 0x33894D2B;  /* 0x026 — per-session on stock */
+
+	/* 0x028-0x02A — unknown, all 0x07 on stock ISP-A */
+	cmd[n++] = h1x_incr(0x028, 3);
+	cmd[n++] = 0x00000007;  /* 0x028 */
+	cmd[n++] = 0x00000007;  /* 0x029 */
+	cmd[n++] = 0x00000007;  /* 0x02A — ISP-B has 0x07 too */
+
+	/* 0x038 — unknown constant */
+	cmd[n++] = h1x_incr(0x038, 1);
+	cmd[n++] = 0x242CB07B;
+
+	/* 0x03B — per-sensor */
+	cmd[n++] = h1x_incr(0x03B, 1);
+	cmd[n++] = (class_id == 0x32) ? 0x017BAD37 : 0x00100900;
+
+	/* 0x03F — unknown */
+	cmd[n++] = h1x_incr(0x03F, 1);
+	cmd[n++] = 0x00000020;
+
+	/* 0x051 — unknown */
+	cmd[n++] = h1x_incr(0x051, 1);
+	cmd[n++] = 0x017BA537;
+
+	/* 0x05E-0x05F */
+	cmd[n++] = h1x_incr(0x05E, 2);
+	cmd[n++] = 0x00003232;  /* 0x05E */
+	cmd[n++] = 0x00000010;  /* 0x05F — not written before */
 
 	/* Trigger 0x0F — static config apply */
 	cmd[n++] = h1x_nonincr(0x00C, 1);
@@ -1141,9 +1177,10 @@ int main(int argc, char **argv)
 				}
 			}
 		}
-		/* Init regs */
+		/* Init regs — ALL non-zero stock MMIO values */
 		cmd[pos++] = h1x_setclass(class_id, 0, 0);
 		cmd[pos++] = h1x_incr(0x008, 1); cmd[pos++] = 0xF000F800;
+		cmd[pos++] = h1x_incr(0x00D, 1); cmd[pos++] = 0x00000100;
 		cmd[pos++] = h1x_incr(0x014, 1); cmd[pos++] = 0x00000339;
 		cmd[pos++] = h1x_incr(0x015, 1); cmd[pos++] = 0x04040007;
 		cmd[pos++] = h1x_incr(0x018, 5);
@@ -1152,7 +1189,18 @@ int main(int argc, char **argv)
 		cmd[pos++] = 0x00000001;
 		cmd[pos++] = h1x_incr(0x01D, 1); cmd[pos++] = 0x00000001;
 		cmd[pos++] = h1x_incr(0x01F, 1); cmd[pos++] = 0x00000001;
-		cmd[pos++] = h1x_incr(0x05E, 1); cmd[pos++] = 0x00003232;
+		cmd[pos++] = h1x_incr(0x024, 3);
+		cmd[pos++] = 0xC6BFF67C; cmd[pos++] = 0x70C9A9EA;
+		cmd[pos++] = 0x33894D2B;
+		cmd[pos++] = h1x_incr(0x028, 3);
+		cmd[pos++] = 0x00000007; cmd[pos++] = 0x00000007;
+		cmd[pos++] = 0x00000007;
+		cmd[pos++] = h1x_incr(0x038, 1); cmd[pos++] = 0x242CB07B;
+		cmd[pos++] = h1x_incr(0x03B, 1); cmd[pos++] = 0x017BAD37;
+		cmd[pos++] = h1x_incr(0x03F, 1); cmd[pos++] = 0x00000020;
+		cmd[pos++] = h1x_incr(0x051, 1); cmd[pos++] = 0x017BA537;
+		cmd[pos++] = h1x_incr(0x05E, 2);
+		cmd[pos++] = 0x00003232; cmd[pos++] = 0x00000010;
 		/* Secondary output config */
 		cmd[pos++] = h1x_incr(0xE31, 1); cmd[pos++] = W | (H << 16);
 		cmd[pos++] = h1x_incr(0xE33, 1); cmd[pos++] = 0x04FE00E6;
@@ -1231,23 +1279,27 @@ int main(int argc, char **argv)
 		}
 		printf("  relocs: %d\n", rnr);
 
-		/* syncpt_incrs = 4: G1 + G3 + G5 + G6_tail = 4 OP_DONE
-		 * plus 3 ISP-internal in G2 = 7 total. But submit counts
-		 * only the ones kernel needs to track. Stock uses 4. */
+		/* syncpt_incrs: G1(1) + G2(3 cond) + G3(1) + G5(1) + G6(1) = 7
+		 * But ISP cond incrs (4/5/6) may not fire if DMA doesn't start.
+		 * Try 7 first, fallback to 4 (OP_DONE only), then 1.
+		 * Short timeout to avoid hanging device. */
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		uint32_t fence;
-		if (isp_submit_multi(gathers, 6, syncpt_id, 4,
+		if (isp_submit_multi(gathers, 6, syncpt_id, 7,
 				     relocs, shifts, rnr, &fence) < 0) {
-			printf("Stock-style submit FAILED\n");
-			/* Try with different syncpt count */
-			if (isp_submit_multi(gathers, 6, syncpt_id, 1,
+			printf("Stock-style submit FAILED (incrs=7), trying 4\n");
+			if (isp_submit_multi(gathers, 6, syncpt_id, 4,
 					     relocs, shifts, rnr, &fence) < 0) {
-				printf("Also failed with incrs=1\n");
-				goto cleanup;
+				printf("Also failed with incrs=4, trying 1\n");
+				if (isp_submit_multi(gathers, 6, syncpt_id, 1,
+						     relocs, shifts, rnr, &fence) < 0) {
+					printf("All failed\n");
+					goto cleanup;
+				}
 			}
 		}
-		int ret = syncpt_wait(syncpt_id, fence, 3000);
+		int ret = syncpt_wait(syncpt_id, fence, 500);
 		clock_gettime(CLOCK_MONOTONIC, &t1);
 		printf("  Stock-style: %s (%ld us)\n",
 		       ret ? "TIMEOUT" : "OK", elapsed_us(&t0, &t1));
