@@ -314,11 +314,12 @@ static void isp_dma_buf_free(struct device *dev, struct isp_dma_buf *buf)
 static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 {
 	struct device *dev = &isp->pdev->dev;
-	struct isp_dma_buf in_buf = {}, out_y = {}, out_u = {}, out_v = {};
+	struct isp_dma_buf in_buf = {}, out_buf = {}, work_buf = {};
 	u32 *cmdbuf;
 	dma_addr_t cmdbuf_phys;
-	int err, n, nonzero, i;
-	size_t y_size, uv_size;
+	dma_addr_t out_y_dma, out_u_dma, out_v_dma;
+	int err, n, nonzero, i, cal_last_idx;
+	size_t y_size, uv_size, out_total;
 	ktime_t start;
 	s64 us;
 
@@ -327,79 +328,88 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 
 	y_size = ISP_TEST_Y_STRIDE * ISP_TEST_H;
 	uv_size = ISP_TEST_UV_STRIDE * (ISP_TEST_H / 2);
+	out_total = y_size + uv_size * 2;
 
-	seq_printf(s, "ISP DMA test: %dx%d, Y=%zuKB, UV=%zuKB each\n",
-		   ISP_TEST_W, ISP_TEST_H, y_size / 1024, uv_size / 1024);
+	seq_printf(s, "ISP DMA test: %dx%d, out=%zuKB (Y+U+V contiguous)\n",
+		   ISP_TEST_W, ISP_TEST_H, out_total / 1024);
 
 	err = nvhost_module_busy(isp->pdev);
 	if (err)
 		return err;
 
-	/* Allocate buffers */
+	/*
+	 * Allocate buffers matching stock memory model:
+	 * - input: full RAW frame (W*H*2), also used as ISP working memory
+	 * - output: single contiguous Y+U+V (like stock nvmap handle with offsets)
+	 * - work_buf: ISP runtime working buffer for method 0x054
+	 *   (stock calibration has IOVA 0x00745f5c which is invalid here)
+	 */
 	err = isp_dma_buf_alloc(dev, &in_buf, ISP_TEST_INPUT_SIZE);
 	if (err) {
 		seq_printf(s, "input alloc failed: %d\n", err);
 		goto idle;
 	}
-	err = isp_dma_buf_alloc(dev, &out_y, y_size);
+	err = isp_dma_buf_alloc(dev, &out_buf, out_total);
 	if (err) {
-		seq_printf(s, "output Y alloc failed: %d\n", err);
+		seq_printf(s, "output alloc failed: %d\n", err);
 		goto free_in;
 	}
-	err = isp_dma_buf_alloc(dev, &out_u, uv_size);
+	/* ISP working buffer — stock uses ~512KB, allocate 256KB */
+	err = isp_dma_buf_alloc(dev, &work_buf, 256 * 1024);
 	if (err) {
-		seq_printf(s, "output U alloc failed: %d\n", err);
-		goto free_y;
-	}
-	err = isp_dma_buf_alloc(dev, &out_v, uv_size);
-	if (err) {
-		seq_printf(s, "output V alloc failed: %d\n", err);
-		goto free_u;
+		seq_printf(s, "work buf alloc failed: %d\n", err);
+		goto free_out;
 	}
 
-	/* Command buffer: cal(1544) + frame(~50) + padding, use 2 pages */
+	/* Command buffer: need ~1600 words, use 2 pages */
 	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE * 2, &cmdbuf_phys,
 				    GFP_KERNEL);
 	if (!cmdbuf) {
 		err = -ENOMEM;
 		seq_printf(s, "cmdbuf alloc failed\n");
-		goto free_v;
+		goto free_work;
 	}
+
+	/* Contiguous output: Y at base, U after Y, V after U */
+	out_y_dma = out_buf.dma;
+	out_u_dma = out_buf.dma + y_size;
+	out_v_dma = out_buf.dma + y_size + uv_size;
 
 	/* Fill input with test pattern */
 	memset(in_buf.cpu, 0xA5, ISP_TEST_INPUT_SIZE);
 
 	seq_printf(s, "  input:  dma=0x%pad, %d KB\n",
 		   &in_buf.dma, ISP_TEST_INPUT_SIZE / 1024);
-	seq_printf(s, "  out_y:  dma=0x%pad, %zu KB\n",
-		   &out_y.dma, y_size / 1024);
-	seq_printf(s, "  out_u:  dma=0x%pad, %zu KB\n",
-		   &out_u.dma, uv_size / 1024);
-	seq_printf(s, "  out_v:  dma=0x%pad, %zu KB\n",
-		   &out_v.dma, uv_size / 1024);
+	seq_printf(s, "  output: dma=0x%pad, %zu KB (contiguous Y+U+V)\n",
+		   &out_buf.dma, out_total / 1024);
+	seq_printf(s, "    Y=+0x0, U=+0x%zx, V=+0x%zx\n",
+		   y_size, y_size + uv_size);
+	seq_printf(s, "  work:   dma=0x%pad, 256 KB\n", &work_buf.dma);
 
 	/*
 	 * Build SINGLE combined command buffer:
 	 * calibration + output config + surfaces + trigger + syncpt
-	 * (like isp_test.c on stock — everything in one gather)
 	 *
-	 * All SET_CLASS opcodes stripped — class set by
-	 * nvhost_job_add_client_gather_address() in pushbuffer.
+	 * SET_CLASS stripped — class set by nvhost_job_add_client_gather_address()
+	 * in the pushbuffer (outside gather), bypassing gather filter.
 	 */
 
-	/* Part 1: Calibration with SET_CLASS
-	 * Gather filter disabled, so SET_CLASS inside gathers is allowed.
-	 * Prepend SET_CLASS(0x32) before stripped calibration data.
-	 */
+	/* Part 1: Calibration (1544 words, SET_CLASS already stripped) */
 	n = 0;
-	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
-					     0, 0);
 	memcpy(&cmdbuf[n], isp_a_cal_data, sizeof(isp_a_cal_data));
 	n += ARRAY_SIZE(isp_a_cal_data);
 
-	/* Part 2: Output config (with SET_CLASS, stock-identical) */
-	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
-					     0, 0);
+	/*
+	 * Patch calibration tail: INCR(0x053, 2) → [enable, buffer_addr]
+	 * Last word is stock ISP working buffer IOVA (0x00745f5c) — replace
+	 * with our allocated working buffer.
+	 */
+	cal_last_idx = ARRAY_SIZE(isp_a_cal_data) - 1;
+	seq_printf(s, "  cal[%d] (work buf): 0x%08x → 0x%08x\n",
+		   cal_last_idx, cmdbuf[cal_last_idx], (u32)work_buf.dma);
+	cmdbuf[cal_last_idx] = (u32)work_buf.dma;
+
+	/* Part 2: Output enable block (from isp_test.c 0x60D8 path) */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
 	cmdbuf[n++] = ISP_TEST_W | (ISP_TEST_H << 16);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FMT2, 1);
@@ -407,11 +417,11 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_STRIDE, 1);
 	cmdbuf[n++] = ISP_TEST_Y_STRIDE;
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmdbuf[n++] = 0x00000007; /* match isp_test.c, not ISP_ENABLE_MODE */
+	cmdbuf[n++] = 0x00000007;
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_ENABLE, 1);
 	cmdbuf[n++] = 0x00000001;
 
-	/* Part 3: Output dimensions (stock 45-word block) */
+	/* Part 3: Output dimensions (stock per-frame block) */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmdbuf[n++] = ((ISP_TEST_W - 1) & 0x3FFF) << 16;
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
@@ -423,21 +433,21 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
 	cmdbuf[n++] = 0x00000000;
 
-	/* Output surface Y: [IOVA, 0, stride] */
+	/* Output surface Y: [IOVA, 0, stride] — contiguous buffer */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
-	cmdbuf[n++] = (u32)out_y.dma;
+	cmdbuf[n++] = (u32)out_y_dma;
 	cmdbuf[n++] = ISP_SURF_WORD1;
 	cmdbuf[n++] = ISP_TEST_Y_STRIDE;
 
 	/* Output surface U */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
-	cmdbuf[n++] = (u32)out_u.dma;
+	cmdbuf[n++] = (u32)out_u_dma;
 	cmdbuf[n++] = ISP_SURF_WORD1;
 	cmdbuf[n++] = ISP_TEST_UV_STRIDE;
 
 	/* Output surface V */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
-	cmdbuf[n++] = (u32)out_v.dma;
+	cmdbuf[n++] = (u32)out_v_dma;
 	cmdbuf[n++] = ISP_SURF_WORD1;
 	cmdbuf[n++] = ISP_TEST_UV_STRIDE;
 
@@ -450,18 +460,14 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = (ISP_TEST_H << 16) | ISP_TEST_W;
 
-	/* Input buffer (with SET_CLASS, stock-identical) */
-	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
-					     0, 0);
+	/* Input buffer */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
 	cmdbuf[n++] = (u32)in_buf.dma;
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
 
-	/* Trigger (with SET_CLASS, stock-identical) */
-	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
-					     0, 0);
+	/* Trigger */
 	cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmdbuf[n++] = ISP_TRIGGER_RUNTIME;
 
@@ -471,7 +477,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		isp->syncpt_id);
 	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
-	seq_printf(s, "  combined submit: %d words (cal=%zu + frame)\n",
+	seq_printf(s, "  submit: %d words (cal=%zu + frame)\n",
 		   n, ARRAY_SIZE(isp_a_cal_data));
 
 	start = ktime_get();
@@ -484,14 +490,12 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	seq_printf(s, "  submit OK (%lld us)\n", us);
 
 	/* Wait for ISP to potentially finish async processing */
-	msleep(100);
+	msleep(200);
 
-	/* Check output Y plane for non-zero data
-	 * (dma_alloc_coherent buffers are always CPU-coherent, no sync needed)
-	 */
+	/* Check output Y plane for non-zero data */
 	nonzero = 0;
 	for (i = 0; i < 4096; i++) {
-		if (((u8 *)out_y.cpu)[i] != 0)
+		if (((u8 *)out_buf.cpu)[i] != 0)
 			nonzero++;
 	}
 
@@ -502,7 +506,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	/* Hex dump first 64 bytes */
 	seq_printf(s, "  Y hex[0..63]: ");
 	for (i = 0; i < 64; i++)
-		seq_printf(s, "%02x ", ((u8 *)out_y.cpu)[i]);
+		seq_printf(s, "%02x ", ((u8 *)out_buf.cpu)[i]);
 	seq_printf(s, "\n");
 
 	/* Check stats region in input buffer at +0x20000 */
@@ -517,14 +521,23 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 			   nonzero);
 	}
 
+	/* Check if ISP touched the working buffer */
+	{
+		u8 *wb = (u8 *)work_buf.cpu;
+		nonzero = 0;
+		for (i = 0; i < 4096; i++) {
+			if (wb[i] != 0)
+				nonzero++;
+		}
+		seq_printf(s, "  work buf: %d/4096 bytes non-zero\n", nonzero);
+	}
+
 free_cmdbuf:
 	dma_free_coherent(dev, PAGE_SIZE * 2, cmdbuf, cmdbuf_phys);
-free_v:
-	isp_dma_buf_free(dev, &out_v);
-free_u:
-	isp_dma_buf_free(dev, &out_u);
-free_y:
-	isp_dma_buf_free(dev, &out_y);
+free_work:
+	isp_dma_buf_free(dev, &work_buf);
+free_out:
+	isp_dma_buf_free(dev, &out_buf);
 free_in:
 	isp_dma_buf_free(dev, &in_buf);
 idle:
