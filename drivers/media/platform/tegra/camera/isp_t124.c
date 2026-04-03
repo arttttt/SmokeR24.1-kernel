@@ -387,14 +387,19 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	 * nvhost_job_add_client_gather_address() in pushbuffer.
 	 */
 
-	/* Part 1: Calibration data (1544 words, SET_CLASS stripped) */
-	n = ARRAY_SIZE(isp_a_cal_data);
-	memcpy(cmdbuf, isp_a_cal_data, sizeof(isp_a_cal_data));
-	/* Note: last word is stock ISP working buffer IOVA (0x00745f5c).
-	 * Not valid in our SMMU space, but ISP may not access it during
-	 * our test. Don't patch it — match isp_test.c behavior exactly. */
+	/* Part 1: Calibration with SET_CLASS
+	 * Gather filter disabled, so SET_CLASS inside gathers is allowed.
+	 * Prepend SET_CLASS(0x32) before stripped calibration data.
+	 */
+	n = 0;
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
+	memcpy(&cmdbuf[n], isp_a_cal_data, sizeof(isp_a_cal_data));
+	n += ARRAY_SIZE(isp_a_cal_data);
 
-	/* Part 2: Output enable block (from isp_test.c 0x60D8 path) */
+	/* Part 2: Output config (with SET_CLASS, stock-identical) */
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
 	cmdbuf[n++] = ISP_TEST_W | (ISP_TEST_H << 16);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FMT2, 1);
@@ -445,14 +450,18 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = (ISP_TEST_H << 16) | ISP_TEST_W;
 
-	/* Input buffer */
+	/* Input buffer (with SET_CLASS, stock-identical) */
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
 	cmdbuf[n++] = (u32)in_buf.dma;
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
 	cmdbuf[n++] = 0;
 
-	/* Trigger */
+	/* Trigger (with SET_CLASS, stock-identical) */
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmdbuf[n++] = ISP_TRIGGER_RUNTIME;
 
