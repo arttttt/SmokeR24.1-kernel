@@ -326,17 +326,14 @@ static int pin_array_ids(struct platform_device *dev,
 
 		phys_addr[ids[i].index] = sg_dma_address(sgt->sgl);
 
-		/* ISP debug: show what address pin returns */
-		{
-			struct nvhost_device_data *pdata = platform_get_drvdata(dev);
-			if (pdata && (pdata->class == 0x32 || pdata->class == 0x34))
-				dev_info(&dev->dev,
-					"pin id=%u -> dma=0x%pad phys=0x%lx dev=%s\n",
-					ids[i].id,
-					&sg_dma_address(sgt->sgl),
-					(unsigned long)sg_phys(sgt->sgl),
-					dev_name(&dev->dev));
-		}
+		/* Debug: show pin results for ALL devices */
+		dev_info(&dev->dev,
+			"pin: id=%u dma=0x%pad phys=0x%lx nents=%d dev=%s\n",
+			ids[i].id,
+			&sg_dma_address(sgt->sgl),
+			(unsigned long)sg_phys(sgt->sgl),
+			sgt->nents,
+			dev_name(&dev->dev));
 		unpin_data[pin_count].buf = buf;
 		unpin_data[pin_count].attach = attach;
 		unpin_data[pin_count++].sgt = sgt;
@@ -361,6 +358,10 @@ static int pin_job_mem(struct nvhost_job *job)
 	}
 
 	/* validate array and pin unique ids, get refs for reloc unpinning */
+	pr_info("pin_job_mem: relocs via %s (%d), gathers via %s (%d)\n",
+		dev_name(&job->ch->vm->pdev->dev), job->num_relocs,
+		dev_name(&nvhost_get_host(job->ch->dev)->dev->dev),
+		job->num_gathers);
 	result = pin_array_ids(job->ch->vm->pdev,
 		job->pin_ids, job->addr_phys,
 		job->num_relocs,

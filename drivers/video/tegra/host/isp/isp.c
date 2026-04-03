@@ -102,23 +102,9 @@ int nvhost_isp_t124_finalize_poweron(struct platform_device *pdev)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 	struct isp *tegra_isp = pdata->private_data;
-	void __iomem *mc = ioremap(0x70019000, 0x1000);
 
 	host1x_writel(pdev, T12_ISP_CG_CTRL, T12_CG_2ND_LEVEL_EN);
 	enable_irq(tegra_isp->irq);
-
-	/* HACK: Disable ISP SMMU and HC SMMU to use physical addresses.
-	 * 24.1 tegra-smmu.c enables these but buffer mapping is broken.
-	 * Stock kernel worked with SMMU enabled via legacy driver that
-	 * created identity mappings. */
-	if (mc) {
-		writel(0, mc + 0x258);  /* MC_SMMU_ISP2_ASID_0 = disable */
-		writel(0, mc + 0xaa4);  /* MC_SMMU_ISP2B_ASID_0 = disable */
-		writel(0, mc + 0x250);  /* MC_SMMU_HC_ASID_0 = disable */
-		dev_info(&pdev->dev,
-			 "HACK: ISP2/ISP2B/HC SMMU disabled for physical DMA\n");
-		iounmap(mc);
-	}
 
 	return 0;
 }
