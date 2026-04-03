@@ -901,6 +901,28 @@ int main(int argc, char **argv)
 	check_sentinel(work_h, 0, 4096, "work[0..4K]");
 	check_sentinel(out_h, 0, 4096, "output Y[0..4K]");
 
+	/* Check if CDMA stalled on calibration FIFO */
+	printf("  waiting 3s to check for cdma timeout...\n");
+	usleep(3000000);
+	{
+		/* Read ISP channel CDMA state via host1x debug */
+		int mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
+		if (mem_fd >= 0) {
+			/* Read active method from host1x channel regs
+			 * Channel base for ISP is at host1x + ch_offset
+			 * But we can read ISP MMIO 0x00C to see if still streaming */
+			uint32_t isp_base = (class_id == 0x32) ? 0x54600000 : 0x54680000;
+			void *map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, mem_fd, isp_base);
+			if (map != MAP_FAILED) {
+				volatile uint32_t *regs = (volatile uint32_t *)map;
+				printf("  ISP state 3s later: 0x00C=%08x 0x00D=%08x 0x015=%08x\n",
+				       regs[0x00C], regs[0x00D], regs[0x015]);
+				munmap(map, 4096);
+			}
+			close(mem_fd);
+		}
+	}
+
 	/* MMIO dump while ISP is definitely still powered (fd open, just submitted) */
 	{
 		int mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
@@ -1381,18 +1403,10 @@ int main(int argc, char **argv)
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		uint32_t fence;
-		if (isp_submit_multi(gathers, 6, syncpt_id, 7,
+		if (isp_submit_multi(gathers, 6, syncpt_id, 4,
 				     relocs, shifts, rnr, &fence) < 0) {
-			printf("Stock-style submit FAILED (incrs=7), trying 4\n");
-			if (isp_submit_multi(gathers, 6, syncpt_id, 4,
-					     relocs, shifts, rnr, &fence) < 0) {
-				printf("Also failed with incrs=4, trying 1\n");
-				if (isp_submit_multi(gathers, 6, syncpt_id, 1,
-						     relocs, shifts, rnr, &fence) < 0) {
-					printf("All failed\n");
-					goto cleanup;
-				}
-			}
+			printf("Stock-style submit FAILED\n");
+			goto cleanup;
 		}
 		int ret = syncpt_wait(syncpt_id, fence, 500);
 		clock_gettime(CLOCK_MONOTONIC, &t1);
