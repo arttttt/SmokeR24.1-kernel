@@ -829,8 +829,15 @@ int nvhost_update_characteristics(struct platform_device *dev)
 {
 	struct nvhost_master *host = nvhost_get_host(dev);
 
+	/*
+	 * Don't advertise GFILTER to userspace — stock blobs (libnvisp_v3.so)
+	 * check characteristics and refuse to work if GFILTER is set.
+	 * Gather filter is still active in hardware.
+	 */
+#if 0
 	if (nvhost_gather_filter_enabled(&host->syncpt))
 		host->nvhost_char.flags |= NVHOST_CHARACTERISTICS_GFILTER;
+#endif
 
 	if (host->info.channel_policy == MAP_CHANNEL_ON_SUBMIT)
 		host->nvhost_char.flags |=
