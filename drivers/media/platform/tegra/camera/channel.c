@@ -1598,11 +1598,6 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
 			chan->isp_raw_size = chan->format.width *
 					    chan->format.height * raw_bpp;
-			/*
-			 * Allocate via ISP device, not VI device.
-			 * ISP has SMMU so dma_alloc_coherent does
-			 * scatter-gather IOVA mapping (no large vmap).
-			 */
 			chan->isp_raw_cpu = dma_alloc_coherent(
 					&isp->pdev->dev,
 					PAGE_ALIGN(chan->isp_raw_size),
