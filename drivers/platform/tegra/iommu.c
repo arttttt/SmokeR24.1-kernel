@@ -218,6 +218,9 @@ u64 tegra_smmu_fixup_swgids(struct device *dev, struct iommu_linear_map **map)
 		if (map)
 			*map = table->linear_map;
 
+		pr_info("smmu fixup: %s -> swgids 0x%llx\n",
+			dev_name(dev), table->swgids);
+
 		if (dev->of_node)
 			break;
 
