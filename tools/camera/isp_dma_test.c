@@ -747,6 +747,47 @@ int main(int argc, char **argv)
 	fill_sentinel(work_h, 0, WORK_SIZE);
 	printf("Output+work: filled with 0x%02X sentinel\n", SENTINEL);
 
+	/* ==== MMIO PRE-INIT ====
+	 * Some ISP registers (0x014, 0x01F, 0x024-0x02A) don't accept
+	 * writes through host1x command buffers — they're pure MMIO regs.
+	 * Write them directly via /dev/mem before any host1x submit.
+	 */
+	printf("\n--- MMIO pre-init ---\n");
+	{
+		int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+		if (mem_fd >= 0) {
+			uint32_t isp_base = (class_id == 0x32) ? 0x54600000 : 0x54680000;
+			void *map = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+					 MAP_SHARED, mem_fd, isp_base);
+			if (map != MAP_FAILED) {
+				volatile uint32_t *regs = (volatile uint32_t *)map;
+
+				/* Regs that don't write via host1x cmdbuf */
+				regs[0x014] = (class_id == 0x32) ? 0x00000339 : 0x0000019B;
+				regs[0x01F] = (class_id == 0x32) ? 0x00000001 : 0x00000003;
+				regs[0x024] = 0xC6BFF67C;
+				regs[0x025] = 0x70C9A9EA;
+				regs[0x026] = 0x33894D2B;
+				regs[0x028] = 0x00000007;
+				regs[0x029] = 0x00000007;
+				regs[0x02A] = 0x00000007;
+
+				/* Readback verify */
+				printf("  0x014=%08x (want 0x339)\n", regs[0x014]);
+				printf("  0x01F=%08x (want 0x001)\n", regs[0x01F]);
+				printf("  0x024=%08x (want 0xC6BFF67C)\n", regs[0x024]);
+				printf("  0x028=%08x (want 0x007)\n", regs[0x028]);
+
+				munmap(map, 4096);
+			} else {
+				perror("mmap ISP for pre-init");
+			}
+			close(mem_fd);
+		} else {
+			printf("  (cannot open /dev/mem)\n");
+		}
+	}
+
 	/* ==== PING TEST ==== */
 	printf("\n--- Ping ---\n");
 	{
