@@ -396,7 +396,7 @@ static int isp_probe(struct platform_device *dev)
 		goto free_isr;
 
 	/* Initialize T124 ISP MC driver (V4L2 subdev + host1x) */
-	if (dev_id == ISPA_DEV_ID)
+	if (dev_id == ISPA_DEV_ID || dev_id == ISPB_DEV_ID)
 		tegra_isp_t124_mc_init(dev);
 
 	return 0;
@@ -417,7 +417,8 @@ static int __exit isp_remove(struct platform_device *dev)
 	if (tegra_isp->isomgr_handle)
 		isp_isomgr_unregister(tegra_isp);
 #endif
-	if (tegra_isp->dev_id == ISPA_DEV_ID)
+	if (tegra_isp->dev_id == ISPA_DEV_ID ||
+	    tegra_isp->dev_id == ISPB_DEV_ID)
 		tegra_isp_t124_mc_cleanup(dev);
 	nvhost_client_device_release(dev);
 	disable_irq(tegra_isp->irq);
