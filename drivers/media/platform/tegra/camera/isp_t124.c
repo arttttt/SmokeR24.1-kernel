@@ -361,9 +361,23 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		goto free_out;
 	}
 
-	/* Command buffer: need ~1600 words, use 2 pages */
-	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE * 2, &cmdbuf_phys,
-				    GFP_KERNEL);
+	/*
+	 * Command buffer: need ~1600 words, use 2 pages.
+	 * CRITICAL: cmdbuf must be allocated through host1x parent device,
+	 * NOT ISP device! Host1x CDMA reads gathers by physical address
+	 * (host1x is not behind SMMU). If we allocate through ISP device,
+	 * dma_alloc_coherent returns ISP SMMU IOVA which CDMA can't read.
+	 */
+	{
+		struct platform_device *host1x_pdev =
+			nvhost_get_parent(isp->pdev);
+		struct device *host1x_dev = host1x_pdev ?
+			&host1x_pdev->dev : dev;
+		cmdbuf = dma_alloc_coherent(host1x_dev, PAGE_SIZE * 2,
+					    &cmdbuf_phys, GFP_KERNEL);
+		seq_printf(s, "  cmdbuf: dev=%s phys=0x%pad\n",
+			   dev_name(host1x_dev), &cmdbuf_phys);
+	}
 	if (!cmdbuf) {
 		err = -ENOMEM;
 		seq_printf(s, "cmdbuf alloc failed\n");
@@ -583,7 +597,13 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	}
 
 free_cmdbuf:
-	dma_free_coherent(dev, PAGE_SIZE * 2, cmdbuf, cmdbuf_phys);
+	{
+		struct platform_device *host1x_pdev =
+			nvhost_get_parent(isp->pdev);
+		struct device *host1x_dev = host1x_pdev ?
+			&host1x_pdev->dev : dev;
+		dma_free_coherent(host1x_dev, PAGE_SIZE * 2, cmdbuf, cmdbuf_phys);
+	}
 free_work:
 	isp_dma_buf_free(dev, &work_buf);
 free_out:
