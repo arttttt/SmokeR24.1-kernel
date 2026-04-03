@@ -250,6 +250,24 @@ static void submit_gathers(struct nvhost_job *job)
 
 		if (nvhost_debug_trace_cmdbuf)
 			cpuva = dma_buf_vmap(g->buf);
+		/* ISP: dump first 16 gather words to verify content */
+		if ((pdata->class == 0x32 || pdata->class == 0x34) && g->buf) {
+			void *gv = dma_buf_vmap(g->buf);
+			if (gv) {
+				u32 *gw = (u32 *)(gv + g->offset);
+				int dump_n = min((int)g->words, 16);
+				int k;
+				dev_info(&job->ch->dev->dev,
+					"GATHER[%d] %d words @phys=0x%x+%d:",
+					i, g->words,
+					(u32)job->gathers[i].mem_base,
+					g->offset);
+				for (k = 0; k < dump_n; k++)
+					dev_info(&job->ch->dev->dev,
+						"  G[%d]=%08x", k, gw[k]);
+				dma_buf_vunmap(g->buf, gv);
+			}
+		}
 		nvhost_cdma_push_gather(&job->ch->cdma,
 				cpuva,
 				job->gathers[i].mem_base,
