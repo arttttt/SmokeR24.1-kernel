@@ -318,7 +318,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	u32 *cmdbuf;
 	dma_addr_t cmdbuf_phys;
 	dma_addr_t out_y_dma, out_u_dma, out_v_dma;
-	int err, n, nonzero, i, cal_last_idx;
+	int err, n, nonzero, i, cal_last_idx, trigger_idx;
 	size_t y_size, uv_size, out_total;
 	ktime_t start;
 	s64 us;
@@ -394,8 +394,13 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	 * in the pushbuffer (outside gather), bypassing gather filter.
 	 */
 
-	/* Part 1: Calibration (1544 words, SET_CLASS already stripped) */
+	/* Part 1: SET_CLASS + Calibration
+	 * Gather filter disabled for ISP, so SET_CLASS inside gather is OK.
+	 * ISP methods require SET_CLASS for proper dispatch.
+	 */
 	n = 0;
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	memcpy(&cmdbuf[n], isp_a_cal_data, sizeof(isp_a_cal_data));
 	n += ARRAY_SIZE(isp_a_cal_data);
 
@@ -404,12 +409,14 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	 * Last word is stock ISP working buffer IOVA (0x00745f5c) — replace
 	 * with our allocated working buffer.
 	 */
-	cal_last_idx = ARRAY_SIZE(isp_a_cal_data) - 1;
+	cal_last_idx = ARRAY_SIZE(isp_a_cal_data); /* +1 offset for SET_CLASS */
 	seq_printf(s, "  cal[%d] (work buf): 0x%08x → 0x%08x\n",
 		   cal_last_idx, cmdbuf[cal_last_idx], (u32)work_buf.dma);
 	cmdbuf[cal_last_idx] = (u32)work_buf.dma;
 
-	/* Part 2: Output enable block (from isp_test.c 0x60D8 path) */
+	/* Part 2: Output enable block */
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
 	cmdbuf[n++] = ISP_TEST_W | (ISP_TEST_H << 16);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FMT2, 1);
@@ -461,6 +468,8 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = (ISP_TEST_H << 16) | ISP_TEST_W;
 
 	/* Input buffer */
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
 	cmdbuf[n++] = (u32)in_buf.dma;
 	cmdbuf[n++] = 0;
@@ -468,7 +477,10 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = 0;
 
 	/* Trigger — will be patched for each phase */
+	cmdbuf[n++] = nvhost_opcode_setclass(NV_VIDEO_STREAMING_ISP_CLASS_ID,
+					     0, 0);
 	cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	trigger_idx = n;
 	cmdbuf[n++] = ISP_TRIGGER_POST_APPLY; /* placeholder, patched below */
 
 	/* Syncpt OP_DONE */
@@ -477,11 +489,8 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 		isp->syncpt_id);
 	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
-	/* Remember trigger word position for patching */
-	#define TRIGGER_WORD_OFFSET (n - 3) /* points to trigger value word */
-
-	seq_printf(s, "  cmdbuf: %d words (cal=%zu + frame)\n",
-		   n, ARRAY_SIZE(isp_a_cal_data));
+	seq_printf(s, "  cmdbuf: %d words (cal=%zu + frame), trigger@[%d]\n",
+		   n, ARRAY_SIZE(isp_a_cal_data), trigger_idx);
 
 	/*
 	 * ISP requires two submits to produce output:
@@ -494,7 +503,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	 */
 
 	/* Phase 1: Init (trigger 0x0F) */
-	cmdbuf[TRIGGER_WORD_OFFSET] = ISP_TRIGGER_POST_APPLY;
+	cmdbuf[trigger_idx] = ISP_TRIGGER_POST_APPLY;
 
 	start = ktime_get();
 	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);
@@ -507,7 +516,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	seq_printf(s, "  phase 1 (0x0F init) OK (%lld us)\n", us);
 
 	/* Phase 2: Frame (trigger 0x05) */
-	cmdbuf[TRIGGER_WORD_OFFSET] = ISP_TRIGGER_RUNTIME;
+	cmdbuf[trigger_idx] = ISP_TRIGGER_RUNTIME;
 
 	start = ktime_get();
 	err = isp_t124_submit(isp, cmdbuf, cmdbuf_phys, n);

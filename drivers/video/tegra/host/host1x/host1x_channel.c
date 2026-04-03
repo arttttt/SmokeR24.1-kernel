@@ -416,10 +416,32 @@ static int t124_channel_init_gather_filter(struct nvhost_channel *ch)
 
 	struct platform_device *pdev = ch->dev;
 	struct nvhost_master *master = nvhost_get_host(pdev);
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 	int err;
 
 	if (!nvhost_gather_filter_enabled(&master->syncpt))
 		return -EINVAL;
+
+	/* Skip gather filter for ISP — ISP methods require SET_CLASS
+	 * inside gathers for proper method dispatch. Stock kernel
+	 * had gather filter disabled globally. */
+	if (pdata->class == 0x32 || pdata->class == 0x34) {
+		u32 val;
+		err = nvhost_module_busy(nvhost_get_parent(pdev));
+		if (err) {
+			dev_warn(&pdev->dev, "failed to disable gather filter for ISP");
+			return err;
+		}
+		/* Read-modify-write: clear only the gather filter bit */
+		val = host1x_channel_readl(ch, host1x_channel_channelctrl_r());
+		val &= ~host1x_channel_channelctrl_kernel_filter_gbuffer_f(1);
+		host1x_channel_writel(ch, host1x_channel_channelctrl_r(), val);
+		nvhost_module_idle(nvhost_get_parent(pdev));
+		dev_info(&pdev->dev,
+			 "gather filter DISABLED for ISP class 0x%x\n",
+			 pdata->class);
+		return 0;
+	}
 
 	err = nvhost_module_busy(nvhost_get_parent(pdev));
 	if (err) {
