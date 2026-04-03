@@ -209,6 +209,43 @@ int main(int argc, char **argv)
 	cmd[n++] = h1x_imm(0, (1<<8)|sp_id); /* OP_DONE syncpt */
 	cmd[n++] = h1x_nonincr(0, 0); /* NOOP */
 
+	/* === SUBMIT 1: Init (calibration + trigger 0x0F) === */
+	{
+		uint32_t init_cmd[2048];
+		int ni = 0;
+		/* Copy calibration as-is (includes SET_CLASS) */
+		FILE *cal2 = fopen(cal_path, "rb");
+		if (cal2) { ni = fread(init_cmd, 4, 2000, cal2); fclose(cal2); }
+		/* Trigger 0x0F */
+		init_cmd[ni++] = h1x_nonincr(0x00C, 1);
+		init_cmd[ni++] = 0x0F;
+		init_cmd[ni++] = h1x_imm(0, (1<<8)|sp_id);
+		init_cmd[ni++] = h1x_nonincr(0, 0);
+
+		nv_write(cmd_h, 0, init_cmd, ni * 4);
+
+		struct nvhost_cmdbuf icb = { .mem=cmd_h, .words=ni };
+		struct nvhost_syncpt_incr isi = { .syncpt_id=sp_id, .syncpt_incrs=1 };
+		struct nvhost_fence ifence = {};
+		uint32_t icid = class_id;
+		struct nvhost32_submit_args isa;
+		memset(&isa, 0, sizeof(isa));
+		isa.num_syncpt_incrs=1; isa.num_cmdbufs=1; isa.timeout=5000;
+		isa.syncpt_incrs=(uint32_t)(uintptr_t)&isi;
+		isa.cmdbufs=(uint32_t)(uintptr_t)&icb;
+		isa.class_ids=(uint32_t)(uintptr_t)&icid;
+		isa.fences=(uint32_t)(uintptr_t)&ifence;
+
+		if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0) {
+			perror("init submit"); return 1;
+		}
+		struct nvhost_ctrl_syncpt_waitex_args iwa = {
+			.id=sp_id, .thresh=ifence.value, .timeout=5000 };
+		ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &iwa);
+		printf("Init (0x0F): OK\n");
+	}
+
+	/* === SUBMIT 2: Frame (output + input + trigger 0x05) === */
 	printf("Cmdbuf: %d words\n", n);
 	nv_write(cmd_h, 0, cmd, n * 4);
 
