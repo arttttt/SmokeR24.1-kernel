@@ -275,7 +275,8 @@ static int isp_submit_multi(struct gather_desc *gathers, int num_gathers,
 		cbs[i].mem = gathers[i].handle;
 		cbs[i].offset = gathers[i].offset;
 		cbs[i].words = gathers[i].words;
-		class_ids[i] = gathers[i].class_id;
+		/* class_id = 0: no pushbuffer SET_CLASS, ISP has it inside gather */
+		class_ids[i] = 0;
 	}
 
 	struct nvhost32_submit_args sa;
@@ -313,7 +314,10 @@ static int isp_submit(uint32_t cmdbuf_h, uint32_t num_words,
 		.syncpt_id = syncpt_id, .syncpt_incrs = 1,
 	};
 	struct nvhost_fence fence = { 0, 0 };
-	uint32_t cid = class_id;
+	/* class_id = 0: don't push SET_CLASS in pushbuffer.
+	 * ISP gathers already contain SET_CLASS inside.
+	 * Stock kernel had pdata->class=0 for ISP. */
+	uint32_t cid = 0;
 
 	struct nvhost32_submit_args sa;
 	memset(&sa, 0, sizeof(sa));

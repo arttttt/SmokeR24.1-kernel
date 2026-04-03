@@ -114,8 +114,11 @@ static int isp_t124_submit(struct tegra_isp_t124 *isp,
 	job->sp->incrs = 1;
 	job->num_syncpts = 1;
 
+	/* class_id = 0: don't push SET_CLASS in pushbuffer.
+	 * ISP gathers contain SET_CLASS inside (gather filter disabled).
+	 * Stock kernel had pdata->class=0, no pushbuffer SET_CLASS. */
 	err = nvhost_job_add_client_gather_address(job, num_words,
-			NV_VIDEO_STREAMING_ISP_CLASS_ID, cmdbuf_phys);
+			0, cmdbuf_phys);
 	if (err) {
 		nvhost_job_put(job);
 		return err;
