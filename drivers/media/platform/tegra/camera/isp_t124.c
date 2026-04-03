@@ -657,6 +657,211 @@ static const struct file_operations isp_t124_debugfs_dma_fops = {
 	.release = single_release,
 };
 
+/* ----------------------------------------------------------------
+ * MMIO bypass test — write ISP registers directly, no host1x
+ * This is a DIRTY HACK to check if ISP hardware works at all.
+ * ---------------------------------------------------------------- */
+#include <linux/io.h>
+
+#define ISP_A_BASE 0x54600000
+#define ISP_A_SIZE 0x40000
+
+static int isp_t124_mmio_test(struct tegra_isp_t124 *isp, struct seq_file *s)
+{
+	struct device *dev = &isp->pdev->dev;
+	struct isp_dma_buf in_buf = {}, out_buf = {}, work_buf = {};
+	void __iomem *base;
+	int err, i, nonzero;
+	size_t y_size, uv_size, out_total;
+
+	/* Small test: 64x64 to minimize resources */
+	const int W = 64, H = 64;
+	const int Y_STRIDE = 64;
+	const int UV_STRIDE = 32;
+
+	y_size = Y_STRIDE * H;
+	uv_size = UV_STRIDE * (H / 2);
+	out_total = y_size + uv_size * 2;
+
+	seq_printf(s, "MMIO bypass test: %dx%d\n", W, H);
+
+	err = nvhost_module_busy(isp->pdev);
+	if (err) return err;
+
+	/* ioremap ISP-A */
+	base = ioremap(ISP_A_BASE, ISP_A_SIZE);
+	if (!base) {
+		seq_printf(s, "ioremap failed!\n");
+		goto idle;
+	}
+
+	/* Read some regs before */
+	seq_printf(s, "  pre: 0x030=%08x 0x054=%08x 0x074=%08x\n",
+		   readl(base + 0x030), readl(base + 0x054),
+		   readl(base + 0x074));
+
+	/* Alloc DMA buffers — these go through ISP SMMU */
+	err = isp_dma_buf_alloc(dev, &in_buf, W * H * 2);
+	if (err) { seq_printf(s, "in alloc fail\n"); goto unmap; }
+	err = isp_dma_buf_alloc(dev, &out_buf, out_total);
+	if (err) { seq_printf(s, "out alloc fail\n"); goto free_in; }
+	err = isp_dma_buf_alloc(dev, &work_buf, 256 * 1024);
+	if (err) { seq_printf(s, "work alloc fail\n"); goto free_out; }
+
+	/* Fill input with pattern, output with sentinel */
+	memset(in_buf.cpu, 0x55, W * H * 2);
+	memset(out_buf.cpu, 0xDE, out_total);
+	memset(work_buf.cpu, 0xDE, 256 * 1024);
+
+	seq_printf(s, "  in=0x%pad out=0x%pad work=0x%pad\n",
+		   &in_buf.dma, &out_buf.dma, &work_buf.dma);
+
+	/*
+	 * Write ISP registers directly via MMIO.
+	 * Method offset * 4 = MMIO byte offset.
+	 *
+	 * Stock MMIO values for reference:
+	 * 0x008(0x20)=F000F800, 0x015(0x54)=04040007, etc.
+	 */
+
+	/* Init/config registers */
+	writel(0xF000F800, base + 0x008 * 4);  /* input cfg */
+	writel(0x000000EB, base + 0x014 * 4);  /* sensor param (IMX179) */
+	writel(0x04040007, base + 0x015 * 4);  /* enable mode */
+	writel(0x0A00500A, base + 0x018 * 4);  /* proc0 */
+	writel(0x00008089, base + 0x019 * 4);  /* proc1 */
+	writel(0x013645CB, base + 0x01A * 4);  /* cal0 */
+	writel(0x000001E7, base + 0x01B * 4);  /* cal1 */
+	writel(0x00000001, base + 0x01C * 4);  /* unk */
+	writel(0x00000001, base + 0x01D * 4);  /* CG_CTRL */
+	writel(0x00000003, base + 0x01F * 4);  /* mode */
+	writel(0x00003232, base + 0x05E * 4);  /* unk2 */
+
+	/* ISP enable + work buffer */
+	writel(0x00000001, base + 0x053 * 4);  /* ISP enable */
+	writel((u32)work_buf.dma, base + 0x054 * 4);  /* work buf addr */
+
+	/* Output dimensions */
+	writel(((W - 1) & 0x3FFF) << 16, base + 0xE00 * 4);
+	writel(((H - 1) & 0x3FFF) << 16, base + 0xE01 * 4);
+	writel(0x04FE00E6, base + 0xE02 * 4);  /* format */
+	writel(0x00000000, base + 0xE03 * 4);  /* color */
+
+	/* Output surfaces Y/U/V: [addr, 0, stride] */
+	writel((u32)out_buf.dma, base + 0xE04 * 4);
+	writel(0, base + 0xE05 * 4);
+	writel(Y_STRIDE, base + 0xE06 * 4);
+
+	writel((u32)(out_buf.dma + y_size), base + 0xE07 * 4);
+	writel(0, base + 0xE08 * 4);
+	writel(UV_STRIDE, base + 0xE09 * 4);
+
+	writel((u32)(out_buf.dma + y_size + uv_size), base + 0xE0A * 4);
+	writel(0, base + 0xE0B * 4);
+	writel(UV_STRIDE, base + 0xE0C * 4);
+
+	/* Secondary output config (0x60D8-like) */
+	writel(W | (H << 16), base + 0xE31 * 4);
+	writel(Y_STRIDE, base + 0xE32 * 4);
+	writel(0x04FE00E6, base + 0xE33 * 4);
+	writel(0x00000001, base + 0xE30 * 4);  /* output enable */
+
+	/* Processing: method 0x500 (6 words) */
+	writel(0, base + 0x500 * 4);
+	writel(0, base + 0x501 * 4);
+	writel(0, base + 0x502 * 4);
+	writel(0, base + 0x503 * 4);
+	writel(0, base + 0x504 * 4);
+	writel((H << 16) | W, base + 0x505 * 4);
+
+	/* Input buffer: method 0x100 (4 words) */
+	writel((u32)in_buf.dma, base + 0x100 * 4);
+	writel(0, base + 0x101 * 4);
+	writel(0, base + 0x102 * 4);
+	writel(0, base + 0x103 * 4);
+
+	/* Read back to confirm */
+	seq_printf(s, "  post-config: 0x054=%08x E00=%08x E04=%08x 0x100=%08x\n",
+		   readl(base + 0x054 * 4),
+		   readl(base + 0xE00 * 4),
+		   readl(base + 0xE04 * 4),
+		   readl(base + 0x100 * 4));
+
+	/* Trigger 0x0F — static config apply */
+	seq_printf(s, "  trigger 0x0F...\n");
+	writel(0x0000000F, base + 0x00C * 4);
+	msleep(50);
+	seq_printf(s, "  after 0x0F: ctrl=%08x status=%08x\n",
+		   readl(base + 0x030), readl(base + 0x034));
+
+	/* Trigger 0x05 — runtime frame processing */
+	seq_printf(s, "  trigger 0x05...\n");
+	writel(0x00000005, base + 0x00C * 4);
+	msleep(100);
+	seq_printf(s, "  after 0x05: ctrl=%08x status=%08x\n",
+		   readl(base + 0x030), readl(base + 0x034));
+
+	/* Second trigger 0x05 */
+	seq_printf(s, "  trigger 0x05 again...\n");
+	writel(0x00000005, base + 0x00C * 4);
+	msleep(100);
+	seq_printf(s, "  after 0x05: ctrl=%08x status=%08x\n",
+		   readl(base + 0x030), readl(base + 0x034));
+
+	/* Check output */
+	nonzero = 0;
+	for (i = 0; i < (int)y_size && i < 4096; i++) {
+		if (((u8 *)out_buf.cpu)[i] != 0xDE)
+			nonzero++;
+	}
+	seq_printf(s, "\n  output Y: %d/%d bytes changed from 0xDE%s\n",
+		   nonzero, (int)(y_size < 4096 ? y_size : 4096),
+		   nonzero ? " ** ISP DMA WORKS! **" : " (untouched)");
+
+	/* Hex dump first 32 bytes */
+	seq_printf(s, "  hex: ");
+	for (i = 0; i < 32 && i < (int)y_size; i++)
+		seq_printf(s, "%02x ", ((u8 *)out_buf.cpu)[i]);
+	seq_printf(s, "\n");
+
+	/* Check work buffer */
+	nonzero = 0;
+	for (i = 0; i < 4096; i++) {
+		if (((u8 *)work_buf.cpu)[i] != 0xDE)
+			nonzero++;
+	}
+	seq_printf(s, "  work: %d/4096 bytes changed\n", nonzero);
+
+	isp_dma_buf_free(dev, &work_buf);
+free_out:
+	isp_dma_buf_free(dev, &out_buf);
+free_in:
+	isp_dma_buf_free(dev, &in_buf);
+unmap:
+	iounmap(base);
+idle:
+	nvhost_module_idle(isp->pdev);
+	return 0;
+}
+
+static int isp_t124_debugfs_mmio_show(struct seq_file *s, void *data)
+{
+	struct tegra_isp_t124 *isp = s->private;
+	return isp_t124_mmio_test(isp, s);
+}
+
+static int isp_t124_debugfs_mmio_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_t124_debugfs_mmio_show, inode->i_private);
+}
+
+static const struct file_operations isp_t124_debugfs_mmio_fops = {
+	.open    = isp_t124_debugfs_mmio_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
 static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp)
 {
 	isp->debugfs_dir = debugfs_create_dir("isp_t124", NULL);
@@ -668,6 +873,8 @@ static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp)
 			    isp, &isp_t124_debugfs_probe_fops);
 	debugfs_create_file("dma_test", 0444, isp->debugfs_dir,
 			    isp, &isp_t124_debugfs_dma_fops);
+	debugfs_create_file("mmio_test", 0444, isp->debugfs_dir,
+			    isp, &isp_t124_debugfs_mmio_fops);
 }
 
 static void isp_t124_debugfs_cleanup(struct tegra_isp_t124 *isp)
