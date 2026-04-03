@@ -186,6 +186,9 @@ struct tegra_channel {
 	void *isp_raw_cpu;		/* internal raw buffer for VI output */
 	dma_addr_t isp_raw_dma;
 	size_t isp_raw_size;
+	void *isp_out_cpu;		/* ISP output buffer (ISP device IOVA) */
+	dma_addr_t isp_out_dma;
+	size_t isp_out_size;
 };
 
 #define to_tegra_channel(vdev) \

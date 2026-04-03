@@ -1031,13 +1031,19 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
 		int isp_err = isp_t124_process_frame(chan->isp,
 				chan->isp_raw_dma,
-				buf->addr,
+				chan->isp_out_dma,
 				chan->syncpt[0],
 				thresh[0]);
 		if (isp_err) {
 			dev_err(&chan->video.dev,
 				"ISP process_frame failed: %d\n", isp_err);
 			state = VB2_BUF_STATE_ERROR;
+		} else {
+			/* Copy ISP output to vb2 userspace buffer */
+			void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
+			if (vb2_vaddr)
+				memcpy(vb2_vaddr, chan->isp_out_cpu,
+				       chan->isp_out_size);
 		}
 	}
 
@@ -1618,10 +1624,33 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 				} else {
 					chan->isp = isp;
 					chan->use_isp = true;
-					dev_info(&chan->video.dev,
-						 "ISP pipeline active: %ux%u\n",
-						 chan->format.width,
-						 chan->format.height);
+					/* Allocate ISP output buffer through ISP device */
+					{
+						u32 y_sz = isp->y_stride * chan->format.height;
+						u32 uv_sz = isp->uv_stride * (chan->format.height / 2);
+						chan->isp_out_size = y_sz + 2 * uv_sz;
+						chan->isp_out_cpu = dma_alloc_coherent(
+							&isp->pdev->dev,
+							PAGE_ALIGN(chan->isp_out_size),
+							&chan->isp_out_dma, GFP_KERNEL);
+						if (!chan->isp_out_cpu) {
+							dev_warn(&chan->video.dev,
+								 "ISP out buf alloc failed\n");
+							chan->use_isp = false;
+							isp_t124_stream_stop(isp);
+							dma_free_coherent(&isp->pdev->dev,
+								PAGE_ALIGN(chan->isp_raw_size),
+								chan->isp_raw_cpu,
+								chan->isp_raw_dma);
+							chan->isp_raw_cpu = NULL;
+						}
+					}
+					if (chan->use_isp)
+						dev_info(&chan->video.dev,
+							 "ISP pipeline active: %ux%u out_dma=0x%pad\n",
+							 chan->format.width,
+							 chan->format.height,
+							 &chan->isp_out_dma);
 				}
 			}
 		}
@@ -1696,6 +1725,12 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 		tegra_channel_update_clknbw(chan, 0);
 
 	/* ISP pipeline cleanup */
+	if (chan->isp_out_cpu && chan->isp) {
+		dma_free_coherent(&chan->isp->pdev->dev,
+				  PAGE_ALIGN(chan->isp_out_size),
+				  chan->isp_out_cpu, chan->isp_out_dma);
+		chan->isp_out_cpu = NULL;
+	}
 	if (chan->isp_raw_cpu && chan->isp) {
 		dma_free_coherent(&chan->isp->pdev->dev,
 				  PAGE_ALIGN(chan->isp_raw_size),
