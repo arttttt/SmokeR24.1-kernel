@@ -988,6 +988,31 @@ int main(int argc, char **argv)
 	}
 
 	/* Dump cmdbuf words for debugging */
+	/* Dump cmdbuf after submit to see what kernel relocs wrote */
+	printf("\n--- Cmdbuf after submit (reloc-patched) ---\n");
+	{
+		uint32_t dump[64];
+		/* Read last frame cmdbuf (submit 4 combined) — it has relocs */
+		if (nvmap_read(cmdbuf_h, 0, dump, sizeof(dump)) == 0) {
+			printf("  First 32 words (calibration start):\n");
+			for (int i = 0; i < 32; i++)
+				printf("  [%03d] 0x%08x\n", i, dump[i]);
+		}
+		/* Read around output surface area — need to find word offset */
+		/* Combined: cal=1566 words, then frame starts at ~1566 */
+		int frame_off = 1566 * 4;  /* approximate */
+		if (nvmap_read(cmdbuf_h, frame_off, dump, 64 * 4) == 0) {
+			printf("  Frame region (offset %d):\n", frame_off);
+			for (int i = 0; i < 64; i++)
+				printf("  [%03d] 0x%08x%s\n", i, dump[i],
+				       (dump[i] == out_y_iova) ? " ← out_Y baked" :
+				       (dump[i] == out_u_iova) ? " ← out_U baked" :
+				       (dump[i] == out_v_iova) ? " ← out_V baked" :
+				       (dump[i] == in_iova) ? " ← in baked" :
+				       (dump[i] == work_iova) ? " ← work baked" : "");
+		}
+	}
+
 	printf("\n--- Init cmdbuf first 32 words ---\n");
 	{
 		uint32_t dump[32];
