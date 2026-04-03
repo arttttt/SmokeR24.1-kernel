@@ -1243,10 +1243,31 @@ int main(int argc, char **argv)
 		cmd[pos++] = h1x_imm_incr_syncpt(1, syncpt_id);
 		sizes[2] = pos - offsets[2];
 
-		/* G4: syncpt wait — stock waits for VI, we skip */
+		/* G4: syncpt wait — stock waits for VI completion.
+		 * We don't have VI, but need a real wait to give ISP time
+		 * to process trigger 0x05 before calibration in G6.
+		 * Use WAIT_SYNCPT on ISP syncpt current value (already passed). */
 		offsets[3] = pos;
-		cmd[pos++] = NOOP;
-		cmd[pos++] = NOOP;
+		{
+			/* Read current syncpt value — it's already past this */
+			uint32_t cur_val = 0;
+			struct nvhost_ctrl_syncpt_read_args ra = { .id = syncpt_id };
+			ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_READ, &ra);
+			cur_val = ra.value;
+			/* host1x class WAIT_SYNCPT: wait for syncpt >= cur_val
+			 * Format: SET_CLASS(0x01) then NONINCR(0x008, 1) then
+			 * (thresh << 0) | (id << 0) packed as (id | (thresh << 8)) */
+			cmd[pos++] = h1x_setclass(0x01, 0, 0); /* host1x class */
+			cmd[pos++] = h1x_nonincr(0x008, 1); /* WAIT_SYNCPT method */
+			cmd[pos++] = syncpt_id | (cur_val << 8);
+			cmd[pos++] = h1x_setclass(0x01, 0, 0);
+			cmd[pos++] = h1x_nonincr(0x008, 1);
+			cmd[pos++] = syncpt_id | (cur_val << 8);
+			cmd[pos++] = NOOP;
+			cmd[pos++] = NOOP;
+			printf("  G4: WAIT_SYNCPT id=%u val=%u\n",
+			       syncpt_id, cur_val);
+		}
 		sizes[3] = pos - offsets[3];
 
 		/* G5: syncpt incr */
