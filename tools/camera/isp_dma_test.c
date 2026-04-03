@@ -824,9 +824,31 @@ int main(int argc, char **argv)
 	}
 
 	/* Check if init changed work buffer */
-	printf("\n--- After init ---\n");
+	printf("\n--- After init (ISP should be powered) ---\n");
 	check_sentinel(work_h, 0, 4096, "work[0..4K]");
 	check_sentinel(out_h, 0, 4096, "output Y[0..4K]");
+
+	/* MMIO dump while ISP is definitely still powered (fd open, just submitted) */
+	{
+		int mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
+		if (mem_fd >= 0) {
+			uint32_t isp_base = (class_id == 0x32) ? 0x54600000 : 0x54680000;
+			void *map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, mem_fd, isp_base);
+			if (map != MAP_FAILED) {
+				volatile uint32_t *regs = (volatile uint32_t *)map;
+				printf("  MMIO after init:\n");
+				for (int i = 0; i < 96; i++) {
+					uint32_t v = regs[i];
+					if (v != 0 && v != 0xFFFFFFFF)
+						printf("    %03x = 0x%08X\n", i, v);
+					else if (v == 0xFFFFFFFF)
+						printf("    %03x = FFFFFFFF (power-gated?)\n", i);
+				}
+				munmap(map, 4096);
+			}
+			close(mem_fd);
+		}
+	}
 
 	/* ==== SUBMIT 2: Frame (output + input + trigger 0x05) ==== */
 	printf("\n--- Submit 2: Frame (0x05) ---\n");
