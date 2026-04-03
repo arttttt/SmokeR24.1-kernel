@@ -44,7 +44,7 @@
 #define ISP_TEST_H		2460
 #define ISP_TEST_Y_STRIDE	3328	/* 3280 aligned to 64 */
 #define ISP_TEST_UV_STRIDE	1664	/* half Y stride */
-#define ISP_TEST_INPUT_SIZE	(256 * 1024) /* 256KB: 128KB working + 128KB stats */
+#define ISP_TEST_INPUT_SIZE	(ISP_TEST_W * ISP_TEST_H * 2) /* full RAW frame */
 
 /* ----------------------------------------------------------------
  * Host1x channel + job submission
@@ -390,8 +390,9 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	/* Part 1: Calibration data (1544 words, SET_CLASS stripped) */
 	n = ARRAY_SIZE(isp_a_cal_data);
 	memcpy(cmdbuf, isp_a_cal_data, sizeof(isp_a_cal_data));
-	/* Patch stock buffer IOVA → our input buffer */
-	cmdbuf[n - 1] = (u32)in_buf.dma;
+	/* Note: last word is stock ISP working buffer IOVA (0x00745f5c).
+	 * Not valid in our SMMU space, but ISP may not access it during
+	 * our test. Don't patch it — match isp_test.c behavior exactly. */
 
 	/* Part 2: Output enable block (from isp_test.c 0x60D8 path) */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_DIMS, 1);
@@ -401,7 +402,7 @@ static int isp_t124_dma_test(struct tegra_isp_t124 *isp, struct seq_file *s)
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_STRIDE, 1);
 	cmdbuf[n++] = ISP_TEST_Y_STRIDE;
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmdbuf[n++] = ISP_ENABLE_MODE;
+	cmdbuf[n++] = 0x00000007; /* match isp_test.c, not ISP_ENABLE_MODE */
 	cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_ENABLE, 1);
 	cmdbuf[n++] = 0x00000001;
 
