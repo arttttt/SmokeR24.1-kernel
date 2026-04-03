@@ -810,6 +810,38 @@ int main(int argc, char **argv)
 		if (ret) return 1;
 	}
 
+	/* MMIO writes AFTER ping (ISP fully powered now) */
+	printf("\n--- MMIO post-ping init ---\n");
+	{
+		int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+		if (mem_fd >= 0) {
+			uint32_t isp_base = (class_id == 0x32) ? 0x54600000 : 0x54680000;
+			void *map = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+					 MAP_SHARED, mem_fd, isp_base);
+			if (map != MAP_FAILED) {
+				volatile uint32_t *regs = (volatile uint32_t *)map;
+
+				printf("  before: 0x014=%08x 0x01F=%08x 0x024=%08x 0x028=%08x\n",
+				       regs[0x014], regs[0x01F], regs[0x024], regs[0x028]);
+
+				regs[0x014] = (class_id == 0x32) ? 0x00000339 : 0x0000019B;
+				regs[0x01F] = (class_id == 0x32) ? 0x00000001 : 0x00000003;
+				regs[0x024] = 0xC6BFF67C;
+				regs[0x025] = 0x70C9A9EA;
+				regs[0x026] = 0x33894D2B;
+				regs[0x028] = 0x00000007;
+				regs[0x029] = 0x00000007;
+				regs[0x02A] = 0x00000007;
+
+				printf("  after:  0x014=%08x 0x01F=%08x 0x024=%08x 0x028=%08x\n",
+				       regs[0x014], regs[0x01F], regs[0x024], regs[0x028]);
+
+				munmap(map, 4096);
+			}
+			close(mem_fd);
+		}
+	}
+
 	/* ==== SUBMIT 1: Init (calibration + MMIO init + trigger 0x0F) ==== */
 	printf("\n--- Submit 1: Init (0x0F) ---\n");
 	int init_work_reloc_offset = -1;  /* byte offset of work_buf IOVA in cmdbuf */
