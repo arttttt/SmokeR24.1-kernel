@@ -511,9 +511,14 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (4 << 8) | isp->syncpt_memory;
 
-	/* Trigger RUNTIME (0x05) — ISP uses cal from stream_init */
+	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmd[n++] = ISP_TRIGGER_RUNTIME;
+
+	/* Calibration AFTER trigger (stock: G2 has trigger, G6 has cal) */
+	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
+	n += isp->cal_words;
+	cmd[n - 1] = (u32)isp->work_buf.dma; /* patch work_buf addr */
 
 	/* IMMEDIATE syncpt incr */
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -521,7 +526,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		isp->syncpt_memory);
 	cmd[n++] = NVHOST_OPCODE_NOOP;
 
-	dev_info(&isp->pdev->dev, "process_frame: %d words, no cal\n", n);
+	dev_info(&isp->pdev->dev, "process_frame: %d words, with cal after trigger\n", n);
 
 	/* Single-gather job */
 	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
