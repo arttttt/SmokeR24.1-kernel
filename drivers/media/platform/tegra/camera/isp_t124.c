@@ -429,21 +429,10 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp)
 EXPORT_SYMBOL(isp_t124_stream_stop);
 
 /**
- * isp_t124_process_frame() - Submit one frame through ISP (6-gather, stock layout)
+ * isp_t124_process_frame() - Submit one frame through ISP
  *
- * @isp: ISP instance (A or B)
- * @in_dma: DMA address of raw Bayer input buffer (from VI)
- * @out_dma: DMA address of YUV output buffer (contiguous Y+U+V)
- * @vi_syncpt: VI syncpoint ID to wait on
- * @vi_thresh: VI syncpoint threshold (frame_done value)
- *
- * Submits 6 gathers matching stock firmware layout:
- * G1: syncpt incr (memory)
- * G2: output config + surfaces + processing + input (45 words)
- * G3: syncpt incr (stats)
- * G4: WAIT_SYNCPT for VI frame
- * G5: syncpt incr (loadv)
- * G6: calibration + ISP enable
+ * Single-gather approach: cal + output config + input + trigger + OP_DONE.
+ * Simpler than stock 6-gather layout, for debugging.
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t in_dma, dma_addr_t out_dma,
@@ -453,8 +442,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	u32 *cmd;
 	dma_addr_t cmd_phys;
 	int err;
-	int g1_off, g2_off, g3_off, g4_off, g5_off, g6_off;
-	int g1_words, g2_words, g3_words, g4_words, g5_words, g6_words;
 	int n;
 	u32 W = isp->width, H = isp->height;
 	u32 y_stride = isp->y_stride;
@@ -468,10 +455,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
 
-	/*
-	 * Use second half of cmdbuf for per-frame data.
-	 * First half was used for init and is no longer needed per-frame.
-	 */
 	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS;
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
@@ -480,47 +463,37 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		 "process_frame: cmdbuf_phys=0x%pad cmd_phys=0x%pad in=0x%pad out=0x%pad\n",
 		 &isp->cmdbuf_phys, &cmd_phys, &in_dma, &out_dma);
 
-	/* ---- G1: syncpt_memory IMMEDIATE incr (2 words) ---- */
-	g1_off = n;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (host1x_uclass_incr_syncpt_cond_immediate_v() << 8) |
-		   isp->syncpt_memory;
-	g1_words = n - g1_off;
+	/* --- Calibration data --- */
+	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
+	n += isp->cal_words;
+	/* Patch work buffer address (last word of cal) */
+	cmd[n - 1] = (u32)isp->work_buf.dma;
 
-	/* ---- G2: output config + surfaces + processing + input (45 words) ---- */
-	g2_off = n;
-
-	/* Output dimensions: 0xE00, 0xE01 */
+	/* --- Output config --- */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
-
-	/* Output format: 0xE02, 0xE03 */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
 	cmd[n++] = ISP_FORMAT_STOCK;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0x00000000;
 
-	/* Output surface Y: [IOVA, 0, stride] at 0xE04 */
+	/* Output surfaces Y/U/V */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
 	cmd[n++] = (u32)out_y;
 	cmd[n++] = ISP_SURF_WORD1;
 	cmd[n++] = y_stride;
-
-	/* Output surface U at 0xE07 */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
 	cmd[n++] = (u32)out_u;
 	cmd[n++] = ISP_SURF_WORD1;
 	cmd[n++] = uv_stride;
-
-	/* Output surface V at 0xE0A */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
 	cmd[n++] = (u32)out_v;
 	cmd[n++] = ISP_SURF_WORD1;
 	cmd[n++] = uv_stride;
 
-	/* Processing: 0x500 (6 words: 5 zeros + packed dims) */
+	/* Processing */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
 	cmd[n++] = 0;
 	cmd[n++] = 0;
@@ -529,122 +502,55 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0;
 	cmd[n++] = (H << 16) | W;
 
-	/* Input buffer: 0x100 (4 words) */
+	/* Input buffer */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
 	cmd[n++] = (u32)in_dma;
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Conditional syncpt incrs (stock: cond4→memory, cond5→stats, cond6→loadv) */
+	/* Conditional OP_DONE syncpt incr */
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (4 << 8) | isp->syncpt_memory;  /* cond4 = OP_DONE */
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (5 << 8) | isp->syncpt_stats;   /* cond5 */
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (6 << 8) | isp->syncpt_loadv;   /* cond6 */
+	cmd[n++] = (4 << 8) | isp->syncpt_memory;
 
-	/* Trigger — try POST_APPLY (0x0F) since RUNTIME (0x05) never fires OP_DONE */
+	/* Trigger POST_APPLY */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmd[n++] = ISP_TRIGGER_POST_APPLY;
 
-	g2_words = n - g2_off;
-
-	/* ---- G3: syncpt_stats IMMEDIATE incr (2 words) ---- */
-	g3_off = n;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (host1x_uclass_incr_syncpt_cond_immediate_v() << 8) |
-		   isp->syncpt_stats;
-	g3_words = n - g3_off;
-
-	/* ---- G4: WAIT_SYNCPT — stock waits on stats/loadv of PREVIOUS frame.
-	 * For first frame, use NOOPs (no previous frame to wait on).
-	 * TODO: implement inter-frame sync for continuous streaming.
-	 */
-	g4_off = n;
+	/* IMMEDIATE syncpt incr */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		isp->syncpt_memory);
 	cmd[n++] = NVHOST_OPCODE_NOOP;
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-	g4_words = n - g4_off;
 
-	/* ---- G5: syncpt_loadv IMMEDIATE incr (2 words) ---- */
-	g5_off = n;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (host1x_uclass_incr_syncpt_cond_immediate_v() << 8) |
-		   isp->syncpt_loadv;
-	g5_words = n - g5_off;
+	dev_info(&isp->pdev->dev,
+		 "process_frame: single gather, %d words\n", n);
 
-	/* ---- G6: calibration + ISP enable ---- */
-	g6_off = n;
-	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
-	n += isp->cal_words;
-	/* Patch work buffer address (last word of cal data) */
-	cmd[g6_off + isp->cal_words - 1] = (u32)isp->work_buf.dma;
-	g6_words = n - g6_off;
-
-	/* ---- Build job with 6 gathers ---- */
-	job = nvhost_job_alloc(isp->channel, 6, 0, 0, 1);
+	/* Single-gather job */
+	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
 	if (!job)
 		return -ENOMEM;
 
-	/* Syncpt: memory syncpt, 4 incrs (3 IMMEDIATE + 1 OP_DONE conditional) */
 	job->sp->id = isp->syncpt_memory;
-	job->sp->incrs = 4;
+	job->sp->incrs = 2; /* 1 OP_DONE + 1 IMMEDIATE */
 	job->num_syncpts = 1;
 
-	/*
-	 * Add 6 gathers manually — nvhost_job_add_client_gather_address()
-	 * has a bug: it always writes mem_base to gathers[0], so only the
-	 * last call's address survives. We use nvhost_job_add_gather() and
-	 * patch mem_base on the correct index ourselves.
-	 */
-	/* G1: ISP class */
-	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
-	job->gathers[0].mem_base = cmd_phys + g1_off * 4;
-
-	/* G2: ISP class */
-	nvhost_job_add_gather(job, 0, g2_words, 0, isp->class_id, 0);
-	job->gathers[1].mem_base = cmd_phys + g2_off * 4;
-
-	/* G3: ISP class */
-	nvhost_job_add_gather(job, 0, g3_words, 0, isp->class_id, 0);
-	job->gathers[2].mem_base = cmd_phys + g3_off * 4;
-
-	/* G4: ISP class (NOOPs, no WAIT needed for now) */
-	nvhost_job_add_gather(job, 0, g4_words, 0, isp->class_id, 0);
-	job->gathers[3].mem_base = cmd_phys + g4_off * 4;
-
-	/* G5: ISP class */
-	nvhost_job_add_gather(job, 0, g5_words, 0, isp->class_id, 0);
-	job->gathers[4].mem_base = cmd_phys + g5_off * 4;
-
-	/* G6: ISP class */
-	nvhost_job_add_gather(job, 0, g6_words, 0, isp->class_id, 0);
-	job->gathers[5].mem_base = cmd_phys + g6_off * 4;
-
-	dev_info(&isp->pdev->dev,
-		 "gathers: [0]=0x%x [1]=0x%x [2]=0x%x [3]=0x%x [4]=0x%x [5]=0x%x num=%d\n",
-		 (u32)job->gathers[0].mem_base, (u32)job->gathers[1].mem_base,
-		 (u32)job->gathers[2].mem_base, (u32)job->gathers[3].mem_base,
-		 (u32)job->gathers[4].mem_base, (u32)job->gathers[5].mem_base,
-		 job->num_gathers);
+	nvhost_job_add_gather(job, 0, n, 0, isp->class_id, 0);
+	job->gathers[0].mem_base = cmd_phys;
 
 	err = nvhost_channel_submit(job);
 	if (err) {
 		dev_err(&isp->pdev->dev, "ISP frame submit failed: %d\n", err);
-		goto fail;
+		nvhost_job_put(job);
+		return err;
 	}
 
-	/* Wait for ISP OP_DONE */
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
 			job->sp->id, job->sp->fence,
 			msecs_to_jiffies(1000), NULL, NULL);
 	if (err)
 		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);
 
-	nvhost_job_put(job);
-	return err;
-
-fail:
 	nvhost_job_put(job);
 	return err;
 }
