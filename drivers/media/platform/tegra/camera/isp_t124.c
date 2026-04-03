@@ -189,9 +189,81 @@ idle:
 	return err;
 }
 
-/* ----------------------------------------------------------------
- * Runtime API — stream init/stop + per-frame processing
- * ---------------------------------------------------------------- */
+/**
+ * isp_t124_test_opdone() - Test if conditional OP_DONE syncpt fires
+ *
+ * Sends minimal submit: trigger 0x05 + cond4 OP_DONE syncpt incr.
+ * If this times out, ISP never generates OP_DONE for trigger 0x05.
+ */
+static int isp_t124_test_opdone(struct tegra_isp_t124 *isp)
+{
+	struct device *dev = &isp->pdev->dev;
+	struct nvhost_job *job;
+	u32 *cmdbuf;
+	dma_addr_t cmdbuf_phys;
+	int err, n = 0;
+
+	if (!isp->channel || !isp->syncpt_memory)
+		return -ENODEV;
+
+	err = nvhost_module_busy(isp->pdev);
+	if (err)
+		return err;
+
+	cmdbuf = dma_alloc_coherent(dev, PAGE_SIZE, &cmdbuf_phys, GFP_KERNEL);
+	if (!cmdbuf) {
+		err = -ENOMEM;
+		goto idle;
+	}
+
+	/* Conditional OP_DONE syncpt incr */
+	cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmdbuf[n++] = (4 << 8) | isp->syncpt_memory; /* cond4 = OP_DONE */
+
+	/* Trigger RUNTIME */
+	cmdbuf[n++] = nvhost_opcode_nonincr(0x00C, 1);
+	cmdbuf[n++] = 0x05;
+
+	/* IMMEDIATE incr as backup fence */
+	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		isp->syncpt_memory);
+	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
+
+	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+	if (!job) {
+		err = -ENOMEM;
+		goto free_cmdbuf;
+	}
+
+	job->sp->id = isp->syncpt_memory;
+	job->sp->incrs = 2; /* 1 OP_DONE + 1 IMMEDIATE */
+	job->num_syncpts = 1;
+
+	nvhost_job_add_gather(job, 0, n, 0, isp->class_id, 0);
+	job->gathers[0].mem_base = cmdbuf_phys;
+
+	err = nvhost_channel_submit(job);
+	if (err) {
+		nvhost_job_put(job);
+		goto free_cmdbuf;
+	}
+
+	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(500), NULL, NULL);
+
+	dev_info(dev, "test_opdone: %s (fence=%u)\n",
+		 err ? "TIMEOUT — OP_DONE never fired" : "OK — OP_DONE works",
+		 job->sp->fence);
+
+	nvhost_job_put(job);
+free_cmdbuf:
+	dma_free_coherent(dev, PAGE_SIZE, cmdbuf, cmdbuf_phys);
+idle:
+	nvhost_module_idle(isp->pdev);
+	return err;
+}
 
 /**
  * isp_t124_stream_init() - Prepare ISP for streaming
@@ -609,6 +681,31 @@ static const struct file_operations isp_t124_debugfs_ping_fops = {
 	.release = single_release,
 };
 
+static int isp_t124_debugfs_opdone_show(struct seq_file *s, void *data)
+{
+	struct tegra_isp_t124 *isp = s->private;
+	ktime_t start = ktime_get();
+	int ret = isp_t124_test_opdone(isp);
+	s64 us = ktime_us_delta(ktime_get(), start);
+
+	seq_printf(s, "ISP%s OP_DONE test: %s (%lld us)\n",
+		   isp->class_id == ISP_A_CLASS_ID ? "-A" : "-B",
+		   ret ? "TIMEOUT" : "OK", us);
+	return 0;
+}
+
+static int isp_t124_debugfs_opdone_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, isp_t124_debugfs_opdone_show, inode->i_private);
+}
+
+static const struct file_operations isp_t124_debugfs_opdone_fops = {
+	.open    = isp_t124_debugfs_opdone_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
 static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp,
 				  const char *name)
 {
@@ -617,6 +714,8 @@ static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp,
 		return;
 	debugfs_create_file("ping", 0444, isp->debugfs_dir,
 			    isp, &isp_t124_debugfs_ping_fops);
+	debugfs_create_file("test_opdone", 0444, isp->debugfs_dir,
+			    isp, &isp_t124_debugfs_opdone_fops);
 }
 
 static void isp_t124_debugfs_cleanup(struct tegra_isp_t124 *isp)
