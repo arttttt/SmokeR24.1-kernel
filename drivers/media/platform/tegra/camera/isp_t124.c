@@ -220,9 +220,9 @@ static int isp_t124_test_opdone(struct tegra_isp_t124 *isp)
 	cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmdbuf[n++] = (4 << 8) | isp->syncpt_memory; /* cond4 = OP_DONE */
 
-	/* Trigger RUNTIME */
+	/* Trigger POST_APPLY (0x0F) — known to generate OP_DONE in stream_init */
 	cmdbuf[n++] = nvhost_opcode_nonincr(0x00C, 1);
-	cmdbuf[n++] = 0x05;
+	cmdbuf[n++] = 0x0F;
 
 	/* IMMEDIATE incr as backup fence */
 	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -544,9 +544,9 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (6 << 8) | isp->syncpt_loadv;   /* cond6 */
 
-	/* Trigger: 0x00C = RUNTIME (0x05) */
+	/* Trigger — try POST_APPLY (0x0F) since RUNTIME (0x05) never fires OP_DONE */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
+	cmd[n++] = ISP_TRIGGER_POST_APPLY;
 
 	g2_words = n - g2_off;
 
