@@ -501,47 +501,12 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		   isp->syncpt_loadv;
 	g5_words = n - g5_off;
 
-	/* ---- G6: calibration + ISP enable + init regs (stock G6 tail) ---- */
+	/* ---- G6: calibration + ISP enable ---- */
 	g6_off = n;
 	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
 	/* Patch work buffer address (last word of cal data) */
 	cmd[g6_off + isp->cal_words - 1] = (u32)isp->work_buf.dma;
-
-	/* Stock G6 tail: init registers after cal+enable+work_buf */
-	cmd[n++] = nvhost_opcode_incr(0x008, 1);
-	cmd[n++] = 0xF000F800;
-	cmd[n++] = nvhost_opcode_incr(0x00D, 1);
-	cmd[n++] = 0x00000100;
-	cmd[n++] = nvhost_opcode_incr(0x014, 1);
-	cmd[n++] = 0x00000339;
-	cmd[n++] = nvhost_opcode_incr(0x015, 1);
-	cmd[n++] = 0x04040007;
-	cmd[n++] = nvhost_opcode_incr(0x018, 5);
-	cmd[n++] = 0x0a00500a;  /* 0x018 */
-	cmd[n++] = 0x00008089;  /* 0x019 */
-	cmd[n++] = 0x013645cb;  /* 0x01A */
-	cmd[n++] = 0x000001e7;  /* 0x01B */
-	cmd[n++] = 0x00000001;  /* 0x01C */
-	cmd[n++] = nvhost_opcode_incr(0x01D, 1);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = nvhost_opcode_incr(0x01F, 1);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = nvhost_opcode_incr(0x024, 3);
-	cmd[n++] = 0xc6bff67c;  /* 0x024 */
-	cmd[n++] = 0x70c9a9ea;  /* 0x025 */
-	cmd[n++] = 0x33894d2b;  /* 0x026 */
-	cmd[n++] = nvhost_opcode_incr(0x028, 3);
-	cmd[n++] = 0x00000007;  /* 0x028 */
-	cmd[n++] = 0x00000007;  /* 0x029 */
-	cmd[n++] = 0x00000007;  /* 0x02A */
-	cmd[n++] = nvhost_opcode_incr(0x038, 1);
-	cmd[n++] = 0x242cb07b;
-	cmd[n++] = nvhost_opcode_incr(0x03B, 1);
-	cmd[n++] = 0x017bad37;
-	cmd[n++] = nvhost_opcode_incr(0x03F, 1);
-	cmd[n++] = 0x00000020;
-
 	g6_words = n - g6_off;
 
 	/* ---- Build job with 6 gathers ---- */
