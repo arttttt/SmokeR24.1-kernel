@@ -1598,7 +1598,13 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
 			chan->isp_raw_size = chan->format.width *
 					    chan->format.height * raw_bpp;
-			chan->isp_raw_cpu = dma_alloc_coherent(chan->vi->dev,
+			/*
+			 * Allocate via ISP device, not VI device.
+			 * ISP has SMMU so dma_alloc_coherent does
+			 * scatter-gather IOVA mapping (no large vmap).
+			 */
+			chan->isp_raw_cpu = dma_alloc_coherent(
+					&isp->pdev->dev,
 					PAGE_ALIGN(chan->isp_raw_size),
 					&chan->isp_raw_dma, GFP_KERNEL);
 			if (chan->isp_raw_cpu) {
@@ -1608,7 +1614,8 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 				if (ret) {
 					dev_warn(&chan->video.dev,
 						 "ISP init failed: %d\n", ret);
-					dma_free_coherent(chan->vi->dev,
+					dma_free_coherent(
+						&isp->pdev->dev,
 						PAGE_ALIGN(chan->isp_raw_size),
 						chan->isp_raw_cpu,
 						chan->isp_raw_dma);
@@ -1694,16 +1701,16 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 		tegra_channel_update_clknbw(chan, 0);
 
 	/* ISP pipeline cleanup */
+	if (chan->isp_raw_cpu && chan->isp) {
+		dma_free_coherent(&chan->isp->pdev->dev,
+				  PAGE_ALIGN(chan->isp_raw_size),
+				  chan->isp_raw_cpu, chan->isp_raw_dma);
+		chan->isp_raw_cpu = NULL;
+	}
 	if (chan->use_isp) {
 		isp_t124_stream_stop(chan->isp);
 		chan->use_isp = false;
 		chan->isp = NULL;
-	}
-	if (chan->isp_raw_cpu) {
-		dma_free_coherent(chan->vi->dev,
-				  PAGE_ALIGN(chan->isp_raw_size),
-				  chan->isp_raw_cpu, chan->isp_raw_dma);
-		chan->isp_raw_cpu = NULL;
 	}
 
 	tegra_mipi_bias_pad_disable();
