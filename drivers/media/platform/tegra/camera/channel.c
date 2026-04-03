@@ -42,6 +42,7 @@
 #include "vi/vi.h"
 #include "nvhost_acm.h"
 #include "mipi_cal.h"
+#include "isp_t124.h"
 #include "t124_registers.h"
 #include "t210_registers.h"
 
@@ -795,17 +796,28 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	int state = VB2_BUF_STATE_DONE;
 
 	for (index = 0; index < valid_ports; index++) {
+		dma_addr_t surface_addr;
+		int surface_stride;
+
+		if (chan->use_isp) {
+			/* ISP mode: VI writes raw to internal buffer */
+			surface_addr = chan->isp_raw_dma;
+			surface_stride = chan->format.width * 2; /* RAW10 */
+		} else {
+			surface_addr = buf->addr + chan->buffer_offset[index];
+			surface_stride = bytes_per_line;
+		}
+
 		/* Program buffer address by using surface 0 */
 		csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_MSB, 0x0);
 		csi_write(chan, index,
-			TEGRA_VI_CSI_SURFACE0_OFFSET_LSB,
-			(buf->addr + chan->buffer_offset[index]));
+			TEGRA_VI_CSI_SURFACE0_OFFSET_LSB, surface_addr);
 		csi_write(chan, index,
-			TEGRA_VI_CSI_SURFACE0_STRIDE, bytes_per_line);
+			TEGRA_VI_CSI_SURFACE0_STRIDE, surface_stride);
 		dev_dbg(&chan->video.dev,
-			"capture_frame[%d]: buf_addr=0x%08x offset=0x%x stride=%d\n",
-			index, (u32)(buf->addr + chan->buffer_offset[index]),
-			chan->buffer_offset[index], bytes_per_line);
+			"capture_frame[%d]: buf_addr=0x%08x stride=%d%s\n",
+			index, (u32)surface_addr, surface_stride,
+			chan->use_isp ? " (ISP raw)" : "");
 
 		/* Program syncpoints */
 		thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
@@ -1012,6 +1024,20 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			chan->capture_state = CAPTURE_ERROR;
 			/* do we have to run recover here ?? */
 			/* tegra_channel_ec_recover(chan); */
+		}
+	}
+
+	/* ISP processing: raw → YUV */
+	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
+		int isp_err = isp_t124_process_frame(chan->isp,
+				chan->isp_raw_dma,
+				buf->addr,
+				chan->syncpt[0],
+				thresh[0]);
+		if (isp_err) {
+			dev_err(&chan->video.dev,
+				"ISP process_frame failed: %d\n", isp_err);
+			state = VB2_BUF_STATE_ERROR;
 		}
 	}
 
@@ -1561,6 +1587,45 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 	chan->sequence = 0;
 	tegra_channel_init_ring_buffer(chan);
 
+	/* ISP pipeline setup: allocate raw buffer, init ISP */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+	if (!chan->vi->pg_mode && chan->valid_ports > 0) {
+		u8 isp_class = (chan->port[0] == 0) ?
+			ISP_A_CLASS_ID : ISP_B_CLASS_ID;
+		struct tegra_isp_t124 *isp = isp_t124_get_isp(isp_class);
+
+		if (isp) {
+			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
+			chan->isp_raw_size = chan->format.width *
+					    chan->format.height * raw_bpp;
+			chan->isp_raw_cpu = dma_alloc_coherent(chan->vi->dev,
+					PAGE_ALIGN(chan->isp_raw_size),
+					&chan->isp_raw_dma, GFP_KERNEL);
+			if (chan->isp_raw_cpu) {
+				ret = isp_t124_stream_init(isp,
+						chan->format.width,
+						chan->format.height);
+				if (ret) {
+					dev_warn(&chan->video.dev,
+						 "ISP init failed: %d\n", ret);
+					dma_free_coherent(chan->vi->dev,
+						PAGE_ALIGN(chan->isp_raw_size),
+						chan->isp_raw_cpu,
+						chan->isp_raw_dma);
+					chan->isp_raw_cpu = NULL;
+				} else {
+					chan->isp = isp;
+					chan->use_isp = true;
+					dev_info(&chan->video.dev,
+						 "ISP pipeline active: %ux%u\n",
+						 chan->format.width,
+						 chan->format.height);
+				}
+			}
+		}
+	}
+#endif
+
 	/* Update clock and bandwidth based on the format */
 	tegra_channel_update_clknbw(chan, 1);
 
@@ -1627,6 +1692,19 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 
 	if (!chan->bypass)
 		tegra_channel_update_clknbw(chan, 0);
+
+	/* ISP pipeline cleanup */
+	if (chan->use_isp) {
+		isp_t124_stream_stop(chan->isp);
+		chan->use_isp = false;
+		chan->isp = NULL;
+	}
+	if (chan->isp_raw_cpu) {
+		dma_free_coherent(chan->vi->dev,
+				  PAGE_ALIGN(chan->isp_raw_size),
+				  chan->isp_raw_cpu, chan->isp_raw_dma);
+		chan->isp_raw_cpu = NULL;
+	}
 
 	tegra_mipi_bias_pad_disable();
 

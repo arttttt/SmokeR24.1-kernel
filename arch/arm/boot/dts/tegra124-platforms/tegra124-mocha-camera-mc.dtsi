@@ -56,7 +56,7 @@
 			 * 4 channels: IMX179 (CSI-A), OV5693 (CSI-E),
 			 *             AD5823 (focuser), ISP-A (processor)
 			 */
-			num-channels = <4>;
+			num-channels = <5>;
 			status = "okay";
 
 			ports {
@@ -114,6 +114,17 @@
 						remote-endpoint = <&mocha_isp_a_out0>;
 					};
 				};
+
+				/*
+				 * Channel 4: ISP-B
+				 * ISP entity for front camera processing
+				 */
+				port@4 {
+					reg = <4>;
+					mocha_vi_in4: endpoint {
+						remote-endpoint = <&mocha_isp_b_out0>;
+					};
+				};
 			};
 		};
 
@@ -137,6 +148,18 @@
 		/* ISP B */
 		isp@54680000 {
 			status = "okay";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mocha_isp_b_out0: endpoint {
+						remote-endpoint = <&mocha_vi_in4>;
+					};
+				};
+			};
 		};
 	};
 

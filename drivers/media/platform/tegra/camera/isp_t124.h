@@ -7,11 +7,18 @@
 #ifndef __ISP_T124_H__
 #define __ISP_T124_H__
 
+#include <linux/types.h>
 #include <media/v4l2-subdev.h>
 #include <media/media-entity.h>
 
 struct nvhost_channel;
 struct dentry;
+
+struct isp_dma_buf {
+	void *cpu;
+	dma_addr_t dma;
+	size_t size;
+};
 
 struct tegra_isp_t124 {
 	struct platform_device *pdev;
@@ -22,11 +29,28 @@ struct tegra_isp_t124 {
 
 	/* Host1x job submission */
 	struct nvhost_channel *channel;
-	u32 syncpt_id;
+	u8 class_id; /* ISP_A_CLASS_ID (0x32) or ISP_B_CLASS_ID (0x34) */
 
-	/* Calibration data */
+	/* Syncpoints — 3 per ISP (params 0, 1, 3) */
+	u32 syncpt_memory;  /* param 0 — OP_DONE fires here */
+	u32 syncpt_stats;   /* param 1 */
+	u32 syncpt_loadv;   /* param 3 */
+
+	/* Calibration data (from isp_t124_cal.h) */
 	const u32 *cal_data;
 	int cal_words;
+
+	/* Runtime state (allocated during stream_init) */
+	struct isp_dma_buf work_buf;    /* 256KB ISP working buffer */
+	u32 *cmdbuf;                    /* DMA-coherent command buffer */
+	dma_addr_t cmdbuf_phys;
+	bool streaming;                 /* stream_init called */
+
+	/* Frame dimensions (set during stream_init) */
+	u32 width;
+	u32 height;
+	u32 y_stride;
+	u32 uv_stride;
 
 	/* debugfs */
 	struct dentry *debugfs_dir;
@@ -35,6 +59,14 @@ struct tegra_isp_t124 {
 /* Called from legacy isp.c probe to initialize MC integration */
 int tegra_isp_t124_mc_init(struct platform_device *pdev);
 void tegra_isp_t124_mc_cleanup(struct platform_device *pdev);
+
+/* Runtime API — called from channel.c capture path */
+struct tegra_isp_t124 *isp_t124_get_isp(u8 class_id);
+int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height);
+void isp_t124_stream_stop(struct tegra_isp_t124 *isp);
+int isp_t124_process_frame(struct tegra_isp_t124 *isp,
+			   dma_addr_t in_dma, dma_addr_t out_dma,
+			   u32 vi_syncpt, u32 vi_thresh);
 
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */
 
@@ -98,5 +130,12 @@ void tegra_isp_t124_mc_cleanup(struct platform_device *pdev);
 /* ISP class IDs */
 #define ISP_A_CLASS_ID			0x32
 #define ISP_B_CLASS_ID			0x34
+
+/* Command buffer size — enough for cal(~1545) + frame(~60) + overhead */
+#define ISP_CMDBUF_WORDS		2048
+#define ISP_CMDBUF_SIZE			(ISP_CMDBUF_WORDS * 4)
+
+/* Working buffer size */
+#define ISP_WORK_BUF_SIZE		(256 * 1024)
 
 #endif /* __ISP_T124_H__ */
