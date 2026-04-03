@@ -29,6 +29,7 @@
 #include <sys/ioctl.h>
 #include <stdint.h>
 #include <time.h>
+#include <sys/mman.h>
 
 /* ---- nvhost ioctl definitions ---- */
 #define NVHOST_IOCTL_MAGIC 'H'
@@ -742,6 +743,47 @@ int main(int argc, char **argv)
 		if (nvmap_read(cmdbuf_h, 0, dump, sizeof(dump)) == 0) {
 			for (int i = 0; i < 32; i++)
 				printf("  [%03d] 0x%08x\n", i, dump[i]);
+		}
+	}
+
+	/* Pause to allow MMIO reading while ISP is still powered */
+	printf("\n--- ISP still powered, reading MMIO ---\n");
+	{
+		int mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
+		if (mem_fd >= 0) {
+			uint32_t isp_base = (class_id == 0x32) ? 0x54600000 : 0x54680000;
+			void *map = mmap(NULL, 4096, PROT_READ, MAP_SHARED,
+					 mem_fd, isp_base);
+			if (map != MAP_FAILED) {
+				volatile uint32_t *regs = (volatile uint32_t *)map;
+				struct { int off; const char *name; } mmio[] = {
+					{0x020/4, "0x008 input_cfg"},
+					{0x030/4, "0x00C control"},
+					{0x034/4, "0x00D status"},
+					{0x050/4, "0x014 sensor_param"},
+					{0x054/4, "0x015 enable"},
+					{0x060/4, "0x018 proc0"},
+					{0x064/4, "0x019 proc1"},
+					{0x068/4, "0x01A cal0"},
+					{0x06C/4, "0x01B cal1"},
+					{0x070/4, "0x01C unk"},
+					{0x074/4, "0x01D CG_CTRL"},
+					{0x07C/4, "0x01F mode"},
+					{0x14C/4, "0x053 ISP_EN"},
+					{0x150/4, "0x054 work_buf"},
+					{0x178/4, "0x05E unk2"},
+				};
+				for (int i = 0; i < (int)(sizeof(mmio)/sizeof(mmio[0])); i++) {
+					printf("  MMIO %s = 0x%08X\n",
+					       mmio[i].name, regs[mmio[i].off]);
+				}
+				munmap(map, 4096);
+			} else {
+				perror("mmap ISP MMIO");
+			}
+			close(mem_fd);
+		} else {
+			printf("  (cannot open /dev/mem for MMIO read)\n");
 		}
 	}
 
