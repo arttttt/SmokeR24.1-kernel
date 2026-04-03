@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 	/* Allocate buffers */
 	uint32_t cmd_h = nv_create(32768);
 	uint32_t in_h = nv_create(IN_SIZE);
-	uint32_t out_h = nv_create(OUT_SIZE);
+	uint32_t out_h = nv_create(W * H * 4 + 4096); /* BGRA */
 	if (!cmd_h || !in_h || !out_h) { printf("create fail\n"); return 1; }
 
 	nv_alloc(cmd_h, NVMAP_HEAP_CARVEOUT, 4096);
@@ -176,20 +176,24 @@ int main(int argc, char **argv)
 	}
 
 	/* Output config (stock per-frame block) */
+	int BGRA_STRIDE = W * 4;
+	int BGRA_SIZE = BGRA_STRIDE * H;
+
+	printf("Output format: BGRA (0xCA), stride=%d, size=%d\n", BGRA_STRIDE, BGRA_SIZE);
+
 	cmd[n++] = h1x_setclass(class_id, 0, 0);
 	cmd[n++] = h1x_incr(0xE00, 1); cmd[n++] = ((W-1)&0x3FFF)<<16;
 	cmd[n++] = h1x_incr(0xE01, 1); cmd[n++] = ((H-1)&0x3FFF)<<16;
-	cmd[n++] = h1x_incr(0xE02, 1); cmd[n++] = 0x04FE00E6;
+	cmd[n++] = h1x_incr(0xE02, 1); cmd[n++] = 0x04FE00CA;
 	cmd[n++] = h1x_incr(0xE03, 1); cmd[n++] = 0;
-	/* Y */
+	/* Single BGRA surface */
 	cmd[n++] = h1x_incr(0xE04, 3);
-	int reloc_y = n; cmd[n++] = out_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
-	/* U */
+	int reloc_y = n; cmd[n++] = out_iova; cmd[n++] = 0; cmd[n++] = BGRA_STRIDE;
+	/* U/V surfaces — point to same buffer, ISP won't use for packed format */
 	cmd[n++] = h1x_incr(0xE07, 3);
-	int reloc_u = n; cmd[n++] = out_iova + Y_SIZE; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
-	/* V */
+	int reloc_u = n; cmd[n++] = out_iova; cmd[n++] = 0; cmd[n++] = BGRA_STRIDE;
 	cmd[n++] = h1x_incr(0xE0A, 3);
-	int reloc_v = n; cmd[n++] = out_iova + Y_SIZE + UV_SIZE; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
+	int reloc_v = n; cmd[n++] = out_iova; cmd[n++] = 0; cmd[n++] = BGRA_STRIDE;
 	/* Processing */
 	cmd[n++] = h1x_incr(0x500, 6);
 	cmd[n++]=0; cmd[n++]=0; cmd[n++]=0; cmd[n++]=0; cmd[n++]=0;
@@ -200,8 +204,8 @@ int main(int argc, char **argv)
 	int reloc_in = n; cmd[n++] = in_iova; cmd[n++]=0; cmd[n++]=0; cmd[n++]=0;
 	/* Secondary output */
 	cmd[n++] = h1x_incr(0xE31, 1); cmd[n++] = W|(H<<16);
-	cmd[n++] = h1x_incr(0xE33, 1); cmd[n++] = 0x04FE00E6;
-	cmd[n++] = h1x_incr(0xE32, 1); cmd[n++] = Y_STRIDE;
+	cmd[n++] = h1x_incr(0xE33, 1); cmd[n++] = 0x04FE00CA;
+	cmd[n++] = h1x_incr(0xE32, 1); cmd[n++] = BGRA_STRIDE;
 	cmd[n++] = h1x_incr(0x015, 1); cmd[n++] = 0x00000007;
 	cmd[n++] = h1x_incr(0xE30, 1); cmd[n++] = 1;
 	/* Trigger */
@@ -254,8 +258,8 @@ int main(int argc, char **argv)
 	struct nvhost_reloc_shift shifts[4];
 	int nr = 0;
 	relocs[nr] = (struct nvhost_reloc){cmd_h, reloc_y*4, out_h, 0}; shifts[nr++].shift=0;
-	relocs[nr] = (struct nvhost_reloc){cmd_h, reloc_u*4, out_h, Y_SIZE}; shifts[nr++].shift=0;
-	relocs[nr] = (struct nvhost_reloc){cmd_h, reloc_v*4, out_h, Y_SIZE+UV_SIZE}; shifts[nr++].shift=0;
+	relocs[nr] = (struct nvhost_reloc){cmd_h, reloc_u*4, out_h, 0}; shifts[nr++].shift=0;
+	relocs[nr] = (struct nvhost_reloc){cmd_h, reloc_v*4, out_h, 0}; shifts[nr++].shift=0;
 	relocs[nr] = (struct nvhost_reloc){cmd_h, reloc_in*4, in_h, 0}; shifts[nr++].shift=0;
 
 	/* Submit */
@@ -289,13 +293,14 @@ int main(int argc, char **argv)
 	printf("Submit: %s (%ld us)\n", ret ? "TIMEOUT" : "OK", us);
 
 	/* Read and save output */
+	int SAVE_SIZE = W * H * 4; /* BGRA */
 	fp = fopen(out_path, "wb");
 	if (fp) {
 		int chunk = 65536;
 		uint8_t *buf = malloc(chunk);
 		int off = 0, nonzero = 0;
-		while (off < OUT_SIZE) {
-			int sz = (OUT_SIZE-off < chunk) ? OUT_SIZE-off : chunk;
+		while (off < SAVE_SIZE) {
+			int sz = (SAVE_SIZE-off < chunk) ? SAVE_SIZE-off : chunk;
 			nv_read(out_h, off, buf, sz);
 			fwrite(buf, 1, sz, fp);
 			if (off == 0) {
@@ -306,7 +311,7 @@ int main(int argc, char **argv)
 		}
 		free(buf);
 		fclose(fp);
-		printf("Output: %d bytes saved, first 4K: %d/4096 non-zero\n", off, nonzero);
+		printf("Output: %d bytes saved (BGRA), first 4K: %d/4096 non-zero\n", off, nonzero);
 	}
 
 	printf("Done!\n");
