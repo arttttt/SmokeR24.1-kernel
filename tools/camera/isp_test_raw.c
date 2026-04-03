@@ -292,6 +292,35 @@ int main(int argc, char **argv)
 	long us = (t1.tv_sec-t0.tv_sec)*1000000L + (t1.tv_nsec-t0.tv_nsec)/1000;
 	printf("Submit: %s (%ld us)\n", ret ? "TIMEOUT" : "OK", us);
 
+	/* === SUBMIT 3: Second frame (pipeline now warm) === */
+	nv_write(cmd_h, 0, cmd, n * 4);  /* reload same cmdbuf */
+	{
+		struct nvhost_cmdbuf cb2 = { .mem=cmd_h, .words=n };
+		struct nvhost_syncpt_incr si2 = { .syncpt_id=sp_id, .syncpt_incrs=1 };
+		struct nvhost_fence fence2 = {};
+		struct nvhost32_submit_args sa2;
+		memset(&sa2, 0, sizeof(sa2));
+		sa2.num_syncpt_incrs=1; sa2.num_cmdbufs=1; sa2.num_relocs=nr; sa2.timeout=5000;
+		sa2.syncpt_incrs=(uint32_t)(uintptr_t)&si2;
+		sa2.cmdbufs=(uint32_t)(uintptr_t)&cb2;
+		sa2.relocs=(uint32_t)(uintptr_t)relocs;
+		sa2.reloc_shifts=(uint32_t)(uintptr_t)shifts;
+		sa2.class_ids=(uint32_t)(uintptr_t)&cid;
+		sa2.fences=(uint32_t)(uintptr_t)&fence2;
+
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa2) < 0) {
+			perror("submit2");
+		} else {
+			struct nvhost_ctrl_syncpt_waitex_args wa2 = {
+				.id=sp_id, .thresh=fence2.value, .timeout=5000 };
+			ret = ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa2);
+			clock_gettime(CLOCK_MONOTONIC, &t1);
+			us = (t1.tv_sec-t0.tv_sec)*1000000L + (t1.tv_nsec-t0.tv_nsec)/1000;
+			printf("Submit2 (warm): %s (%ld us)\n", ret ? "TIMEOUT" : "OK", us);
+		}
+	}
+
 	/* Read and save output */
 	int SAVE_SIZE = W * H * 4; /* BGRA */
 	fp = fopen(out_path, "wb");
