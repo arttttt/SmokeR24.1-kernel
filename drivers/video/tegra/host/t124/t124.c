@@ -126,10 +126,7 @@ struct nvhost_device_data t124_isp_info = {
 	.num_channels	= 1,
 	/* FIXME: control clocks from user space instead of hard-coding here */
 	.moduleid        = NVHOST_MODULE_ISP,
-	/* NOTE: .class intentionally NOT set — matches stock kernel behavior.
-	 * With .class = 0, submit_gathers() won't push SET_CLASS before gather.
-	 * ISP gathers already contain SET_CLASS inside (gather filter disabled).
-	 * Stock kernel had .class = 0 and ISP DMA worked. */
+	.class           = NV_VIDEO_STREAMING_ISP_CLASS_ID,
 	.modulemutexes   = {NVMODMUTEX_ISP_0},
 	.devfs_name      = "isp",
 	.exclusive       = true,
@@ -171,7 +168,7 @@ struct nvhost_device_data t124_ispb_info = {
 	/* FIXME: control clocks from user space instead of hard-coding here */
 	.moduleid        = (1 << 16) | NVHOST_MODULE_ISP,
 	.devfs_name      = "isp.1",
-	/* .class intentionally NOT set — see t124_isp_info comment */
+	.class           = NV_VIDEO_STREAMING_ISPB_CLASS_ID,
 	.modulemutexes   = {NVMODMUTEX_ISP_1},
 	.exclusive       = true,
 	.keepalive       = true,

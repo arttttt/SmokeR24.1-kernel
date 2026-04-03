@@ -554,8 +554,7 @@ void nvhost_cdma_push(struct nvhost_cdma *cdma, u32 op1, u32 op2)
 		trace_nvhost_cdma_push(pdev->name, op1, op2);
 
 	/* ISP pushbuffer debug dump */
-	if (pdata->moduleid == 3 /* NVHOST_MODULE_ISP */ ||
-	    pdata->moduleid == ((1 << 16) | 3))
+	if (pdata->class == 0x32 || pdata->class == 0x34)
 		dev_info(&pdev->dev, "PB: %08x %08x\n", op1, op2);
 
 	nvhost_cdma_push_gather(cdma, NULL, 0, 0, op1, op2);
@@ -578,8 +577,7 @@ void nvhost_cdma_push_gather(struct nvhost_cdma *cdma,
 		trace_write_gather(cdma, cpuva, iova, offset, op1 & 0x1fff);
 
 	/* ISP gather debug dump */
-	if (pdata->moduleid == 3 /* NVHOST_MODULE_ISP */ ||
-	    pdata->moduleid == ((1 << 16) | 3))
+	if (pdata->class == 0x32 || pdata->class == 0x34)
 		dev_info(&pdev->dev, "PB_G: %08x %08x (iova=%pad off=%u)\n",
 			 op1, op2, &iova, offset);
 

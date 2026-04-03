@@ -329,7 +329,7 @@ static int pin_array_ids(struct platform_device *dev,
 		/* ISP debug: show what address pin returns */
 		{
 			struct nvhost_device_data *pdata = platform_get_drvdata(dev);
-			if (pdata && (pdata->moduleid == 3 || pdata->moduleid == ((1 << 16) | 3)))
+			if (pdata && (pdata->class == 0x32 || pdata->class == 0x34))
 				dev_info(&dev->dev,
 					"pin id=%u -> dma=0x%pad phys=0x%lx dev=%s\n",
 					ids[i].id,
