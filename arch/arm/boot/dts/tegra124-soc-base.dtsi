@@ -790,7 +790,12 @@
 		interrupts = <0 65 0x04   /* mpcore syncpt */
 			      0 67 0x04>; /* mpcore general */
 		iommus = <&smmu TEGRA_SWGROUP_EPP>,
-			 <&smmu TEGRA_SWGROUP_HC>,
+			 /* TEGRA_SWGROUP_HC removed: host1x CDMA must use
+			  * physical addresses for gather fetch, not IOVA.
+			  * Stock kernel did not have HC behind SMMU.
+			  * With HC behind SMMU, gather buffers (physical/carveout)
+			  * are not mapped in host1x SMMU domain → CDMA reads
+			  * zeros → ISP/VI/etc never receive methods from gathers */
 			 <&smmu TEGRA_SWGROUP_HDA>,
 			 <&smmu TEGRA_SWGROUP_VDE>;
 
