@@ -1036,6 +1036,21 @@ static int test_B4_input_isolation(int ch_fd, int ctrl_fd, uint32_t syncpt,
 
 	for (i = 0; i < ntests; i++) {
 		uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
+
+		/* Re-init ISP between tests to avoid stale state */
+		{
+			cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
+			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
+			cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1);
+			cmd[n++]=ISP_TRIGGER_POST_APPLY;
+			cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF));
+			cmd[n++]=NVHOST_OPCODE_NOOP;
+			struct nvhost_syncpt_incr sp_reset={syncpt,1};
+			if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp_reset,1,NULL,0,NULL,&fence)==0)
+				nvhost_wait_syncpt(ctrl_fd,syncpt,fence,1000);
+			n = 0;
+		}
+
 		cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
 
 		if (tests[i].use_dims) {
