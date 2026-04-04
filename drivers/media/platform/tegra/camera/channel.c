@@ -1694,7 +1694,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 							&isp->pdev->dev,
 							PAGE_ALIGN(chan->isp_out_size),
 							&chan->isp_out_dma,
-							GFP_KERNEL | __GFP_DMA32);
+							GFP_KERNEL | __GFP_DMA);
 						if (!chan->isp_out_cpu) {
 							dev_warn(&chan->video.dev,
 								 "ISP out buf alloc failed\n");

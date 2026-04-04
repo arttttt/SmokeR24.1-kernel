@@ -46,7 +46,7 @@ static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
 {
 	buf->size = PAGE_ALIGN(size);
 	buf->cpu = dma_alloc_coherent(dev, buf->size, &buf->dma,
-				      GFP_KERNEL | __GFP_DMA32);
+				      GFP_KERNEL | __GFP_DMA);
 	if (!buf->cpu)
 		return -ENOMEM;
 	return 0;
