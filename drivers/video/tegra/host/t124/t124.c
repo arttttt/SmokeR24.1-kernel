@@ -137,7 +137,7 @@ struct nvhost_device_data t124_isp_info = {
 	.powergate_delay = ISP_POWERGATE_DELAY,
 	.clocks          = {
 		{"isp", UINT_MAX, 0, TEGRA_MC_CLIENT_ISP},
-		{"emc", 0, NVHOST_MODULE_ID_EXTERNAL_MEMORY_CONTROLLER},
+		{"emc", 81600000, NVHOST_MODULE_ID_EXTERNAL_MEMORY_CONTROLLER},
 		{"sclk", 80000000} },
 	.finalize_poweron = nvhost_isp_t124_finalize_poweron,
 	.prepare_poweroff = nvhost_isp_t124_prepare_poweroff,
@@ -178,7 +178,7 @@ struct nvhost_device_data t124_ispb_info = {
 	.powergate_delay = ISP_POWERGATE_DELAY,
 	.clocks          = {
 		{"isp", UINT_MAX, 0, TEGRA_MC_CLIENT_ISPB},
-		{"emc", 0, NVHOST_MODULE_ID_EXTERNAL_MEMORY_CONTROLLER},
+		{"emc", 81600000, NVHOST_MODULE_ID_EXTERNAL_MEMORY_CONTROLLER},
 		{"sclk", 80000000} },
 	.finalize_poweron = nvhost_isp_t124_finalize_poweron,
 	.prepare_poweroff = nvhost_isp_t124_prepare_poweroff,
