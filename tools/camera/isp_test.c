@@ -1253,6 +1253,208 @@ static int test_C_full(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	return ret;
 }
 
+
+/*
+ * Test E: Input via method 0x100 (stock streaming path from cmdbuf dump).
+ * Stock cmdbuf shows: INCR(0x100, 4) = [IOVA, 0, 0, 0]
+ * This is how stock streaming mode passes input address.
+ * Combined with output surfaces, ISP_ENABLE=0x04040007, trigger=0x05.
+ */
+static int test_E_method100(int ch_fd, int ctrl_fd, uint32_t syncpt,
+	uint32_t class_id, struct nvbuf *cmdbuf,
+	struct nvbuf *inbuf, struct nvbuf *outbuf,
+	struct nvbuf *workbuf, uint32_t W, uint32_t H)
+{
+	uint32_t *cmd = cmdbuf->cpu;
+	int n = 0;
+	uint32_t fence;
+	uint32_t y_stride = (W + 63) & ~63;
+	uint32_t uv_stride = ((W/2) + 63) & ~63;
+	uint32_t y_size = y_stride * H;
+	uint32_t uv_size = uv_stride * (H/2);
+
+	struct nvhost_reloc relocs[5];
+	struct nvhost_reloc_shift shifts[5];
+	int nr = 0;
+
+	printf("\n=== TEST E: Input via 0x100 (stock cmdbuf path) %ux%u ===\n", W, H);
+
+	memset(inbuf->cpu, 0x42, inbuf->size);
+	memset(outbuf->cpu, 0xDE, outbuf->size);
+
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+
+	/* Output config */
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
+	cmd[n++] = ((W-1)&0x3FFF)<<16;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
+	cmd[n++] = ((H-1)&0x3FFF)<<16;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
+	cmd[n++] = ISP_FORMAT_STOCK;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
+	cmd[n++] = 0;
+
+	/* Output Y via RELOC */
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
+	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
+	relocs[nr].cmdbuf_offset = n * 4;
+	relocs[nr].target = outbuf->dmabuf_fd;
+	relocs[nr].target_offset = 0;
+	shifts[nr].shift = 0; nr++;
+	cmd[n++] = 0xDEAD0001; cmd[n++] = 0; cmd[n++] = y_stride;
+
+	/* Output U via RELOC */
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
+	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
+	relocs[nr].cmdbuf_offset = n * 4;
+	relocs[nr].target = outbuf->dmabuf_fd;
+	relocs[nr].target_offset = y_size;
+	shifts[nr].shift = 0; nr++;
+	cmd[n++] = 0xDEAD0002; cmd[n++] = 0; cmd[n++] = uv_stride;
+
+	/* Output V via RELOC */
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
+	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
+	relocs[nr].cmdbuf_offset = n * 4;
+	relocs[nr].target = outbuf->dmabuf_fd;
+	relocs[nr].target_offset = y_size + uv_size;
+	shifts[nr].shift = 0; nr++;
+	cmd[n++] = 0xDEAD0003; cmd[n++] = 0; cmd[n++] = uv_stride;
+
+	/* Processing */
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = (H<<16)|W;
+
+	/* Input via method 0x100 — stock cmdbuf format: INCR(0x100, 4) = [IOVA,0,0,0] */
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_INCR(0x100, 4);
+	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
+	relocs[nr].cmdbuf_offset = n * 4;
+	relocs[nr].target = inbuf->dmabuf_fd;
+	relocs[nr].target_offset = 0;
+	shifts[nr].shift = 0; nr++;
+	cmd[n++] = 0xDEAD0004;
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+
+	/* Syncpt incrs: cond 4,5,6 */
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
+	cmd[n++] = (4<<8)|(syncpt&0xFF);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
+	cmd[n++] = (5<<8)|(syncpt&0xFF);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
+	cmd[n++] = (6<<8)|(syncpt&0xFF);
+
+	/* Trigger RUNTIME */
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
+	cmd[n++] = ISP_TRIGGER_RUNTIME;
+
+	/* Safety IMMEDIATE */
+	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (0<<8)|(syncpt&0xFF));
+	cmd[n++] = NVHOST_OPCODE_NOOP;
+
+	printf("  cmdbuf: %d words, %d relocs\n", n, nr);
+
+	/* 4 incrs: cond4 + cond5 + cond6 + immediate */
+	struct nvhost_syncpt_incr sp = { syncpt, 4 };
+	uint32_t before = nvhost_read_syncpt(ctrl_fd, syncpt);
+
+	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, relocs, nr, shifts, &fence))
+		return -1;
+
+	/* Wait for all 3 conditional + 1 immediate = before+4 */
+	printf("  syncpt before=%u, waiting for %u (all cond+imm)...\n", before, before+4);
+	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, before + 3, 3000);
+	if (ret) {
+		uint32_t after = nvhost_read_syncpt(ctrl_fd, syncpt);
+		printf("  cond syncpts DID NOT fire (syncpt: %u→%u, expected %u)\n",
+		       before, after, before+4);
+		/* Drain immediate */
+		nvhost_wait_syncpt(ctrl_fd, syncpt, before + 4, 5000);
+	} else {
+		printf("  ALL cond syncpts FIRED!\n");
+		check_output(outbuf);
+		/* Drain immediate */
+		nvhost_wait_syncpt(ctrl_fd, syncpt, before + 4, 1000);
+	}
+
+	/* Also try with ISP_ENABLE=0x04040007 */
+	printf("\n=== TEST E2: Same but ISP_ENABLE=0x04040007 ===\n");
+	n = 0; nr = 0;
+	memset(outbuf->cpu, 0xDE, outbuf->size);
+
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
+	cmd[n++] = ((W-1)&0x3FFF)<<16;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
+	cmd[n++] = ((H-1)&0x3FFF)<<16;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
+	cmd[n++] = ISP_FORMAT_STOCK;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
+	cmd[n++] = 0;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
+	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
+	relocs[nr].target=outbuf->dmabuf_fd; relocs[nr].target_offset=0;
+	shifts[nr].shift=0; nr++;
+	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=y_stride;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
+	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
+	relocs[nr].target=outbuf->dmabuf_fd; relocs[nr].target_offset=y_size;
+	shifts[nr].shift=0; nr++;
+	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=uv_stride;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
+	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
+	relocs[nr].target=outbuf->dmabuf_fd; relocs[nr].target_offset=y_size+uv_size;
+	shifts[nr].shift=0; nr++;
+	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=uv_stride;
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
+	cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=(H<<16)|W;
+
+	/* Input via 0x100 */
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_INCR(0x100, 4);
+	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
+	relocs[nr].target=inbuf->dmabuf_fd; relocs[nr].target_offset=0;
+	shifts[nr].shift=0; nr++;
+	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=0; cmd[n++]=0;
+
+	/* ISP_ENABLE = 0x04040007 (streaming mode) */
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
+	cmd[n++] = 0x04040007;
+
+	/* cond 4,5,6 */
+	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(4<<8)|(syncpt&0xFF);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(5<<8)|(syncpt&0xFF);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(6<<8)|(syncpt&0xFF);
+
+	/* Trigger RUNTIME */
+	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
+	cmd[n++] = ISP_TRIGGER_RUNTIME;
+
+	cmd[n++] = NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF));
+	cmd[n++] = NVHOST_OPCODE_NOOP;
+
+	struct nvhost_syncpt_incr sp2 = { syncpt, 4 };
+	before = nvhost_read_syncpt(ctrl_fd, syncpt);
+	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp2, 1, relocs, nr, shifts, &fence))
+		return -1;
+	ret = nvhost_wait_syncpt(ctrl_fd, syncpt, before+3, 3000);
+	if (ret) {
+		uint32_t after = nvhost_read_syncpt(ctrl_fd, syncpt);
+		printf("  cond syncpts DID NOT fire (%u→%u)\n", before, after);
+		nvhost_wait_syncpt(ctrl_fd, syncpt, before+4, 5000);
+	} else {
+		printf("  ALL cond syncpts FIRED!\n");
+		check_output(outbuf);
+		nvhost_wait_syncpt(ctrl_fd, syncpt, before+4, 1000);
+	}
+	return 0;
+}
+
 /*
  * Test D: Stock-like per-frame with 4 separate syncpts (memory/stats/loadv/stream)
  * Matches isp_t124_process_frame() exactly.
@@ -1572,6 +1774,10 @@ int main(int argc, char **argv)
 	/* Test C: enable=0x07, trigger=0x0F, WITH surfaces (full pipeline) */
 	test_C_full(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
 		    &inbuf, &outbuf, &workbuf, W, H);
+
+	/* Test E: Input via method 0x100 (stock streaming path) */
+	test_E_method100(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+			 &inbuf, &outbuf, &workbuf, W, H);
 
 	/* Test D: stock-like per-frame with 4 separate syncpts */
 	test_D_stock(ch_fd, ctrl_fd, &cmdbuf,
