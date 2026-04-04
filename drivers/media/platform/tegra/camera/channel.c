@@ -1722,10 +1722,12 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					}
 					if (chan->use_isp)
 						dev_info(&chan->video.dev,
-							 "ISP pipeline active: %ux%u out_dma=0x%pad\n",
+							 "ISP pipeline active: %ux%u out_dma=0x%pad out_phys=0x%lx raw_dma=0x%pad\n",
 							 chan->format.width,
 							 chan->format.height,
-							 &chan->isp_out_dma);
+							 &chan->isp_out_dma,
+							 (unsigned long)page_to_phys(chan->isp_out_page),
+							 &chan->isp_raw_dma);
 				}
 			}
 		}
