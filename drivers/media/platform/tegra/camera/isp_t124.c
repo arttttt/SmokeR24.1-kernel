@@ -273,12 +273,7 @@ idle:
 	return err;
 }
 
-/**
- * isp_t124_stream_init() - Prepare ISP for streaming
- *
- * Allocates working buffer, command buffer, applies calibration
- * with trigger 0x0F (POST_APPLY).
- */
+
 /* Helper: submit a command buffer and wait for cond=1 OP_DONE */
 static int isp_submit_and_wait(struct tegra_isp_t124 *isp,
 			       u32 *cmdbuf, dma_addr_t phys,
@@ -323,24 +318,71 @@ static int isp_submit_and_wait(struct tegra_isp_t124 *isp,
 	return err;
 }
 
-/* Helper: append calibration + trigger 0x0F + syncpt to buffer */
-static int isp_build_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
+/* Build stock zero-init block (1813 words) — all ISP registers zeroed */
+static int isp_build_zero_init(u32 *buf)
+{
+	int n = 0;
+#define ZI(off, cnt) do { \
+	buf[n++] = nvhost_opcode_incr(off, cnt); \
+	memset(&buf[n], 0, (cnt) * 4); n += (cnt); \
+} while (0)
+#define ZN(off, cnt) do { \
+	buf[n++] = nvhost_opcode_nonincr(off, cnt); \
+	memset(&buf[n], 0, (cnt) * 4); n += (cnt); \
+} while (0)
+	ZI(0x202, 3); ZI(0x200, 2); ZI(0x205, 4);
+	ZI(0x700, 16); ZI(0x750, 16);
+	ZI(0xd00, 10); ZI(0xd0a, 1); ZN(0xd0b, 480);
+	ZI(0xd0c, 2); ZI(0xd20, 6);
+	ZI(0x900, 2); ZI(0x902, 1); ZN(0x903, 64);
+	ZI(0x904, 2); ZI(0x906, 1); ZN(0x907, 36);
+	ZI(0x908, 1); ZI(0x920, 10); ZI(0x909, 7);
+	ZI(0x910, 9); ZI(0x919, 1); ZN(0x91a, 9);
+	ZI(0x91b, 1); ZN(0x91c, 9);
+	ZI(0x91d, 1); ZN(0x91e, 9);
+	buf[n++] = nvhost_opcode_incr(0x91f, 1);
+	buf[n++] = 0x00000002; /* stock value */
+	ZI(0x506, 9); ZI(0x600, 16); ZI(0x650, 1);
+	ZI(0x651, 1); ZN(0x652, 257);
+	ZI(0x653, 1); ZN(0x654, 257);
+	ZI(0x655, 1); ZN(0x656, 257);
+	ZI(0x657, 1); ZN(0x658, 257);
+	ZI(0x300, 4); ZI(0x304, 4);
+	ZI(0x053, 2);
+#undef ZI
+#undef ZN
+	return n; /* 1813 */
+}
+
+/* Append zero-init block + trigger. Returns new n. */
+static int isp_append_zero_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
+{
+	int zi = isp_build_zero_init(&buf[n]);
+	buf[n + zi - 1] = (u32)isp->work_buf.dma; /* patch 0x053 work_buf */
+	n += zi;
+	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	buf[n++] = ISP_TRIGGER_POST_APPLY;
+	return n;
+}
+
+/* Append real calibration + trigger. Returns new n. */
+static int isp_append_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
 	memcpy(&buf[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
-	/* Patch work buffer address (last word of cal) */
 	buf[n - 1] = (u32)isp->work_buf.dma;
-
-	/* Trigger POST_APPLY */
 	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
+	return n;
+}
 
-	/* Syncpt OP_DONE (cond=1) */
+/* Append syncpt cond=1 + NOOP. Returns new n. */
+static int isp_append_syncpt(struct tegra_isp_t124 *isp, u32 *buf, int n)
+{
 	buf[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_op_done_v(),
 		isp->syncpt_stream);
 	buf[n++] = NVHOST_OPCODE_NOOP;
-
 	return n;
 }
 
@@ -404,62 +446,35 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	dev_info(dev, "stream_init: %ux%u cmdbuf=0x%pad work=0x%pad\n",
 		 width, height, &cmd_phys, &isp->work_buf.dma);
 
-	/* ================================================================
-	 * SUBMIT 1 (stock: 3654 words): cal + trigger + 0x018 + cal + trigger + 0x018
-	 * ================================================================ */
+	/* S1 (stock 3654w): zero_block×2 + 0x018 tails + syncpt */
 	n = 0;
-
-	/* Block A: calibration + trigger */
-	n = isp_build_cal_block(isp, cmd, n);
-	/* Remove syncpt+noop from end (we don't want it mid-gather) */
-	n -= 2;
-
-	/* 0x018 tail block A (from stock) */
+	n = isp_append_zero_block(isp, cmd, n);
 	cmd[n++] = nvhost_opcode_incr(0x018, 5);
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000400;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000200;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000400;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000200;
 	cmd[n++] = 0x00000002;
-
-	/* Block B: calibration + trigger */
-	n = isp_build_cal_block(isp, cmd, n);
-	/* Remove syncpt+noop again */
-	n -= 2;
-
-	/* 0x018 tail block B (from stock — different values) */
+	n = isp_append_zero_block(isp, cmd, n);
 	cmd[n++] = nvhost_opcode_incr(0x018, 5);
-	cmd[n++] = 0x0a00500a;
-	cmd[n++] = 0x00008089;
-	cmd[n++] = 0x013645cb;
-	cmd[n++] = 0x000001e7;
+	cmd[n++] = 0x0a00500a; cmd[n++] = 0x00008089;
+	cmd[n++] = 0x013645cb; cmd[n++] = 0x000001e7;
 	cmd[n++] = 0x00000001;
-
-	/* Now add the syncpt for the whole gather */
-	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
-		isp->syncpt_stream);
-	cmd[n++] = NVHOST_OPCODE_NOOP;
+	n = isp_append_syncpt(isp, cmd, n);
+	dev_info(dev, "S1: %d words\n", n);
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S1-init");
 	if (err)
 		goto free_cmdbuf;
 
-	/* ================================================================
-	 * SUBMIT 2 (stock: 1817 words): cal + trigger
-	 * ================================================================ */
+	/* S2 (stock 1817w): zero_block + trigger + syncpt */
 	n = 0;
-	n = isp_build_cal_block(isp, cmd, n);
+	n = isp_append_zero_block(isp, cmd, n);
+	n = isp_append_syncpt(isp, cmd, n);
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S2-cal");
 	if (err)
 		goto free_cmdbuf;
 
-	/* ================================================================
-	 * SUBMIT 3 (stock: 1 word): SET_CLASS only + syncpt
-	 * Stock sends G[0]=1 word (SET_CLASS) + G[1]=2 words (syncpt incr).
-	 * We combine into single gather.
-	 * ================================================================ */
+	/* S3 (stock 1+2w): SET_CLASS + syncpt */
 	n = 0;
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -471,20 +486,16 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (err)
 		goto free_cmdbuf;
 
-	/* ================================================================
-	 * SUBMIT 4 (stock: 1817 words): cal + trigger (repeat of S2)
-	 * ================================================================ */
+	/* S4 (stock 1817w): zero_block + trigger + syncpt */
 	n = 0;
-	n = isp_build_cal_block(isp, cmd, n);
+	n = isp_append_zero_block(isp, cmd, n);
+	n = isp_append_syncpt(isp, cmd, n);
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S4-cal");
 	if (err)
 		goto free_cmdbuf;
 
-	/* ================================================================
-	 * SUBMIT 5 (stock: 1238 words): runtime config
-	 * 0x400, 0x800, 0x820, 0x930, 0xC00, calibration, 0x506, trigger
-	 * ================================================================ */
+	/* S5 (stock 1238w): runtime config + real cal + trigger + syncpt */
 	n = 0;
 
 	/* 0x400: runtime config (12 words) */
@@ -532,8 +543,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Calibration again (stock repeats in S5) */
-	n = isp_build_cal_block(isp, cmd, n);
+	/* Real calibration + trigger + syncpt */
+	n = isp_append_cal_block(isp, cmd, n);
+	n = isp_append_syncpt(isp, cmd, n);
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S5-rtcfg");
 	if (err)
