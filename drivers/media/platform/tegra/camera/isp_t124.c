@@ -330,6 +330,39 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cal_last_idx = isp->cal_words - 1;
 	isp->cmdbuf[cal_last_idx] = (u32)isp->work_buf.dma;
 
+	/* Output config — set up dims + format so ISP knows about output DMA */
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
+	isp->cmdbuf[n++] = ((width - 1) & 0x3FFF) << 16;
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
+	isp->cmdbuf[n++] = ((height - 1) & 0x3FFF) << 16;
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
+	isp->cmdbuf[n++] = ISP_FORMAT_STOCK;
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
+	isp->cmdbuf[n++] = 0x00000000;
+
+	/* Output surfaces — dummy addr (will be overwritten per-frame) */
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
+	isp->cmdbuf[n++] = 0x00000000;
+	isp->cmdbuf[n++] = ISP_SURF_WORD1;
+	isp->cmdbuf[n++] = isp->y_stride;
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
+	isp->cmdbuf[n++] = 0x00000000;
+	isp->cmdbuf[n++] = ISP_SURF_WORD1;
+	isp->cmdbuf[n++] = isp->uv_stride;
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
+	isp->cmdbuf[n++] = 0x00000000;
+	isp->cmdbuf[n++] = ISP_SURF_WORD1;
+	isp->cmdbuf[n++] = isp->uv_stride;
+
+	/* Processing dims */
+	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
+	isp->cmdbuf[n++] = 0;
+	isp->cmdbuf[n++] = 0;
+	isp->cmdbuf[n++] = 0;
+	isp->cmdbuf[n++] = 0;
+	isp->cmdbuf[n++] = 0;
+	isp->cmdbuf[n++] = (height << 16) | width;
+
 	/* Trigger 0x0F — static config apply */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	isp->cmdbuf[n++] = ISP_TRIGGER_POST_APPLY;
