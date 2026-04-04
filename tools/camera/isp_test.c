@@ -740,6 +740,25 @@ static int isp_init(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	if (ret) return ret;
 
 	printf("\n*** ISP INIT COMPLETE ***\n\n");
+
+	/* SET_EMC — without this, MC may block ISP DMA */
+	{
+		char ctrl_path[64];
+		snprintf(ctrl_path, sizeof(ctrl_path),
+			 "/dev/nvhost-ctrl-isp%s", is_b ? ".1" : "");
+		int cfd = open(ctrl_path, O_RDWR);
+		if (cfd < 0) cfd = open("/dev/nvhost-ctrl-isp", O_RDWR);
+		if (cfd >= 0) {
+			struct { uint32_t bw; uint32_t clk; uint32_t bpp_in; uint32_t bpp_out; } emc;
+			emc.bw = 0; emc.clk = 81600000; emc.bpp_in = 16; emc.bpp_out = 12;
+			int r = ioctl(cfd, _IOW('I', 1, emc), &emc);
+			printf("  SET_EMC: %s\n", r == 0 ? "OK" : "FAILED");
+			close(cfd);
+		} else {
+			printf("  SET_EMC: no ctrl-isp device\n");
+		}
+	}
+
 	return 0;
 }
 
