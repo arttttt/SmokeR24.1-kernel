@@ -367,9 +367,25 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	isp->cmdbuf[n++] = ISP_TRIGGER_POST_APPLY;
 
-	/* Syncpt — test if ISP generates cond=4 with output config */
+	/* Syncpt — try all conditions 0-9 to find which one ISP generates */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (0 << 8) | isp->syncpt_memory; /* cond0 IMMEDIATE */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (2 << 8) | isp->syncpt_memory; /* cond2 RD_DONE */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (3 << 8) | isp->syncpt_memory; /* cond3 REG_WR_SAFE */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
 	isp->cmdbuf[n++] = (4 << 8) | isp->syncpt_memory; /* cond4 */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (5 << 8) | isp->syncpt_memory; /* cond5 */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (6 << 8) | isp->syncpt_memory; /* cond6 */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (7 << 8) | isp->syncpt_memory; /* cond7 */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (8 << 8) | isp->syncpt_memory; /* cond8 */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (9 << 8) | isp->syncpt_memory; /* cond9 */
 
 	/* IMMEDIATE syncpt incr for fence accounting */
 	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -386,7 +402,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	}
 
 	job->sp->id = isp->syncpt_memory;
-	job->sp->incrs = 2; /* 1 OP_DONE + 1 IMMEDIATE */
+	job->sp->incrs = 10; /* 9 conditional (cond0-9 except 1) + 1 IMMEDIATE */
 	job->num_syncpts = 1;
 
 	err = nvhost_job_add_client_gather_address(job, n,
@@ -406,6 +422,13 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
 			job->sp->id, job->sp->fence,
 			msecs_to_jiffies(1000), NULL, NULL);
+
+	{
+		/* Log how many syncpt incrs actually fired */
+		u32 cur = nvhost_syncpt_read_min_ext(isp->pdev, job->sp->id);
+		dev_info(dev, "stream_init: fence=%u current=%u (fired %d of 10 incrs), err=%d\n",
+			 job->sp->fence, cur, cur - (job->sp->fence - 10), err);
+	}
 	nvhost_job_put(job);
 
 	if (err) {
