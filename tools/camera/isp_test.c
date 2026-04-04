@@ -362,11 +362,12 @@ static int test_opdone(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t class_i
 
 /*
  * Test 3: Full ISP pipeline — init + process frame.
- * Uses reprocess mode (input via 0xE34) with trigger 0x09.
+ * Tries known working combos from test 5/6.
  */
 static int test_reprocess(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t class_id,
 			  struct nvbuf *cmdbuf, struct nvbuf *inbuf, struct nvbuf *outbuf,
-			  struct nvbuf *workbuf, uint32_t W, uint32_t H)
+			  struct nvbuf *workbuf, uint32_t W, uint32_t H,
+			  uint32_t enable_val, uint32_t trigger_val)
 {
 	uint32_t *cmd = cmdbuf->cpu;
 	int n = 0;
@@ -377,7 +378,8 @@ static int test_reprocess(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t clas
 	uint32_t y_size = y_stride * H;
 	uint32_t uv_size = uv_stride * (H/2);
 
-	printf("\n=== TEST 3: Reprocess %ux%u (trigger 0x09) ===\n", W, H);
+	printf("\n=== TEST 3: Reprocess %ux%u (enable=0x%08x trigger=0x%02x) ===\n",
+	       W, H, enable_val, trigger_val);
 	printf("  in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
 	       inbuf->iova, outbuf->iova, workbuf->iova);
 
@@ -445,7 +447,7 @@ static int test_reprocess(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t clas
 	cmd[n++] = W & 0x3FFF;
 
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x00000007;  /* reprocess mode enable */
+	cmd[n++] = enable_val;
 
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER, 1);
 	cmd[n++] = 1;
@@ -467,12 +469,10 @@ static int test_reprocess(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t clas
 	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
 	cmd[n++] = (6 << 8) | (syncpt & 0xFF);   /* cond=6 */
 
-	/* Trigger reprocess: 0x09, then 0x0B (stock reprocess sequence) */
+	/* Trigger */
 	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
 	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = 0x09;
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = 0x0B;
+	cmd[n++] = trigger_val;
 
 	/* Safety: IMMEDIATE so we don't hang */
 	cmd[n++] = NVHOST_OPCODE_IMM(0, (0 << 8) | (syncpt & 0xFF));
@@ -782,9 +782,13 @@ int main(int argc, char **argv)
 	test_opdone(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf, 0x09); /* REPROCESS A */
 	test_opdone(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf, 0x0B); /* REPROCESS B */
 
-	/* Test 3: Reprocess */
+	/* Test 3: Reprocess with known working combos */
 	test_reprocess(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-		       &inbuf, &outbuf, &workbuf, W, H);
+		       &inbuf, &outbuf, &workbuf, W, H, 0x03, 0x05);
+	test_reprocess(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+		       &inbuf, &outbuf, &workbuf, W, H, 0x07, 0x0F);
+	test_reprocess(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+		       &inbuf, &outbuf, &workbuf, W, H, 0x07, 0x05);
 
 	/* Test 4: Streaming */
 	test_streaming(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
