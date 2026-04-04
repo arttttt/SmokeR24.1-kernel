@@ -495,7 +495,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (err)
 		goto free_cmdbuf;
 
-	/* S5 (stock 1238w): runtime config + real cal + trigger + syncpt */
+	/* S5 (stock 1238w): full runtime config from stock trace + cal + trigger */
 	n = 0;
 
 	/* 0x400: runtime config (12 words) */
@@ -525,13 +525,113 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
+	/* 0x930: histogram config (18 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x930, 18);
+	cmd[n++] = 0x0000001c; cmd[n++] = 0x88888888;
+	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
+	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
+	cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
+	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
+	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
+	cmd[n++] = 0x00000078; cmd[n++] = 0x3fc00000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
+
 	/* 0xC00: extra config */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_EXTRA, 3);
 	cmd[n++] = 0x00000101;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00100000;
 
-	/* 0x506: demosaic processing params */
+	/* 0x202: input config — CRITICAL: enable=1 */
+	cmd[n++] = nvhost_opcode_incr(0x202, 3);
+	cmd[n++] = 0x00000001;
+	cmd[n++] = 0x02000200;
+	cmd[n++] = 0x02000200;
+
+	/* 0x200: input enable */
+	cmd[n++] = nvhost_opcode_incr(0x200, 2);
+	cmd[n++] = 0x00000001;
+	cmd[n++] = 0x00000000;
+
+	/* 0x205: input stride/format config */
+	cmd[n++] = nvhost_opcode_incr(0x205, 4);
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x000600c8;
+	cmd[n++] = 0x000f000f;
+	cmd[n++] = 0x00003333;
+
+	/* 0x700: config block (16 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x700, 16);
+	cmd[n++] = 0x00000001; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00001dc0;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x10000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+
+	/* 0x750: config block (16 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x750, 16);
+	cmd[n++] = 0x00000003; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x10000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+
+	/* 0xd20: lens shading extra — from stock */
+	cmd[n++] = nvhost_opcode_incr(0xd20, 6);
+	cmd[n++] = 0x00003101;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x01ec0000;
+	cmd[n++] = 0x01ec0000;
+	cmd[n++] = 0x01ec0000;
+	cmd[n++] = 0x01ec0000;
+
+	/* 0x900: stats enable */
+	cmd[n++] = nvhost_opcode_incr(0x900, 2);
+	cmd[n++] = 0x00000001;
+	cmd[n++] = 0x00000001;
+
+	/* 0x904/0x908: stats config */
+	cmd[n++] = nvhost_opcode_incr(0x904, 2);
+	cmd[n++] = 0x00005555;
+	cmd[n++] = 0x00000001;
+	cmd[n++] = nvhost_opcode_incr(0x908, 1);
+	cmd[n++] = 0x00005555;
+
+	/* 0x920: stats window (10 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x920, 10);
+	cmd[n++] = 0x00000002; cmd[n++] = 0x10001660;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x1000f4a0;
+	cmd[n++] = 0x0000fa80; cmd[n++] = 0x10000000;
+	cmd[n++] = 0x00001c50; cmd[n++] = 0x30001000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+
+	/* 0x909: stats config (7 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x909, 7);
+	cmd[n++] = 0x00000001; cmd[n++] = 0xfc000f00;
+	cmd[n++] = 0xf680f320; cmd[n++] = 0x0d80fde0;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x1400002a;
+	cmd[n++] = 0x3c00002b;
+
+	/* 0x910: stats config (9 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x910, 9);
+	cmd[n++] = 0x00000003; cmd[n++] = 0x00000028;
+	cmd[n++] = 0x01480029; cmd[n++] = 0x00177e0b;
+	cmd[n++] = 0x00990030; cmd[n++] = 0x00000800;
+	cmd[n++] = 0x007b0666; cmd[n++] = 0x00000039;
+	cmd[n++] = 0x0fff0000;
+
+	/* 0x91f: from stock */
+	cmd[n++] = nvhost_opcode_incr(0x91f, 1);
+	cmd[n++] = 0x00000032;
+
+	/* 0x506: demosaic processing — ALL 9 words from stock */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING2, 9);
 	cmd[n++] = 0x3f3fcff3;
 	cmd[n++] = 0x00000000;
@@ -539,11 +639,26 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x08220882;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x03d0f43d;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x08621886; /* was 0 — stock has value! */
+	cmd[n++] = 0x01204812; /* was 0 — stock has value! */
 	cmd[n++] = 0x00000000;
 
-	/* Real calibration + trigger + syncpt */
+	/* 0x600: config (16 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(0x600, 16);
+	cmd[n++] = 0x00000005; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+
+	/* 0x650: tone curve enable = 3 (stock value) */
+	cmd[n++] = nvhost_opcode_incr(0x650, 1);
+	cmd[n++] = 0x00000003;
+
+	/* Real calibration (lens shading + tone curves) + trigger */
 	n = isp_append_cal_block(isp, cmd, n);
 	n = isp_append_syncpt(isp, cmd, n);
 
