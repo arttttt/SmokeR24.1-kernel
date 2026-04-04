@@ -143,7 +143,6 @@ static ssize_t isp_trace_read(struct file *file, char __user *buf,
 {
 	u32 pos, data_size, wrap_count;
 	u32 total, start;
-	ssize_t ret;
 	loff_t off = *ppos;
 
 	if (!trace_hdr || !trace_data)
