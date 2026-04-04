@@ -932,6 +932,73 @@ static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	return ret;
 }
 
+/* Test B2: output surfaces ONLY (no input) */
+static int test_B2_output_only(int ch_fd, int ctrl_fd, uint32_t syncpt,
+	uint32_t class_id, struct nvbuf *cmdbuf,
+	struct nvbuf *outbuf, struct nvbuf *workbuf, uint32_t W, uint32_t H)
+{
+	uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
+	uint32_t ys=(W+63)&~63, us=((W/2)+63)&~63, ysz=ys*H, usz=us*(H/2);
+	printf("\n=== TEST B2: OUTPUT only (no input) %ux%u ===\n", W, H);
+	memset(outbuf->cpu, 0xDE, outbuf->size);
+	cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH,1); cmd[n++]=((W-1)&0x3FFF)<<16;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT,1); cmd[n++]=((H-1)&0x3FFF)<<16;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT,1); cmd[n++]=ISP_FORMAT_STOCK;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR,1); cmd[n++]=0;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y,3);
+	cmd[n++]=outbuf->iova; cmd[n++]=0; cmd[n++]=ys;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U,3);
+	cmd[n++]=outbuf->iova+ysz; cmd[n++]=0; cmd[n++]=us;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V,3);
+	cmd[n++]=outbuf->iova+ysz+usz; cmd[n++]=0; cmd[n++]=us;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING,6);
+	cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=(H<<16)|W;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF,4);
+	cmd[n++]=workbuf->iova;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;
+	cmd[n++]=NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(4<<8)|(syncpt&0xFF);
+	cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1); cmd[n++]=ISP_TRIGGER_RUNTIME;
+	cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF)); cmd[n++]=NVHOST_OPCODE_NOOP;
+	struct nvhost_syncpt_incr sp2={syncpt,2};
+	if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp2,1,NULL,0,NULL,&fence)) return -1;
+	int ret=nvhost_wait_syncpt(ctrl_fd,syncpt,fence-1,2000);
+	if(ret){printf("  cond=4 DID NOT fire (output config breaks it)\n");
+		nvhost_wait_syncpt(ctrl_fd,syncpt,fence,2000);
+	}else{printf("  cond=4 FIRED (output config alone is OK)\n");check_output(outbuf);}
+	return ret;
+}
+
+/* Test B3: INPUT only (no output) */
+static int test_B3_input_only(int ch_fd, int ctrl_fd, uint32_t syncpt,
+	uint32_t class_id, struct nvbuf *cmdbuf,
+	struct nvbuf *inbuf, struct nvbuf *workbuf, uint32_t W, uint32_t H)
+{
+	uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
+	printf("\n=== TEST B3: INPUT only (no output) %ux%u ===\n", W, H);
+	memset(inbuf->cpu, 0x42, inbuf->size);
+	cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS,1); cmd[n++]=(W&0x7FFF)|(H<<16);
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT,1); cmd[n++]=0x11000020;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0,3);
+	cmd[n++]=inbuf->iova;cmd[n++]=0;cmd[n++]=W*2;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP,1); cmd[n++]=W&0x3FFF;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF,4);
+	cmd[n++]=workbuf->iova;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;
+	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER,1); cmd[n++]=1;
+	cmd[n++]=NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(4<<8)|(syncpt&0xFF);
+	cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1); cmd[n++]=ISP_TRIGGER_RUNTIME;
+	cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF)); cmd[n++]=NVHOST_OPCODE_NOOP;
+	struct nvhost_syncpt_incr sp3={syncpt,2};
+	if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp3,1,NULL,0,NULL,&fence)) return -1;
+	int ret=nvhost_wait_syncpt(ctrl_fd,syncpt,fence-1,2000);
+	if(ret){printf("  cond=4 DID NOT fire (input config breaks it)\n");
+		nvhost_wait_syncpt(ctrl_fd,syncpt,fence,2000);
+	}else{printf("  cond=4 FIRED (input config alone is OK)\n");}
+	return ret;
+}
+
 /*
  * Test C: enable=0x07, trigger=0x0F WITH surfaces (full pipeline)
  */
@@ -1340,6 +1407,14 @@ int main(int argc, char **argv)
 	/* Test B: enable=0x03, trigger=0x05, WITH surfaces */
 	test_B_surfaces(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
 			&inbuf, &outbuf, &workbuf, W, H);
+
+	/* Test B2: output surfaces only */
+	test_B2_output_only(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+			    &outbuf, &workbuf, W, H);
+
+	/* Test B3: input only */
+	test_B3_input_only(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+			   &inbuf, &workbuf, W, H);
 
 	/* Test C: enable=0x07, trigger=0x0F, WITH surfaces (full pipeline) */
 	test_C_full(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
