@@ -416,7 +416,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->y_stride = (width + 63) & ~63;
 	isp->uv_stride = ((width / 2) + 63) & ~63;
 	isp->in_stride = width * 2;  /* RAW10 packed to 16-bit = 2 bytes/pixel */
-	isp->in_format = 0x00000000; /* TODO: determine from stock trace */
+	isp->in_format = 0x11000020; /* RAW Bayer single-plane linear (from RE) */
 
 	err = nvhost_module_busy(isp->pdev);
 	if (err)
