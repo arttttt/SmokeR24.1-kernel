@@ -285,6 +285,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	struct platform_device *host1x_pdev;
 	struct device *host1x_dev;
 	struct nvhost_job *job;
+	u32 *cmd;
+	dma_addr_t cmd_phys;
 	int err, n = 0, cal_last_idx;
 
 	if (!isp->channel || !isp->syncpt_stream)
@@ -365,7 +367,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->cmdbuf[n++] = ISP_SURF_WORD1;
 	isp->cmdbuf[n++] = isp->uv_stride;
 
-	/* Processing dims */
+	/* Processing dims — stock uses INCR(0x506, 9) with real values in runtime config,
+	 * but for init submit, stock uses INCR(0x500, 6) with zeros + packed dims.
+	 * We do the same here for init. */
 	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
 	isp->cmdbuf[n++] = 0;
 	isp->cmdbuf[n++] = 0;
@@ -419,6 +423,111 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 		dev_err(dev, "ISP init timeout: %d\n", err);
 		goto free_cmdbuf;
 	}
+
+	/*
+	 * Submit 2: runtime config (from stock submit 5)
+	 * Contains methods 0x400, 0x800, 0x820, 0xC00, and 0x506 processing
+	 * block with real demosaic values (not zeros).
+	 */
+	n = 0;
+
+	/* 0x400: runtime config block (12 words) — from stock */
+	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS; /* reuse frame area */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_CONFIG, 12);
+	cmd[n++] = 0x00000001;
+	cmd[n++] = ((width / 16) << 16);	/* packed width/16 */
+	cmd[n++] = ((height / 16) << 16);	/* packed height/16 */
+	cmd[n++] = ((height / (16 * 2)) << 16); /* half height/16 */
+	cmd[n++] = 0x2ff01000;	/* stock value */
+	cmd[n++] = 0x2ff01000;
+	cmd[n++] = 0x2ff01000;
+	cmd[n++] = 0x2ff01000;
+	cmd[n++] = 0x00030000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00020000;
+	cmd[n++] = 0x00000000;
+
+	/* 0x800: stats buffer A (3 words) — use work buffer */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_A, 3);
+	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+
+	/* 0x820: stats buffer B (3 words) — use work buffer */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_B, 3);
+	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+
+	/* 0xC00: extra config (3 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_EXTRA, 3);
+	cmd[n++] = 0x00000101;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00100000;
+
+	/* 0x506: processing config with real demosaic values from stock */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING2, 9);
+	cmd[n++] = 0x3f3fcff3;	/* demosaic config */
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x04c1304c;
+	cmd[n++] = 0x08220882;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x03d0f43d;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+
+	/* Calibration again (stock repeats it) */
+	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
+	n += isp->cal_words;
+	cmd[n - 1] = (u32)isp->work_buf.dma;
+
+	/* Trigger POST_APPLY */
+	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	cmd[n++] = ISP_TRIGGER_POST_APPLY;
+
+	/* Syncpt */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		isp->syncpt_stream);
+	cmd[n++] = NVHOST_OPCODE_NOOP;
+
+	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+	if (!job) {
+		err = -ENOMEM;
+		goto free_cmdbuf;
+	}
+
+	job->sp->id = isp->syncpt_stream;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+
+	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
+	err = nvhost_job_add_client_gather_address(job, n,
+			isp->class_id, cmd_phys);
+	if (err) {
+		nvhost_job_put(job);
+		goto free_cmdbuf;
+	}
+
+	err = nvhost_channel_submit(job);
+	if (err) {
+		dev_err(dev, "ISP runtime config submit failed: %d\n", err);
+		nvhost_job_put(job);
+		goto free_cmdbuf;
+	}
+
+	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(1000), NULL, NULL);
+	nvhost_job_put(job);
+
+	if (err) {
+		dev_err(dev, "ISP runtime config timeout: %d\n", err);
+		goto free_cmdbuf;
+	}
+
+	dev_info(dev, "ISP runtime config OK\n");
 
 	isp->streaming = true;
 	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x\n",
@@ -534,7 +643,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = ISP_SURF_WORD1;
 	cmd[n++] = uv_stride;
 
-	/* Processing */
+	/* Processing dims */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
 	cmd[n++] = 0;
 	cmd[n++] = 0;
@@ -542,6 +651,18 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 	cmd[n++] = (H << 16) | W;
+
+	/* Processing config 2 — demosaic params from stock trace */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING2, 9);
+	cmd[n++] = 0x3f3fcff3;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x04c1304c;
+	cmd[n++] = 0x08220882;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x03d0f43d;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
 
 	/* Input buffer */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);

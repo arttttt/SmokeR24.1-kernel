@@ -81,6 +81,14 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 /* Processing */
 #define ISP_METHOD_PROCESSING		0x500
+#define ISP_METHOD_PROCESSING2		0x506
+
+/* Runtime config (from stock submit 5) */
+#define ISP_METHOD_RT_CONFIG		0x400
+#define ISP_METHOD_RT_BUF_A		0x800
+#define ISP_METHOD_RT_BUF_B		0x820
+#define ISP_METHOD_RT_HIST		0x930
+#define ISP_METHOD_RT_EXTRA		0xC00
 
 /* Tone curves (4 channels) */
 #define ISP_METHOD_TC_CH0_CTRL		0x651
@@ -132,8 +140,8 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 #define ISP_A_CLASS_ID			0x32
 #define ISP_B_CLASS_ID			0x34
 
-/* Command buffer size — enough for cal(~1545) + frame(~60) + overhead */
-#define ISP_CMDBUF_WORDS		2048
+/* Command buffer size — enough for cal(~1545) + runtime config(~200) + frame(~60) + overhead */
+#define ISP_CMDBUF_WORDS		4096
 #define ISP_CMDBUF_SIZE			(ISP_CMDBUF_WORDS * 4)
 
 /* Working buffer size */
