@@ -1622,11 +1622,11 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
 			chan->isp_raw_size = chan->format.width *
 					    chan->format.height * raw_bpp;
-			/* Allocate raw buffer through ISP device —
-			 * ISP needs IOVA in its SMMU domain.
-			 * VI also sees it (common_as shared domain). */
+			/* Allocate raw buffer through VI device —
+			 * VI writes here, and we know VI SMMU works.
+			 * ISP should see same IOVA (common_as). */
 			chan->isp_raw_cpu = dma_alloc_coherent(
-					&isp->pdev->dev,
+					chan->vi->dev,
 					PAGE_ALIGN(chan->isp_raw_size),
 					&chan->isp_raw_dma, GFP_KERNEL);
 			if (chan->isp_raw_cpu) {
@@ -1637,7 +1637,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					dev_warn(&chan->video.dev,
 						 "ISP init failed: %d\n", ret);
 					dma_free_coherent(
-						&isp->pdev->dev,
+						chan->vi->dev,
 						PAGE_ALIGN(chan->isp_raw_size),
 						chan->isp_raw_cpu,
 						chan->isp_raw_dma);
@@ -1659,7 +1659,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 								 "ISP out buf alloc failed\n");
 							chan->use_isp = false;
 							isp_t124_stream_stop(isp);
-							dma_free_coherent(&isp->pdev->dev,
+							dma_free_coherent(chan->vi->dev,
 								PAGE_ALIGN(chan->isp_raw_size),
 								chan->isp_raw_cpu,
 								chan->isp_raw_dma);
@@ -1753,7 +1753,7 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 		chan->isp_out_cpu = NULL;
 	}
 	if (chan->isp_raw_cpu && chan->isp) {
-		dma_free_coherent(&chan->isp->pdev->dev,
+		dma_free_coherent(chan->vi->dev,
 				  PAGE_ALIGN(chan->isp_raw_size),
 				  chan->isp_raw_cpu, chan->isp_raw_dma);
 		chan->isp_raw_cpu = NULL;
