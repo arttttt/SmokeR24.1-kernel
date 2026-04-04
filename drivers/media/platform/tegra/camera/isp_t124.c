@@ -405,6 +405,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	job->sp->incrs = 10; /* 9 conditional (cond0-9 except 1) + 1 IMMEDIATE */
 	job->num_syncpts = 1;
 
+	/* Record syncpt before submit */
+	{
+		u32 before = nvhost_syncpt_read_min_ext(isp->pdev, isp->syncpt_memory);
+
 	err = nvhost_job_add_client_gather_address(job, n,
 			isp->class_id, isp->cmdbuf_phys);
 	if (err) {
@@ -419,16 +423,15 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 		goto free_cmdbuf;
 	}
 
-	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
-			job->sp->id, job->sp->fence,
-			msecs_to_jiffies(1000), NULL, NULL);
-
+	/* Don't wait on fence — just sleep and read syncpt to see how many fired */
+	msleep(200);
 	{
-		/* Log how many syncpt incrs actually fired */
-		u32 cur = nvhost_syncpt_read_min_ext(isp->pdev, job->sp->id);
-		dev_info(dev, "stream_init: fence=%u current=%u (fired %d of 10 incrs), err=%d\n",
-			 job->sp->fence, cur, cur - (job->sp->fence - 10), err);
+		u32 after = nvhost_syncpt_read_min_ext(isp->pdev, isp->syncpt_memory);
+		dev_info(dev, "stream_init: syncpt before=%u after=%u fired=%u (of 10)\n",
+			 before, after, after - before);
 	}
+	}  /* close before block */
+	err = 0; /* don't fail — this is a diagnostic test */
 	nvhost_job_put(job);
 
 	if (err) {
