@@ -6,8 +6,8 @@
  * V4L2 subdev driver for T124 ISP-A and ISP-B.
  * Provides runtime API for VI→ISP capture pipeline integration.
  *
- * ISP-A (class 0x32): rear IMX179, 3280x2460
- * ISP-B (class 0x34): front OV5693, 2592x1944
+ * ISP-A (class 0x32): isp.0, rear IMX179, 3280x2460
+ * ISP-B (class 0x34): isp.1, front OV5693, 2592x1944
  */
 
 #include <linux/module.h>
@@ -377,11 +377,11 @@ static int isp_append_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 	return n;
 }
 
-/* Append syncpt cond=1 + NOOP. Returns new n. */
+/* Append syncpt IMMEDIATE incr + NOOP — used for init submits (S1-S5). */
 static int isp_append_syncpt(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
 	buf[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
 		isp->syncpt_stream);
 	buf[n++] = NVHOST_OPCODE_NOOP;
 	return n;
@@ -496,15 +496,20 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (err)
 		goto free_cmdbuf;
 
-	/* S5 (stock 1238w): full runtime config from stock trace + cal + trigger */
+	/* S5 (stock 1238w): full runtime config from stock trace + cal + trigger
+	 * Values differ between ISP-A (isp.0, IMX179 rear) and ISP-B (isp.1, OV5693 front).
+	 * Each register group preceded by SET_CLASS per stock trace. */
 	n = 0;
+	{
+	bool is_b = (isp->class_id == ISP_B_CLASS_ID);
 
 	/* 0x400: runtime config (12 words) */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_CONFIG, 12);
 	cmd[n++] = 0x00000001;
-	cmd[n++] = ((width / 16) << 16);
-	cmd[n++] = ((height / 16) << 16);
-	cmd[n++] = ((height / (16 * 2)) << 16);
+	cmd[n++] = 0x004b0000;
+	cmd[n++] = 0x00930000;
+	cmd[n++] = 0x00220000;
 	cmd[n++] = 0x2ff01000;
 	cmd[n++] = 0x2ff01000;
 	cmd[n++] = 0x2ff01000;
@@ -515,18 +520,21 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000;
 
 	/* 0x800: stats buffer A */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_A, 3);
 	cmd[n++] = (u32)isp->work_buf.dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
 	/* 0x820: stats buffer B */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_B, 3);
 	cmd[n++] = (u32)isp->work_buf.dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* 0x930: histogram config (18 words) — from stock */
+	/* 0x930: histogram config (18 words) */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(0x930, 18);
 	cmd[n++] = 0x0000001c; cmd[n++] = 0x88888888;
 	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
@@ -539,16 +547,18 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
 
 	/* 0xC00: extra config */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_EXTRA, 3);
 	cmd[n++] = 0x00000101;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00100000;
 
-	/* 0x202: input config — CRITICAL: enable=1 */
+	/* 0x202: input config — sensor-specific dims */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(0x202, 3);
 	cmd[n++] = 0x00000001;
-	cmd[n++] = 0x02000200;
-	cmd[n++] = 0x02000200;
+	cmd[n++] = is_b ? 0x00780078 : 0x02000200; /* 0x203 */
+	cmd[n++] = is_b ? 0x00780078 : 0x02000200; /* 0x204 */
 
 	/* 0x200: input enable */
 	cmd[n++] = nvhost_opcode_incr(0x200, 2);
@@ -560,38 +570,40 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x000600c8;
 	cmd[n++] = 0x000f000f;
-	cmd[n++] = 0x00003333;
+	cmd[n++] = is_b ? 0x00000000 : 0x00003333; /* 0x208 */
 
-	/* 0x700: config block (16 words) — from stock */
+	/* 0x700: processing channel A (16 words) — sensor-specific strides */
 	cmd[n++] = nvhost_opcode_incr(0x700, 16);
 	cmd[n++] = 0x00000001; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00001dc0;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = is_b ? 0x00001a40 : 0x00001dc0; /* 0x705 */
 	cmd[n++] = 0x00000000; cmd[n++] = 0x10000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00001000;
+	cmd[n++] = is_b ? 0x00001a00 : 0x00001c50; /* 0x70b */
+	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
 
-	/* 0x750: config block (16 words) — from stock */
+	/* 0x750: processing channel B (16 words) */
 	cmd[n++] = nvhost_opcode_incr(0x750, 16);
 	cmd[n++] = 0x00000003; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x10000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
 
-	/* 0xd20: lens shading extra — from stock */
+	/* 0xd20: lens shading extra — sensor-specific */
 	cmd[n++] = nvhost_opcode_incr(0xd20, 6);
-	cmd[n++] = 0x00003101;
+	cmd[n++] = is_b ? 0x00001101 : 0x00003101; /* 0xd20 */
 	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x01ec0000;
-	cmd[n++] = 0x01ec0000;
-	cmd[n++] = 0x01ec0000;
-	cmd[n++] = 0x01ec0000;
+	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd22 */
+	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd23 */
+	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd24 */
+	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd25 */
 
 	/* 0x900: stats enable */
 	cmd[n++] = nvhost_opcode_incr(0x900, 2);
@@ -605,34 +617,63 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = nvhost_opcode_incr(0x908, 1);
 	cmd[n++] = 0x00005555;
 
-	/* 0x920: stats window (10 words) — from stock */
+	/* 0x920: stats window (10 words) */
 	cmd[n++] = nvhost_opcode_incr(0x920, 10);
 	cmd[n++] = 0x00000002; cmd[n++] = 0x10001660;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x1000f4a0;
 	cmd[n++] = 0x0000fa80; cmd[n++] = 0x10000000;
 	cmd[n++] = 0x00001c50; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
 
-	/* 0x909: stats config (7 words) — from stock */
+	/* 0x909: stats config (7 words) — sensor-specific */
 	cmd[n++] = nvhost_opcode_incr(0x909, 7);
 	cmd[n++] = 0x00000001; cmd[n++] = 0xfc000f00;
 	cmd[n++] = 0xf680f320; cmd[n++] = 0x0d80fde0;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x1400002a;
+	cmd[n++] = is_b ? 0x00000030 : 0x00000000; /* 0x90d */
+	cmd[n++] = 0x1400002a;
 	cmd[n++] = 0x3c00002b;
 
-	/* 0x910: stats config (9 words) — from stock */
+	/* 0x910: stats config (9 words) — sensor-specific */
 	cmd[n++] = nvhost_opcode_incr(0x910, 9);
 	cmd[n++] = 0x00000003; cmd[n++] = 0x00000028;
-	cmd[n++] = 0x01480029; cmd[n++] = 0x00177e0b;
+	cmd[n++] = 0x01480029;
+	cmd[n++] = is_b ? 0x0003030b : 0x00177e0b; /* 0x913 */
 	cmd[n++] = 0x00990030; cmd[n++] = 0x00000800;
-	cmd[n++] = 0x007b0666; cmd[n++] = 0x00000039;
-	cmd[n++] = 0x0fff0000;
+	cmd[n++] = 0x007b0666;
+	cmd[n++] = is_b ? 0x00000036 : 0x00000039; /* 0x917 */
+	cmd[n++] = is_b ? 0x00001f1f : 0x00000000; /* 0x918 */
+
+	/* 0x91b: from stock */
+	cmd[n++] = nvhost_opcode_incr(0x91b, 1);
+	cmd[n++] = 0x00000000;
+
+	/* 0x91c: NONINCR 9 words — sensor-specific */
+	cmd[n++] = nvhost_opcode_nonincr(0x91c, 9);
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000001;
+	cmd[n++] = is_b ? 0x00000025 : 0x00000026; /* word 5 */
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000026;
+	cmd[n++] = 0x00000361;
+
+	/* 0x91d: from stock */
+	cmd[n++] = nvhost_opcode_incr(0x91d, 1);
+	cmd[n++] = 0x00000000;
+
+	/* 0x91e: NONINCR 9 words */
+	cmd[n++] = nvhost_opcode_nonincr(0x91e, 9);
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000780;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000780;
+	cmd[n++] = 0x00000200;
 
 	/* 0x91f: from stock */
 	cmd[n++] = nvhost_opcode_incr(0x91f, 1);
 	cmd[n++] = 0x00000032;
 
-	/* 0x506: demosaic processing — ALL 9 words from stock */
+	/* 0x506: demosaic processing (9 words) — same both ISPs */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING2, 9);
 	cmd[n++] = 0x3f3fcff3;
 	cmd[n++] = 0x00000000;
@@ -640,11 +681,11 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x08220882;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x03d0f43d;
-	cmd[n++] = 0x08621886; /* was 0 — stock has value! */
-	cmd[n++] = 0x01204812; /* was 0 — stock has value! */
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x08621886;
+	cmd[n++] = 0x01204812;
+	cmd[n++] = 0x06e1b86e;
 
-	/* 0x600: config (16 words) — from stock */
+	/* 0x600: GPP config (16 words) */
 	cmd[n++] = nvhost_opcode_incr(0x600, 16);
 	cmd[n++] = 0x00000005; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
@@ -652,12 +693,18 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+	cmd[n++] = 0x3fff0000; cmd[n++] = 0x3fff0000;
+	cmd[n++] = 0x3fff0000; cmd[n++] = 0x10001000;
 
-	/* 0x650: tone curve enable = 3 (stock value) */
+	/* 0x650: tone curve enable */
 	cmd[n++] = nvhost_opcode_incr(0x650, 1);
 	cmd[n++] = 0x00000003;
+
+	/* 0x651: from stock */
+	cmd[n++] = nvhost_opcode_incr(0x651, 1);
+	cmd[n++] = 0x00000000;
+
+	} /* end is_b scope */
 
 	/* Real calibration (lens shading + tone curves) + trigger */
 	n = isp_append_cal_block(isp, cmd, n);
