@@ -415,6 +415,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->height = height;
 	isp->y_stride = (width + 63) & ~63;
 	isp->uv_stride = ((width / 2) + 63) & ~63;
+	isp->in_stride = width * 2;  /* RAW10 packed to 16-bit = 2 bytes/pixel */
+	isp->in_format = 0x00000000; /* TODO: determine from stock trace */
 
 	err = nvhost_module_busy(isp->pdev);
 	if (err)
@@ -769,10 +771,10 @@ EXPORT_SYMBOL(isp_t124_stream_stop);
 /**
  * isp_t124_process_frame() - Submit one frame through ISP
  *
- * Exact stock per-frame submit format (from rear camera trace):
- * G[0] (45 words): output(0xE00) + processing(0x500) + input(0x100)
- *                  + 3 conditional syncpt incrs + trigger 0x05
- * G[1] (2 words): immediate syncpt incr (stream)
+ * Per-frame submit based on v3 RE report:
+ * G[0]: output(0xE00) + processing(0x500) + input(0xE31/E33/E34/E32/E30)
+ *       + ISP_ENABLE(0x015) + stats(0x100) + syncpt incrs + trigger
+ * G[1]: immediate syncpt incr (stream)
  * Job: 4 syncpts (memory, stats, loadv, stream)
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
@@ -809,10 +811,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		 "process_frame: in=0x%pad out=0x%pad %ux%u\n",
 		 &in_dma, &out_dma, W, H);
 
-	/* ---- G[0]: SET_CLASS + output + processing + input + syncpts + trigger ---- */
+	/* ---- G[0]: output + processing + input + syncpts + trigger ---- */
 	g1_off = n;
 
-	/* SET_CLASS inside gather — stock does this, not just in push buffer */
+	/* SET_CLASS inside gather */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 
 	/* Output width/height/format/color */
@@ -848,19 +850,45 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = (H << 16) | W;
 
-	/* Input buffer — stock has SET_CLASS before this */
+	/* --- Input (v3 methods per RE report) --- */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_INPUT_BUF, 4);
+
+	/* Input dimensions: width | (height << 16) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
+	cmd[n++] = (W & 0x7FFF) | (H << 16);
+
+	/* Input format */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
+	cmd[n++] = isp->in_format;
+
+	/* Input surface plane 0: [IOVA, 0, stride] */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
 	cmd[n++] = (u32)in_dma;
 	cmd[n++] = 0x00000000;
+	cmd[n++] = isp->in_stride;
+
+	/* Input strip config: strip_width | (overlap << 16) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
+	cmd[n++] = W & 0x3FFF;
+
+	/* ISP_ENABLE = 7 (full pipeline) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmd[n++] = 0x00000007;
+
+	/* Input trigger = 1 — THIS fires ISP processing */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
+	cmd[n++] = 0x00000001;
+
+	/* Stats buffer (0x100) */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
+	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Stock has SET_CLASS × 2 before syncpt incrs */
+	/* 3 conditional syncpt incrs (memory, stats, loadv) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-
-	/* 3 conditional syncpt incrs (stock order: memory, stats, loadv) */
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (4 << 8) | isp->syncpt_memory;  /* cond=4 → memory */
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
@@ -868,7 +896,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (6 << 8) | isp->syncpt_loadv;   /* cond=6 → loadv */
 
-	/* Trigger RUNTIME (0x05) — stock has SET_CLASS before trigger */
+	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmd[n++] = ISP_TRIGGER_RUNTIME;

@@ -52,6 +52,8 @@ struct tegra_isp_t124 {
 	u32 height;
 	u32 y_stride;
 	u32 uv_stride;
+	u32 in_stride;   /* input RAW stride (bytes per line) */
+	u32 in_format;   /* input pixel format descriptor */
 
 	/* debugfs */
 	struct dentry *debugfs_dir;
@@ -77,7 +79,8 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 #define ISP_METHOD_ISP_ENABLE		0x053
 
 /* Input */
-#define ISP_METHOD_INPUT_BUF		0x100
+/* Stats buffer (0x100 = stats, NOT input!) */
+#define ISP_METHOD_STATS_BUF		0x100
 
 /* Processing */
 #define ISP_METHOD_PROCESSING		0x500
@@ -120,11 +123,15 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 #define ISP_METHOD_OUT_SURF_Y		0xE04
 #define ISP_METHOD_OUT_SURF_U		0xE07
 #define ISP_METHOD_OUT_SURF_V		0xE0A
-#define ISP_METHOD_OUT_ENABLE		0xE30
-#define ISP_METHOD_OUT_DIMS		0xE31
-#define ISP_METHOD_OUT_STRIDE		0xE32
-#define ISP_METHOD_OUT_FMT2		0xE33
-#define ISP_METHOD_IN_SURF		0xE34
+
+/* Input (v3 methods — NOT 0x100!) */
+#define ISP_METHOD_IN_TRIGGER		0xE30
+#define ISP_METHOD_IN_DIMS		0xE31
+#define ISP_METHOD_IN_STRIP		0xE32
+#define ISP_METHOD_IN_FORMAT		0xE33
+#define ISP_METHOD_IN_SURF0		0xE34
+#define ISP_METHOD_IN_SURF1		0xE37
+#define ISP_METHOD_IN_SURF2		0xE3A
 
 /* ---- Stock values (from cmdbuf capture) ---- */
 
