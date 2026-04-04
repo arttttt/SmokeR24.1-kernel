@@ -581,7 +581,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = is_b ? 0x00001a40 : 0x00001dc0; /* 0x705 */
-	cmd[n++] = 0x00000000; cmd[n++] = 0x10000000;
+	cmd[n++] = 0x00000000; cmd[n++] = (u32)isp->work_buf.dma + 0x30000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00001000;
 	cmd[n++] = is_b ? 0x00001a00 : 0x00001c50; /* 0x70b */
@@ -622,9 +622,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 
 	/* 0x920: stats window (10 words) */
 	cmd[n++] = nvhost_opcode_incr(0x920, 10);
-	cmd[n++] = 0x00000002; cmd[n++] = 0x10001660;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x1000f4a0;
-	cmd[n++] = 0x0000fa80; cmd[n++] = 0x10000000;
+	cmd[n++] = 0x00000002; cmd[n++] = (u32)isp->work_buf.dma + 0x31660;
+	cmd[n++] = 0x00000000; cmd[n++] = (u32)isp->work_buf.dma + 0x3f4a0;
+	cmd[n++] = 0x0000fa80; cmd[n++] = (u32)isp->work_buf.dma + 0x30000;
 	cmd[n++] = 0x00001c50; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
 	cmd[n++] = (u32)isp->work_buf.dma + 0x20000; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
 
@@ -697,7 +697,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x3fff0000; cmd[n++] = 0x3fff0000;
-	cmd[n++] = 0x3fff0000; cmd[n++] = 0x10001000;
+	cmd[n++] = 0x3fff0000; cmd[n++] = (u32)isp->work_buf.dma + 0x31000;
 
 	/* 0x650: tone curve enable */
 	cmd[n++] = nvhost_opcode_incr(0x650, 1);
