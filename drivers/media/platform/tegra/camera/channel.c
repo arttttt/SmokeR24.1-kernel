@@ -1036,17 +1036,6 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			 "raw buf check: [0]=0x%08x [1]=0x%08x [100]=0x%08x [1000]=0x%08x\n",
 			 raw32[0], raw32[1], raw32[100], raw32[1000]);
 
-		/* DEBUG: fill raw buf with known pattern to test if ISP reads it */
-		{
-			int px;
-			u16 *raw16 = (u16 *)chan->isp_raw_cpu;
-			int npix = chan->isp_raw_size / 2;
-			for (px = 0; px < npix; px++)
-				raw16[px] = 0x0200; /* RAW10 value ~512 = mid-gray */
-			dev_info(&chan->video.dev,
-				 "DEBUG: filled raw buf with 0x0200 (%d pixels)\n", npix);
-		}
-
 		isp_err = isp_t124_process_frame(chan->isp,
 				chan->isp_raw_dma,
 				chan->isp_out_dma,
