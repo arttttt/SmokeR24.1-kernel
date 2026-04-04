@@ -358,6 +358,11 @@ static int isp_build_zero_init(u32 *buf)
 } while (0)
 	ZI(0x202, 3); ZI(0x200, 2); ZI(0x205, 4);
 	ZI(0x700, 16); ZI(0x750, 16);
+	/* Output surfaces (E00-E0A), input surfaces (E30-E3A), stats (100-103) */
+	ZI(0xE00, 11); ZI(0xE30, 11);
+	ZI(0x100, 4);
+	/* Processing (500-505), ISP_ENABLE (015) */
+	ZI(0x500, 6); ZI(0x015, 1);
 	ZI(0xd00, 10); ZI(0xd0a, 1); ZN(0xd0b, 480);
 	ZI(0xd0c, 2); ZI(0xd20, 6);
 	ZI(0x900, 2); ZI(0x902, 1); ZN(0x903, 64);
