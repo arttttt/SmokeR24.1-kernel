@@ -367,25 +367,27 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	isp->cmdbuf[n++] = ISP_TRIGGER_POST_APPLY;
 
-	/* Syncpt — try all conditions 0-9 to find which one ISP generates */
+	/* Syncpt — use different syncpts per condition group to identify which fire.
+	 * memory(6): cond 0,2,3   stats(7): cond 4,5,6   loadv(8): cond 7,8,9
+	 */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (0 << 8) | isp->syncpt_memory; /* cond0 IMMEDIATE */
+	isp->cmdbuf[n++] = (0 << 8) | isp->syncpt_memory; /* cond0 → mem */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (2 << 8) | isp->syncpt_memory; /* cond2 RD_DONE */
+	isp->cmdbuf[n++] = (2 << 8) | isp->syncpt_memory; /* cond2 → mem */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (3 << 8) | isp->syncpt_memory; /* cond3 REG_WR_SAFE */
+	isp->cmdbuf[n++] = (3 << 8) | isp->syncpt_memory; /* cond3 → mem */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (4 << 8) | isp->syncpt_memory; /* cond4 */
+	isp->cmdbuf[n++] = (4 << 8) | isp->syncpt_stats;  /* cond4 → stats */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (5 << 8) | isp->syncpt_memory; /* cond5 */
+	isp->cmdbuf[n++] = (5 << 8) | isp->syncpt_stats;  /* cond5 → stats */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (6 << 8) | isp->syncpt_memory; /* cond6 */
+	isp->cmdbuf[n++] = (6 << 8) | isp->syncpt_stats;  /* cond6 → stats */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (7 << 8) | isp->syncpt_memory; /* cond7 */
+	isp->cmdbuf[n++] = (7 << 8) | isp->syncpt_loadv;  /* cond7 → loadv */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (8 << 8) | isp->syncpt_memory; /* cond8 */
+	isp->cmdbuf[n++] = (8 << 8) | isp->syncpt_loadv;  /* cond8 → loadv */
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (9 << 8) | isp->syncpt_memory; /* cond9 */
+	isp->cmdbuf[n++] = (9 << 8) | isp->syncpt_loadv;  /* cond9 → loadv */
 
 	/* IMMEDIATE syncpt incr for fence accounting */
 	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -407,8 +409,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 
 	/* Record syncpt before submit */
 	{
-		u32 before, after;
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &before);
+		u32 before_mem, after_mem, before_stats, after_stats, before_loadv, after_loadv;
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &before_mem);
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_stats, &before_stats);
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_loadv, &before_loadv);
 
 	err = nvhost_job_add_client_gather_address(job, n,
 			isp->class_id, isp->cmdbuf_phys);
@@ -427,9 +431,14 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	/* Don't wait on fence — just sleep and read syncpt to see how many fired */
 	msleep(200);
 	{
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &after);
-		dev_info(dev, "stream_init: syncpt before=%u after=%u fired=%u (of 10)\n",
-			 before, after, after - before);
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &after_mem);
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_stats, &after_stats);
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_loadv, &after_loadv);
+		dev_info(dev, "stream_init: mem=%u→%u(+%u) stats=%u→%u(+%u) loadv=%u→%u(+%u)\n",
+			 before_mem, after_mem, after_mem - before_mem,
+			 before_stats, after_stats, after_stats - before_stats,
+			 before_loadv, after_loadv, after_loadv - before_loadv);
+		dev_info(dev, "stream_init: cond0,2,3→mem  cond4,5,6→stats  cond7,8,9→loadv\n");
 	}
 	}  /* close before block */
 	err = 0; /* don't fail — this is a diagnostic test */
