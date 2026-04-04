@@ -367,31 +367,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	isp->cmdbuf[n++] = ISP_TRIGGER_POST_APPLY;
 
-	/* Syncpt — use different syncpts per condition group to identify which fire.
-	 * memory(6): cond 0,2,3   stats(7): cond 4,5,6   loadv(8): cond 7,8,9
-	 */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (0 << 8) | isp->syncpt_memory; /* cond0 → mem */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (2 << 8) | isp->syncpt_memory; /* cond2 → mem */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (3 << 8) | isp->syncpt_memory; /* cond3 → mem */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (4 << 8) | isp->syncpt_stats;  /* cond4 → stats */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (5 << 8) | isp->syncpt_stats;  /* cond5 → stats */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (6 << 8) | isp->syncpt_stats;  /* cond6 → stats */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (7 << 8) | isp->syncpt_loadv;  /* cond7 → loadv */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (8 << 8) | isp->syncpt_loadv;  /* cond8 → loadv */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	isp->cmdbuf[n++] = (9 << 8) | isp->syncpt_loadv;  /* cond9 → loadv */
-
-	/* IMMEDIATE syncpt incr for fence accounting */
+	/* Syncpt OP_DONE (cond=1) — only standard host1x conditions work */
 	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
 		isp->syncpt_memory);
 
 	isp->cmdbuf[n++] = NVHOST_OPCODE_NOOP;
@@ -404,15 +382,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	}
 
 	job->sp->id = isp->syncpt_memory;
-	job->sp->incrs = 10; /* 9 conditional (cond0-9 except 1) + 1 IMMEDIATE */
+	job->sp->incrs = 1;
 	job->num_syncpts = 1;
-
-	/* Record syncpt before submit */
-	{
-		u32 before_mem, after_mem, before_stats, after_stats, before_loadv, after_loadv;
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &before_mem);
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_stats, &before_stats);
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_loadv, &before_loadv);
 
 	err = nvhost_job_add_client_gather_address(job, n,
 			isp->class_id, isp->cmdbuf_phys);
@@ -428,20 +399,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 		goto free_cmdbuf;
 	}
 
-	/* Don't wait on fence — just sleep and read syncpt to see how many fired */
-	msleep(200);
-	{
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &after_mem);
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_stats, &after_stats);
-		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_loadv, &after_loadv);
-		dev_info(dev, "stream_init: mem=%u→%u(+%u) stats=%u→%u(+%u) loadv=%u→%u(+%u)\n",
-			 before_mem, after_mem, after_mem - before_mem,
-			 before_stats, after_stats, after_stats - before_stats,
-			 before_loadv, after_loadv, after_loadv - before_loadv);
-		dev_info(dev, "stream_init: cond0,2,3→mem  cond4,5,6→stats  cond7,8,9→loadv\n");
-	}
-	}  /* close before block */
-	err = 0; /* don't fail — this is a diagnostic test */
+	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(1000), NULL, NULL);
 	nvhost_job_put(job);
 
 	if (err) {
@@ -575,13 +535,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Conditional syncpt incrs (stock: cond4/5/6) */
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (4 << 8) | isp->syncpt_memory;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (5 << 8) | isp->syncpt_stats;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (6 << 8) | isp->syncpt_loadv;
+	/* Conditional syncpt — use cond=1 (standard OP_DONE) since ISP-specific
+	 * conditions (4-9) don't fire on SmokeR24.1 kernel */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		isp->syncpt_memory);
 
 	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
@@ -602,7 +560,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		return -ENOMEM;
 
 	job->sp->id = isp->syncpt_memory;
-	job->sp->incrs = 1; /* 1 cond4 OP_DONE */
+	job->sp->incrs = 1; /* 1 OP_DONE (cond=1) */
 	job->num_syncpts = 1;
 
 	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
@@ -622,7 +580,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			job->sp->id, job->sp->fence,
 			msecs_to_jiffies(500), NULL, NULL);
 	if (err)
-		dev_err(&isp->pdev->dev, "ISP frame timeout (cond4): %d\n", err);
+		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);
 	else
 		dev_info(&isp->pdev->dev, "ISP frame OK!\n");
 
