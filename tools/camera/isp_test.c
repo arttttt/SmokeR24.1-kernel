@@ -837,7 +837,11 @@ static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	uint32_t y_size = y_stride * H;
 	uint32_t uv_size = uv_stride * (H / 2);
 
-	printf("\n=== TEST B: enable=0x03 trigger=0x05 WITH surfaces %ux%u ===\n", W, H);
+	struct nvhost_reloc relocs[5];
+	struct nvhost_reloc_shift shifts[5];
+	int nr = 0;
+
+	printf("\n=== TEST B: enable=0x03 trigger=0x05 WITH surfaces %ux%u (RELOCS) ===\n", W, H);
 	printf("  in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
 	       inbuf->iova, outbuf->iova, workbuf->iova);
 
@@ -856,17 +860,23 @@ static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0x00000000;
 
-	/* Output surfaces Y/U/V */
+	/* Output surfaces Y/U/V — use relocations */
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	cmd[n++] = outbuf->iova;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, 0 };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0001; /* placeholder — out Y */
 	cmd[n++] = 0;
 	cmd[n++] = y_stride;
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	cmd[n++] = outbuf->iova + y_size;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0002; /* placeholder — out U */
 	cmd[n++] = 0;
 	cmd[n++] = uv_stride;
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	cmd[n++] = outbuf->iova + y_size + uv_size;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size + uv_size };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0003; /* placeholder — out V */
 	cmd[n++] = 0;
 	cmd[n++] = uv_stride;
 
@@ -883,7 +893,9 @@ static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT, 1);
 	cmd[n++] = 0x11000020; /* RAW Bayer single-plane linear */
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0, 3);
-	cmd[n++] = inbuf->iova;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, inbuf->dmabuf_fd, 0 };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0004; /* placeholder — input */
 	cmd[n++] = 0;
 	cmd[n++] = in_stride;
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP, 1);
@@ -900,7 +912,9 @@ static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	/* Stats buffer */
 	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = workbuf->iova;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, workbuf->dmabuf_fd, 0 };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0005; /* placeholder — stats/work */
 	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
 
 	/* cond=4 syncpt */
@@ -915,10 +929,10 @@ static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
 	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (0 << 8) | (syncpt & 0xFF));
 	cmd[n++] = NVHOST_OPCODE_NOOP;
 
-	printf("  cmdbuf: %d words\n", n);
+	printf("  cmdbuf: %d words, %d relocs\n", n, nr);
 
 	struct nvhost_syncpt_incr sp = { syncpt, 2 };
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, NULL, 0, NULL, &fence))
+	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, relocs, nr, shifts, &fence))
 		return -1;
 
 	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence - 1, 2000);
@@ -1031,6 +1045,11 @@ static int test_B4_input_isolation(int ch_fd, int ctrl_fd, uint32_t syncpt,
 		{"fmt=0x10000000",   0,1,0,0,0, 0x10000000},
 		{"fmt=0x10000020",   0,1,0,0,0, 0x10000020},
 		{"fmt=0x01000020",   0,1,0,0,0, 0x01000020},
+		/* Key test: dims+surface+trigger (minimum for real processing?) */
+		{"dims+surf+trig",   1,0,1,0,1, 0},
+		/* Full with output too */
+		{"dims+fmt+surf+trig",1,1,1,0,1, 0x11000020},
+		{"dims+fmt+surf+strip+trig",1,1,1,1,1, 0x11000020},
 	};
 	int ntests = sizeof(tests)/sizeof(tests[0]);
 
@@ -1236,7 +1255,11 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	uint32_t y_size = y_stride * H;
 	uint32_t uv_size = uv_stride * (H / 2);
 
-	printf("\n=== TEST D: Stock per-frame %ux%u (4 syncpts) ===\n", W, H);
+	struct nvhost_reloc relocs[5];
+	struct nvhost_reloc_shift shifts[5];
+	int nr = 0;
+
+	printf("\n=== TEST D: Stock per-frame %ux%u (4 syncpts, RELOCS) ===\n", W, H);
 	printf("  syncpts: mem=%u stats=%u stream=%u loadv=%u\n",
 	       sp_memory, sp_stats, sp_stream, sp_loadv);
 	printf("  in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
@@ -1259,17 +1282,23 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0x00000000;
 
-	/* Output Y/U/V surfaces */
+	/* Output Y/U/V surfaces — use relocations */
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	cmd[n++] = outbuf->iova;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, 0 };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0001; /* placeholder — out Y */
 	cmd[n++] = 0x00000000;
 	cmd[n++] = y_stride;
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	cmd[n++] = outbuf->iova + y_size;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0002; /* placeholder — out U */
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	cmd[n++] = outbuf->iova + y_size + uv_size;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size + uv_size };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0003; /* placeholder — out V */
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 
@@ -1292,7 +1321,9 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	cmd[n++] = 0x11000020; /* RAW Bayer */
 
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0, 3);
-	cmd[n++] = inbuf->iova;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, inbuf->dmabuf_fd, 0 };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0004; /* placeholder — input */
 	cmd[n++] = 0x00000000;
 	cmd[n++] = in_stride;
 
@@ -1310,7 +1341,9 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	/* Stats buffer */
 	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
 	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = workbuf->iova;
+	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, workbuf->dmabuf_fd, 0 };
+	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
+	cmd[n++] = 0xDEAD0005; /* placeholder — stats/work */
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
@@ -1337,7 +1370,7 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
 	cmd[n++] = sp_stream & 0xFF; /* cond=0 (immediate) */
 
-	printf("  cmdbuf: G[0]=%d words + G[1]=2 words = %d total\n", g0_words, n);
+	printf("  cmdbuf: G[0]=%d words + G[1]=2 words = %d total, %d relocs\n", g0_words, n, nr);
 
 	/* Read current syncpt values BEFORE submit */
 	uint32_t mem_before = nvhost_read_syncpt(ctrl_fd, sp_memory);
@@ -1355,7 +1388,7 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 		{ sp_stream, 1 },
 	};
 
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, sps, 4, NULL, 0, NULL, &fence))
+	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, sps, 4, relocs, nr, shifts, &fence))
 		return -1;
 
 	/* Wait on stream syncpt (the immediate one — should always work) */
