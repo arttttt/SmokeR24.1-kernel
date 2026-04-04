@@ -668,6 +668,30 @@ static int isp_init(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 	printf("\n========================================\n");
 	printf("ISP INIT (class=0x%02x, %s)\n", class_id, is_b ? "ISP-B" : "ISP-A");
 	printf("  work_iova=0x%08x cal_words=%d\n", workbuf->iova, cal_words);
+
+	/* PIO write: reg 0xFC = 0x20 (stock does this via NvRmHostModuleRegWr) */
+	{
+		struct {
+			uint32_t id;
+			uint32_t num_offsets;
+			uint32_t block_size;
+			uint32_t offsets;   /* userptr */
+			uint32_t values;    /* userptr */
+			uint32_t write;
+		} rw;
+		uint32_t offset = 0xFC;
+		uint32_t value = 0x20;
+		rw.id = 0; /* module id — 0 for self */
+		rw.num_offsets = 1;
+		rw.block_size = 4;
+		rw.offsets = (uint32_t)(uintptr_t)&offset;
+		rw.values = (uint32_t)(uintptr_t)&value;
+		rw.write = 1;
+		/* NVHOST32_IOCTL_CHANNEL_MODULE_REGRDWR = _IOWR('H', 14, ...) */
+		int r = ioctl(ch_fd, _IOWR('H', 14, rw), &rw);
+		printf("  PIO write 0xFC=0x20: %s (errno=%d)\n",
+		       r == 0 ? "OK" : "FAILED", r ? errno : 0);
+	}
 	printf("========================================\n");
 
 	/* --- S1: zero_block x2 + 0x018 tails + syncpt --- */
@@ -1767,9 +1791,9 @@ int main(int argc, char **argv)
 	test_B3_input_only(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
 			   &inbuf, &workbuf, W, H);
 
-	/* Test B4: isolate which input method breaks cond=4 */
-	test_B4_input_isolation(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-				&inbuf, &workbuf, W, H);
+	/* Test B4: skip — already know results */
+	/* test_B4_input_isolation(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+				&inbuf, &workbuf, W, H); */
 
 	/* Test C: enable=0x07, trigger=0x0F, WITH surfaces (full pipeline) */
 	test_C_full(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
