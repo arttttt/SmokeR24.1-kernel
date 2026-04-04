@@ -135,9 +135,8 @@ static struct swgid_fixup tegra_swgid_fixup_t124[] = {
 	{ .name = "tegra-udc",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
 	{ .name = "vic",	.swgids = SWGIDS_ERROR_CODE, },
 	{ .name = "vi",	.swgids = TEGRA_SWGROUP_BIT(VI), },
-	{ .name = "isp",	.swgids = TEGRA_SWGROUP_BIT(ISP2) |
-					  TEGRA_SWGROUP_BIT(ISP2B), },
-	{ .name = "isp.1",	.swgids = TEGRA_SWGROUP_BIT(ISP2B), },
+	{ .name = "isp",	.swgids = SWGIDS_ERROR_CODE, },
+	{ .name = "isp.1",	.swgids = SWGIDS_ERROR_CODE, },
 	{ .name = "therm_est",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
 #ifdef CONFIG_PLATFORM_ENABLE_IOMMU
 	{ .name = dummy_name,	.swgids = TEGRA_SWGROUP_BIT(PPCS) },
