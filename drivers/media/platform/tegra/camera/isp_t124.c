@@ -28,6 +28,7 @@
 
 #include "isp_t124.h"
 #include "isp_t124_cal.h"
+#include "isp_trace.h"
 
 /* Include host1x internals for opcode macros and job API */
 #include "dev.h"
@@ -662,6 +663,11 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	n = isp_append_cal_block(isp, cmd, n);
 	n = isp_append_syncpt(isp, cmd, n);
 
+	isp_trace_log("S5 %d words, syncpts: mem=%u stats=%u stream=%u loadv=%u",
+		      n, isp->syncpt_memory, isp->syncpt_stats,
+		      isp->syncpt_stream, isp->syncpt_loadv);
+	isp_trace_hex("S5", cmd, n > 256 ? 256 : n);
+
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S5-rtcfg");
 	if (err)
 		goto free_cmdbuf;
@@ -812,6 +818,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
 	g1_words = n - g1_off;
+
+	/* Trace per-frame gather */
+	isp_trace_log("FRAME in=0x%08x out=0x%08x %ux%u G[0]=%d words",
+		      (u32)in_dma, (u32)out_dma, W, H, g1_words);
+	isp_trace_hex("G0", &cmd[g1_off], g1_words);
 
 	/* ---- G[1]: immediate syncpt incr for stream ---- */
 	g2_off = n;
