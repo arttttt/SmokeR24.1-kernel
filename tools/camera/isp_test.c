@@ -597,7 +597,115 @@ static int test_streaming(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t clas
 	return ret;
 }
 
-/* ---- main ---- */
+/*
+ * Test 5: Minimal cond=4 — try each trigger with cond=4 (ISP-specific condition).
+ * No input, no output surfaces, just trigger + cond4 syncpt.
+ * This tells us what triggers generate cond=4.
+ */
+static int test_cond4_triggers(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t class_id,
+			       struct nvbuf *cmdbuf)
+{
+	uint32_t triggers[] = { 0x01, 0x03, 0x05, 0x07, 0x09, 0x0B, 0x0F };
+	int num_triggers = sizeof(triggers) / sizeof(triggers[0]);
+	int i;
+
+	printf("\n=== TEST 5: cond=4 with various triggers (no surfaces) ===\n");
+
+	for (i = 0; i < num_triggers; i++) {
+		uint32_t *cmd = cmdbuf->cpu;
+		int n = 0;
+		uint32_t fence;
+		struct nvhost_syncpt_incr sp = { syncpt, 2 };
+
+		cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+
+		/* cond=4 syncpt incr */
+		cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
+		cmd[n++] = (4 << 8) | (syncpt & 0xFF);
+
+		/* Trigger */
+		cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
+		cmd[n++] = triggers[i];
+
+		/* Safety IMMEDIATE */
+		cmd[n++] = NVHOST_OPCODE_IMM(0, (0 << 8) | (syncpt & 0xFF));
+		cmd[n++] = NVHOST_OPCODE_NOOP;
+
+		if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, NULL, 0, NULL, &fence))
+			continue;
+
+		int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence - 1, 300);
+		if (ret) {
+			printf("  trigger=0x%02x: cond=4 NO\n", triggers[i]);
+			nvhost_wait_syncpt(ctrl_fd, syncpt, fence, 1000);
+		} else {
+			printf("  trigger=0x%02x: cond=4 YES!\n", triggers[i]);
+		}
+	}
+	return 0;
+}
+
+/*
+ * Test 6: cond=4 with ISP_ENABLE before trigger.
+ * Maybe ISP needs ISP_ENABLE written before conditional syncpts work.
+ */
+static int test_cond4_with_enable(int ch_fd, int ctrl_fd, uint32_t syncpt, uint32_t class_id,
+				  struct nvbuf *cmdbuf, struct nvbuf *workbuf)
+{
+	uint32_t enable_vals[] = { 0x01, 0x03, 0x07, 0x04040007 };
+	uint32_t trigger_vals[] = { 0x05, 0x09, 0x0F };
+	int ne = sizeof(enable_vals) / sizeof(enable_vals[0]);
+	int nt = sizeof(trigger_vals) / sizeof(trigger_vals[0]);
+	int e, t;
+
+	printf("\n=== TEST 6: cond=4 with ISP_ENABLE + trigger combos ===\n");
+
+	for (e = 0; e < ne; e++) {
+		for (t = 0; t < nt; t++) {
+			uint32_t *cmd = cmdbuf->cpu;
+			int n = 0;
+			uint32_t fence;
+			struct nvhost_syncpt_incr sp = { syncpt, 2 };
+
+			cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+
+			/* Write ISP_ENABLE */
+			cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
+			cmd[n++] = enable_vals[e];
+
+			/* Stats buffer (maybe needed) */
+			cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
+			cmd[n++] = workbuf->iova;
+			cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+
+			/* cond=4 syncpt incr */
+			cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
+			cmd[n++] = (4 << 8) | (syncpt & 0xFF);
+
+			/* Trigger */
+			cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
+			cmd[n++] = trigger_vals[t];
+
+			/* Safety */
+			cmd[n++] = NVHOST_OPCODE_IMM(0, (0 << 8) | (syncpt & 0xFF));
+			cmd[n++] = NVHOST_OPCODE_NOOP;
+
+			if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, NULL, 0, NULL, &fence))
+				continue;
+
+			int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence - 1, 300);
+			if (ret) {
+				printf("  enable=0x%08x trigger=0x%02x: cond=4 NO\n",
+				       enable_vals[e], trigger_vals[t]);
+				nvhost_wait_syncpt(ctrl_fd, syncpt, fence, 1000);
+			} else {
+				printf("  enable=0x%08x trigger=0x%02x: cond=4 YES!\n",
+				       enable_vals[e], trigger_vals[t]);
+			}
+		}
+	}
+	return 0;
+}
 
 int main(int argc, char **argv)
 {
@@ -616,8 +724,14 @@ int main(int argc, char **argv)
 		printf("Using ISP-A (class 0x%02x)\n", class_id);
 	}
 	if (argc > 2) {
-		W = H = atoi(argv[2]);
+		W = atoi(argv[2]);
+		H = (argc > 3) ? atoi(argv[3]) : W;
 		printf("Resolution: %ux%u\n", W, H);
+	} else {
+		/* Default to front camera resolution */
+		if (class_id == ISP_B_CLASS) { W = 2592; H = 1944; }
+		else { W = 3280; H = 2460; }
+		printf("Default resolution: %ux%u\n", W, H);
 	}
 
 	/* Open nvmap */
@@ -651,9 +765,12 @@ int main(int argc, char **argv)
 
 	/* Allocate buffers */
 	printf("Allocating buffers...\n");
-	if (nvbuf_alloc(&cmdbuf, 16384, 256)) return 1;
-	if (nvbuf_alloc(&inbuf, W * H * 2, 256)) return 1;  /* RAW10 = 2 bpp */
-	if (nvbuf_alloc(&outbuf, W * H * 2, 256)) return 1; /* YUV420 ~ 1.5 bpp, 2x for safety */
+	uint32_t cmdbuf_size = 64 * 1024;  /* 64KB for init + frame */
+	uint32_t in_size = W * H * 2;      /* RAW10 = 2 bpp */
+	uint32_t out_size = W * H * 2;     /* YUV420 ~ 1.5 bpp, 2x safety */
+	if (nvbuf_alloc(&cmdbuf, cmdbuf_size, 256)) return 1;
+	if (nvbuf_alloc(&inbuf, in_size, 256)) return 1;
+	if (nvbuf_alloc(&outbuf, out_size, 256)) return 1;
 	if (nvbuf_alloc(&workbuf, 256 * 1024, 256)) return 1; /* 256KB work/stats */
 
 	/* Test 1: Ping */
@@ -672,6 +789,12 @@ int main(int argc, char **argv)
 	/* Test 4: Streaming */
 	test_streaming(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
 		       &outbuf, &workbuf, W, H);
+
+	/* Test 5: cond=4 with various triggers */
+	test_cond4_triggers(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf);
+
+	/* Test 6: cond=4 with ISP_ENABLE + trigger combos */
+	test_cond4_with_enable(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf, &workbuf);
 
 	/* Cleanup */
 	nvbuf_free(&workbuf);
