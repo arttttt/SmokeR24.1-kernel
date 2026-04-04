@@ -52,8 +52,10 @@ struct nvmap_pin_handle_32 {
 #define NVMAP_IOC_UNPIN_MULT _IOW(NVMAP_IOC_MAGIC, 11, struct nvmap_pin_handle_32)
 
 #define NVMAP_HEAP_IOVMM    (1 << 30)
-#define NVMAP_HANDLE_UNCACHEABLE   0
-#define NVMAP_HANDLE_WRITE_COMBINE 1
+#define NVMAP_HANDLE_UNCACHEABLE     0
+#define NVMAP_HANDLE_WRITE_COMBINE   1
+#define NVMAP_HANDLE_INNER_CACHEABLE 2
+#define NVMAP_HANDLE_CACHEABLE       3
 
 /* ---- nvhost ioctls ---- */
 #define NVHOST_IOC_MAGIC 'H'
@@ -206,7 +208,7 @@ static int nvbuf_alloc(struct nvbuf *b, uint32_t size, uint32_t align)
 	/* Alloc backing memory */
 	ah.handle = b->handle;
 	ah.heap_mask = NVMAP_HEAP_IOVMM;
-	ah.flags = NVMAP_HANDLE_WRITE_COMBINE;
+	ah.flags = NVMAP_HANDLE_INNER_CACHEABLE;
 	ah.align = align;
 	ret = ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah);
 	if (ret) { perror("nvmap ALLOC"); return -1; }
