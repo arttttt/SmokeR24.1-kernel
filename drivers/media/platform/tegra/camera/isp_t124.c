@@ -367,10 +367,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	isp->cmdbuf[n++] = ISP_TRIGGER_POST_APPLY;
 
-	/* Syncpt OP_DONE */
-	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
-		isp->syncpt_memory);
+	/* Syncpt — test if ISP generates cond=4 with output config */
+	isp->cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
+	isp->cmdbuf[n++] = (4 << 8) | isp->syncpt_memory; /* cond4 */
 
 	/* IMMEDIATE syncpt incr for fence accounting */
 	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
