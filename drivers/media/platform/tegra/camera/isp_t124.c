@@ -407,7 +407,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 
 	/* Record syncpt before submit */
 	{
-		u32 before = nvhost_syncpt_read_min_ext(isp->pdev, isp->syncpt_memory);
+		u32 before, after;
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &before);
 
 	err = nvhost_job_add_client_gather_address(job, n,
 			isp->class_id, isp->cmdbuf_phys);
@@ -426,7 +427,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	/* Don't wait on fence — just sleep and read syncpt to see how many fired */
 	msleep(200);
 	{
-		u32 after = nvhost_syncpt_read_min_ext(isp->pdev, isp->syncpt_memory);
+		nvhost_syncpt_read_ext_check(isp->pdev, isp->syncpt_memory, &after);
 		dev_info(dev, "stream_init: syncpt before=%u after=%u fired=%u (of 10)\n",
 			 before, after, after - before);
 	}
