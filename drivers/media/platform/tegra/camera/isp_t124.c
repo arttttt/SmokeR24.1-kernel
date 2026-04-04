@@ -809,6 +809,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
+	dev_info(&isp->pdev->dev,
+		 "frame: out=0x%08x Y=0x%08x U=0x%08x V=0x%08x stats=0x%08x\n",
+		 (u32)out_dma, (u32)out_y, (u32)out_u, (u32)out_v,
+		 (u32)stats_dma);
+
 	/* ---- G[0]: streaming mode per-frame ---- */
 	g1_off = n;
 
