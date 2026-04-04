@@ -34,12 +34,57 @@
 #define BOOTLOADER_MODE		BIT(30)
 #define FORCED_RECOVERY_MODE	BIT(1)
 
+/* Stock (K1/mocha) reboot reason bits — full SCRATCH0 overwrite */
+#define STOCK_KPANIC_RS_REASON	BIT(29)
+#define STOCK_NORMAL_RS_REASON	BIT(28)
+#define STOCK_CHARGEONLY_MODE	BIT(5)
+
 #define SYS_RST_OK		1
+
+static bool use_stock_reboot;
+
+/*
+ * Stock bootloader (e.g. Xiaomi mocha) expects SCRATCH0 to be fully
+ * overwritten with a single reason code. The R24.1 default preserves
+ * existing bits via read-modify-write, which can confuse the stock
+ * bootloader with unexpected bit combinations, causing hangs on
+ * reboot to recovery/fastboot.
+ */
+static int program_reboot_reason_stock(const char *cmd)
+{
+	void __iomem *reset = IO_ADDRESS(TEGRA_PMC_BASE);
+	u32 reg;
+
+	if (tegra_platform_is_fpga() || NEVER_RESET) {
+		pr_info("tegra_assert_system_reset() ignored.....");
+		do { } while (1);
+	}
+
+	if (!cmd || (strlen(cmd) == 0)) {
+		reg = STOCK_NORMAL_RS_REASON;
+	} else if (!strcmp(cmd, "recovery")) {
+		reg = RECOVERY_MODE;
+	} else if (!strcmp(cmd, "bootloader") || !strcmp(cmd, "fastboot")) {
+		reg = BOOTLOADER_MODE;
+	} else if (!strcmp(cmd, "forced-recovery")) {
+		reg = FORCED_RECOVERY_MODE;
+	} else if (!strcmp(cmd, "usb_chg")) {
+		reg = STOCK_CHARGEONLY_MODE;
+	} else {
+		reg = STOCK_NORMAL_RS_REASON;
+	}
+
+	writel_relaxed(reg, reset + PMC_SCRATCH0);
+	return 0;
+}
 
 static int program_reboot_reason(const char *cmd)
 {
 	void __iomem *reset = IO_ADDRESS(TEGRA_PMC_BASE);
 	u32 reg;
+
+	if (use_stock_reboot)
+		return program_reboot_reason_stock(cmd);
 
 	if (tegra_platform_is_fpga() || NEVER_RESET) {
 		pr_info("tegra_assert_system_reset() ignored.....");
@@ -77,7 +122,7 @@ static void tegra_reboot_handler(enum reboot_mode mode, const char *cmd)
 
 	/* program reboot reason for the bootloader */
 	ret = program_reboot_reason(cmd);
-	if (ret && pm_power_reset) {
+	if (!use_stock_reboot && ret && pm_power_reset) {
 		pr_info("%s: using %pF()\n", __func__, pm_power_reset);
 		pm_power_reset();
 	} else {
@@ -96,7 +141,7 @@ static int tegra_restart_notify(struct notifier_block *nb,
 
 	/* program reboot reason for the bootloader */
 	ret = program_reboot_reason(cmd);
-	if (ret && pm_power_reset) {
+	if (!use_stock_reboot && ret && pm_power_reset) {
 		pr_info("%s: using %pF()\n", __func__, pm_power_reset);
 		pm_power_reset();
 	}
@@ -111,6 +156,12 @@ static struct notifier_block tegra_restart_nb = {
 
 static int tegra_register_restart_notifier(void)
 {
+	/* Detect stock bootloader platforms (e.g. Xiaomi mocha) */
+	if (of_machine_is_compatible("nvidia,tn8")) {
+		use_stock_reboot = true;
+		pr_info("Tegra reboot: stock bootloader mode (full SCRATCH0 overwrite)\n");
+	}
+
 	/*
 	 * PSCI v0.2 has support for system reset. If we support v0.2, then
 	 * we have to register a reboot notifier which will program the
