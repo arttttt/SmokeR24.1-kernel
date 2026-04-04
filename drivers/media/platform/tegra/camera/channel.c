@@ -1056,11 +1056,23 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			dev_err(&chan->video.dev,
 				"ISP process_frame failed: %d\n", isp_err);
 		} else {
-			/* Check ISP output in kernel */
+			/* Scan ISP output for any non-zero data */
 			u32 *out32 = (u32 *)chan->isp_out_cpu;
+			u32 total = chan->isp_out_size / 4;
+			u32 nz = 0, first_nz = 0;
+			u32 i;
+			for (i = 0; i < total; i++) {
+				if (out32[i] != 0) {
+					if (!nz)
+						first_nz = i;
+					nz++;
+				}
+			}
 			dev_info(&chan->video.dev,
-				 "ISP out: [0]=0x%08x [1]=0x%08x [100]=0x%08x [1000]=0x%08x\n",
-				 out32[0], out32[1], out32[100], out32[1000]);
+				 "ISP out: %u/%u nonzero, first@%u=0x%08x last@%u\n",
+				 nz, total, first_nz,
+				 nz ? out32[first_nz] : 0,
+				 nz ? i - 1 : 0);
 		}
 	}
 
