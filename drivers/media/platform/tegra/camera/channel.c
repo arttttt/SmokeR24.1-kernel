@@ -1036,6 +1036,17 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			 "raw buf check: [0]=0x%08x [1]=0x%08x [100]=0x%08x [1000]=0x%08x\n",
 			 raw32[0], raw32[1], raw32[100], raw32[1000]);
 
+		/* Copy raw to userspace first (test: VI→ISP domain) */
+		{
+			void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
+			size_t copy_sz = min_t(size_t,
+				vb2_plane_size(vb, 0),
+				PAGE_ALIGN(chan->isp_raw_size));
+			if (vb2_vaddr)
+				memcpy(vb2_vaddr, chan->isp_raw_cpu, copy_sz);
+		}
+
+		/* Still run ISP — check result in dmesg only */
 		isp_err = isp_t124_process_frame(chan->isp,
 				chan->isp_raw_dma,
 				chan->isp_out_dma,
@@ -1044,13 +1055,12 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		if (isp_err) {
 			dev_err(&chan->video.dev,
 				"ISP process_frame failed: %d\n", isp_err);
-			state = VB2_BUF_STATE_ERROR;
 		} else {
-			/* Copy ISP output to vb2 userspace buffer */
-			void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
-			if (vb2_vaddr)
-				memcpy(vb2_vaddr, chan->isp_out_cpu,
-				       chan->isp_out_size);
+			/* Check ISP output in kernel */
+			u32 *out32 = (u32 *)chan->isp_out_cpu;
+			dev_info(&chan->video.dev,
+				 "ISP out: [0]=0x%08x [1]=0x%08x [100]=0x%08x [1000]=0x%08x\n",
+				 out32[0], out32[1], out32[100], out32[1000]);
 		}
 	}
 
