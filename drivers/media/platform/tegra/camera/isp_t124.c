@@ -769,16 +769,18 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp)
 EXPORT_SYMBOL(isp_t124_stream_stop);
 
 /**
- * isp_t124_process_frame() - Submit one frame through ISP
+ * isp_t124_process_frame() - Submit one frame through ISP (streaming mode)
  *
- * Per-frame submit based on v3 RE report:
- * G[0]: output(0xE00) + processing(0x500) + input(0xE31/E33/E34/E32/E30)
- *       + ISP_ENABLE(0x015) + stats(0x100) + syncpt incrs + trigger
+ * Stock streaming mode: ISP receives pixels from VI via hardware path.
+ * No input surfaces — only output + stats + trigger.
+ *
+ * G[0]: output(0xE00) + processing(0x500) + ISP_ENABLE(0x015)=0x04040007
+ *       + stats(0x100) + syncpt incrs (cond=4,5,6) + trigger=0x05
  * G[1]: immediate syncpt incr (stream)
  * Job: 4 syncpts (memory, stats, loadv, stream)
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
-			   dma_addr_t in_dma, dma_addr_t out_dma,
+			   dma_addr_t out_dma, dma_addr_t stats_dma,
 			   u32 vi_syncpt, u32 vi_thresh)
 {
 	struct nvhost_job *job;
@@ -807,11 +809,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
-	dev_info(&isp->pdev->dev,
-		 "process_frame: in=0x%pad out=0x%pad %ux%u\n",
-		 &in_dma, &out_dma, W, H);
-
-	/* ---- G[0]: reprocess mode per-frame (enable=0x07, trigger=0x0F) ---- */
+	/* ---- G[0]: streaming mode per-frame ---- */
 	g1_off = n;
 
 	/* SET_CLASS */
@@ -841,79 +839,50 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 
-	/* Processing: [0,0,0,0,0, (H<<16)|W] */
+	/* Processing: [flags, 0, 0, 0, 0, (H<<16)|W] */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000003; /* processing enable flags (stock) */
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = (H << 16) | W;
 
-	/* Input (v3 reprocess methods) */
+	/* ISP_ENABLE = streaming mode (input from VI hardware path) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-
-	/* Input dimensions: width | (height << 16) */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
-	cmd[n++] = (W & 0x7FFF) | (H << 16);
-
-	/* Input format */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = isp->in_format;
-
-	/* Input surface plane 0: [IOVA, 0, stride] */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
-	cmd[n++] = (u32)in_dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = isp->in_stride;
-
-	/* Input strip config: strip_width | (overlap << 16) */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
-	cmd[n++] = W & 0x3FFF;
-
-	/* ISP_ENABLE = 0x07 (full pipeline, NOT 0x04040007) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x00000007;
+	cmd[n++] = ISP_ENABLE_STREAMING;
 
-	/* Input trigger = 1 */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
-	cmd[n++] = 0x00000001;
-
-	/* Stats buffer (0x100) */
+	/* Stats buffer via 0x100: [IOVA, 0, 0, 0] */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = (u32)stats_dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* 3 conditional syncpt incrs (memory, stats, loadv) */
+	/* Conditional syncpt incrs (cond=4: OP_DONE, cond=5: STATS, cond=6: RD_DONE) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (4 << 8) | isp->syncpt_memory;
+	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (5 << 8) | isp->syncpt_stats;
+	cmd[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | isp->syncpt_stats;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (6 << 8) | isp->syncpt_loadv;
+	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
 
-	/* Trigger POST_APPLY (0x0F) — tested: enable=0x07 + trigger=0x0F → cond=4 YES */
+	/* Runtime trigger = 0x05 (stock streaming trigger) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_POST_APPLY;
+	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
 	g1_words = n - g1_off;
-
-	/* Trace per-frame gather */
-	isp_trace_log("FRAME in=0x%08x out=0x%08x %ux%u G[0]=%d words",
-		      (u32)in_dma, (u32)out_dma, W, H, g1_words);
-	isp_trace_hex("G0", &cmd[g1_off], g1_words);
 
 	/* ---- G[1]: immediate syncpt incr for stream ---- */
 	g2_off = n;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = isp->syncpt_stream; /* cond=0 (immediate) */
 
-	/* Job with 4 syncpts (stock uses all 4) */
+	/* Job with 4 syncpts */
 	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
 	if (!job) {
 		nvhost_module_idle(isp->pdev);
@@ -945,14 +914,12 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		return err;
 	}
 
-	/* Wait on stream syncpt (SP[3]) — stock waits on this */
+	/* Wait on stream syncpt (SP[3]) */
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
 			job->sp[3].id, job->sp[3].fence,
 			msecs_to_jiffies(500), NULL, NULL);
 	if (err)
 		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);
-	else
-		dev_info(&isp->pdev->dev, "ISP frame OK!\n");
 
 	nvhost_job_put(job);
 	nvhost_module_idle(isp->pdev);

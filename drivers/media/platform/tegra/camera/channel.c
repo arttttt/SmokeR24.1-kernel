@@ -522,9 +522,25 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		}
 
 		/* VI CSI image config — port specific base */
-		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
-		       (t124_csi_tpg ? 0 : (1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
-		       (format << IMAGE_DEF_FORMAT_OFFSET) | IMAGE_DEF_DEST_MEM);
+		{
+			u32 dest;
+			if (chan->use_isp)
+				dest = (chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B;
+			else
+				dest = IMAGE_DEF_DEST_MEM;
+			tegra_channel_write(chan,
+				vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
+				(t124_csi_tpg ? 0 :
+					(1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
+				(format << IMAGE_DEF_FORMAT_OFFSET) | dest);
+		}
+		/* Enable VI→ISP interface if ISP active */
+		if (chan->use_isp)
+			tegra_channel_write(chan,
+				vi_csi_base + TEGRA_VI_CSI_ISPINTF_CONFIG,
+				ISPINTF_CONFIG_ENABLE);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DT,
 		       data_type);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE_WC,
@@ -872,7 +888,13 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				return err;
 			}
 			val = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
-			csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
+			if (chan->use_isp)
+				csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
+					val | ((chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B));
+			else
+				csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
 					val | IMAGE_DEF_DEST_MEM);
 		}
 
@@ -935,10 +957,18 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			tegra_channel_ring_buffer(chan, vb, &ts, state);
 			return err;
 		}
-		/* Bit controls VI memory write, enable after all regs */
+		/* Bit controls VI destination, enable after all regs */
 		for (index = 0; index < valid_ports; index++) {
 			val = csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DEF);
-			csi_write(chan, index, TEGRA_VI_CSI_IMAGE_DEF,
+			if (chan->use_isp)
+				csi_write(chan, index,
+					TEGRA_VI_CSI_IMAGE_DEF,
+					val | ((chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B));
+			else
+				csi_write(chan, index,
+					TEGRA_VI_CSI_IMAGE_DEF,
 					val | IMAGE_DEF_DEST_MEM);
 		}
 	}
@@ -1046,10 +1076,10 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				memcpy(vb2_vaddr, chan->isp_raw_cpu, copy_sz);
 		}
 
-		/* Still run ISP — check result in dmesg only */
+		/* ISP streaming mode — no input surface, VI feeds ISP via HW */
 		isp_err = isp_t124_process_frame(chan->isp,
-				chan->isp_raw_dma,
 				chan->isp_out_dma,
+				chan->isp->work_buf.dma,
 				chan->syncpt[0],
 				thresh[0]);
 		if (isp_err) {

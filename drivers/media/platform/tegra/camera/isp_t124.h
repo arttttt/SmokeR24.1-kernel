@@ -68,7 +68,7 @@ struct tegra_isp_t124 *isp_t124_get_isp(u8 class_id);
 int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height);
 void isp_t124_stream_stop(struct tegra_isp_t124 *isp);
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
-			   dma_addr_t in_dma, dma_addr_t out_dma,
+			   dma_addr_t out_dma, dma_addr_t stats_dma,
 			   u32 vi_syncpt, u32 vi_thresh);
 
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */
@@ -138,7 +138,14 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 #define ISP_FORMAT_STOCK		0x04FE00E6
 #define ISP_TRIGGER_RUNTIME		0x05
 #define ISP_TRIGGER_POST_APPLY		0x0F
-#define ISP_ENABLE_MODE			0x04040007
+#define ISP_ENABLE_REPROCESS		0x07
+#define ISP_ENABLE_STREAMING		0x04040007
+#define ISP_ENABLE_MODE			ISP_ENABLE_STREAMING
+
+/* Syncpoint increment condition values */
+#define ISP_SYNCPT_COND_OP_DONE		4
+#define ISP_SYNCPT_COND_STATS_DONE	5
+#define ISP_SYNCPT_COND_RD_DONE		6
 
 /* Surface descriptor: [IOVA, 0, stride] */
 #define ISP_SURF_WORD1			0x00000000
