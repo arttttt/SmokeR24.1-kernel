@@ -525,6 +525,9 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
 		       (t124_csi_tpg ? 0 : (1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
 		       (format << IMAGE_DEF_FORMAT_OFFSET) | IMAGE_DEF_DEST_MEM);
+		/* Try enabling VI→ISP pixel routing */
+		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_ISPINTF_CONFIG,
+		       0x00000001);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DT,
 		       data_type);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE_WC,
