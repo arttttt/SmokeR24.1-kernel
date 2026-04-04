@@ -356,7 +356,9 @@ out:
 	nvmap_handle_put(h);
 	return err;
 }
-EXPORT_SYMBOL(nvmap_alloc_handle);(struct nvmap_handle *h)
+EXPORT_SYMBOL(nvmap_alloc_handle);
+
+void _nvmap_handle_free(struct nvmap_handle *h)
 {
 	unsigned int i, nr_page, page_index = 0;
 

@@ -138,7 +138,9 @@ ref_alloc_fail:
 	kfree(h);
 	return err;
 }
-EXPORT_SYMBOL(nvmap_create_handle);(struct nvmap_client *client,
+EXPORT_SYMBOL(nvmap_create_handle);
+
+struct nvmap_handle_ref *nvmap_duplicate_handle(struct nvmap_client *client,
 					struct nvmap_handle *h, bool skip_val)
 {
 	struct nvmap_handle_ref *ref = NULL;
