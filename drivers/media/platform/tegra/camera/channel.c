@@ -1029,8 +1029,11 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 
 	/* ISP processing: raw → YUV */
 	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
+		/* ISP has no SMMU — needs physical addr for raw input.
+		 * isp_raw_dma is VI IOVA, use virt_to_phys for ISP. */
+		dma_addr_t isp_in = virt_to_phys(chan->isp_raw_cpu);
 		int isp_err = isp_t124_process_frame(chan->isp,
-				chan->isp_raw_dma,
+				isp_in,
 				chan->isp_out_dma,
 				chan->syncpt[0],
 				thresh[0]);
@@ -1604,8 +1607,10 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
 			chan->isp_raw_size = chan->format.width *
 					    chan->format.height * raw_bpp;
+			/* Allocate raw buffer through VI device so VI can write
+			 * (VI uses SMMU, needs IOVA in VI domain) */
 			chan->isp_raw_cpu = dma_alloc_coherent(
-					&isp->pdev->dev,
+					chan->vi->dev,
 					PAGE_ALIGN(chan->isp_raw_size),
 					&chan->isp_raw_dma, GFP_KERNEL);
 			if (chan->isp_raw_cpu) {
@@ -1616,7 +1621,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					dev_warn(&chan->video.dev,
 						 "ISP init failed: %d\n", ret);
 					dma_free_coherent(
-						&isp->pdev->dev,
+						chan->vi->dev,
 						PAGE_ALIGN(chan->isp_raw_size),
 						chan->isp_raw_cpu,
 						chan->isp_raw_dma);
@@ -1638,7 +1643,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 								 "ISP out buf alloc failed\n");
 							chan->use_isp = false;
 							isp_t124_stream_stop(isp);
-							dma_free_coherent(&isp->pdev->dev,
+							dma_free_coherent(chan->vi->dev,
 								PAGE_ALIGN(chan->isp_raw_size),
 								chan->isp_raw_cpu,
 								chan->isp_raw_dma);
@@ -1732,7 +1737,7 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 		chan->isp_out_cpu = NULL;
 	}
 	if (chan->isp_raw_cpu && chan->isp) {
-		dma_free_coherent(&chan->isp->pdev->dev,
+		dma_free_coherent(chan->vi->dev,
 				  PAGE_ALIGN(chan->isp_raw_size),
 				  chan->isp_raw_cpu, chan->isp_raw_dma);
 		chan->isp_raw_cpu = NULL;
