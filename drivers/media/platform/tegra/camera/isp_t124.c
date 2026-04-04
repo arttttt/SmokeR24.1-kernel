@@ -484,6 +484,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
 
+	err = nvhost_module_busy(isp->pdev);
+	if (err)
+		return err;
+
 	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS;
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
@@ -535,11 +539,9 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0;
 	cmd[n++] = 0;
 
-	/* Conditional syncpt — use cond=1 (standard OP_DONE) since ISP-specific
-	 * conditions (4-9) don't fire on SmokeR24.1 kernel */
-	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
-		isp->syncpt_memory);
+	/* Conditional syncpt — cond=4 (ISP OP_DONE), should work now with module_busy */
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (4 << 8) | isp->syncpt_memory;
 
 	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
@@ -585,6 +587,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		dev_info(&isp->pdev->dev, "ISP frame OK!\n");
 
 	nvhost_job_put(job);
+	nvhost_module_idle(isp->pdev);
 	return err;
 }
 EXPORT_SYMBOL(isp_t124_process_frame);
