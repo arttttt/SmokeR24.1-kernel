@@ -1029,6 +1029,12 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 
 	/* ISP processing: raw → YUV */
 	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
+		/* Check if VI wrote anything to raw buffer */
+		u32 *raw32 = (u32 *)chan->isp_raw_cpu;
+		dev_info(&chan->video.dev,
+			 "raw buf check: [0]=0x%08x [1]=0x%08x [100]=0x%08x [1000]=0x%08x\n",
+			 raw32[0], raw32[1], raw32[100], raw32[1000]);
+
 		/* ISP has no SMMU — needs physical addr for raw input.
 		 * isp_raw_dma is VI IOVA, use virt_to_phys for ISP. */
 		dma_addr_t isp_in = virt_to_phys(chan->isp_raw_cpu);
