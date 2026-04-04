@@ -1000,6 +1000,88 @@ static int test_B3_input_only(int ch_fd, int ctrl_fd, uint32_t syncpt,
 }
 
 /*
+ * Test B4: Isolate which input method breaks cond=4.
+ * Try each input method individually.
+ */
+static int test_B4_input_isolation(int ch_fd, int ctrl_fd, uint32_t syncpt,
+	uint32_t class_id, struct nvbuf *cmdbuf,
+	struct nvbuf *inbuf, struct nvbuf *workbuf, uint32_t W, uint32_t H)
+{
+	int i;
+	printf("\n=== TEST B4: Isolate which input method breaks cond=4 ===\n");
+
+	struct {
+		const char *name;
+		int use_dims, use_fmt, use_surf, use_strip, use_trigger;
+		uint32_t format;
+	} tests[] = {
+		{"dims only",        1,0,0,0,0, 0},
+		{"format only",      0,1,0,0,0, 0x11000020},
+		{"surface only",     0,0,1,0,0, 0},
+		{"trigger only",     0,0,0,0,1, 0},
+		{"strip only",       0,0,0,1,0, 0},
+		{"dims+fmt",         1,1,0,0,0, 0x11000020},
+		{"dims+fmt+strip",   1,1,0,1,0, 0x11000020},
+		{"dims+fmt+trigger", 1,1,0,0,1, 0x11000020},
+		{"surface+trigger",  0,0,1,0,1, 0},
+		{"all input no surf", 1,1,0,1,1, 0x11000020},
+		{"all input",        1,1,1,1,1, 0x11000020},
+		/* Try different format values */
+		{"fmt=0x00000000",   0,1,0,0,0, 0x00000000},
+		{"fmt=0x10000000",   0,1,0,0,0, 0x10000000},
+		{"fmt=0x10000020",   0,1,0,0,0, 0x10000020},
+		{"fmt=0x01000020",   0,1,0,0,0, 0x01000020},
+	};
+	int ntests = sizeof(tests)/sizeof(tests[0]);
+
+	for (i = 0; i < ntests; i++) {
+		uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
+		cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
+
+		if (tests[i].use_dims) {
+			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS,1);
+			cmd[n++]=(W&0x7FFF)|(H<<16);
+		}
+		if (tests[i].use_fmt) {
+			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT,1);
+			cmd[n++]=tests[i].format;
+		}
+		if (tests[i].use_surf) {
+			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0,3);
+			cmd[n++]=inbuf->iova;cmd[n++]=0;cmd[n++]=W*2;
+		}
+		if (tests[i].use_strip) {
+			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP,1);
+			cmd[n++]=W&0x3FFF;
+		}
+
+		cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
+		cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF,4);
+		cmd[n++]=workbuf->iova;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;
+
+		if (tests[i].use_trigger) {
+			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER,1);
+			cmd[n++]=1;
+		}
+
+		cmd[n++]=NVHOST_OPCODE_NONINCR(0x000,1);cmd[n++]=(4<<8)|(syncpt&0xFF);
+		cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1);cmd[n++]=ISP_TRIGGER_RUNTIME;
+		cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF));cmd[n++]=NVHOST_OPCODE_NOOP;
+
+		struct nvhost_syncpt_incr sp={syncpt,2};
+		if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp,1,NULL,0,NULL,&fence)) continue;
+		int ret=nvhost_wait_syncpt(ctrl_fd,syncpt,fence-1,500);
+		if(ret){
+			printf("  %-22s cond=4 NO\n", tests[i].name);
+			nvhost_wait_syncpt(ctrl_fd,syncpt,fence,2000);
+		}else{
+			printf("  %-22s cond=4 YES\n", tests[i].name);
+		}
+	}
+	return 0;
+}
+
+/*
  * Test C: enable=0x07, trigger=0x0F WITH surfaces (full pipeline)
  */
 static int test_C_full(int ch_fd, int ctrl_fd, uint32_t syncpt,
@@ -1415,6 +1497,10 @@ int main(int argc, char **argv)
 	/* Test B3: input only */
 	test_B3_input_only(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
 			   &inbuf, &workbuf, W, H);
+
+	/* Test B4: isolate which input method breaks cond=4 */
+	test_B4_input_isolation(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
+				&inbuf, &workbuf, W, H);
 
 	/* Test C: enable=0x07, trigger=0x0F, WITH surfaces (full pipeline) */
 	test_C_full(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
