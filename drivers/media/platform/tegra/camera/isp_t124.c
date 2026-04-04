@@ -720,7 +720,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	job->sp[3].id = isp->syncpt_stream;
 	job->sp[3].incrs = 1;
 	job->num_syncpts = 4;
-	job->hwctx_syncpt_idx = 3; /* stream is the "main" syncpt */
 
 	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
 	job->gathers[0].mem_base = cmd_phys + g1_off * 4;
