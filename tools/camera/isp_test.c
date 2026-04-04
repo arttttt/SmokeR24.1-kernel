@@ -121,8 +121,15 @@ struct nvhost32_submit_args {
 	_IOWR(NVHOST_IOC_MAGIC, 16, struct nvhost_get_param_arg)
 #define NVHOST32_IOCTL_CHANNEL_SUBMIT \
 	_IOWR(NVHOST_IOC_MAGIC, 15, struct nvhost32_submit_args)
+struct nvhost_ctrl_syncpt_read_args {
+	uint32_t id;
+	uint32_t value;
+};
+
 #define NVHOST_IOCTL_CTRL_SYNCPT_WAITEX \
 	_IOWR(NVHOST_IOC_MAGIC, 6, struct nvhost_ctrl_syncpt_waitex_args)
+#define NVHOST_IOCTL_CTRL_SYNCPT_READ \
+	_IOWR(NVHOST_IOC_MAGIC, 1, struct nvhost_ctrl_syncpt_read_args)
 
 /* ---- host1x opcodes ---- */
 #define NVHOST_OPCODE_SETCLASS(cl, off, mask) \
@@ -287,6 +294,15 @@ static int nvhost_submit(int ch_fd, struct nvbuf *cmdbuf, int words,
 	*out_fence = sa.fence;
 	printf("  submit OK: fence=%u\n", sa.fence);
 	return 0;
+}
+
+static uint32_t nvhost_read_syncpt(int ctrl_fd, uint32_t id)
+{
+	struct nvhost_ctrl_syncpt_read_args ra;
+	ra.id = id;
+	ra.value = 0;
+	ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_READ, &ra);
+	return ra.value;
 }
 
 static int nvhost_wait_syncpt(int ctrl_fd, uint32_t id, uint32_t thresh, int timeout_ms)
@@ -1159,6 +1175,14 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 
 	printf("  cmdbuf: G[0]=%d words + G[1]=2 words = %d total\n", g0_words, n);
 
+	/* Read current syncpt values BEFORE submit */
+	uint32_t mem_before = nvhost_read_syncpt(ctrl_fd, sp_memory);
+	uint32_t stats_before = nvhost_read_syncpt(ctrl_fd, sp_stats);
+	uint32_t loadv_before = nvhost_read_syncpt(ctrl_fd, sp_loadv);
+	uint32_t stream_before = nvhost_read_syncpt(ctrl_fd, sp_stream);
+	printf("  syncpt values before: mem=%u stats=%u stream=%u loadv=%u\n",
+	       mem_before, stats_before, stream_before, loadv_before);
+
 	/* Submit with 4 syncpt incrs (memory, stats, loadv, stream) */
 	struct nvhost_syncpt_incr sps[4] = {
 		{ sp_memory, 1 },
@@ -1172,7 +1196,7 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 
 	/* Wait on stream syncpt (the immediate one — should always work) */
 	printf("  Waiting for stream syncpt (immediate) ...\n");
-	int ret = nvhost_wait_syncpt(ctrl_fd, sp_stream, fence, 2000);
+	int ret = nvhost_wait_syncpt(ctrl_fd, sp_stream, stream_before + 1, 2000);
 	if (ret) {
 		printf("  Stream syncpt TIMEOUT!\n");
 		return -1;
@@ -1180,18 +1204,18 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 
 	/* Now check if conditional syncpts fired */
 	printf("  Checking conditional syncpts ...\n");
+	int mem_ok = (nvhost_wait_syncpt(ctrl_fd, sp_memory, mem_before + 1, 500) == 0);
+	int stats_ok = (nvhost_wait_syncpt(ctrl_fd, sp_stats, stats_before + 1, 500) == 0);
+	int loadv_ok = (nvhost_wait_syncpt(ctrl_fd, sp_loadv, loadv_before + 1, 500) == 0);
 
-	/* For cond4/5/6, we need to read current syncpt values.
-	 * Since we submitted them together, if stream (immediate) completed,
-	 * try waiting on the conditionals with short timeout. */
-	int mem_ok = (nvhost_wait_syncpt(ctrl_fd, sp_memory, fence, 100) == 0);
-	int stats_ok = (nvhost_wait_syncpt(ctrl_fd, sp_stats, fence, 100) == 0);
-	int loadv_ok = (nvhost_wait_syncpt(ctrl_fd, sp_loadv, fence, 100) == 0);
+	uint32_t mem_after = nvhost_read_syncpt(ctrl_fd, sp_memory);
+	uint32_t stats_after = nvhost_read_syncpt(ctrl_fd, sp_stats);
+	uint32_t loadv_after = nvhost_read_syncpt(ctrl_fd, sp_loadv);
 
-	printf("  Results: memory(cond4)=%s stats(cond5)=%s loadv(cond6)=%s\n",
-	       mem_ok ? "YES" : "NO",
-	       stats_ok ? "YES" : "NO",
-	       loadv_ok ? "YES" : "NO");
+	printf("  Results: memory(cond4)=%s(%u→%u) stats(cond5)=%s(%u→%u) loadv(cond6)=%s(%u→%u)\n",
+	       mem_ok ? "YES" : "NO", mem_before, mem_after,
+	       stats_ok ? "YES" : "NO", stats_before, stats_after,
+	       loadv_ok ? "YES" : "NO", loadv_before, loadv_after);
 
 	if (mem_ok || stats_ok || loadv_ok) {
 		printf("  At least one conditional syncpt fired!\n");
