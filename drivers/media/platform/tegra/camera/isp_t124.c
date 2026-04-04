@@ -44,11 +44,34 @@
 static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
 			     size_t size)
 {
+	unsigned int order;
+
 	buf->size = PAGE_ALIGN(size);
-	buf->cpu = dma_alloc_coherent(dev, buf->size, &buf->dma,
-				      GFP_KERNEL | __GFP_DMA);
-	if (!buf->cpu)
+	order = get_order(buf->size);
+
+	/*
+	 * Allocate physical pages from ZONE_NORMAL (lowmem) explicitly.
+	 * dma_alloc_coherent through IOMMU ignores GFP zone flags and may
+	 * place backing pages in SEC/TSEC carveout (0xFE000000+).
+	 * alloc_pages(GFP_KERNEL) without __GFP_HIGHMEM guarantees lowmem.
+	 */
+	buf->page = alloc_pages(GFP_KERNEL, order);
+	if (!buf->page)
 		return -ENOMEM;
+
+	buf->cpu = page_address(buf->page);
+	memset(buf->cpu, 0, buf->size);
+
+	/* Map into ISP SMMU domain */
+	buf->dma = dma_map_single(dev, buf->cpu, buf->size,
+				  DMA_BIDIRECTIONAL);
+	if (dma_mapping_error(dev, buf->dma)) {
+		__free_pages(buf->page, order);
+		buf->cpu = NULL;
+		buf->page = NULL;
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 
@@ -56,7 +79,8 @@ static void isp_dma_buf_free(struct device *dev, struct isp_dma_buf *buf)
 {
 	if (!buf->cpu)
 		return;
-	dma_free_coherent(dev, buf->size, buf->cpu, buf->dma);
+	dma_unmap_single(dev, buf->dma, buf->size, DMA_BIDIRECTIONAL);
+	__free_pages(buf->page, get_order(buf->size));
 	memset(buf, 0, sizeof(*buf));
 }
 
@@ -432,6 +456,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 		dev_err(dev, "ISP work buf alloc failed: %d\n", err);
 		goto idle;
 	}
+	dev_info(dev, "work_buf: iova=0x%pad phys=0x%lx size=%zu\n",
+		 &isp->work_buf.dma,
+		 (unsigned long)page_to_phys(isp->work_buf.page),
+		 isp->work_buf.size);
 
 	/* Command buffer — 16KB total for all submits */
 	host1x_pdev = nvhost_get_parent(isp->pdev);

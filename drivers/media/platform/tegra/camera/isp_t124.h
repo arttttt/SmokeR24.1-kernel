@@ -18,6 +18,7 @@ struct isp_dma_buf {
 	void *cpu;
 	dma_addr_t dma;
 	size_t size;
+	struct page *page;	/* backing pages (for alloc_pages path) */
 };
 
 struct tegra_isp_t124 {
@@ -159,6 +160,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 #define ISP_CMDBUF_SIZE			(ISP_CMDBUF_WORDS * 4)
 
 /* Working buffer size */
-#define ISP_WORK_BUF_SIZE		(256 * 1024)
+#define ISP_WORK_BUF_SIZE		(512 * 1024)
 
 #endif /* __ISP_T124_H__ */
