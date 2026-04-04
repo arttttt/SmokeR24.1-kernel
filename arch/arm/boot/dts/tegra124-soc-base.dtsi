@@ -815,7 +815,8 @@
 			power-domains = <&ve_pd>;
 			reg = <0x54600000 0x00040000>;
 			interrupts = <0 71 0x04>;
-			/* SMMU disabled for ISP DMA debug */
+			iommus = <&smmu TEGRA_SWGROUP_ISP>,
+				 <&smmu TEGRA_SWGROUP_ISP2B>;
 			status = "disabled";
 		};
 
@@ -824,7 +825,8 @@
 			power-domains = <&ve_pd>;
 			reg = <0x54680000 0x00040000>;
 			interrupts = <0 70 0x04>;
-			/* SMMU disabled for ISP DMA debug */
+			iommus = <&smmu TEGRA_SWGROUP_ISP>,
+				 <&smmu TEGRA_SWGROUP_ISP2B>;
 			status = "disabled";
 		};
 
