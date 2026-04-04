@@ -31,9 +31,10 @@ struct tegra_isp_t124 {
 	struct nvhost_channel *channel;
 	u8 class_id; /* ISP_A_CLASS_ID (0x32) or ISP_B_CLASS_ID (0x34) */
 
-	/* Syncpoints — 3 per ISP (params 0, 1, 3) */
-	u32 syncpt_memory;  /* param 0 — OP_DONE fires here */
+	/* Syncpoints — 4 per ISP (params 0, 1, 2, 3) */
+	u32 syncpt_memory;  /* param 0 */
 	u32 syncpt_stats;   /* param 1 */
+	u32 syncpt_stream;  /* param 2 — stock uses this for submit */
 	u32 syncpt_loadv;   /* param 3 */
 
 	/* Calibration data (from isp_t124_cal.h) */

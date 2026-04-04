@@ -74,22 +74,26 @@ static int isp_t124_channel_init(struct tegra_isp_t124 *isp)
 		return err;
 	}
 
-	/* 3 syncpoints per ISP: memory (param 0), stats (param 1), loadv (param 3) */
+	/* 4 syncpoints per ISP: memory (0), stats (1), stream (2), loadv (3) */
 	isp->syncpt_memory = nvhost_get_syncpt_host_managed(isp->pdev,
 							    0, "isp_memory");
 	isp->syncpt_stats = nvhost_get_syncpt_host_managed(isp->pdev,
 							   1, "isp_stats");
+	isp->syncpt_stream = nvhost_get_syncpt_host_managed(isp->pdev,
+							    2, "isp_stream");
 	isp->syncpt_loadv = nvhost_get_syncpt_host_managed(isp->pdev,
 							   3, "isp_loadv");
 
-	if (!isp->syncpt_memory || !isp->syncpt_stats || !isp->syncpt_loadv) {
+	if (!isp->syncpt_memory || !isp->syncpt_stats ||
+	    !isp->syncpt_stream || !isp->syncpt_loadv) {
 		dev_err(&isp->pdev->dev, "syncpt allocation failed\n");
 		goto fail;
 	}
 
 	dev_info(&isp->pdev->dev,
-		 "host1x channel mapped, syncpts: mem=%u stats=%u loadv=%u\n",
-		 isp->syncpt_memory, isp->syncpt_stats, isp->syncpt_loadv);
+		 "host1x channel mapped, syncpts: mem=%u stats=%u stream=%u loadv=%u\n",
+		 isp->syncpt_memory, isp->syncpt_stats,
+		 isp->syncpt_stream, isp->syncpt_loadv);
 	return 0;
 
 fail:
@@ -114,6 +118,10 @@ static void isp_t124_channel_cleanup(struct tegra_isp_t124 *isp)
 		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_stats);
 		isp->syncpt_stats = 0;
 	}
+	if (isp->syncpt_stream) {
+		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_stream);
+		isp->syncpt_stream = 0;
+	}
 	if (isp->syncpt_loadv) {
 		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_loadv);
 		isp->syncpt_loadv = 0;
@@ -136,7 +144,7 @@ static int isp_t124_ping(struct tegra_isp_t124 *isp)
 	dma_addr_t cmdbuf_phys;
 	int err, n = 0;
 
-	if (!isp->channel || !isp->syncpt_memory)
+	if (!isp->channel || !isp->syncpt_stream)
 		return -ENODEV;
 
 	err = nvhost_module_busy(isp->pdev);
@@ -151,7 +159,7 @@ static int isp_t124_ping(struct tegra_isp_t124 *isp)
 
 	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_immediate_v(),
-		isp->syncpt_memory);
+		isp->syncpt_stream);
 	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
 	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
@@ -160,7 +168,7 @@ static int isp_t124_ping(struct tegra_isp_t124 *isp)
 		goto free_cmdbuf;
 	}
 
-	job->sp->id = isp->syncpt_memory;
+	job->sp->id = isp->syncpt_stream;
 	job->sp->incrs = 1;
 	job->num_syncpts = 1;
 
@@ -203,7 +211,7 @@ static int isp_t124_test_opdone(struct tegra_isp_t124 *isp)
 	dma_addr_t cmdbuf_phys;
 	int err, n = 0;
 
-	if (!isp->channel || !isp->syncpt_memory)
+	if (!isp->channel || !isp->syncpt_stream)
 		return -ENODEV;
 
 	err = nvhost_module_busy(isp->pdev);
@@ -218,7 +226,7 @@ static int isp_t124_test_opdone(struct tegra_isp_t124 *isp)
 
 	/* Conditional OP_DONE syncpt incr */
 	cmdbuf[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmdbuf[n++] = (4 << 8) | isp->syncpt_memory; /* cond4 = OP_DONE */
+	cmdbuf[n++] = (4 << 8) | isp->syncpt_stream; /* cond4 = OP_DONE */
 
 	/* Trigger POST_APPLY (0x0F) — known to generate OP_DONE in stream_init */
 	cmdbuf[n++] = nvhost_opcode_nonincr(0x00C, 1);
@@ -227,7 +235,7 @@ static int isp_t124_test_opdone(struct tegra_isp_t124 *isp)
 	/* IMMEDIATE incr as backup fence */
 	cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_immediate_v(),
-		isp->syncpt_memory);
+		isp->syncpt_stream);
 	cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
 	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
@@ -236,7 +244,7 @@ static int isp_t124_test_opdone(struct tegra_isp_t124 *isp)
 		goto free_cmdbuf;
 	}
 
-	job->sp->id = isp->syncpt_memory;
+	job->sp->id = isp->syncpt_stream;
 	job->sp->incrs = 2; /* 1 OP_DONE + 1 IMMEDIATE */
 	job->num_syncpts = 1;
 
@@ -279,7 +287,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	struct nvhost_job *job;
 	int err, n = 0, cal_last_idx;
 
-	if (!isp->channel || !isp->syncpt_memory)
+	if (!isp->channel || !isp->syncpt_stream)
 		return -ENODEV;
 	if (isp->streaming)
 		return -EBUSY;
@@ -292,6 +300,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	err = nvhost_module_busy(isp->pdev);
 	if (err)
 		return err;
+
+	/* PIO write: stock does this before first submit */
+	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
 
 	/* Allocate working buffer (ISP internal scratch) */
 	err = isp_dma_buf_alloc(dev, &isp->work_buf, ISP_WORK_BUF_SIZE);
@@ -370,7 +381,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	/* Syncpt OP_DONE (cond=1) — only standard host1x conditions work */
 	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_op_done_v(),
-		isp->syncpt_memory);
+		isp->syncpt_stream);
 
 	isp->cmdbuf[n++] = NVHOST_OPCODE_NOOP;
 
@@ -381,7 +392,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 		goto free_cmdbuf;
 	}
 
-	job->sp->id = isp->syncpt_memory;
+	job->sp->id = isp->syncpt_stream;
 	job->sp->incrs = 1;
 	job->num_syncpts = 1;
 
@@ -541,7 +552,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 	/* Conditional syncpt — cond=4 (ISP OP_DONE), should work now with module_busy */
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (4 << 8) | isp->syncpt_memory;
+	cmd[n++] = (4 << 8) | isp->syncpt_stream;
 
 	/* Trigger RUNTIME (0x05) */
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
@@ -561,7 +572,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	if (!job)
 		return -ENOMEM;
 
-	job->sp->id = isp->syncpt_memory;
+	job->sp->id = isp->syncpt_stream;
 	job->sp->incrs = 1; /* 1 OP_DONE (cond=1) */
 	job->num_syncpts = 1;
 
@@ -603,10 +614,11 @@ static int isp_t124_debugfs_ping_show(struct seq_file *s, void *data)
 	int ret = isp_t124_ping(isp);
 	s64 us = ktime_us_delta(ktime_get(), start);
 
-	seq_printf(s, "ISP%s %s, syncpts: mem=%u stats=%u loadv=%u (%lld us)\n",
+	seq_printf(s, "ISP%s %s, syncpts: mem=%u stats=%u stream=%u loadv=%u (%lld us)\n",
 		   isp->class_id == ISP_A_CLASS_ID ? "-A" : "-B",
 		   ret ? "FAILED" : "alive",
-		   isp->syncpt_memory, isp->syncpt_stats, isp->syncpt_loadv,
+		   isp->syncpt_memory, isp->syncpt_stats,
+		   isp->syncpt_stream, isp->syncpt_loadv,
 		   us);
 	return 0;
 }
