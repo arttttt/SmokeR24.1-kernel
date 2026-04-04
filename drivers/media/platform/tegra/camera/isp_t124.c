@@ -512,10 +512,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x004b0000;
 	cmd[n++] = 0x00930000;
 	cmd[n++] = 0x00220000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x2ff01000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x10000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x10000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x10000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x10000;
 	cmd[n++] = 0x00030000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00020000;
@@ -584,8 +584,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00001000;
 	cmd[n++] = is_b ? 0x00001a00 : 0x00001c50; /* 0x70b */
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x20000; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x20000; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
 
 	/* 0x750: processing channel B (16 words) */
 	cmd[n++] = nvhost_opcode_incr(0x750, 16);
@@ -595,8 +595,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x20000; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x20000; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
 
 	/* 0xd20: lens shading extra — sensor-specific */
 	cmd[n++] = nvhost_opcode_incr(0xd20, 6);
@@ -624,8 +624,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000002; cmd[n++] = 0x10001660;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x1000f4a0;
 	cmd[n++] = 0x0000fa80; cmd[n++] = 0x10000000;
-	cmd[n++] = 0x00001c50; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	cmd[n++] = 0x00001c50; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
+	cmd[n++] = (u32)isp->work_buf.dma + 0x20000; cmd[n++] = (u32)isp->work_buf.dma + 0x20000;
 
 	/* 0x909: stats config (7 words) — sensor-specific */
 	cmd[n++] = nvhost_opcode_incr(0x909, 7);
