@@ -279,15 +279,89 @@ idle:
  * Allocates working buffer, command buffer, applies calibration
  * with trigger 0x0F (POST_APPLY).
  */
+/* Helper: submit a command buffer and wait for cond=1 OP_DONE */
+static int isp_submit_and_wait(struct tegra_isp_t124 *isp,
+			       u32 *cmdbuf, dma_addr_t phys,
+			       int words, const char *name)
+{
+	struct nvhost_job *job;
+	int err;
+
+	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+	if (!job)
+		return -ENOMEM;
+
+	job->sp->id = isp->syncpt_stream;
+	job->sp->incrs = 1;
+	job->num_syncpts = 1;
+
+	err = nvhost_job_add_client_gather_address(job, words,
+			isp->class_id, phys);
+	if (err) {
+		nvhost_job_put(job);
+		return err;
+	}
+
+	err = nvhost_channel_submit(job);
+	if (err) {
+		dev_err(&isp->pdev->dev, "ISP %s submit failed: %d\n",
+			name, err);
+		nvhost_job_put(job);
+		return err;
+	}
+
+	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+			job->sp->id, job->sp->fence,
+			msecs_to_jiffies(1000), NULL, NULL);
+	nvhost_job_put(job);
+
+	if (err)
+		dev_err(&isp->pdev->dev, "ISP %s timeout: %d\n", name, err);
+	else
+		dev_info(&isp->pdev->dev, "ISP %s OK\n", name);
+
+	return err;
+}
+
+/* Helper: append calibration + trigger 0x0F + syncpt to buffer */
+static int isp_build_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
+{
+	memcpy(&buf[n], isp->cal_data, isp->cal_words * 4);
+	n += isp->cal_words;
+	/* Patch work buffer address (last word of cal) */
+	buf[n - 1] = (u32)isp->work_buf.dma;
+
+	/* Trigger POST_APPLY */
+	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	buf[n++] = ISP_TRIGGER_POST_APPLY;
+
+	/* Syncpt OP_DONE (cond=1) */
+	buf[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		isp->syncpt_stream);
+	buf[n++] = NVHOST_OPCODE_NOOP;
+
+	return n;
+}
+
+/**
+ * isp_t124_stream_init() - Prepare ISP for streaming
+ *
+ * Reproduces exact stock init sequence: 5 submits.
+ * S1: cal + 0x018 tail + cal + 0x018 tail2
+ * S2: cal + trigger
+ * S3: SET_CLASS only
+ * S4: cal + trigger (repeat)
+ * S5: runtime config (0x400, 0x800, 0x930, 0x506, cal, trigger)
+ */
 int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 {
 	struct device *dev = &isp->pdev->dev;
 	struct platform_device *host1x_pdev;
 	struct device *host1x_dev;
-	struct nvhost_job *job;
 	u32 *cmd;
 	dma_addr_t cmd_phys;
-	int err, n = 0, cal_last_idx;
+	int err, n;
 
 	if (!isp->channel || !isp->syncpt_stream)
 		return -ENODEV;
@@ -306,139 +380,120 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	/* PIO write: stock does this before first submit */
 	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
 
-	/* Allocate working buffer (ISP internal scratch) */
+	/* Allocate working buffer */
 	err = isp_dma_buf_alloc(dev, &isp->work_buf, ISP_WORK_BUF_SIZE);
 	if (err) {
 		dev_err(dev, "ISP work buf alloc failed: %d\n", err);
 		goto idle;
 	}
 
-	/* Command buffer through host1x device for CDMA reads */
+	/* Command buffer — 16KB total for all submits */
 	host1x_pdev = nvhost_get_parent(isp->pdev);
 	host1x_dev = host1x_pdev ? &host1x_pdev->dev : dev;
 	isp->cmdbuf = dma_alloc_coherent(host1x_dev,
-					  ISP_CMDBUF_SIZE * 2, /* room for init + frame */
+					  ISP_CMDBUF_SIZE * 2,
 					  &isp->cmdbuf_phys, GFP_KERNEL);
 	if (!isp->cmdbuf) {
 		err = -ENOMEM;
 		goto free_work;
 	}
 
-	dev_info(dev, "stream_init: cmdbuf_phys=0x%pad work_buf=0x%pad host1x_dev=%s\n",
-		 &isp->cmdbuf_phys, &isp->work_buf.dma,
-		 dev_name(host1x_dev));
+	cmd = isp->cmdbuf;
+	cmd_phys = isp->cmdbuf_phys;
 
-	/*
-	 * Build init command buffer: calibration + trigger 0x0F
-	 * No SET_CLASS needed — class set by gather_address.
-	 */
+	dev_info(dev, "stream_init: %ux%u cmdbuf=0x%pad work=0x%pad\n",
+		 width, height, &cmd_phys, &isp->work_buf.dma);
+
+	/* ================================================================
+	 * SUBMIT 1 (stock: 3654 words): cal + trigger + 0x018 + cal + trigger + 0x018
+	 * ================================================================ */
 	n = 0;
-	memcpy(&isp->cmdbuf[n], isp->cal_data, isp->cal_words * 4);
-	n += isp->cal_words;
 
-	/* Patch last word of calibration: replace stock work buf IOVA
-	 * with our allocated work buffer address.
-	 * Cal ends with INCR(0x053, 2) + [enable=1, work_buf_addr]
-	 */
-	cal_last_idx = isp->cal_words - 1;
-	isp->cmdbuf[cal_last_idx] = (u32)isp->work_buf.dma;
+	/* Block A: calibration + trigger */
+	n = isp_build_cal_block(isp, cmd, n);
+	/* Remove syncpt+noop from end (we don't want it mid-gather) */
+	n -= 2;
 
-	/* Output config — set up dims + format so ISP knows about output DMA */
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
-	isp->cmdbuf[n++] = ((width - 1) & 0x3FFF) << 16;
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
-	isp->cmdbuf[n++] = ((height - 1) & 0x3FFF) << 16;
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	isp->cmdbuf[n++] = ISP_FORMAT_STOCK;
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
-	isp->cmdbuf[n++] = 0x00000000;
+	/* 0x018 tail block A (from stock) */
+	cmd[n++] = nvhost_opcode_incr(0x018, 5);
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000400;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000200;
+	cmd[n++] = 0x00000002;
 
-	/* Output surfaces — dummy addr (will be overwritten per-frame) */
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
-	isp->cmdbuf[n++] = 0x00000000;
-	isp->cmdbuf[n++] = ISP_SURF_WORD1;
-	isp->cmdbuf[n++] = isp->y_stride;
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
-	isp->cmdbuf[n++] = 0x00000000;
-	isp->cmdbuf[n++] = ISP_SURF_WORD1;
-	isp->cmdbuf[n++] = isp->uv_stride;
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
-	isp->cmdbuf[n++] = 0x00000000;
-	isp->cmdbuf[n++] = ISP_SURF_WORD1;
-	isp->cmdbuf[n++] = isp->uv_stride;
+	/* Block B: calibration + trigger */
+	n = isp_build_cal_block(isp, cmd, n);
+	/* Remove syncpt+noop again */
+	n -= 2;
 
-	/* Processing dims — stock uses INCR(0x506, 9) with real values in runtime config,
-	 * but for init submit, stock uses INCR(0x500, 6) with zeros + packed dims.
-	 * We do the same here for init. */
-	isp->cmdbuf[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	isp->cmdbuf[n++] = 0;
-	isp->cmdbuf[n++] = 0;
-	isp->cmdbuf[n++] = 0;
-	isp->cmdbuf[n++] = 0;
-	isp->cmdbuf[n++] = 0;
-	isp->cmdbuf[n++] = (height << 16) | width;
+	/* 0x018 tail block B (from stock — different values) */
+	cmd[n++] = nvhost_opcode_incr(0x018, 5);
+	cmd[n++] = 0x0a00500a;
+	cmd[n++] = 0x00008089;
+	cmd[n++] = 0x013645cb;
+	cmd[n++] = 0x000001e7;
+	cmd[n++] = 0x00000001;
 
-	/* Trigger 0x0F — static config apply */
-	isp->cmdbuf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	isp->cmdbuf[n++] = ISP_TRIGGER_POST_APPLY;
-
-	/* Syncpt OP_DONE (cond=1) — only standard host1x conditions work */
-	isp->cmdbuf[n++] = nvhost_opcode_imm_incr_syncpt(
+	/* Now add the syncpt for the whole gather */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_op_done_v(),
 		isp->syncpt_stream);
+	cmd[n++] = NVHOST_OPCODE_NOOP;
 
-	isp->cmdbuf[n++] = NVHOST_OPCODE_NOOP;
-
-	/* Submit init */
-	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
-	if (!job) {
-		err = -ENOMEM;
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S1-init");
+	if (err)
 		goto free_cmdbuf;
-	}
 
-	job->sp->id = isp->syncpt_stream;
-	job->sp->incrs = 1;
-	job->num_syncpts = 1;
+	/* ================================================================
+	 * SUBMIT 2 (stock: 1817 words): cal + trigger
+	 * ================================================================ */
+	n = 0;
+	n = isp_build_cal_block(isp, cmd, n);
 
-	err = nvhost_job_add_client_gather_address(job, n,
-			isp->class_id, isp->cmdbuf_phys);
-	if (err) {
-		nvhost_job_put(job);
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S2-cal");
+	if (err)
 		goto free_cmdbuf;
-	}
 
-	err = nvhost_channel_submit(job);
-	if (err) {
-		dev_err(dev, "ISP init submit failed: %d\n", err);
-		nvhost_job_put(job);
+	/* ================================================================
+	 * SUBMIT 3 (stock: 1 word): SET_CLASS only + syncpt
+	 * Stock sends G[0]=1 word (SET_CLASS) + G[1]=2 words (syncpt incr).
+	 * We combine into single gather.
+	 * ================================================================ */
+	n = 0;
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		isp->syncpt_stream);
+	cmd[n++] = NVHOST_OPCODE_NOOP;
+
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S3-class");
+	if (err)
 		goto free_cmdbuf;
-	}
 
-	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
-			job->sp->id, job->sp->fence,
-			msecs_to_jiffies(1000), NULL, NULL);
-	nvhost_job_put(job);
+	/* ================================================================
+	 * SUBMIT 4 (stock: 1817 words): cal + trigger (repeat of S2)
+	 * ================================================================ */
+	n = 0;
+	n = isp_build_cal_block(isp, cmd, n);
 
-	if (err) {
-		dev_err(dev, "ISP init timeout: %d\n", err);
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S4-cal");
+	if (err)
 		goto free_cmdbuf;
-	}
 
-	/*
-	 * Submit 2: runtime config (from stock submit 5)
-	 * Contains methods 0x400, 0x800, 0x820, 0xC00, and 0x506 processing
-	 * block with real demosaic values (not zeros).
-	 */
+	/* ================================================================
+	 * SUBMIT 5 (stock: 1238 words): runtime config
+	 * 0x400, 0x800, 0x820, 0x930, 0xC00, calibration, 0x506, trigger
+	 * ================================================================ */
 	n = 0;
 
-	/* 0x400: runtime config block (12 words) — from stock */
-	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS; /* reuse frame area */
+	/* 0x400: runtime config (12 words) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_CONFIG, 12);
 	cmd[n++] = 0x00000001;
-	cmd[n++] = ((width / 16) << 16);	/* packed width/16 */
-	cmd[n++] = ((height / 16) << 16);	/* packed height/16 */
-	cmd[n++] = ((height / (16 * 2)) << 16); /* half height/16 */
-	cmd[n++] = 0x2ff01000;	/* stock value */
+	cmd[n++] = ((width / 16) << 16);
+	cmd[n++] = ((height / 16) << 16);
+	cmd[n++] = ((height / (16 * 2)) << 16);
+	cmd[n++] = 0x2ff01000;
 	cmd[n++] = 0x2ff01000;
 	cmd[n++] = 0x2ff01000;
 	cmd[n++] = 0x2ff01000;
@@ -447,27 +502,27 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00020000;
 	cmd[n++] = 0x00000000;
 
-	/* 0x800: stats buffer A (3 words) — use work buffer */
+	/* 0x800: stats buffer A */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_A, 3);
 	cmd[n++] = (u32)isp->work_buf.dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* 0x820: stats buffer B (3 words) — use work buffer */
+	/* 0x820: stats buffer B */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_B, 3);
 	cmd[n++] = (u32)isp->work_buf.dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* 0xC00: extra config (3 words) — from stock */
+	/* 0xC00: extra config */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_EXTRA, 3);
 	cmd[n++] = 0x00000101;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00100000;
 
-	/* 0x506: processing config with real demosaic values from stock */
+	/* 0x506: demosaic processing params */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING2, 9);
-	cmd[n++] = 0x3f3fcff3;	/* demosaic config */
+	cmd[n++] = 0x3f3fcff3;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x04c1304c;
 	cmd[n++] = 0x08220882;
@@ -477,60 +532,15 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Calibration again (stock repeats it) */
-	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
-	n += isp->cal_words;
-	cmd[n - 1] = (u32)isp->work_buf.dma;
+	/* Calibration again (stock repeats in S5) */
+	n = isp_build_cal_block(isp, cmd, n);
 
-	/* Trigger POST_APPLY */
-	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_POST_APPLY;
-
-	/* Syncpt */
-	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
-		isp->syncpt_stream);
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
-	if (!job) {
-		err = -ENOMEM;
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S5-rtcfg");
+	if (err)
 		goto free_cmdbuf;
-	}
-
-	job->sp->id = isp->syncpt_stream;
-	job->sp->incrs = 1;
-	job->num_syncpts = 1;
-
-	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
-	err = nvhost_job_add_client_gather_address(job, n,
-			isp->class_id, cmd_phys);
-	if (err) {
-		nvhost_job_put(job);
-		goto free_cmdbuf;
-	}
-
-	err = nvhost_channel_submit(job);
-	if (err) {
-		dev_err(dev, "ISP runtime config submit failed: %d\n", err);
-		nvhost_job_put(job);
-		goto free_cmdbuf;
-	}
-
-	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
-			job->sp->id, job->sp->fence,
-			msecs_to_jiffies(1000), NULL, NULL);
-	nvhost_job_put(job);
-
-	if (err) {
-		dev_err(dev, "ISP runtime config timeout: %d\n", err);
-		goto free_cmdbuf;
-	}
-
-	dev_info(dev, "ISP runtime config OK\n");
 
 	isp->streaming = true;
-	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x\n",
+	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (5 submits)\n",
 		 width, height, isp->class_id);
 	nvhost_module_idle(isp->pdev);
 	return 0;
