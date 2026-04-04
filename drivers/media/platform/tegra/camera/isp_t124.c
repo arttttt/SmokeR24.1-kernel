@@ -811,7 +811,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		 "process_frame: in=0x%pad out=0x%pad %ux%u\n",
 		 &in_dma, &out_dma, W, H);
 
-	/* ---- G[0]: stock streaming mode per-frame ---- */
+	/* ---- G[0]: reprocess mode per-frame (enable=0x07, trigger=0x0F) ---- */
 	g1_off = n;
 
 	/* SET_CLASS */
@@ -827,7 +827,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0x00000000;
 
-	/* Output Y surface only: [addr, 0, stride] */
+	/* Output Y/U/V surfaces: [addr, 0, stride] */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
 	cmd[n++] = (u32)out_y;
 	cmd[n++] = 0x00000000;
@@ -841,7 +841,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 
-	/* Processing: stock values [scaler_flags, h_scale, v_scale, v_ratio, 0, (H<<16)|W] */
+	/* Processing: [0,0,0,0,0, (H<<16)|W] */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
@@ -850,10 +850,34 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = (H << 16) | W;
 
-	/* ISP_ENABLE = 0x04040007 (streaming mode — no input via cmdbuf) */
+	/* Input (v3 reprocess methods) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+
+	/* Input dimensions: width | (height << 16) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
+	cmd[n++] = (W & 0x7FFF) | (H << 16);
+
+	/* Input format */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
+	cmd[n++] = isp->in_format;
+
+	/* Input surface plane 0: [IOVA, 0, stride] */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
+	cmd[n++] = (u32)in_dma;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = isp->in_stride;
+
+	/* Input strip config: strip_width | (overlap << 16) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
+	cmd[n++] = W & 0x3FFF;
+
+	/* ISP_ENABLE = 0x07 (full pipeline, NOT 0x04040007) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x04040007;
+	cmd[n++] = 0x00000007;
+
+	/* Input trigger = 1 */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
+	cmd[n++] = 0x00000001;
 
 	/* Stats buffer (0x100) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
@@ -865,7 +889,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 	/* 3 conditional syncpt incrs (memory, stats, loadv) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (4 << 8) | isp->syncpt_memory;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
@@ -873,10 +896,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (6 << 8) | isp->syncpt_loadv;
 
-	/* Trigger RUNTIME (0x05) */
+	/* Trigger POST_APPLY (0x0F) — tested: enable=0x07 + trigger=0x0F → cond=4 YES */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
+	cmd[n++] = ISP_TRIGGER_POST_APPLY;
 
 	g1_words = n - g1_off;
 
