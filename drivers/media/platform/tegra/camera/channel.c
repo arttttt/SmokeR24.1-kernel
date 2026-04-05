@@ -1720,7 +1720,8 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			if (chan->isp_raw_cpu) {
 				ret = isp_t124_stream_init(isp,
 						chan->format.width,
-						chan->format.height);
+						chan->format.height,
+						isp_reprocess);
 				if (ret) {
 					dev_warn(&chan->video.dev,
 						 "ISP init failed: %d\n", ret);

@@ -70,7 +70,8 @@ void tegra_isp_t124_mc_cleanup(struct platform_device *pdev);
 
 /* Runtime API — called from channel.c capture path */
 struct tegra_isp_t124 *isp_t124_get_isp(u8 class_id);
-int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height);
+int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
+			 bool reprocess);
 void isp_t124_stream_stop(struct tegra_isp_t124 *isp);
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t out_dma, dma_addr_t stats_dma);

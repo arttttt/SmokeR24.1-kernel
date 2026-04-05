@@ -439,7 +439,8 @@ static int isp_append_syncpt(struct tegra_isp_t124 *isp, u32 *buf, int n)
  * S4: cal + trigger (repeat)
  * S5: runtime config (0x400, 0x800, 0x930, 0x506, cal, trigger)
  */
-int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
+int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
+			 bool reprocess)
 {
 	struct device *dev = &isp->pdev->dev;
 	struct platform_device *host1x_pdev;
@@ -772,6 +773,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (err)
 		goto free_cmdbuf;
 
+	/* S6+S7: Only for streaming mode (warmup needs VI pixel path).
+	 * Reprocess mode sets ISP_ENABLE per-frame and doesn't need warmup. */
+	if (!reprocess) {
 	/* S6: Histogram config submit (stock 25 words — between init and first frame)
 	 * Sets 0x930 histogram + ISP enable. Stock does this from userspace. */
 	n = 0;
@@ -907,6 +911,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 
 		nvhost_job_put(wjob);
 	}
+	} /* end !reprocess */
 
 	isp->streaming = true;
 	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (7 submits)\n",
