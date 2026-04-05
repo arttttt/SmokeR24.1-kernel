@@ -103,13 +103,13 @@ cmd_kexec() {
     local dtb_arg="${2:-}"
     [ -f "$img" ] || die "File not found: $img"
 
-    local zimage_file="" dtb_file="" cleanup=""
+    local zimage_file="" dtb_file="" ramdisk_file="" cleanup=""
 
     # Detect if input is boot.img or raw zImage
     local magic
     magic=$(head -c 8 "$img" | cat -v)
     if [[ "$magic" == *"ANDROID"* ]]; then
-        echo "[*] Detected boot.img, extracting zImage + DTB..."
+        echo "[*] Detected boot.img, extracting zImage + ramdisk + DTB..."
         local tmpdir
         tmpdir=$(mktemp -d /tmp/mocha_kexec.XXXXXX)
         cleanup="$tmpdir"
@@ -128,11 +128,14 @@ r_off = k_off + pages(ks)
 s_off = r_off + pages(rs)
 d_off = s_off + pages(ss)
 with open('$tmpdir/zImage', 'wb') as f: f.write(d[k_off:k_off+ks])
+if rs > 0:
+    with open('$tmpdir/ramdisk.gz', 'wb') as f: f.write(d[r_off:r_off+rs])
 if ds > 0:
     with open('$tmpdir/dt.img', 'wb') as f: f.write(d[d_off:d_off+ds])
-print(f'zImage: {ks} bytes, DTB: {ds} bytes')
+print(f'zImage: {ks} bytes, ramdisk: {rs} bytes, DTB: {ds} bytes')
 "
         zimage_file="$tmpdir/zImage"
+        [ -f "$tmpdir/ramdisk.gz" ] && ramdisk_file="$tmpdir/ramdisk.gz"
         [ -f "$tmpdir/dt.img" ] && dtb_file="$tmpdir/dt.img"
     else
         echo "[*] Using raw zImage"
@@ -150,6 +153,18 @@ print(f'zImage: {ks} bytes, DTB: {ds} bytes')
     echo "[*] Uploading zImage ($(stat -f%z "$zimage_file" 2>/dev/null || stat -c%s "$zimage_file") bytes)..."
     remote_upload "$zimage_file" "${UPLOAD_DIR}/kexec_zImage"
 
+    # Ramdisk: upload from boot.img, or extract from LNX partition on device
+    local initrd_flag=""
+    if [ -n "$ramdisk_file" ]; then
+        echo "[*] Uploading ramdisk ($(stat -f%z "$ramdisk_file" 2>/dev/null || stat -c%s "$ramdisk_file") bytes)..."
+        remote_upload "$ramdisk_file" "${UPLOAD_DIR}/kexec_ramdisk"
+        initrd_flag="--initrd=${UPLOAD_DIR}/kexec_ramdisk"
+    else
+        echo "[*] Extracting ramdisk from LNX partition on device..."
+        remote_cmd 'LNX='"${BOOT_PARTITION}"' D='"${UPLOAD_DIR}"' && dd if=$LNX of=$D/lnx.img bs=4096 2>/dev/null && KS=$(busybox od -A n -t u4 -j 8 -N 4 $D/lnx.img | busybox tr -d " ") && RS=$(busybox od -A n -t u4 -j 16 -N 4 $D/lnx.img | busybox tr -d " ") && PS=$(busybox od -A n -t u4 -j 36 -N 4 $D/lnx.img | busybox tr -d " ") && KP=$(( (KS + PS - 1) / PS * PS )) && RO=$(( PS + KP )) && dd if=$D/lnx.img of=$D/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null && rm -f $D/lnx.img && echo "ramdisk: $RS bytes from LNX"'
+        initrd_flag="--initrd=${UPLOAD_DIR}/kexec_ramdisk"
+    fi
+
     # Upload DTB if available
     local dtb_flag=""
     if [ -n "$dtb_file" ]; then
@@ -160,8 +175,22 @@ print(f'zImage: {ks} bytes, DTB: {ds} bytes')
 
     [ -n "$cleanup" ] && rm -rf "$cleanup"
 
+    # Grab current cmdline from device (bootloader passes critical params)
+    echo "[*] Reading device cmdline..."
+    local cmdline
+    cmdline=$(remote_cmd "cat /proc/cmdline")
+    echo "[*] cmdline: ${cmdline:0:80}..."
+
+    # Build kexec command
+    local kexec_cmd="kexec --load-hardboot --mem-min=${KEXEC_MEM_MIN} --mem-max=${KEXEC_MEM_MAX}"
+    kexec_cmd+=" --boardname=mocha"
+    [ -n "$initrd_flag" ] && kexec_cmd+=" ${initrd_flag}"
+    [ -n "$dtb_flag" ] && kexec_cmd+=" ${dtb_flag}"
+    [ -n "$cmdline" ] && kexec_cmd+=" --append=\"${cmdline}\""
+    kexec_cmd+=" ${UPLOAD_DIR}/kexec_zImage"
+
     echo "[*] Loading kernel via kexec-hardboot..."
-    remote_cmd "kexec --load-hardboot --mem-min=${KEXEC_MEM_MIN} --mem-max=${KEXEC_MEM_MAX} ${dtb_flag} ${UPLOAD_DIR}/kexec_zImage 2>&1"
+    remote_cmd "$kexec_cmd 2>&1"
 
     echo "[*] Executing kexec..."
     curl -s --connect-timeout 3 -X POST -d "kexec -e" "$(url /cgi-bin/cmd)" 2>/dev/null || true
