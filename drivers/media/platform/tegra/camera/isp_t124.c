@@ -856,6 +856,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
+	dev_info(&isp->pdev->dev,
+		 "frame: out=0x%08x stats=0x%08x mem_sp=%u\n",
+		 (u32)out_dma, (u32)stats_dma, isp->syncpt_memory);
+
 	dev_dbg(&isp->pdev->dev,
 		"frame: out=0x%08x Y=0x%08x U=0x%08x V=0x%08x stats=0x%08x\n",
 		(u32)out_dma, (u32)out_y, (u32)out_u, (u32)out_v,
@@ -1052,7 +1056,13 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			isp->syncpt_memory, isp->frame_fence_memory,
 			msecs_to_jiffies(500), NULL, NULL);
 	if (err)
-		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);
+		dev_err(&isp->pdev->dev,
+			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
+			err, isp->syncpt_memory, isp->frame_fence_memory);
+	else
+		dev_info(&isp->pdev->dev,
+			 "ISP frame OK (sp=%u thresh=%u)\n",
+			 isp->syncpt_memory, isp->frame_fence_memory);
 
 	nvhost_module_idle(isp->pdev);
 	return err;

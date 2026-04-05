@@ -1077,7 +1077,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		u32 rnz = 0, i;
 		for (i = 0; i < 256; i++)
 			if (raw32[i]) rnz++;
-		dev_dbg(&chan->video.dev,
+		dev_info(&chan->video.dev,
 			 "raw check: first 1KB: %u/256 nonzero, [0]=0x%08x [1]=0x%08x\n",
 			 rnz, raw32[0], raw32[1]);
 	}
@@ -1114,7 +1114,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 					nz++;
 				}
 			}
-			dev_dbg(&chan->video.dev,
+			dev_info(&chan->video.dev,
 				 "ISP out: %u/%u nonzero, first@%u=0x%08x last@%u\n",
 				 nz, total, first_nz,
 				 nz ? out32[first_nz] : 0,
