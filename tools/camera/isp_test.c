@@ -658,8 +658,6 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = in_iova; buf[n++] = 0; buf[n++] = in_stride;
 	buf[n++] = OP_INCR(0xE32, 1);
 	buf[n++] = (W & 0x3FFF);                       /* strip width = full */
-	buf[n++] = OP_INCR(0xE30, 1);
-	buf[n++] = 1;                                   /* input trigger = FIRE */
 
 	/* Stats */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
@@ -674,6 +672,11 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | sp_stats;
 	buf[n++] = OP_NONINCR(0x000, 1);
 	buf[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | sp_loadv;
+
+	/* Input trigger = FIRE (must be LAST before control trigger) */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_INCR(0xE30, 1);
+	buf[n++] = 1;
 
 	/* Trigger — POST_APPLY for reprocess mode */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
