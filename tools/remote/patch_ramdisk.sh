@@ -115,11 +115,13 @@ sbin/cgi-bin/upload"
 sbin/kexec"
     fi
 
-    # Combine: original list + new files (no ./ prefix)
-    cat /tmp/_orig_cpio_list.txt > /tmp/_patched_cpio_list.txt
-    echo "$new_files" >> /tmp/_patched_cpio_list.txt
+    # Build file list for cpio: original order + new files appended
+    {
+        cat /tmp/_orig_cpio_list.txt
+        echo "$new_files"
+    } > /tmp/_patched_cpio_list.txt
 
-    # Repack with original cpio format
+    # Repack: use python to invoke cpio correctly (macOS cpio mangles ./ prefix)
     local output_file
     if [ -n "$OUTPUT" ]; then
         output_file="$OUTPUT"
@@ -129,7 +131,74 @@ sbin/kexec"
         output_file="$RAMDISK"
     fi
 
-    cat /tmp/_patched_cpio_list.txt | cpio -o -H newc 2>/dev/null | gzip > "$output_file"
+    WORKDIR="$workdir" OUTPUT_FILE="$output_file" python3 << 'PYEOF'
+import gzip, os, struct
+
+def cpio_header(name, stat_info, content_len, is_symlink=False):
+    """Create cpio newc format header with uid=0, gid=0 (root)"""
+    mode = stat_info.st_mode
+    nlink = 2 if os.path.isdir(os.path.join(workdir, name)) else 1
+    namesize = len(name) + 1  # include null terminator
+    h = "070701"                          # magic
+    h += "%08X" % stat_info.st_ino
+    h += "%08X" % mode
+    h += "%08X" % 0                       # uid = root
+    h += "%08X" % 0                       # gid = root
+    h += "%08X" % nlink
+    h += "%08X" % int(stat_info.st_mtime)
+    h += "%08X" % content_len
+    h += "%08X" % 0                       # devmajor
+    h += "%08X" % 0                       # devminor
+    h += "%08X" % 0                       # rdevmajor
+    h += "%08X" % 0                       # rdevminor
+    h += "%08X" % namesize
+    h += "%08X" % 0                       # check
+    return h.encode('ascii')
+
+def pad4(n):
+    return (4 - (n % 4)) % 4
+
+workdir = os.environ['WORKDIR']
+filelist = open('/tmp/_patched_cpio_list.txt').read().strip().split('\n')
+
+out = bytearray()
+for name in filelist:
+    path = os.path.join(workdir, name)
+    if not os.path.exists(path) and not os.path.islink(path):
+        continue
+    st = os.lstat(path)
+    if os.path.islink(path):
+        target = os.readlink(path).encode()
+        hdr = cpio_header(name, st, len(target))
+        entry = hdr + name.encode() + b'\0'
+        entry += b'\0' * pad4(len(entry))
+        entry += target
+        entry += b'\0' * pad4(len(entry))
+    elif os.path.isdir(path):
+        hdr = cpio_header(name, st, 0)
+        entry = hdr + name.encode() + b'\0'
+        entry += b'\0' * pad4(len(entry))
+    else:
+        with open(path, 'rb') as f:
+            data = f.read()
+        hdr = cpio_header(name, st, len(data))
+        entry = hdr + name.encode() + b'\0'
+        entry += b'\0' * pad4(len(entry))
+        entry += data
+        entry += b'\0' * pad4(len(entry))
+    out += entry
+
+# TRAILER
+trailer = "TRAILER!!!"
+hdr = "070701" + "00000000" * 12 + "%08X" % (len(trailer) + 1) + "00000000"
+entry = hdr.encode() + trailer.encode() + b'\0'
+entry += b'\0' * pad4(len(entry))
+out += entry
+
+with gzip.open(os.environ['OUTPUT_FILE'], 'wb') as f:
+    f.write(bytes(out))
+print(f"Packed {len(filelist)} entries, uid=0:gid=0")
+PYEOF
     rm -f /tmp/_orig_cpio_list.txt /tmp/_patched_cpio_list.txt
 
     local size

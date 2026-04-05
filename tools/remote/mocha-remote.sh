@@ -32,8 +32,13 @@ url() { echo "http://${DEVICE}:${PORT}$1"; }
 
 remote_cmd() {
     local result
-    result=$(curl -s --fail --connect-timeout 5 -X POST -d "$*" "$(url /cgi-bin/cmd)") || return 1
+    result=$(curl -s --fail --connect-timeout 5 --max-time 300 -X POST -d "$*" "$(url /cgi-bin/cmd)") || return 1
     echo "$result"
+}
+
+# Fire-and-forget: send command, don't wait for response
+remote_cmd_async() {
+    curl -s --connect-timeout 5 --max-time 3 -X POST -d "$*" "$(url /cgi-bin/cmd)" 2>/dev/null || true
 }
 
 remote_upload() {
@@ -93,7 +98,7 @@ cmd_flash() {
     remote_cmd "dd if=$remote_path of=$BOOT_PARTITION bs=4096 && sync"
 
     echo "[*] Rebooting..."
-    remote_cmd "reboot" || true
+    remote_cmd_async "reboot"
     echo "[+] Done. Device is rebooting."
 }
 
@@ -193,7 +198,7 @@ print(f'zImage: {ks} bytes, ramdisk: {rs} bytes, DTB: {ds} bytes')
     remote_cmd "$kexec_cmd 2>&1"
 
     echo "[*] Executing kexec..."
-    curl -s --connect-timeout 3 -X POST -d "kexec -e" "$(url /cgi-bin/cmd)" 2>/dev/null || true
+    remote_cmd_async "kexec -e"
 
     echo "[*] Waiting for device to come back..."
     sleep 5

