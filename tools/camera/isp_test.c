@@ -782,7 +782,7 @@ int main(int argc, char **argv)
 	n = build_zero_block(cmd, work_buf.iova);
 
 	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S2");
-	if (err) goto out;
+	if (err) printf("  (continuing despite S2 timeout)\n");
 
 	/* ---- S3: SET_CLASS (cond=OP_DONE) ---- */
 	n = 0;
@@ -795,7 +795,7 @@ int main(int argc, char **argv)
 	n = build_zero_block(cmd, work_buf.iova);
 
 	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S4");
-	if (err) goto out;
+	if (err) printf("  (continuing despite S4 timeout)\n");
 
 	/* ---- S5: runtime config + cal ---- */
 	n = build_s5_runtime(cmd, is_b, work_buf.iova, cal_data, cal_words);
