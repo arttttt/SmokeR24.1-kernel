@@ -765,6 +765,13 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = nvhost_opcode_incr(0x651, 1);
 	cmd[n++] = 0x00000000;
 
+	/* ISP_ENABLE = 0x04040007 (stats/streaming mode)
+	 * Ghidra RE: stock writes this on first output submit via cached check.
+	 * Without it, ISP_ENABLE=0 from zero_init → ISP disabled. */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(0x015, 1);
+	cmd[n++] = 0x04040007;
+
 	} /* end is_b scope */
 
 	/* Real calibration (lens shading + tone curves) + trigger */
