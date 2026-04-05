@@ -1412,18 +1412,17 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
 
-	/* Input — order matches stock RE report exactly:
-	 * surface → dims → format → strip → ISP_ENABLE → input trigger */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
-	cmd[n++] = (u32)raw_dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = raw_stride;
-
+	/* Input — stock order: dims → format → surface → strip → enable → trigger */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
 	cmd[n++] = (H << 16) | W;
 
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
 	cmd[n++] = 0x11000020;
+
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
+	cmd[n++] = (u32)raw_dma;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = raw_stride;
 
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
 	cmd[n++] = W & 0x3FFF;
