@@ -1487,6 +1487,23 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 
 	nvhost_job_put(job);
 
+	/* Diagnostic: check if per-frame methods reach ISP hardware.
+	 * S5 sets 0x015=0x04040007, reprocess per-frame sets 0x015=0x07.
+	 * If readback shows 0x07 — methods work. If 0x04040007 — they don't. */
+	if (isp->frame_fence_memory <= 1) {
+		void __iomem *base;
+		msleep(50); /* give CDMA time to execute */
+		base = ioremap(
+			(isp->class_id == ISP_A_CLASS_ID) ?
+			0x54600000 : 0x54680000, 0x100);
+		if (base) {
+			dev_info(&isp->pdev->dev,
+				 "REPROCESS DIAG: ENABLE(015)=0x%08x (expect 0x07)\n",
+				 readl(base + 0x015 * 4));
+			iounmap(base);
+		}
+	}
+
 	/* Post-frame WAIT_SYNCPT */
 	{
 		int pn = g3_off;
