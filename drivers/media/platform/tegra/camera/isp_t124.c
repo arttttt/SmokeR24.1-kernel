@@ -16,6 +16,7 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/dma-mapping.h>
+#include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
@@ -1074,6 +1075,34 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 		dev_info(&isp->pdev->dev,
 			 "ISP frame OK (sp=%u thresh=%u)\n",
 			 isp->syncpt_memory, isp->frame_fence_memory);
+
+	/* Diagnostic: dump ISP hardware registers (first frame only) */
+	if (isp->frame_fence_memory <= 1) {
+		void __iomem *base = ioremap(
+			(isp->class_id == ISP_A_CLASS_ID) ?
+			0x54600000 : 0x54680000, 0x10000);
+		if (base) {
+			dev_info(&isp->pdev->dev,
+				 "ISP HW: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
+				 "CTRL(00C)=0x%08x PROC(500)=0x%08x "
+				 "PROC5(505)=0x%08x\n",
+				 readl(base + 0x015 * 4),
+				 readl(base + 0x053 * 4),
+				 readl(base + 0x00C * 4),
+				 readl(base + 0x500 * 4),
+				 readl(base + 0x505 * 4));
+			dev_info(&isp->pdev->dev,
+				 "ISP HW: OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
+				 "IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x "
+				 "IN_FMT(E33)=0x%08x\n",
+				 readl(base + 0xE00 * 4),
+				 readl(base + 0xE01 * 4),
+				 readl(base + 0xE30 * 4),
+				 readl(base + 0xE31 * 4),
+				 readl(base + 0xE33 * 4));
+			iounmap(base);
+		}
+	}
 
 	nvhost_module_idle(isp->pdev);
 	return err;

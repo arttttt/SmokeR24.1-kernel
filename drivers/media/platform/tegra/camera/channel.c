@@ -982,6 +982,15 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		if (isp_err)
 			dev_err(&chan->video.dev,
 				"ISP pre-submit failed: %d\n", isp_err);
+
+		/* Diagnostic: verify VI→ISP routing is set */
+		if (!chan->bfirst_fstart || isp_err == 0) {
+			u32 img_def = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
+			u32 ispintf = csi_read(chan, 0, TEGRA_VI_CSI_ISPINTF_CONFIG);
+			dev_info(&chan->video.dev,
+				 "VI→ISP diag: IMAGE_DEF=0x%08x ISPINTF_CONFIG=0x%08x\n",
+				 img_def, ispintf);
+		}
 	}
 
 	/* Ensure all CSI ports are ready with setup to avoid timing issue */
