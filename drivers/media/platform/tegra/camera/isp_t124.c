@@ -1436,7 +1436,10 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
 	cmd[n++] = 0x00000001;
 
-	/* NO runtime trigger (0x00C) — input trigger is sufficient for reprocess */
+	/* Runtime trigger — NvRmStreamEnd adds this automatically in stock */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
 	g1_words = n - g1_off;
 
