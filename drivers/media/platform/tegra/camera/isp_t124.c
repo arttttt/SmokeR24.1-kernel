@@ -1443,6 +1443,32 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 
 	g1_words = n - g1_off;
 
+	/* Dump reprocess gather on first frame */
+	if (isp->frame_fence_memory == 0) {
+		int i;
+		dev_info(&isp->pdev->dev,
+			 "REPROCESS G[0]: %d words\n", g1_words);
+		for (i = g1_off; i < g1_off + g1_words; i += 8) {
+			int rem = g1_words - (i - g1_off);
+			if (rem >= 8)
+				dev_info(&isp->pdev->dev,
+					 "RCMD[%d]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+					 i - g1_off,
+					 cmd[i], cmd[i+1], cmd[i+2], cmd[i+3],
+					 cmd[i+4], cmd[i+5], cmd[i+6], cmd[i+7]);
+			else {
+				char buf[128];
+				int pos = 0, j;
+				for (j = i; j < g1_off + g1_words; j++)
+					pos += snprintf(buf + pos,
+						sizeof(buf) - pos,
+						"%08x ", cmd[j]);
+				dev_info(&isp->pdev->dev,
+					 "RCMD[%d]: %s\n", i - g1_off, buf);
+			}
+		}
+	}
+
 	/* G[1]: immediate syncpt */
 	g2_off = n;
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
