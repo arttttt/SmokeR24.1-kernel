@@ -525,9 +525,10 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		{
 			u32 dest;
 			if (chan->use_isp)
-				dest = (chan->port[0] == 0) ?
+				dest = IMAGE_DEF_DEST_MEM |
+					((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
-					IMAGE_DEF_DEST_ISP_B;
+					IMAGE_DEF_DEST_ISP_B);
 			else
 				dest = IMAGE_DEF_DEST_MEM;
 			tegra_channel_write(chan,
@@ -890,7 +891,8 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			val = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
 			if (chan->use_isp)
 				csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
-					val | ((chan->port[0] == 0) ?
+					val | IMAGE_DEF_DEST_MEM |
+					((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B));
 			else
@@ -963,7 +965,8 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			if (chan->use_isp)
 				csi_write(chan, index,
 					TEGRA_VI_CSI_IMAGE_DEF,
-					val | ((chan->port[0] == 0) ?
+					val | IMAGE_DEF_DEST_MEM |
+					((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B));
 			else
@@ -1068,6 +1071,17 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			/* do we have to run recover here ?? */
 			/* tegra_channel_ec_recover(chan); */
 		}
+	}
+
+	/* Debug: check if VI wrote raw data (DEST_MEM active) */
+	if (!err && chan->use_isp && chan->isp_raw_cpu) {
+		u32 *raw32 = (u32 *)chan->isp_raw_cpu;
+		u32 rnz = 0, i;
+		for (i = 0; i < 256; i++)
+			if (raw32[i]) rnz++;
+		dev_info(&chan->video.dev,
+			 "raw check: first 1KB: %u/256 nonzero, [0]=0x%08x [1]=0x%08x\n",
+			 rnz, raw32[0], raw32[1]);
 	}
 
 	/* ISP: wait for frame processing completion */
