@@ -51,6 +51,8 @@ struct tegra_isp_t124 {
 	/* Per-frame fence (set by process_frame, used by wait_frame) */
 	u32 frame_fence_id;
 	u32 frame_fence_val;
+	u32 frame_fence_memory;	/* fence for syncpt_memory (for post-frame WAIT) */
+	u32 frame_fence_stats;	/* fence for syncpt_stats (for post-frame WAIT) */
 
 	/* Frame dimensions (set during stream_init) */
 	u32 width;

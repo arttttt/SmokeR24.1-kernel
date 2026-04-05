@@ -830,13 +830,13 @@ EXPORT_SYMBOL(isp_t124_stream_stop);
 /**
  * isp_t124_process_frame() - Submit one frame through ISP (streaming mode)
  *
- * Stock streaming mode: ISP receives pixels from VI via hardware path.
- * No input surfaces — only output + stats + trigger.
+ * Stock per-frame sequence (from isp_trace gather dump):
+ *   G[0] 45 words: SET_CLASS + output(0xE00-0xE0A) + processing(0x500)
+ *        + stats(0x100) + syncpt incrs(cond=4,5,6) + trigger(0x00C=0x05)
+ *   G[1] 2 words: immediate syncpt incr (stream)
  *
- * G[0]: output(0xE00) + processing(0x500) + ISP_ENABLE(0x015)=0x04040007
- *       + stats(0x100) + syncpt incrs (cond=4,5,6) + trigger=0x05
- * G[1]: immediate syncpt incr (stream)
- * Job: 4 syncpts (memory, stats, loadv, stream)
+ * Stock does NOT write ISP_ENABLE (0x015) per-frame — it's set once in S5.
+ * Stock processing 0x500 word[0] = 0, dimension = input (sensor) resolution.
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t out_dma, dma_addr_t stats_dma,
@@ -847,7 +847,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	dma_addr_t cmd_phys;
 	int err;
 	int n;
-	int g1_off, g1_words, g2_off;
+	int g1_off, g1_words, g2_off, g2_words, g3_off;
 	u32 W = isp->width, H = isp->height;
 	u32 y_stride = isp->y_stride;
 	u32 uv_stride = isp->uv_stride;
@@ -868,18 +868,18 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
-	dev_info(&isp->pdev->dev,
-		 "frame: out=0x%08x Y=0x%08x U=0x%08x V=0x%08x stats=0x%08x\n",
-		 (u32)out_dma, (u32)out_y, (u32)out_u, (u32)out_v,
-		 (u32)stats_dma);
+	dev_dbg(&isp->pdev->dev,
+		"frame: out=0x%08x Y=0x%08x U=0x%08x V=0x%08x stats=0x%08x\n",
+		(u32)out_dma, (u32)out_y, (u32)out_u, (u32)out_v,
+		(u32)stats_dma);
 
-	/* ---- G[0]: streaming mode per-frame ---- */
+	/* ---- G[0]: per-frame (matches stock 45-word gather exactly) ---- */
 	g1_off = n;
 
 	/* SET_CLASS */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 
-	/* Output width/height/format/color */
+	/* Output width/height/format/color — stock: INCR(0xE00,1)..INCR(0xE03,1) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
@@ -889,7 +889,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0x00000000;
 
-	/* Output Y/U/V surfaces: [addr, 0, stride] */
+	/* Output Y/U/V surfaces: INCR(0xE04,3), INCR(0xE07,3), INCR(0xE0A,3) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
 	cmd[n++] = (u32)out_y;
 	cmd[n++] = 0x00000000;
@@ -903,21 +903,19 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 
-	/* Processing: [flags, 0, 0, 0, 0, (H<<16)|W] */
+	/* Processing INCR(0x500,6): stock = [0, 0, 0, 0, 0, (H<<16)|W]
+	 * Note: stock uses INPUT resolution here, not output */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000003; /* processing enable flags (stock) */
+	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = (H << 16) | W;
 
-	/* ISP_ENABLE = streaming mode (input from VI hardware path) */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = ISP_ENABLE_STREAMING;
+	/* NO ISP_ENABLE here — stock sets it once in S5 init, not per-frame */
 
-	/* Stats buffer via 0x100: [IOVA, 0, 0, 0] */
+	/* Stats buffer INCR(0x100,4): [IOVA, 0, 0, 0] */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
 	cmd[n++] = (u32)stats_dma;
@@ -925,7 +923,8 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Conditional syncpt incrs (cond=4: OP_DONE, cond=5: STATS, cond=6: RD_DONE) */
+	/* Conditional syncpt incrs — stock: SET_CLASS between each pair */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
@@ -934,7 +933,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
 
-	/* Runtime trigger = 0x05 (stock streaming trigger) */
+	/* Runtime trigger: SET_CLASS + NONINCR(0x00C,1) = 0x05 */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmd[n++] = ISP_TRIGGER_RUNTIME;
@@ -945,8 +944,15 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	g2_off = n;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = isp->syncpt_stream; /* cond=0 (immediate) */
+	g2_words = n - g2_off;
 
-	/* Job with 4 syncpts */
+	/* ---- G[2]: post-frame WAIT_SYNCPT (stock does this) ----
+	 * Filled AFTER main submit to get correct fence values */
+	g3_off = n;
+	/* Reserve 8 words, will be patched after submit */
+	n += 8;
+
+	/* Job: 2 gathers (G[0] + G[1]), 4 syncpts — G[2] submitted separately */
 	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
 	if (!job) {
 		nvhost_module_idle(isp->pdev);
@@ -967,7 +973,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
 	job->gathers[0].mem_base = cmd_phys + g1_off * 4;
 
-	nvhost_job_add_gather(job, 0, 2, 0, isp->class_id, 0);
+	nvhost_job_add_gather(job, 0, g2_words, 0, isp->class_id, 0);
 	job->gathers[1].mem_base = cmd_phys + g2_off * 4;
 
 	err = nvhost_channel_submit(job);
@@ -978,11 +984,52 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		return err;
 	}
 
-	/* Save fence for wait phase */
+	/* Save fences for wait phase and post-frame WAIT_SYNCPT */
 	isp->frame_fence_id = job->sp[3].id;
 	isp->frame_fence_val = job->sp[3].fence;
+	isp->frame_fence_memory = job->sp[0].fence;
+	isp->frame_fence_stats = job->sp[1].fence;
 
 	nvhost_job_put(job);
+
+	/* Now fill G[2] post-frame with correct fence values
+	 * WAIT_SYNCPT format: NONINCR(0x008,1) then (id << 24) | (thresh & 0xFFFFFF) */
+	{
+		int pn = g3_off;
+		cmd[pn++] = nvhost_opcode_setclass(NV_HOST1X_CLASS_ID, 0, 0);
+		cmd[pn++] = nvhost_opcode_nonincr(0x008, 1);
+		cmd[pn++] = (isp->syncpt_memory << 24) |
+			    (isp->frame_fence_memory & 0xFFFFFF);
+		cmd[pn++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+		cmd[pn++] = nvhost_opcode_setclass(NV_HOST1X_CLASS_ID, 0, 0);
+		cmd[pn++] = nvhost_opcode_nonincr(0x008, 1);
+		cmd[pn++] = (isp->syncpt_stats << 24) |
+			    (isp->frame_fence_stats & 0xFFFFFF);
+		cmd[pn++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	}
+
+	/* Submit post-frame gather (WAIT_SYNCPT) as separate job */
+	{
+		struct nvhost_job *pf_job;
+		pf_job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+		if (pf_job) {
+			pf_job->sp[0].id = isp->syncpt_stream;
+			pf_job->sp[0].incrs = 1;
+			pf_job->num_syncpts = 1;
+
+			nvhost_job_add_gather(pf_job, 0, 8, 0,
+					      isp->class_id, 0);
+			pf_job->gathers[0].mem_base = cmd_phys + g3_off * 4;
+
+			err = nvhost_channel_submit(pf_job);
+			if (err)
+				dev_err(&isp->pdev->dev,
+					"ISP post-frame submit failed: %d\n",
+					err);
+			nvhost_job_put(pf_job);
+		}
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(isp_t124_process_frame);
