@@ -963,7 +963,8 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			if (chan->use_isp)
 				csi_write(chan, index,
 					TEGRA_VI_CSI_IMAGE_DEF,
-					val | ((chan->port[0] == 0) ?
+					val | IMAGE_DEF_DEST_MEM |
+					((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B));
 			else
