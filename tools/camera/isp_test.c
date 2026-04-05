@@ -871,13 +871,31 @@ int main(int argc, char **argv)
 		printf("Per-frame submit (pf=%d words, g2=2 words)...\n", pf_words);
 		if (do_submit(&si)) goto out;
 
-		printf("Waiting for stream syncpt (id=%u, fence=%u)...\n",
-		       sp_stream, si.fences[3]);
-		if (syncpt_wait(sp_stream, si.fences[3], 3000)) {
-			printf("PER-FRAME TIMEOUT\n");
-		} else {
-			printf("PER-FRAME OK!\n");
-		}
+		/* Wait all syncpts individually */
+		printf("Waiting syncpts:\n");
+		printf("  cond=4 OP_DONE (mem):   id=%u fence=%u ... ", sp_mem, si.fences[0]);
+		if (syncpt_wait(sp_mem, si.fences[0], 3000))
+			printf("TIMEOUT\n");
+		else
+			printf("OK\n");
+
+		printf("  cond=5 STATS:           id=%u fence=%u ... ", sp_stats, si.fences[1]);
+		if (syncpt_wait(sp_stats, si.fences[1], 3000))
+			printf("TIMEOUT\n");
+		else
+			printf("OK\n");
+
+		printf("  cond=6 RD_DONE (loadv): id=%u fence=%u ... ", sp_loadv, si.fences[2]);
+		if (syncpt_wait(sp_loadv, si.fences[2], 3000))
+			printf("TIMEOUT\n");
+		else
+			printf("OK\n");
+
+		printf("  stream:                 id=%u fence=%u ... ", sp_stream, si.fences[3]);
+		if (syncpt_wait(sp_stream, si.fences[3], 3000))
+			printf("TIMEOUT\n");
+		else
+			printf("OK\n");
 
 		/* Check output */
 		{
