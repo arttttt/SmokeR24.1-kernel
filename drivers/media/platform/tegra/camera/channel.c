@@ -1701,32 +1701,19 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 				} else {
 					chan->isp = isp;
 					chan->use_isp = true;
-					/* Allocate ISP output buffer — use alloc_pages to
-					 * control physical placement (avoid SEC carveout) */
+					/* Allocate ISP output buffer */
 					{
 						u32 y_sz = isp->y_stride * chan->format.height;
 						u32 uv_sz = isp->uv_stride * (chan->format.height / 2);
-						unsigned int order;
 						chan->isp_out_size = y_sz + 2 * uv_sz;
 						/* Add 64KB padding — ISP writes beyond
 						 * calculated YUV size (stride alignment) */
 						chan->isp_out_size += 65536;
-						order = get_order(PAGE_ALIGN(chan->isp_out_size));
-						chan->isp_out_page = alloc_pages(GFP_KERNEL, order);
-						if (chan->isp_out_page) {
-							chan->isp_out_cpu = page_address(chan->isp_out_page);
-							memset(chan->isp_out_cpu, 0, PAGE_ALIGN(chan->isp_out_size));
-							chan->isp_out_dma = dma_map_single(
-								&isp->pdev->dev,
-								chan->isp_out_cpu,
-								PAGE_ALIGN(chan->isp_out_size),
-								DMA_FROM_DEVICE);
-							if (dma_mapping_error(&isp->pdev->dev, chan->isp_out_dma)) {
-								__free_pages(chan->isp_out_page, order);
-								chan->isp_out_cpu = NULL;
-								chan->isp_out_page = NULL;
-							}
-						}
+						chan->isp_out_cpu = dma_alloc_coherent(
+							&isp->pdev->dev,
+							PAGE_ALIGN(chan->isp_out_size),
+							&chan->isp_out_dma,
+							GFP_KERNEL);
 						if (!chan->isp_out_cpu) {
 							dev_warn(&chan->video.dev,
 								 "ISP out buf alloc failed\n");
@@ -1741,11 +1728,10 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					}
 					if (chan->use_isp)
 						dev_info(&chan->video.dev,
-							 "ISP pipeline active: %ux%u out_dma=0x%pad out_phys=0x%lx raw_dma=0x%pad\n",
+							 "ISP pipeline active: %ux%u out_dma=0x%pad raw_dma=0x%pad\n",
 							 chan->format.width,
 							 chan->format.height,
 							 &chan->isp_out_dma,
-							 (unsigned long)page_to_phys(chan->isp_out_page),
 							 &chan->isp_raw_dma);
 				}
 			}
@@ -1822,14 +1808,10 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 
 	/* ISP pipeline cleanup */
 	if (chan->isp_out_cpu && chan->isp) {
-		dma_unmap_single(&chan->isp->pdev->dev,
-				 chan->isp_out_dma,
-				 PAGE_ALIGN(chan->isp_out_size),
-				 DMA_FROM_DEVICE);
-		__free_pages(chan->isp_out_page,
-			     get_order(PAGE_ALIGN(chan->isp_out_size)));
+		dma_free_coherent(&chan->isp->pdev->dev,
+				  PAGE_ALIGN(chan->isp_out_size),
+				  chan->isp_out_cpu, chan->isp_out_dma);
 		chan->isp_out_cpu = NULL;
-		chan->isp_out_page = NULL;
 	}
 	if (chan->isp_raw_cpu && chan->isp) {
 		dma_free_coherent(&chan->isp->pdev->dev,
