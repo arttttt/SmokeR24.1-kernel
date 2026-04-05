@@ -714,29 +714,29 @@ int main(int argc, char **argv)
 		}
 	}
 
-	/* Get syncpoints */
+	/* Get syncpoints — order from dmesg: [0]=memory, [1]=stats, [2]=stream, [3]=loadv */
 	{
 		struct nvhost_get_param_arg gp;
-		gp.param = 0; /* first syncpt */
+		gp.param = 0;
 		if (ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp)) {
 			perror("GET_SYNCPOINT 0"); goto out;
 		}
-		sp_stream = gp.value;
+		sp_mem = gp.value;
 
 		gp.param = 1;
 		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp);
-		sp_mem = gp.value;
+		sp_stats = gp.value;
 
 		gp.param = 2;
 		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp);
-		sp_stats = gp.value;
+		sp_stream = gp.value;
 
 		gp.param = 3;
 		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp);
 		sp_loadv = gp.value;
 	}
-	printf("syncpts: stream=%u mem=%u stats=%u loadv=%u\n",
-	       sp_stream, sp_mem, sp_stats, sp_loadv);
+	printf("syncpts: mem=%u stats=%u stream=%u loadv=%u\n",
+	       sp_mem, sp_stats, sp_stream, sp_loadv);
 
 	/* Allocate buffers */
 	printf("Allocating buffers...\n");
