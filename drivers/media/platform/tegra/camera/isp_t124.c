@@ -1046,6 +1046,36 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		}
 	}
 
+	/* Diagnostic: dump ISP regs RIGHT AFTER submit (ISP should be active) */
+	if (isp->frame_fence_memory <= 1) {
+		void __iomem *base = ioremap(
+			(isp->class_id == ISP_A_CLASS_ID) ?
+			0x54600000 : 0x54680000, 0x10000);
+		if (base) {
+			dev_info(&isp->pdev->dev,
+				 "ISP POST-SUBMIT: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
+				 "CTRL(00C)=0x%08x\n",
+				 readl(base + 0x015 * 4),
+				 readl(base + 0x053 * 4),
+				 readl(base + 0x00C * 4));
+			dev_info(&isp->pdev->dev,
+				 "ISP POST-SUBMIT: OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
+				 "OUT_FMT(E02)=0x%08x OUT_Y(E04)=0x%08x\n",
+				 readl(base + 0xE00 * 4),
+				 readl(base + 0xE01 * 4),
+				 readl(base + 0xE02 * 4),
+				 readl(base + 0xE04 * 4));
+			dev_info(&isp->pdev->dev,
+				 "ISP POST-SUBMIT: IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x "
+				 "IN_FMT(E33)=0x%08x PROC5(505)=0x%08x\n",
+				 readl(base + 0xE30 * 4),
+				 readl(base + 0xE31 * 4),
+				 readl(base + 0xE33 * 4),
+				 readl(base + 0x505 * 4));
+			iounmap(base);
+		}
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(isp_t124_process_frame);
@@ -1083,7 +1113,7 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			0x54600000 : 0x54680000, 0x10000);
 		if (base) {
 			dev_info(&isp->pdev->dev,
-				 "ISP HW: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
+				 "ISP POST-WAIT: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
 				 "CTRL(00C)=0x%08x PROC(500)=0x%08x "
 				 "PROC5(505)=0x%08x\n",
 				 readl(base + 0x015 * 4),
@@ -1092,7 +1122,7 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 				 readl(base + 0x500 * 4),
 				 readl(base + 0x505 * 4));
 			dev_info(&isp->pdev->dev,
-				 "ISP HW: OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
+				 "ISP POST-WAIT: OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
 				 "IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x "
 				 "IN_FMT(E33)=0x%08x\n",
 				 readl(base + 0xE00 * 4),
