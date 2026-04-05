@@ -672,7 +672,7 @@ int main(int argc, char **argv)
 {
 	int is_b = (argc > 1 && argv[1][0] == 'b');
 	uint32_t class_id = is_b ? ISP_B_CLASS : ISP_A_CLASS;
-	const char *dev_path = is_b ? "/dev/nvhost-isp.1" : "/dev/nvhost-isp.0";
+	const char *dev_path = is_b ? "/dev/nvhost-isp.1" : "/dev/nvhost-isp";
 	const uint32_t *cal_data = is_b ? isp_b_cal_data : isp_a_cal_data;
 	int cal_words = is_b ? (int)(sizeof(isp_b_cal_data)/4) : (int)(sizeof(isp_a_cal_data)/4);
 
