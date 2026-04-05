@@ -525,10 +525,9 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		{
 			u32 dest;
 			if (chan->use_isp)
-				dest = IMAGE_DEF_DEST_MEM |
-					((chan->port[0] == 0) ?
+				dest = (chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
-					IMAGE_DEF_DEST_ISP_B);
+					IMAGE_DEF_DEST_ISP_B;
 			else
 				dest = IMAGE_DEF_DEST_MEM;
 			tegra_channel_write(chan,
@@ -891,8 +890,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			val = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
 			if (chan->use_isp)
 				csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
-					val | IMAGE_DEF_DEST_MEM |
-					((chan->port[0] == 0) ?
+					val | ((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B));
 			else
@@ -965,8 +963,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			if (chan->use_isp)
 				csi_write(chan, index,
 					TEGRA_VI_CSI_IMAGE_DEF,
-					val | IMAGE_DEF_DEST_MEM |
-					((chan->port[0] == 0) ?
+					val | ((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B));
 			else
@@ -1015,6 +1012,11 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	}
 
 	chan->capture_state = CAPTURE_GOOD;
+	if (chan->use_isp) {
+		/* ISP mode: no DEST_MEM → MW_ACK_DONE won't fire.
+		 * Frame completion signaled by ISP cond=4 (wait_frame). */
+		goto skip_vi_wait;
+	}
 	for (index = 0; index < valid_ports; index++) {
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
@@ -1059,6 +1061,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		}
 	}
 
+skip_vi_wait:
 	if (!err && !chan->vi->pg_mode) {
 		/* Marking error frames and resume capture */
 		/* TODO: TPG has frame height short error always set */
@@ -1190,6 +1193,11 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 	}
 
 	for (index = 0; index < chan->valid_ports; index++) {
+		if (chan->use_isp) {
+			/* ISP mode: no DEST_MEM → MW_ACK_DONE won't fire.
+			 * ISP wait_frame handles completion. */
+			break;
+		}
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
 			chan->timeout, NULL, &ts);
