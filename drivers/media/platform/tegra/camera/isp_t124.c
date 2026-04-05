@@ -127,6 +127,8 @@ fail:
 		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_memory);
 	if (isp->syncpt_stats)
 		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_stats);
+	if (isp->syncpt_stream)
+		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_stream);
 	if (isp->syncpt_loadv)
 		nvhost_syncpt_put_ref_ext(isp->pdev, isp->syncpt_loadv);
 	nvhost_putchannel(isp->channel, 1);
@@ -376,7 +378,7 @@ static int isp_build_zero_init(u32 *buf)
 	ZI(0x655, 1); ZN(0x656, 257);
 	ZI(0x657, 1); ZN(0x658, 257);
 	ZI(0x300, 4); ZI(0x304, 4);
-	ZI(0x053, 2);
+	ZI(0x053, 1); ZI(0x054, 1);
 #undef ZI
 #undef ZN
 	return n; /* 1813 */
@@ -387,7 +389,11 @@ static int isp_append_zero_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
 	u32 safe = (u32)isp->work_buf.dma;
 	int zi = isp_build_zero_init(&buf[n]);
-	buf[n + zi - 1] = safe; /* patch 0x053 work_buf */
+	/* Patch 0x053 (ISP global enable) and 0x054 with work_buf IOVA.
+	 * ZI(0x053,1)+ZI(0x054,1) = last 4 words: [opcode][0x053_data][opcode][0x054_data]
+	 * buf[zi-1] = 0x054 data, buf[zi-3] = 0x053 data */
+	buf[n + zi - 3] = safe; /* 0x053: work_buf IOVA */
+	buf[n + zi - 1] = safe; /* 0x054: work_buf IOVA */
 	n += zi;
 
 	/* Set output/input/stats surface DMA addresses to safe value (work_buf)
@@ -426,6 +432,8 @@ static int isp_append_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
 	memcpy(&buf[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
+	/* Cal data ends with INCR(0x053, 2) + [val, val].
+	 * Patch 0x054 (last word) with work_buf IOVA */
 	buf[n - 1] = (u32)isp->work_buf.dma;
 	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
@@ -846,8 +854,7 @@ EXPORT_SYMBOL(isp_t124_stream_stop);
  * Stock processing 0x500 word[0] = 0, dimension = input (sensor) resolution.
  */
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
-			   dma_addr_t out_dma, dma_addr_t stats_dma,
-			   u32 vi_syncpt, u32 vi_thresh)
+			   dma_addr_t out_dma, dma_addr_t stats_dma)
 {
 	struct nvhost_job *job;
 	u32 *cmd;
@@ -949,8 +956,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 	/* ---- G[1]: immediate syncpt incr for stream ---- */
 	g2_off = n;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = isp->syncpt_stream; /* cond=0 (immediate) */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		isp->syncpt_stream);
+	cmd[n++] = NVHOST_OPCODE_NOOP;
 	g2_words = n - g2_off;
 
 	/* ---- G[2]: post-frame WAIT_SYNCPT (stock does this) ----
@@ -991,9 +1000,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		return err;
 	}
 
-	/* Save fences for wait phase and post-frame WAIT_SYNCPT */
-	isp->frame_fence_id = job->sp[3].id;
-	isp->frame_fence_val = job->sp[3].fence;
+	/* Save fence thresholds for wait_frame and post-frame WAIT_SYNCPT */
 	isp->frame_fence_memory = job->sp[0].fence;
 	isp->frame_fence_stats = job->sp[1].fence;
 
@@ -1044,7 +1051,8 @@ EXPORT_SYMBOL(isp_t124_process_frame);
 /*
  * isp_t124_wait_frame() - Wait for ISP frame completion
  *
- * Call after VI capture done to wait for ISP to finish processing.
+ * Waits for cond=4 OP_DONE (syncpt_memory) — signals ISP output write done.
+ * Call after VI capture done.
  */
 int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 {
@@ -1053,8 +1061,9 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 	if (!isp->streaming)
 		return -ENODEV;
 
+	/* Wait on syncpt_memory (OP_DONE), not syncpt_stream (submit) */
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
-			isp->frame_fence_id, isp->frame_fence_val,
+			isp->syncpt_memory, isp->frame_fence_memory,
 			msecs_to_jiffies(500), NULL, NULL);
 	if (err)
 		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);

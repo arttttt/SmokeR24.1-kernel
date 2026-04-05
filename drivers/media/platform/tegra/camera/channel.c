@@ -981,9 +981,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	if (chan->use_isp) {
 		int isp_err = isp_t124_process_frame(chan->isp,
 				chan->isp_out_dma,
-				chan->isp->work_buf.dma,
-				chan->syncpt[0],
-				thresh[0]);
+				chan->isp->work_buf.dma);
 		if (isp_err)
 			dev_err(&chan->video.dev,
 				"ISP pre-submit failed: %d\n", isp_err);
@@ -1079,15 +1077,16 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		u32 rnz = 0, i;
 		for (i = 0; i < 256; i++)
 			if (raw32[i]) rnz++;
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			 "raw check: first 1KB: %u/256 nonzero, [0]=0x%08x [1]=0x%08x\n",
 			 rnz, raw32[0], raw32[1]);
 	}
 
 	/* ISP: wait for frame processing completion */
-	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
+	/* ISP: always wait (balances nvhost_module_busy in process_frame) */
+	if (chan->use_isp) {
 		int isp_err = isp_t124_wait_frame(chan->isp);
-		if (isp_err)
+		if (isp_err && state == VB2_BUF_STATE_DONE)
 			dev_err(&chan->video.dev,
 				"ISP wait_frame failed: %d\n", isp_err);
 	}
@@ -1115,7 +1114,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 					nz++;
 				}
 			}
-			dev_info(&chan->video.dev,
+			dev_dbg(&chan->video.dev,
 				 "ISP out: %u/%u nonzero, first@%u=0x%08x last@%u\n",
 				 nz, total, first_nz,
 				 nz ? out32[first_nz] : 0,
@@ -1694,7 +1693,7 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					dev_warn(&chan->video.dev,
 						 "ISP init failed: %d\n", ret);
 					dma_free_coherent(
-						chan->vi->dev,
+						&isp->pdev->dev,
 						PAGE_ALIGN(chan->isp_raw_size),
 						chan->isp_raw_cpu,
 						chan->isp_raw_dma);

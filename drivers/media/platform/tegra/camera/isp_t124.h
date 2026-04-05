@@ -48,11 +48,9 @@ struct tegra_isp_t124 {
 	dma_addr_t cmdbuf_phys;
 	bool streaming;                 /* stream_init called */
 
-	/* Per-frame fence (set by process_frame, used by wait_frame) */
-	u32 frame_fence_id;
-	u32 frame_fence_val;
-	u32 frame_fence_memory;	/* fence for syncpt_memory (for post-frame WAIT) */
-	u32 frame_fence_stats;	/* fence for syncpt_stats (for post-frame WAIT) */
+	/* Per-frame fence thresholds (set by process_frame, used by wait_frame) */
+	u32 frame_fence_memory;	/* syncpt_memory threshold (OP_DONE = output written) */
+	u32 frame_fence_stats;	/* syncpt_stats threshold (for post-frame WAIT) */
 
 	/* Frame dimensions (set during stream_init) */
 	u32 width;
@@ -75,8 +73,7 @@ struct tegra_isp_t124 *isp_t124_get_isp(u8 class_id);
 int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height);
 void isp_t124_stream_stop(struct tegra_isp_t124 *isp);
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
-			   dma_addr_t out_dma, dma_addr_t stats_dma,
-			   u32 vi_syncpt, u32 vi_thresh);
+			   dma_addr_t out_dma, dma_addr_t stats_dma);
 int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */
@@ -146,9 +143,8 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 #define ISP_FORMAT_STOCK		0x04FE00E6
 #define ISP_TRIGGER_RUNTIME		0x05
 #define ISP_TRIGGER_POST_APPLY		0x0F
-#define ISP_ENABLE_REPROCESS		0x07
-#define ISP_ENABLE_STREAMING		0x07
-#define ISP_ENABLE_MODE			ISP_ENABLE_STREAMING
+#define ISP_ENABLE_FULL_PIPELINE		0x07
+#define ISP_ENABLE_STATS_STREAMING	0x04040007
 
 /* Syncpoint increment condition values */
 #define ISP_SYNCPT_COND_OP_DONE		4
