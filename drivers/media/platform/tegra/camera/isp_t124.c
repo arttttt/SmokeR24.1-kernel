@@ -1377,28 +1377,7 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = (in_h << 16) | in_w;
 
-	/* ISP_ENABLE = 0x04040007 (stats+streaming+processing) */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = ISP_ENABLE_STATS_STREAMING;
-
-	/* Input surface (RAW from VI) */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
-	cmd[n++] = (u32)raw_dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = raw_stride;
-
-	/* Input dimensions */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
-	cmd[n++] = (H << 16) | W;
-
-	/* Input format: RAW Bayer single-plane */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = 0x11000020;
-
-	/* Input strip config */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
-	cmd[n++] = W & 0x3FFF;
+	/* Output (same as streaming — already written above) */
 
 	/* Stats buffer */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
@@ -1408,7 +1387,7 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Syncpt incrs (cond=4,5,6) */
+	/* Syncpt incrs (cond=4,5,6) — before input to arm conditions */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
@@ -1418,14 +1397,31 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
 
-	/* Input trigger — tells ISP to read from memory */
+	/* Input — order matches stock RE report exactly:
+	 * surface → dims → format → strip → ISP_ENABLE → input trigger */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
+	cmd[n++] = (u32)raw_dma;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = raw_stride;
+
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
+	cmd[n++] = (H << 16) | W;
+
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
+	cmd[n++] = 0x11000020;
+
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
+	cmd[n++] = W & 0x3FFF;
+
+	/* ISP_ENABLE = 0x07 (reprocess mode — stock RE confirmed) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmd[n++] = ISP_ENABLE_FULL_PIPELINE;
+
+	/* Input trigger = 1 — FIRES ISP to read from memory */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
 	cmd[n++] = 0x00000001;
 
-	/* Runtime trigger */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
+	/* NO runtime trigger (0x00C) — input trigger is sufficient for reprocess */
 
 	g1_words = n - g1_off;
 
