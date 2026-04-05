@@ -793,6 +793,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	cmd[n++] = 0x00000001; /* ISP enable = 1 */
 	cmd[n++] = 0x00000000; /* 0x054 = 0 (stock per-frame value) */
 
+	n = isp_append_syncpt(isp, cmd, n);
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S6-hist");
 	if (err)
 		goto free_cmdbuf;
