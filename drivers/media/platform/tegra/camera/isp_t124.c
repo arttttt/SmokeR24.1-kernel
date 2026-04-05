@@ -390,18 +390,29 @@ static int isp_append_zero_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 	buf[n + zi - 1] = safe; /* patch 0x053 work_buf */
 	n += zi;
 
-	/* Set output/input/stats surfaces to safe address (work_buf)
-	 * to prevent ISP writing to stale bootloader addresses */
+	/* Set output/input/stats surface DMA addresses to safe value (work_buf)
+	 * to prevent ISP writing to stale bootloader addresses.
+	 * 0xE00-0xE03 = width,height,format,color — leave zero
+	 * 0xE04,0xE07,0xE0A = Y,U,V surface addr — set to safe */
 	buf[n++] = nvhost_opcode_incr(0xE00, 11);
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0; /* Y: addr,0,stride */
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0; /* U */
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0; /* V */
-	buf[n++] = 0; buf[n++] = 0;                   /* format, color */
+	buf[n++] = 0;    /* 0xE00: width */
+	buf[n++] = 0;    /* 0xE01: height */
+	buf[n++] = 0;    /* 0xE02: format */
+	buf[n++] = 0;    /* 0xE03: color */
+	buf[n++] = safe; /* 0xE04: Y addr */
+	buf[n++] = 0;    /* 0xE05: Y unk */
+	buf[n++] = 0;    /* 0xE06: Y stride */
+	buf[n++] = safe; /* 0xE07: U addr */
+	buf[n++] = 0;    /* 0xE08: U unk */
+	buf[n++] = 0;    /* 0xE09: U stride */
+	buf[n++] = safe; /* 0xE0A: V addr */
+	/* 0xE30: input surfaces — same layout, only set addr fields */
 	buf[n++] = nvhost_opcode_incr(0xE30, 11);
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0;
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0;
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0;
-	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0;    buf[n++] = 0;    buf[n++] = 0;    buf[n++] = 0;
+	buf[n++] = safe; buf[n++] = 0;    buf[n++] = 0;
+	buf[n++] = safe; buf[n++] = 0;    buf[n++] = 0;
+	buf[n++] = safe;
+	/* 0x100: stats buffer addr */
 	buf[n++] = nvhost_opcode_incr(0x100, 4);
 	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
 
