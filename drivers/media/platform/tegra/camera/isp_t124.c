@@ -1368,19 +1368,19 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 
-	/* Processing */
+	/* Processing — flags=3 (enable processing pipeline) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000003;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = (in_h << 16) | in_w;
 
-	/* ISP_ENABLE = 0x07 (reprocess — read from memory) */
+	/* ISP_ENABLE = 0x04040007 (stats+streaming+processing) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = ISP_ENABLE_FULL_PIPELINE;
+	cmd[n++] = ISP_ENABLE_STATS_STREAMING;
 
 	/* Input surface (RAW from VI) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
