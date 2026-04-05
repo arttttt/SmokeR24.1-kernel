@@ -402,13 +402,16 @@ static int build_zero_init(uint32_t *buf)
 	return n;
 }
 
-/* Build zero block: zero_init + patch work_buf + trigger (matches stock S1/S2/S4) */
-static int build_zero_block(uint32_t *buf, uint32_t safe_iova)
+/* Build zero block: SET_CLASS + zero_init + patch + SET_CLASS + trigger (matches stock) */
+static int build_zero_block(uint32_t *buf, uint32_t safe_iova, uint32_t class_id)
 {
-	int n = build_zero_init(buf);
+	int n = 0;
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	n += build_zero_init(&buf[n]);
 	/* Patch last word of zero_init (0x054) = work_buf iova */
 	buf[n - 1] = safe_iova;
 
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
 	buf[n++] = OP_NONINCR(0x00C, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
 	return n;
@@ -760,15 +763,18 @@ int main(int argc, char **argv)
 
 	/* ---- S1: zero-init ×2 + 0x018 tails ---- */
 	n = 0;
-	cmd[n++] = OP_SETCLASS(class_id, 0, 0); /* host1x needs class before methods */
 	{
-		int z = build_zero_block(&cmd[n], work_buf.iova);
+		int z = build_zero_block(&cmd[n], work_buf.iova, class_id);
 		n += z;
 	}
 	cmd[n++] = OP_INCR(0x018, 5);
 	cmd[n++] = 0; cmd[n++] = 0x400; cmd[n++] = 0; cmd[n++] = 0x200; cmd[n++] = 2;
+	/* Stock extra registers after first 0x018 tail */
+	cmd[n++] = OP_INCR(0x01E, 1); cmd[n++] = 0;
+	cmd[n++] = OP_INCR(0x01F, 1); cmd[n++] = 1;
+	cmd[n++] = OP_INCR(0x05F, 1); cmd[n++] = 0x10;
 	{
-		int z = build_zero_block(&cmd[n], work_buf.iova);
+		int z = build_zero_block(&cmd[n], work_buf.iova, class_id);
 		n += z;
 	}
 	cmd[n++] = OP_INCR(0x018, 5);
@@ -780,9 +786,8 @@ int main(int argc, char **argv)
 
 	/* ---- S2: zero-block ---- */
 	n = 0;
-	cmd[n++] = OP_SETCLASS(class_id, 0, 0);
 	{
-		int z = build_zero_block(&cmd[n], work_buf.iova);
+		int z = build_zero_block(&cmd[n], work_buf.iova, class_id);
 		n += z;
 	}
 
@@ -798,9 +803,8 @@ int main(int argc, char **argv)
 
 	/* ---- S4: zero-block ---- */
 	n = 0;
-	cmd[n++] = OP_SETCLASS(class_id, 0, 0);
 	{
-		int z = build_zero_block(&cmd[n], work_buf.iova);
+		int z = build_zero_block(&cmd[n], work_buf.iova, class_id);
 		n += z;
 	}
 
