@@ -965,8 +965,8 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	/* ---- G[2]: post-frame WAIT_SYNCPT (stock does this) ----
 	 * Filled AFTER main submit to get correct fence values */
 	g3_off = n;
-	/* Reserve 8 words, will be patched after submit */
-	n += 8;
+	/* Reserve 10 words: 8 for WAIT_SYNCPT + 2 for syncpt incr */
+	n += 10;
 
 	/* Job: 2 gathers (G[0] + G[1]), 4 syncpts — G[2] submitted separately */
 	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
@@ -1022,10 +1022,18 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		cmd[pn++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	}
 
-	/* Submit post-frame gather (WAIT_SYNCPT) as separate job */
+	/* G[3]: immediate syncpt incr for post-frame stream */
 	{
+		int g4_off = g3_off + 8;
 		struct nvhost_job *pf_job;
-		pf_job = nvhost_job_alloc(isp->channel, 1, 0, 0, 1);
+
+		cmd[g4_off] = nvhost_opcode_imm_incr_syncpt(
+			host1x_uclass_incr_syncpt_cond_immediate_v(),
+			isp->syncpt_stream);
+		cmd[g4_off + 1] = NVHOST_OPCODE_NOOP;
+
+		/* Submit post-frame: 2 gathers (WAIT_SYNCPT + syncpt incr) */
+		pf_job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
 		if (pf_job) {
 			pf_job->sp[0].id = isp->syncpt_stream;
 			pf_job->sp[0].incrs = 1;
@@ -1034,6 +1042,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			nvhost_job_add_gather(pf_job, 0, 8, 0,
 					      isp->class_id, 0);
 			pf_job->gathers[0].mem_base = cmd_phys + g3_off * 4;
+
+			nvhost_job_add_gather(pf_job, 0, 2, 0,
+					      isp->class_id, 0);
+			pf_job->gathers[1].mem_base = cmd_phys + g4_off * 4;
 
 			err = nvhost_channel_submit(pf_job);
 			if (err)
