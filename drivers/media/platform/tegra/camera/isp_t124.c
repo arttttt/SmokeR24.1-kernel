@@ -365,11 +365,12 @@ static int isp_append_zero_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
 	u32 safe = (u32)isp->work_buf.dma;
 	int zi = isp_build_zero_init(&buf[n]);
-	/* Patch 0x053 (ISP global enable) and 0x054 with work_buf IOVA.
+	/* Patch 0x053 (ISP global enable) and 0x054 (work_buf IOVA).
 	 * ZI(0x053,1)+ZI(0x054,1) = last 4 words: [opcode][0x053_data][opcode][0x054_data]
-	 * buf[zi-1] = 0x054 data, buf[zi-3] = 0x053 data */
-	buf[n + zi - 3] = safe; /* 0x053: work_buf IOVA */
-	buf[n + zi - 1] = safe; /* 0x054: work_buf IOVA */
+	 * buf[zi-1] = 0x054 data, buf[zi-3] = 0x053 data
+	 * Stock: 0x053 = 1 (ISP enable ON), 0x054 = work_buf IOVA */
+	buf[n + zi - 3] = 0x00000001; /* 0x053: ISP global enable = 1 */
+	buf[n + zi - 1] = safe;       /* 0x054: work_buf IOVA */
 	n += zi;
 
 	/* Set output/input/stats surface DMA addresses to safe value (work_buf)
@@ -409,8 +410,9 @@ static int isp_append_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 	memcpy(&buf[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
 	/* Cal data ends with INCR(0x053, 2) + [val, val].
-	 * Patch 0x054 (last word) with work_buf IOVA */
-	buf[n - 1] = (u32)isp->work_buf.dma;
+	 * Patch: 0x053 = 1 (ISP global enable), 0x054 = work_buf IOVA */
+	buf[n - 2] = 0x00000001;              /* 0x053: ISP global enable = 1 */
+	buf[n - 1] = (u32)isp->work_buf.dma;  /* 0x054: work_buf IOVA */
 	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
 	return n;
