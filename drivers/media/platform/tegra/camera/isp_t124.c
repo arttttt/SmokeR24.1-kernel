@@ -896,14 +896,23 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = uv_stride;
 
 	/* Processing INCR(0x500,6): stock = [0, 0, 0, 0, 0, (H<<16)|W]
-	 * Note: stock uses INPUT resolution here, not output */
+	 * Stock uses INPUT (sensor) resolution here, not output!
+	 * IMX179 (ISP-A) = 3280x2464, OV5693 (ISP-B) = 2592x1944 */
+	{
+	u32 in_w, in_h;
+	if (isp->class_id == ISP_A_CLASS_ID) {
+		in_w = 3280; in_h = 2464;
+	} else {
+		in_w = 2592; in_h = 1944;
+	}
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
-	cmd[n++] = (H << 16) | W;
+	cmd[n++] = (in_h << 16) | in_w;
+	}
 
 	/* NO ISP_ENABLE here — stock sets it once in S5 init, not per-frame */
 
