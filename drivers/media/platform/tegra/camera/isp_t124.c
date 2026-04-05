@@ -948,6 +948,34 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 	g1_words = n - g1_off;
 
+	/* Dump G[0] per-frame gather on first frame for comparison with stock */
+	if (isp->frame_fence_memory == 0) {
+		int i;
+		dev_info(&isp->pdev->dev,
+			 "G[0] per-frame: %d words (stock=45)\n", g1_words);
+		for (i = g1_off; i < g1_off + g1_words; i += 8) {
+			int rem = g1_words - (i - g1_off);
+			if (rem >= 8)
+				dev_info(&isp->pdev->dev,
+					 "GCMD[%d]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+					 i - g1_off,
+					 cmd[i], cmd[i+1], cmd[i+2], cmd[i+3],
+					 cmd[i+4], cmd[i+5], cmd[i+6], cmd[i+7]);
+			else {
+				/* Print remaining words */
+				char buf[128];
+				int pos = 0, j;
+				for (j = i; j < g1_off + g1_words; j++)
+					pos += snprintf(buf + pos,
+						sizeof(buf) - pos,
+						"%08x ", cmd[j]);
+				dev_info(&isp->pdev->dev,
+					 "GCMD[%d]: %s\n",
+					 i - g1_off, buf);
+			}
+		}
+	}
+
 	/* ---- G[1]: immediate syncpt incr for stream ---- */
 	g2_off = n;
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
@@ -1050,36 +1078,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		}
 	}
 
-	/* Diagnostic: dump ISP regs RIGHT AFTER submit (ISP should be active) */
-	if (isp->frame_fence_memory <= 1) {
-		void __iomem *base = ioremap(
-			(isp->class_id == ISP_A_CLASS_ID) ?
-			0x54600000 : 0x54680000, 0x10000);
-		if (base) {
-			dev_info(&isp->pdev->dev,
-				 "ISP POST-SUBMIT: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
-				 "CTRL(00C)=0x%08x\n",
-				 readl(base + 0x015 * 4),
-				 readl(base + 0x053 * 4),
-				 readl(base + 0x00C * 4));
-			dev_info(&isp->pdev->dev,
-				 "ISP POST-SUBMIT: OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
-				 "OUT_FMT(E02)=0x%08x OUT_Y(E04)=0x%08x\n",
-				 readl(base + 0xE00 * 4),
-				 readl(base + 0xE01 * 4),
-				 readl(base + 0xE02 * 4),
-				 readl(base + 0xE04 * 4));
-			dev_info(&isp->pdev->dev,
-				 "ISP POST-SUBMIT: IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x "
-				 "IN_FMT(E33)=0x%08x PROC5(505)=0x%08x\n",
-				 readl(base + 0xE30 * 4),
-				 readl(base + 0xE31 * 4),
-				 readl(base + 0xE33 * 4),
-				 readl(base + 0x505 * 4));
-			iounmap(base);
-		}
-	}
-
 	return 0;
 }
 EXPORT_SYMBOL(isp_t124_process_frame);
@@ -1109,34 +1107,6 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 		dev_info(&isp->pdev->dev,
 			 "ISP frame OK (sp=%u thresh=%u)\n",
 			 isp->syncpt_memory, isp->frame_fence_memory);
-
-	/* Diagnostic: dump ISP hardware registers (first frame only) */
-	if (isp->frame_fence_memory <= 1) {
-		void __iomem *base = ioremap(
-			(isp->class_id == ISP_A_CLASS_ID) ?
-			0x54600000 : 0x54680000, 0x10000);
-		if (base) {
-			dev_info(&isp->pdev->dev,
-				 "ISP POST-WAIT: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
-				 "CTRL(00C)=0x%08x PROC(500)=0x%08x "
-				 "PROC5(505)=0x%08x\n",
-				 readl(base + 0x015 * 4),
-				 readl(base + 0x053 * 4),
-				 readl(base + 0x00C * 4),
-				 readl(base + 0x500 * 4),
-				 readl(base + 0x505 * 4));
-			dev_info(&isp->pdev->dev,
-				 "ISP POST-WAIT: OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
-				 "IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x "
-				 "IN_FMT(E33)=0x%08x\n",
-				 readl(base + 0xE00 * 4),
-				 readl(base + 0xE01 * 4),
-				 readl(base + 0xE30 * 4),
-				 readl(base + 0xE31 * 4),
-				 readl(base + 0xE33 * 4));
-			iounmap(base);
-		}
-	}
 
 	nvhost_module_idle(isp->pdev);
 	return err;
