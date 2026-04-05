@@ -1,0 +1,8 @@
+#!/system/bin/sh
+echo "Content-Type: text/plain"
+echo ""
+DEST=$(echo "$QUERY_STRING" | /sbin/busybox sed 's/path=//;s/%2F/\//g;s/%20/ /g')
+[ -z "$DEST" ] && { echo "ERROR: specify ?path=/tmp/boot.img"; exit 1; }
+/sbin/busybox cat > "$DEST"
+SIZE=$(/sbin/busybox ls -l "$DEST" | /sbin/busybox awk '{print $5}')
+echo "OK: $DEST ($SIZE bytes)"

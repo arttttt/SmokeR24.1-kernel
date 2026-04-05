@@ -1,0 +1,15 @@
+service telnetd /sbin/busybox telnetd -l /system/bin/sh -b 0.0.0.0 -p 2323 -F
+    class late_start
+    disabled
+    oneshot
+    seclabel u:r:su:s0
+
+service remotehttpd /sbin/remote-server.sh
+    class late_start
+    disabled
+    oneshot
+    seclabel u:r:su:s0
+
+on property:sys.boot_completed=1
+    start telnetd
+    start remotehttpd

