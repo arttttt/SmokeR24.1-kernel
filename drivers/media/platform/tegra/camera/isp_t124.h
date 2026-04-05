@@ -145,7 +145,7 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 #define ISP_TRIGGER_RUNTIME		0x05
 #define ISP_TRIGGER_POST_APPLY		0x0F
 #define ISP_ENABLE_REPROCESS		0x07
-#define ISP_ENABLE_STREAMING		0x04040007
+#define ISP_ENABLE_STREAMING		0x07
 #define ISP_ENABLE_MODE			ISP_ENABLE_STREAMING
 
 /* Syncpoint increment condition values */
