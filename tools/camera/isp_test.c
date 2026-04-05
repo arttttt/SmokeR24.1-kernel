@@ -607,8 +607,10 @@ static int build_s5_runtime(uint32_t *buf, int is_b, uint32_t work_iova,
 
 static int build_per_frame(uint32_t *buf, uint32_t class_id,
 			   uint32_t W, uint32_t H,
-			   uint32_t out_iova, uint32_t stats_iova,
+			   uint32_t out_iova, uint32_t in_iova,
+			   uint32_t stats_iova,
 			   uint32_t y_stride, uint32_t uv_stride,
+			   uint32_t in_stride,
 			   uint32_t sp_mem, uint32_t sp_stats, uint32_t sp_loadv)
 {
 	int n = 0;
@@ -627,7 +629,7 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = OP_INCR(0xE02, 1); buf[n++] = ISP_FORMAT_STOCK;
 	buf[n++] = OP_INCR(0xE03, 1); buf[n++] = 0;
 
-	/* Y/U/V surfaces */
+	/* Y/U/V output surfaces */
 	buf[n++] = OP_INCR(0xE04, 3);
 	buf[n++] = out_y; buf[n++] = 0; buf[n++] = y_stride;
 	buf[n++] = OP_INCR(0xE07, 3);
@@ -635,13 +637,29 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = OP_INCR(0xE0A, 3);
 	buf[n++] = out_v; buf[n++] = 0; buf[n++] = uv_stride;
 
-	/* Processing — stock: [0,0,0,0,0,(H<<16)|W] */
+	/* Processing — [0,0,0,0,0,(H<<16)|W] */
 	buf[n++] = OP_INCR(0x500, 6);
 	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
 	buf[n++] = 0; buf[n++] = 0;
 	buf[n++] = (H << 16) | W;
 
-	/* NO ISP_ENABLE — stock sets it once in S5, not per-frame */
+	/* ISP_ENABLE = 7 (full pipeline, reprocess mode) */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_INCR(0x015, 1);
+	buf[n++] = 0x00000007;
+
+	/* Input: dims, format, surface, strip, trigger */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_INCR(0xE31, 1);
+	buf[n++] = (W & 0x7FFF) | (H << 16);          /* input dims */
+	buf[n++] = OP_INCR(0xE33, 1);
+	buf[n++] = 0x11000020;                          /* RAW Bayer format */
+	buf[n++] = OP_INCR(0xE34, 3);                  /* input plane 0 */
+	buf[n++] = in_iova; buf[n++] = 0; buf[n++] = in_stride;
+	buf[n++] = OP_INCR(0xE32, 1);
+	buf[n++] = (W & 0x3FFF);                       /* strip width = full */
+	buf[n++] = OP_INCR(0xE30, 1);
+	buf[n++] = 1;                                   /* input trigger = FIRE */
 
 	/* Stats */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
@@ -650,7 +668,6 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 
 	/* Syncpt incrs: cond=4 (OP_DONE), cond=5 (STATS), cond=6 (RD_DONE) */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
-	buf[n++] = OP_SETCLASS(class_id, 0, 0);
 	buf[n++] = OP_NONINCR(0x000, 1);
 	buf[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | sp_mem;
 	buf[n++] = OP_NONINCR(0x000, 1);
@@ -658,12 +675,12 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = OP_NONINCR(0x000, 1);
 	buf[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | sp_loadv;
 
-	/* Trigger */
+	/* Trigger — POST_APPLY for reprocess mode */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
 	buf[n++] = OP_NONINCR(0x00C, 1);
-	buf[n++] = ISP_TRIGGER_RUNTIME;
+	buf[n++] = ISP_TRIGGER_POST_APPLY;
 
-	printf("  per-frame: %d words\n", n);
+	printf("  per-frame (reprocess): %d words\n", n);
 	return n;
 }
 
@@ -686,8 +703,10 @@ int main(int argc, char **argv)
 	uint32_t out_size = y_stride * H + 2 * uv_stride * (H/2);
 
 	int ch_fd = -1;
-	struct nvbuf cmdbuf = {0}, work_buf = {0}, out_buf = {0}, stats_buf = {0};
+	struct nvbuf cmdbuf = {0}, work_buf = {0}, out_buf = {0}, stats_buf = {0}, in_buf = {0};
 	uint32_t sp_stream = 0, sp_mem = 0, sp_stats = 0, sp_loadv = 0;
+	uint32_t in_stride = W * 2; /* RAW10 packed = 2 bytes/pixel */
+	uint32_t in_size = in_stride * H;
 	uint32_t *cmd;
 	int n, err;
 
@@ -744,10 +763,21 @@ int main(int argc, char **argv)
 	if (nvbuf_alloc(&work_buf, 512*1024, 4096)) goto out;
 	if (nvbuf_alloc(&out_buf, out_size, 4096)) goto out;
 	if (nvbuf_alloc(&stats_buf, 65536, 4096)) goto out;
+	if (nvbuf_alloc(&in_buf, in_size, 4096)) goto out;
 
 	memset(work_buf.cpu, 0, work_buf.size);
 	memset(out_buf.cpu, 0xDE, out_buf.size);
 	memset(stats_buf.cpu, 0, stats_buf.size);
+
+	/* Fill input with RAW10 test pattern — gray gradient */
+	{
+		uint16_t *raw = (uint16_t *)in_buf.cpu;
+		uint32_t x, y;
+		for (y = 0; y < H; y++)
+			for (x = 0; x < W; x++)
+				raw[y * W + x] = (uint16_t)((x + y) & 0x3FF) << 2;
+		printf("  input filled: %ux%u RAW10 gradient\n", W, H);
+	}
 
 	cmd = (uint32_t *)cmdbuf.cpu;
 
@@ -828,8 +858,10 @@ int main(int argc, char **argv)
 		/* Build per-frame gather */
 		pf_off = 0;
 		pf_words = build_per_frame(cmd, class_id, W, H,
-					   out_buf.iova, stats_buf.iova,
+					   out_buf.iova, in_buf.iova,
+					   stats_buf.iova,
 					   y_stride, uv_stride,
+					   in_stride,
 					   sp_mem, sp_stats, sp_loadv);
 
 		/* G[1]: immediate syncpt incr */
@@ -839,6 +871,7 @@ int main(int argc, char **argv)
 
 		nvbuf_cache_wb(&cmdbuf);
 		nvbuf_cache_wb(&out_buf);
+		nvbuf_cache_wb(&in_buf);
 
 		memset(&si, 0, sizeof(si));
 		si.ch_fd = ch_fd;
@@ -925,6 +958,7 @@ int main(int argc, char **argv)
 	}
 
 out:
+	nvbuf_free(&in_buf);
 	nvbuf_free(&stats_buf);
 	nvbuf_free(&out_buf);
 	nvbuf_free(&work_buf);
