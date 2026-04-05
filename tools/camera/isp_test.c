@@ -594,6 +594,13 @@ static int build_s5_runtime(uint32_t *buf, int is_b, uint32_t work_iova,
 	buf[n++] = OP_INCR(0x650, 1); buf[n++] = 3;
 	buf[n++] = OP_INCR(0x651, 1); buf[n++] = 0;
 
+	/* ISP_ENABLE = 0x04040007 (stats/streaming mode)
+	 * Stock writes this on first output submit via cached check.
+	 * Without this, ISP_ENABLE=0 from zero_init → ISP disabled → OP_DONE never fires. */
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0x015, 1);
+	buf[n++] = 0x04040007;
+
 	/* Cal data (lens shading + tone curves) + trigger */
 	n = append_cal(buf, n, cal, cal_words, work_iova);
 
