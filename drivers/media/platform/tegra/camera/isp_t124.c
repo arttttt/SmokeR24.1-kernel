@@ -914,9 +914,13 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	} /* end !reprocess */
 
 	isp->streaming = true;
-	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (7 submits)\n",
-		 width, height, isp->class_id);
-	nvhost_module_idle(isp->pdev);
+	isp->reprocess = reprocess;
+	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (%s)\n",
+		 width, height, isp->class_id,
+		 reprocess ? "reprocess" : "streaming");
+	if (!reprocess)
+		nvhost_module_idle(isp->pdev);
+	/* Reprocess: keep powered — ISP state lost on power cycle */
 	return 0;
 
 free_cmdbuf:
@@ -956,6 +960,11 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp)
 	}
 
 	isp_dma_buf_free(dev, &isp->work_buf);
+
+	if (isp->reprocess)
+		nvhost_module_idle(isp->pdev);
+
+	isp->reprocess = false;
 	dev_info(dev, "ISP stream stopped\n");
 }
 EXPORT_SYMBOL(isp_t124_stream_stop);
@@ -1277,9 +1286,7 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
 
-	err = nvhost_module_busy(isp->pdev);
-	if (err)
-		return err;
+	/* ISP kept powered from stream_init — no module_busy needed */
 
 	/* Sensor resolution for processing dim */
 	if (isp->class_id == ISP_A_CLASS_ID) {
@@ -1310,7 +1317,6 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 		struct nvhost_job *cal_job;
 		cal_job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
 		if (!cal_job) {
-			nvhost_module_idle(isp->pdev);
 			return -ENOMEM;
 		}
 		cal_job->sp[0].id = isp->syncpt_stream;
@@ -1329,7 +1335,6 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 			dev_err(&isp->pdev->dev,
 				"ISP reprocess cal submit failed: %d\n", err);
 			nvhost_job_put(cal_job);
-			nvhost_module_idle(isp->pdev);
 			return err;
 		}
 		nvhost_job_put(cal_job);
@@ -1439,7 +1444,6 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	/* Submit per-frame job */
 	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
 	if (!job) {
-		nvhost_module_idle(isp->pdev);
 		return -ENOMEM;
 	}
 
@@ -1464,7 +1468,6 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 		dev_err(&isp->pdev->dev,
 			"ISP reprocess frame submit failed: %d\n", err);
 		nvhost_job_put(job);
-		nvhost_module_idle(isp->pdev);
 		return err;
 	}
 
@@ -1550,7 +1553,8 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			 "ISP frame OK (sp=%u thresh=%u)\n",
 			 isp->syncpt_memory, isp->frame_fence_memory);
 
-	nvhost_module_idle(isp->pdev);
+	if (!isp->reprocess)
+		nvhost_module_idle(isp->pdev);
 	return err;
 }
 EXPORT_SYMBOL(isp_t124_wait_frame);

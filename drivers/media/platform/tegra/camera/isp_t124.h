@@ -47,6 +47,7 @@ struct tegra_isp_t124 {
 	u32 *cmdbuf;                    /* DMA-coherent command buffer */
 	dma_addr_t cmdbuf_phys;
 	bool streaming;                 /* stream_init called */
+	bool reprocess;                 /* reprocess mode (no power cycling) */
 
 	/* Per-frame fence thresholds (set by process_frame, used by wait_frame) */
 	u32 frame_fence_memory;	/* syncpt_memory threshold (OP_DONE = output written) */
