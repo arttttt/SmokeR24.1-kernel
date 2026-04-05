@@ -911,7 +911,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->streaming = true;
 	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (7 submits)\n",
 		 width, height, isp->class_id);
-	nvhost_module_idle(isp->pdev);
+	/* Keep ISP powered — don't call module_idle here.
+	 * Stock userspace keeps ISP channel open continuously.
+	 * module_idle would power-cycle ISP and lose all host1x state.
+	 * Balanced by module_idle in stream_stop. */
 	return 0;
 
 free_cmdbuf:
@@ -951,6 +954,10 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp)
 	}
 
 	isp_dma_buf_free(dev, &isp->work_buf);
+
+	/* Balance module_busy from stream_init — release ISP power */
+	nvhost_module_idle(isp->pdev);
+
 	dev_info(dev, "ISP stream stopped\n");
 }
 EXPORT_SYMBOL(isp_t124_stream_stop);
@@ -988,9 +995,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
 
-	err = nvhost_module_busy(isp->pdev);
-	if (err)
-		return err;
+	/* ISP stays powered from stream_init to stream_stop — no module_busy needed */
 
 	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS;
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
@@ -1030,7 +1035,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		struct nvhost_job *cal_job;
 		cal_job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
 		if (!cal_job) {
-			nvhost_module_idle(isp->pdev);
 			return -ENOMEM;
 		}
 		cal_job->sp[0].id = isp->syncpt_stream;
@@ -1049,7 +1053,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			dev_err(&isp->pdev->dev,
 				"ISP cal submit failed: %d\n", err);
 			nvhost_job_put(cal_job);
-			nvhost_module_idle(isp->pdev);
 			return err;
 		}
 		nvhost_job_put(cal_job);
@@ -1148,7 +1151,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	/* Job: 2 gathers (G[0] + G[1]), 4 syncpts — G[2] submitted separately */
 	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
 	if (!job) {
-		nvhost_module_idle(isp->pdev);
 		return -ENOMEM;
 	}
 
@@ -1173,7 +1175,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	if (err) {
 		dev_err(&isp->pdev->dev, "ISP frame submit failed: %d\n", err);
 		nvhost_job_put(job);
-		nvhost_module_idle(isp->pdev);
 		return err;
 	}
 
@@ -1263,7 +1264,7 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			 "ISP frame OK (sp=%u thresh=%u)\n",
 			 isp->syncpt_memory, isp->frame_fence_memory);
 
-	nvhost_module_idle(isp->pdev);
+	/* No module_idle — ISP stays powered until stream_stop */
 	return err;
 }
 EXPORT_SYMBOL(isp_t124_wait_frame);
