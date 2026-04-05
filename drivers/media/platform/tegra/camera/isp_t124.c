@@ -842,6 +842,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	dma_addr_t cmd_phys;
 	int err;
 	int n;
+	int cal_off, cal_words, cal_sp_off;
 	int g1_off, g1_words, g2_off, g2_words, g3_off;
 	u32 W = isp->width, H = isp->height;
 	u32 y_stride = isp->y_stride;
@@ -863,16 +864,66 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
-	dev_info(&isp->pdev->dev,
-		 "frame: out=0x%08x stats=0x%08x mem_sp=%u\n",
-		 (u32)out_dma, (u32)stats_dma, isp->syncpt_memory);
-
 	dev_dbg(&isp->pdev->dev,
 		"frame: out=0x%08x Y=0x%08x U=0x%08x V=0x%08x stats=0x%08x\n",
 		(u32)out_dma, (u32)out_y, (u32)out_u, (u32)out_v,
 		(u32)stats_dma);
 
-	/* ---- G[0]: per-frame (matches stock 45-word gather exactly) ---- */
+	/* ============================================================
+	 * Stock per-frame = 3 submits:
+	 *   Submit 1: cal_data (~1544w) + imm syncpt  (cal update)
+	 *   Submit 2: per-frame (45w) + imm syncpt    (frame trigger)
+	 *   Submit 3: WAIT_SYNCPT (8w) + imm syncpt   (post-frame)
+	 * ============================================================ */
+
+	/* ---- Submit 1: Cal update (stock ~1544 words) ---- */
+	cal_off = n;
+	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
+	n += isp->cal_words;
+	/* Patch 0x053=1, 0x054=work_buf (last 2 data words of cal) */
+	cmd[n - 2] = 0x00000001;
+	cmd[n - 1] = (u32)isp->work_buf.dma;
+	/* NO trigger — stock per-frame cal has no trigger 0x0F */
+	cal_words = n - cal_off;
+
+	/* Immediate syncpt for cal submit */
+	cal_sp_off = n;
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		isp->syncpt_stream);
+	cmd[n++] = NVHOST_OPCODE_NOOP;
+
+	/* Submit cal job: 2 gathers, 1 syncpt (stream) */
+	{
+		struct nvhost_job *cal_job;
+		cal_job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
+		if (!cal_job) {
+			nvhost_module_idle(isp->pdev);
+			return -ENOMEM;
+		}
+		cal_job->sp[0].id = isp->syncpt_stream;
+		cal_job->sp[0].incrs = 1;
+		cal_job->num_syncpts = 1;
+
+		nvhost_job_add_gather(cal_job, 0, cal_words, 0,
+				      isp->class_id, 0);
+		cal_job->gathers[0].mem_base = cmd_phys + cal_off * 4;
+
+		nvhost_job_add_gather(cal_job, 0, 2, 0, isp->class_id, 0);
+		cal_job->gathers[1].mem_base = cmd_phys + cal_sp_off * 4;
+
+		err = nvhost_channel_submit(cal_job);
+		if (err) {
+			dev_err(&isp->pdev->dev,
+				"ISP cal submit failed: %d\n", err);
+			nvhost_job_put(cal_job);
+			nvhost_module_idle(isp->pdev);
+			return err;
+		}
+		nvhost_job_put(cal_job);
+	}
+
+	/* ---- Submit 2: Per-frame (stock 45 words) ---- */
 	g1_off = n;
 
 	/* SET_CLASS */
@@ -947,34 +998,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
 	g1_words = n - g1_off;
-
-	/* Dump G[0] per-frame gather on first frame for comparison with stock */
-	if (isp->frame_fence_memory == 0) {
-		int i;
-		dev_info(&isp->pdev->dev,
-			 "G[0] per-frame: %d words (stock=45)\n", g1_words);
-		for (i = g1_off; i < g1_off + g1_words; i += 8) {
-			int rem = g1_words - (i - g1_off);
-			if (rem >= 8)
-				dev_info(&isp->pdev->dev,
-					 "GCMD[%d]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
-					 i - g1_off,
-					 cmd[i], cmd[i+1], cmd[i+2], cmd[i+3],
-					 cmd[i+4], cmd[i+5], cmd[i+6], cmd[i+7]);
-			else {
-				/* Print remaining words */
-				char buf[128];
-				int pos = 0, j;
-				for (j = i; j < g1_off + g1_words; j++)
-					pos += snprintf(buf + pos,
-						sizeof(buf) - pos,
-						"%08x ", cmd[j]);
-				dev_info(&isp->pdev->dev,
-					 "GCMD[%d]: %s\n",
-					 i - g1_off, buf);
-			}
-		}
-	}
 
 	/* ---- G[1]: immediate syncpt incr for stream ---- */
 	g2_off = n;
