@@ -788,12 +788,22 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 				 readl(base + 0xE01 * 4),
 				 readl(base + 0xE04 * 4));
 			dev_info(dev,
-				 "ISP POST-S5: PROC(500)=0x%08x PROC5(505)=0x%08x "
-				 "IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x\n",
+				 "ISP POST-S5: PROC(500)=0x%08x PROC2(506)=0x%08x "
+				 "RT_CFG(400)=0x%08x RT_BUF_A(800)=0x%08x "
+				 "STATS(902)=0x%08x\n",
 				 readl(base + 0x500 * 4),
-				 readl(base + 0x505 * 4),
-				 readl(base + 0xE30 * 4),
-				 readl(base + 0xE31 * 4));
+				 readl(base + 0x506 * 4),
+				 readl(base + 0x400 * 4),
+				 readl(base + 0x800 * 4),
+				 readl(base + 0x902 * 4));
+			/* Also try direct MMIO write + readback to test if
+			 * high registers exist at this address */
+			dev_info(dev,
+				 "ISP POST-S5: LS_CTRL(D00)=0x%08x "
+				 "TC_CH0(651)=0x%08x STATS_AF(906)=0x%08x\n",
+				 readl(base + 0xD00 * 4),
+				 readl(base + 0x651 * 4),
+				 readl(base + 0x906 * 4));
 			iounmap(base);
 		}
 	}
