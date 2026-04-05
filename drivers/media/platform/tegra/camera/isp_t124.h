@@ -74,6 +74,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height);
 void isp_t124_stream_stop(struct tegra_isp_t124 *isp);
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t out_dma, dma_addr_t stats_dma);
+int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
+				     dma_addr_t raw_dma,
+				     dma_addr_t out_dma,
+				     dma_addr_t stats_dma);
 int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */

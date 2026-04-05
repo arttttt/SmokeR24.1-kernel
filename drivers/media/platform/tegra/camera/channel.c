@@ -50,6 +50,10 @@
 static int t124_csi_tpg = 0;
 module_param(t124_csi_tpg, int, 0644);
 MODULE_PARM_DESC(t124_csi_tpg, "Enable T124 CSI Test Pattern Generator (bypasses sensor MIPI)");
+
+static int isp_reprocess = 1;
+module_param(isp_reprocess, int, 0644);
+MODULE_PARM_DESC(isp_reprocess, "ISP reprocess mode: VI→mem→ISP (1=on, 0=streaming)");
 #endif
 
 
@@ -524,7 +528,7 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		/* VI CSI image config — port specific base */
 		{
 			u32 dest;
-			if (chan->use_isp)
+			if (chan->use_isp && !isp_reprocess)
 				dest = (chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B;
@@ -536,8 +540,8 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 					(1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
 				(format << IMAGE_DEF_FORMAT_OFFSET) | dest);
 		}
-		/* Enable VI→ISP interface if ISP active */
-		if (chan->use_isp)
+		/* Enable VI→ISP interface if ISP streaming (not reprocess) */
+		if (chan->use_isp && !isp_reprocess)
 			tegra_channel_write(chan,
 				vi_csi_base + TEGRA_VI_CSI_ISPINTF_CONFIG,
 				ISPINTF_CONFIG_ENABLE);
@@ -960,11 +964,10 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		/* Bit controls VI destination, enable after all regs */
 		for (index = 0; index < valid_ports; index++) {
 			val = csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DEF);
-			if (chan->use_isp)
+			if (chan->use_isp && !isp_reprocess)
 				csi_write(chan, index,
 					TEGRA_VI_CSI_IMAGE_DEF,
-					val | IMAGE_DEF_DEST_MEM |
-					((chan->port[0] == 0) ?
+					val | ((chan->port[0] == 0) ?
 					IMAGE_DEF_DEST_ISP_A :
 					IMAGE_DEF_DEST_ISP_B));
 			else
@@ -976,7 +979,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 
 	/* ISP streaming: submit ISP per-frame BEFORE VI trigger so ISP is
 	 * armed and ready to receive pixels via hardware path */
-	if (chan->use_isp) {
+	if (chan->use_isp && !isp_reprocess) {
 		int isp_err = isp_t124_process_frame(chan->isp,
 				chan->isp_out_dma,
 				chan->isp->work_buf.dma);
@@ -1022,8 +1025,8 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	}
 
 	chan->capture_state = CAPTURE_GOOD;
-	if (chan->use_isp) {
-		/* ISP mode: no DEST_MEM → MW_ACK_DONE won't fire.
+	if (chan->use_isp && !isp_reprocess) {
+		/* ISP streaming mode: no DEST_MEM → MW_ACK_DONE won't fire.
 		 * Frame completion signaled by ISP cond=4 (wait_frame). */
 		goto skip_vi_wait;
 	}
@@ -1090,9 +1093,21 @@ skip_vi_wait:
 		u32 rnz = 0, i;
 		for (i = 0; i < 256; i++)
 			if (raw32[i]) rnz++;
-		dev_info(&chan->video.dev,
+		dev_dbg(&chan->video.dev,
 			 "raw check: first 1KB: %u/256 nonzero, [0]=0x%08x [1]=0x%08x\n",
 			 rnz, raw32[0], raw32[1]);
+	}
+
+	/* ISP reprocess: VI done writing raw → now submit ISP */
+	if (!err && chan->use_isp && isp_reprocess &&
+	    state == VB2_BUF_STATE_DONE) {
+		int isp_err = isp_t124_process_frame_reprocess(chan->isp,
+				chan->isp_raw_dma,
+				chan->isp_out_dma,
+				chan->isp->work_buf.dma);
+		if (isp_err)
+			dev_err(&chan->video.dev,
+				"ISP reprocess submit failed: %d\n", isp_err);
 	}
 
 	/* ISP: wait for frame processing completion */
@@ -1203,9 +1218,8 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 	}
 
 	for (index = 0; index < chan->valid_ports; index++) {
-		if (chan->use_isp) {
-			/* ISP mode: no DEST_MEM → MW_ACK_DONE won't fire.
-			 * ISP wait_frame handles completion. */
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming mode: no DEST_MEM → MW_ACK_DONE won't fire. */
 			break;
 		}
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
