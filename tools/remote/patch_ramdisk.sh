@@ -16,7 +16,6 @@ OVERLAY_DIR="${SCRIPT_DIR}/overlay"
 CACHE_DIR="${SCRIPT_DIR}/.cache"
 
 BUSYBOX_URL="https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l"
-KEXEC_ZIP="" # set to multirom zip path if kexec needed, or leave empty
 
 RAMDISK="${1:?Usage: $0 <ramdisk.img|gz> [output]}"
 OUTPUT="${2:-}"
@@ -39,24 +38,12 @@ fetch_busybox() {
 }
 
 fetch_kexec() {
-    if [ ! -f "$CACHE_DIR/kexec" ]; then
-        # Try to find multirom zip with kexec
-        local zip
-        for zip in ~/Downloads/multirom-*-mocha.zip /tmp/multirom-*-mocha.zip; do
-            if [ -f "$zip" ]; then
-                echo "[*] Extracting kexec from $zip"
-                unzip -o "$zip" multirom/kexec -d "$CACHE_DIR" >/dev/null 2>&1
-                mv "$CACHE_DIR/multirom/kexec" "$CACHE_DIR/kexec"
-                rmdir "$CACHE_DIR/multirom" 2>/dev/null || true
-                chmod 755 "$CACHE_DIR/kexec"
-                break
-            fi
-        done
-    fi
-    if [ -f "$CACHE_DIR/kexec" ]; then
-        echo "[*] kexec: $CACHE_DIR/kexec"
+    if [ -f "${SCRIPT_DIR}/bin/kexec-armv7l" ]; then
+        cp "${SCRIPT_DIR}/bin/kexec-armv7l" "$CACHE_DIR/kexec"
+        chmod 755 "$CACHE_DIR/kexec"
+        echo "[*] kexec: ${SCRIPT_DIR}/bin/kexec-armv7l"
     else
-        echo "[!] kexec not found (optional, skipping)"
+        echo "[!] kexec not found in bin/ (optional, skipping)"
     fi
 }
 
