@@ -1708,6 +1708,9 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 						u32 uv_sz = isp->uv_stride * (chan->format.height / 2);
 						unsigned int order;
 						chan->isp_out_size = y_sz + 2 * uv_sz;
+						/* Add 64KB padding — ISP writes beyond
+						 * calculated YUV size (stride alignment) */
+						chan->isp_out_size += 65536;
 						order = get_order(PAGE_ALIGN(chan->isp_out_size));
 						chan->isp_out_page = alloc_pages(GFP_KERNEL, order);
 						if (chan->isp_out_page) {
