@@ -772,6 +772,32 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (err)
 		goto free_cmdbuf;
 
+	/* Diagnostic: read ISP regs after S5 init to verify methods work */
+	{
+		void __iomem *base = ioremap(
+			(isp->class_id == ISP_A_CLASS_ID) ?
+			0x54600000 : 0x54680000, 0x10000);
+		if (base) {
+			dev_info(dev,
+				 "ISP POST-S5: ENABLE(015)=0x%08x GLOBAL(053)=0x%08x "
+				 "OUT_W(E00)=0x%08x OUT_H(E01)=0x%08x "
+				 "OUT_Y(E04)=0x%08x\n",
+				 readl(base + 0x015 * 4),
+				 readl(base + 0x053 * 4),
+				 readl(base + 0xE00 * 4),
+				 readl(base + 0xE01 * 4),
+				 readl(base + 0xE04 * 4));
+			dev_info(dev,
+				 "ISP POST-S5: PROC(500)=0x%08x PROC5(505)=0x%08x "
+				 "IN_TRIG(E30)=0x%08x IN_DIM(E31)=0x%08x\n",
+				 readl(base + 0x500 * 4),
+				 readl(base + 0x505 * 4),
+				 readl(base + 0xE30 * 4),
+				 readl(base + 0xE31 * 4));
+			iounmap(base);
+		}
+	}
+
 	isp->streaming = true;
 	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (5 submits)\n",
 		 width, height, isp->class_id);
