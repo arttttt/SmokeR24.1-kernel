@@ -70,6 +70,19 @@ static int isp_t124_channel_init(struct tegra_isp_t124 *isp)
 	struct nvhost_device_data *pdata = platform_get_drvdata(isp->pdev);
 	int err;
 
+	/* Register as client — stock does this in nvhost_channelopen.
+	 * Required for proper power management and ACM tracking. */
+	err = nvhost_module_add_client(isp->pdev, isp);
+	if (err) {
+		dev_err(&isp->pdev->dev, "module_add_client failed: %d\n", err);
+		return err;
+	}
+
+	/* ISP has keepalive=true — disable automatic poweroff.
+	 * Stock userspace does this at channel open time. */
+	if (pdata->keepalive)
+		nvhost_module_disable_poweroff(isp->pdev);
+
 	err = nvhost_channel_map(pdata, &isp->channel, isp);
 	if (err) {
 		dev_err(&isp->pdev->dev, "host1x channel map failed: %d\n",
@@ -135,6 +148,8 @@ static void isp_t124_channel_cleanup(struct tegra_isp_t124 *isp)
 		nvhost_putchannel(isp->channel, 1);
 		isp->channel = NULL;
 	}
+	nvhost_module_enable_poweroff(isp->pdev);
+	nvhost_module_remove_client(isp->pdev, isp);
 }
 
 /* ----------------------------------------------------------------
