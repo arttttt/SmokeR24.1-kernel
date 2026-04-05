@@ -772,12 +772,143 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (err)
 		goto free_cmdbuf;
 
-	/* NOTE: MMIO readback of ISP registers 0x400+ causes bus hang
-	 * (ISP uses shadow registers, not directly MMIO-readable).
-	 * Only 0x015, 0x053 are readable. Diagnostic removed. */
+	/* S6: Histogram config submit (stock 25 words — between init and first frame)
+	 * Sets 0x930 histogram + ISP enable. Stock does this from userspace. */
+	n = 0;
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(0x930, 18);
+	cmd[n++] = 0x0000001c; cmd[n++] = 0x88888888;
+	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
+	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
+	cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
+	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
+	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
+	cmd[n++] = 0x00000078; cmd[n++] = 0x3fc00000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
+	/* SET_CLASS × 2 + ISP enable */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(0x053, 2);
+	cmd[n++] = 0x00000001; /* ISP enable = 1 */
+	cmd[n++] = 0x00000000; /* 0x054 = 0 (stock per-frame value) */
+
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S6-hist");
+	if (err)
+		goto free_cmdbuf;
+
+	/* S7: Warmup 8×8 frame (stock does this before real frames)
+	 * ISP_ENABLE=0x04040007 + processing flags=3 + 8×8 output
+	 * This initializes ISP streaming pipeline. */
+	n = 0;
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+
+	/* Output 8×8 */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
+	cmd[n++] = 0x00070000; /* (8-1) << 16 */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
+	cmd[n++] = 0x00070000;
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
+	cmd[n++] = 0x010000c9; /* stock warmup format */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
+	cmd[n++] = 0x00000000;
+
+	/* Output surface Y only (8×8, stride=256, into work_buf) */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
+	cmd[n++] = (u32)isp->work_buf.dma + 0x40000; /* safe offset in work_buf */
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000100; /* stride = 256 */
+
+	/* Processing: flags=3, stock warmup values, dim=8×8 */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
+	cmd[n++] = 0x00000003;
+	cmd[n++] = 0x00000ca4;
+	cmd[n++] = 0x14400000;
+	cmd[n++] = 0x0f300000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00080008; /* (8 << 16) | 8 */
+
+	/* ISP_ENABLE = streaming mode */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmd[n++] = 0x04040007;
+
+	/* Stats buffer (work_buf) */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
+	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+
+	/* Conditional syncpt incrs (cond=4, 5, 6) */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | isp->syncpt_stats;
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
+
+	/* Trigger */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	cmd[n++] = ISP_TRIGGER_RUNTIME;
+
+	{
+		int g1w = n;
+		int g2_off = n;
+		struct nvhost_job *wjob;
+
+		/* G[1]: immediate syncpt */
+		cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+			host1x_uclass_incr_syncpt_cond_immediate_v(),
+			isp->syncpt_stream);
+		cmd[n++] = NVHOST_OPCODE_NOOP;
+
+		wjob = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
+		if (!wjob) {
+			err = -ENOMEM;
+			goto free_cmdbuf;
+		}
+		wjob->sp[0].id = isp->syncpt_memory;
+		wjob->sp[0].incrs = 1;
+		wjob->sp[1].id = isp->syncpt_stats;
+		wjob->sp[1].incrs = 1;
+		wjob->sp[2].id = isp->syncpt_loadv;
+		wjob->sp[2].incrs = 1;
+		wjob->sp[3].id = isp->syncpt_stream;
+		wjob->sp[3].incrs = 1;
+		wjob->num_syncpts = 4;
+
+		nvhost_job_add_gather(wjob, 0, g1w, 0, isp->class_id, 0);
+		wjob->gathers[0].mem_base = cmd_phys;
+
+		nvhost_job_add_gather(wjob, 0, 2, 0, isp->class_id, 0);
+		wjob->gathers[1].mem_base = cmd_phys + g2_off * 4;
+
+		err = nvhost_channel_submit(wjob);
+		if (err) {
+			dev_err(dev, "ISP warmup submit failed: %d\n", err);
+			nvhost_job_put(wjob);
+			goto free_cmdbuf;
+		}
+
+		/* Wait for warmup frame completion (OP_DONE) */
+		err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
+				isp->syncpt_memory, wjob->sp[0].fence,
+				msecs_to_jiffies(500), NULL, NULL);
+		if (err)
+			dev_warn(dev, "ISP warmup timeout: %d\n", err);
+		else
+			dev_info(dev, "ISP S7-warmup OK\n");
+
+		nvhost_job_put(wjob);
+	}
 
 	isp->streaming = true;
-	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (5 submits)\n",
+	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (7 submits)\n",
 		 width, height, isp->class_id);
 	nvhost_module_idle(isp->pdev);
 	return 0;
