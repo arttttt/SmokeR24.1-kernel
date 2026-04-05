@@ -1,13 +1,15 @@
 /*
- * isp_test.c — Userspace ISP init + submit test for Tegra K1 (T124)
+ * isp_test.c — Userspace ISP test for Tegra K1 (T124) on stock kernel
  *
- * Replicates the EXACT same ISP init sequence (S1-S5) that the kernel
- * driver (isp_t124.c) does, but purely from userspace via nvhost/nvmap ioctls.
- * Then runs per-frame submit tests with various configurations.
+ * Runs ISP S1-S5 init + per-frame submit via nvhost/nvmap ioctls.
+ * Per-frame gather matches stock MIUI camera exactly (from isp_trace).
  *
- * Build: arm-linux-gnueabihf-gcc -static -o isp_test isp_test.c
- * Run:   adb push isp_test /data/local/tmp/ && adb shell /data/local/tmp/isp_test
- *        Use "b" arg for ISP-B: /data/local/tmp/isp_test b
+ * This is a REPROCESS test — feeds ISP from memory (not VI hardware path).
+ * Creates a dummy RAW input buffer, submits to ISP, checks output.
+ *
+ * Build: arm-linux-gnueabihf-gcc -std=gnu99 -static -o isp_test isp_test.c
+ * Run:   adb shell /data/local/tmp/isp_test [b]
+ *        "b" = use ISP-B (front camera), default = ISP-A (rear)
  */
 
 #include <stdio.h>
@@ -20,7 +22,6 @@
 #include <sys/mman.h>
 #include <stdint.h>
 
-/* Calibration data for ISP-A and ISP-B */
 #include "isp_test_cal.h"
 
 /* ---- nvmap ioctls ---- */
@@ -44,18 +45,23 @@ struct nvmap_pin_handle_32 {
 	uint32_t count;
 };
 
+struct nvmap_cache_op {
+	uint32_t addr;   /* hmem */
+	uint32_t handle;
+	uint32_t length;
+	uint32_t op;     /* 0=inv, 1=wb, 2=wbi */
+};
+
 #define NVMAP_IOC_CREATE    _IOWR(NVMAP_IOC_MAGIC, 0, struct nvmap_create_handle)
 #define NVMAP_IOC_ALLOC     _IOW(NVMAP_IOC_MAGIC, 3, struct nvmap_alloc_handle)
 #define NVMAP_IOC_FREE      _IO(NVMAP_IOC_MAGIC, 4)
 #define NVMAP_IOC_GET_FD    _IOWR(NVMAP_IOC_MAGIC, 15, struct nvmap_create_handle)
 #define NVMAP_IOC_PIN_MULT  _IOWR(NVMAP_IOC_MAGIC, 10, struct nvmap_pin_handle_32)
 #define NVMAP_IOC_UNPIN_MULT _IOW(NVMAP_IOC_MAGIC, 11, struct nvmap_pin_handle_32)
+#define NVMAP_IOC_CACHE     _IOW(NVMAP_IOC_MAGIC, 12, struct nvmap_cache_op)
 
 #define NVMAP_HEAP_IOVMM    (1 << 30)
-#define NVMAP_HANDLE_UNCACHEABLE     0
-#define NVMAP_HANDLE_WRITE_COMBINE   1
 #define NVMAP_HANDLE_INNER_CACHEABLE 2
-#define NVMAP_HANDLE_CACHEABLE       3
 
 /* ---- nvhost ioctls ---- */
 #define NVHOST_IOC_MAGIC 'H'
@@ -76,10 +82,15 @@ struct nvhost_ctrl_syncpt_waitex_args {
 	uint32_t value;
 };
 
+struct nvhost_ctrl_syncpt_read_args {
+	uint32_t id;
+	uint32_t value;
+};
+
 struct nvhost_cmdbuf {
-	uint32_t mem;       /* dmabuf fd */
-	uint32_t offset;    /* byte offset */
-	uint32_t words;     /* num u32 words */
+	uint32_t mem;
+	uint32_t offset;
+	uint32_t words;
 };
 
 struct nvhost_syncpt_incr {
@@ -105,16 +116,16 @@ struct nvhost32_submit_args {
 	uint32_t num_relocs;
 	uint32_t num_waitchks;
 	uint32_t timeout;
-	uint32_t syncpt_incrs;  /* userptr */
-	uint32_t cmdbufs;       /* userptr */
-	uint32_t relocs;        /* userptr */
-	uint32_t reloc_shifts;  /* userptr */
-	uint32_t waitchks;      /* userptr */
-	uint32_t waitbases;     /* userptr */
-	uint32_t class_ids;     /* userptr */
+	uint32_t syncpt_incrs;
+	uint32_t cmdbufs;
+	uint32_t relocs;
+	uint32_t reloc_shifts;
+	uint32_t waitchks;
+	uint32_t waitbases;
+	uint32_t class_ids;
 	uint32_t pad[2];
-	uint32_t fences;        /* userptr */
-	uint32_t fence;         /* out */
+	uint32_t fences;
+	uint32_t fence;
 };
 
 #define NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD \
@@ -123,61 +134,39 @@ struct nvhost32_submit_args {
 	_IOWR(NVHOST_IOC_MAGIC, 16, struct nvhost_get_param_arg)
 #define NVHOST32_IOCTL_CHANNEL_SUBMIT \
 	_IOWR(NVHOST_IOC_MAGIC, 15, struct nvhost32_submit_args)
-struct nvhost_ctrl_syncpt_read_args {
-	uint32_t id;
-	uint32_t value;
-};
-
 #define NVHOST_IOCTL_CTRL_SYNCPT_WAITEX \
 	_IOWR(NVHOST_IOC_MAGIC, 6, struct nvhost_ctrl_syncpt_waitex_args)
 #define NVHOST_IOCTL_CTRL_SYNCPT_READ \
 	_IOWR(NVHOST_IOC_MAGIC, 1, struct nvhost_ctrl_syncpt_read_args)
 
 /* ---- host1x opcodes ---- */
-#define NVHOST_OPCODE_SETCLASS(cl, off, mask) \
-	((0 << 28) | ((off) << 16) | ((cl) << 6) | (mask))
-#define NVHOST_OPCODE_INCR(off, count) \
-	((1 << 28) | ((off) << 16) | (count))
-#define NVHOST_OPCODE_NONINCR(off, count) \
-	((2 << 28) | ((off) << 16) | (count))
-#define NVHOST_OPCODE_IMM(off, val) \
-	((4 << 28) | ((off) << 16) | (val))
-#define NVHOST_OPCODE_NOOP 0
+#define OP_SETCLASS(cl, off, mask)  ((0 << 28) | ((off) << 16) | ((cl) << 6) | (mask))
+#define OP_INCR(off, count)         ((1 << 28) | ((off) << 16) | (count))
+#define OP_NONINCR(off, count)      ((2 << 28) | ((off) << 16) | (count))
+#define OP_IMM(off, val)            ((4 << 28) | ((off) << 16) | (val))
+#define OP_NOOP                     0
 
-/* ISP class IDs */
+/* IMM_INCR_SYNCPT: immediate syncpt increment via host1x IMM opcode
+ * Format: OP_IMM(0x000, (cond << 8) | syncpt_id) */
+#define OP_SYNCPT_INCR_IMM(id)  OP_IMM(0x000, (id))
+#define OP_SYNCPT_INCR_COND(cond, id)  OP_IMM(0x000, ((cond) << 8) | (id))
+
+/* ISP constants */
 #define ISP_A_CLASS  0x32
 #define ISP_B_CLASS  0x34
+#define HOST1X_CLASS 0x01
 
-/* ISP methods */
-#define ISP_METHOD_CONTROL    0x00C
-#define ISP_METHOD_ENABLE     0x015
-#define ISP_METHOD_ISP_ENABLE 0x053
-#define ISP_METHOD_STATS_BUF  0x100
-#define ISP_METHOD_PROCESSING 0x500
-#define ISP_METHOD_PROCESSING2 0x506
-#define ISP_METHOD_RT_CONFIG  0x400
-#define ISP_METHOD_RT_BUF_A   0x800
-#define ISP_METHOD_RT_BUF_B   0x820
-#define ISP_METHOD_RT_EXTRA   0xC00
-#define ISP_METHOD_OUT_WIDTH  0xE00
-#define ISP_METHOD_OUT_HEIGHT 0xE01
-#define ISP_METHOD_OUT_FORMAT 0xE02
-#define ISP_METHOD_OUT_COLOR  0xE03
-#define ISP_METHOD_OUT_SURF_Y 0xE04
-#define ISP_METHOD_OUT_SURF_U 0xE07
-#define ISP_METHOD_OUT_SURF_V 0xE0A
-#define ISP_METHOD_IN_TRIGGER 0xE30
-#define ISP_METHOD_IN_DIMS    0xE31
-#define ISP_METHOD_IN_STRIP   0xE32
-#define ISP_METHOD_IN_FORMAT  0xE33
-#define ISP_METHOD_IN_SURF0   0xE34
-
-/* Stock constants */
 #define ISP_FORMAT_STOCK       0x04FE00E6
 #define ISP_TRIGGER_RUNTIME    0x05
 #define ISP_TRIGGER_POST_APPLY 0x0F
 
-/* ---- helpers ---- */
+#define ISP_SYNCPT_COND_OP_DONE    4
+#define ISP_SYNCPT_COND_STATS_DONE 5
+#define ISP_SYNCPT_COND_RD_DONE    6
+
+/* ================================================================
+ * nvmap buffer helper
+ * ================================================================ */
 
 static int nvmap_fd = -1;
 
@@ -195,50 +184,57 @@ static int nvbuf_alloc(struct nvbuf *b, uint32_t size, uint32_t align)
 	struct nvmap_alloc_handle ah;
 	struct nvmap_create_handle gf;
 	struct nvmap_pin_handle_32 ph;
-	int ret;
 
 	memset(b, 0, sizeof(*b));
 	b->size = size;
+	b->dmabuf_fd = -1;
 
-	/* Create handle */
-	ret = ioctl(nvmap_fd, NVMAP_IOC_CREATE, &ch);
-	if (ret) { perror("nvmap CREATE"); return -1; }
+	if (ioctl(nvmap_fd, NVMAP_IOC_CREATE, &ch)) {
+		perror("nvmap CREATE"); return -1;
+	}
 	b->handle = ch.handle;
 
-	/* Alloc backing memory */
 	ah.handle = b->handle;
 	ah.heap_mask = NVMAP_HEAP_IOVMM;
 	ah.flags = NVMAP_HANDLE_INNER_CACHEABLE;
 	ah.align = align;
-	ret = ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah);
-	if (ret) { perror("nvmap ALLOC"); return -1; }
+	if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah)) {
+		perror("nvmap ALLOC"); return -1;
+	}
 
-	/* Get dmabuf fd */
 	gf.handle = b->handle;
-	ret = ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gf);
-	if (ret) { perror("nvmap GET_FD"); return -1; }
+	if (ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gf)) {
+		perror("nvmap GET_FD"); return -1;
+	}
 	b->dmabuf_fd = gf.fd;
 
-	/* Pin -> get IOVA */
-	ph.handles = b->handle;  /* count==1: handle directly, not pointer */
+	ph.handles = b->handle;
 	ph.addr = 0;
 	ph.count = 1;
-	ret = ioctl(nvmap_fd, NVMAP_IOC_PIN_MULT, &ph);
-	if (ret) { perror("nvmap PIN"); return -1; }
+	if (ioctl(nvmap_fd, NVMAP_IOC_PIN_MULT, &ph)) {
+		perror("nvmap PIN"); return -1;
+	}
 	b->iova = ph.addr;
 
-	/* mmap for CPU access */
 	b->cpu = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
 		      b->dmabuf_fd, 0);
 	if (b->cpu == MAP_FAILED) {
-		perror("mmap dmabuf");
-		b->cpu = NULL;
-		return -1;
+		perror("mmap"); b->cpu = NULL; return -1;
 	}
 
-	printf("  buf: handle=%u fd=%d iova=0x%08x size=%u cpu=%p\n",
-	       b->handle, b->dmabuf_fd, b->iova, b->size, b->cpu);
+	printf("  buf: handle=%u fd=%d iova=0x%08x size=%u\n",
+	       b->handle, b->dmabuf_fd, b->iova, b->size);
 	return 0;
+}
+
+static void nvbuf_cache_wb(struct nvbuf *b)
+{
+	struct nvmap_cache_op cop;
+	cop.addr = (uint32_t)(uintptr_t)b->cpu;
+	cop.handle = b->handle;
+	cop.length = b->size;
+	cop.op = 2; /* writeback-invalidate */
+	ioctl(nvmap_fd, NVMAP_IOC_CACHE, &cop);
 }
 
 static void nvbuf_free(struct nvbuf *b)
@@ -253,52 +249,31 @@ static void nvbuf_free(struct nvbuf *b)
 	}
 	if (b->dmabuf_fd >= 0) close(b->dmabuf_fd);
 	memset(b, 0, sizeof(*b));
+	b->dmabuf_fd = -1;
 }
 
-static int nvhost_submit(int ch_fd, struct nvbuf *cmdbuf, int words,
-			 uint32_t class_id,
-			 struct nvhost_syncpt_incr *sp, int num_sp,
-			 struct nvhost_reloc *relocs, int num_relocs,
-			 struct nvhost_reloc_shift *shifts,
-			 uint32_t *out_fence)
+/* ================================================================
+ * nvhost submit helper
+ * ================================================================ */
+
+static int ctrl_fd = -1;
+
+static int syncpt_wait(uint32_t id, uint32_t thresh, int timeout_ms)
 {
-	struct nvhost32_submit_args sa;
-	struct nvhost_cmdbuf cb;
-	uint32_t fence_vals[4] = {0};
-	int ret;
-
-	cb.mem = cmdbuf->dmabuf_fd;
-	cb.offset = 0;
-	cb.words = words;
-
-	memset(&sa, 0, sizeof(sa));
-	sa.submit_version = 0;
-	sa.num_syncpt_incrs = num_sp;
-	sa.num_cmdbufs = 1;
-	sa.num_relocs = num_relocs;
-	sa.num_waitchks = 0;
-	sa.timeout = 5000;
-	sa.syncpt_incrs = (uint32_t)(uintptr_t)sp;
-	sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
-	sa.relocs = (uint32_t)(uintptr_t)relocs;
-	sa.reloc_shifts = (uint32_t)(uintptr_t)shifts;
-	sa.waitchks = 0;
-	sa.waitbases = 0;
-	sa.class_ids = (uint32_t)(uintptr_t)&class_id;
-	sa.fences = (uint32_t)(uintptr_t)fence_vals;
-
-	ret = ioctl(ch_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa);
-	if (ret) {
-		perror("SUBMIT");
+	struct nvhost_ctrl_syncpt_waitex_args wa;
+	wa.id = id;
+	wa.thresh = thresh;
+	wa.timeout = timeout_ms;
+	wa.value = 0;
+	if (ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa)) {
+		printf("  syncpt_wait TIMEOUT: id=%u thresh=%u (err=%s)\n",
+		       id, thresh, strerror(errno));
 		return -1;
 	}
-
-	*out_fence = sa.fence;
-	printf("  submit OK: fence=%u\n", sa.fence);
 	return 0;
 }
 
-static uint32_t nvhost_read_syncpt(int ctrl_fd, uint32_t id)
+static uint32_t syncpt_read(uint32_t id)
 {
 	struct nvhost_ctrl_syncpt_read_args ra;
 	ra.id = id;
@@ -307,46 +282,104 @@ static uint32_t nvhost_read_syncpt(int ctrl_fd, uint32_t id)
 	return ra.value;
 }
 
-static int nvhost_wait_syncpt(int ctrl_fd, uint32_t id, uint32_t thresh, int timeout_ms)
-{
-	struct nvhost_ctrl_syncpt_waitex_args wa;
-	wa.id = id;
-	wa.thresh = thresh;
-	wa.timeout = timeout_ms;
-	wa.value = 0;
+struct submit_info {
+	int ch_fd;
+	struct nvbuf *cmdbuf;
+	struct nvhost_cmdbuf gathers[4];
+	int num_gathers;
+	struct nvhost_syncpt_incr syncpts[4];
+	int num_syncpts;
+	struct nvhost_reloc relocs[4];
+	struct nvhost_reloc_shift shifts[4];
+	int num_relocs;
+	uint32_t fences[4];
+};
 
-	int ret = ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa);
-	if (ret) {
-		printf("  WAIT timeout: syncpt=%u thresh=%u (err=%d %s)\n",
-		       id, thresh, errno, strerror(errno));
+static int do_submit(struct submit_info *si)
+{
+	uint32_t class_ids[4];
+	struct nvhost32_submit_args sa;
+	int i;
+
+	for (i = 0; i < si->num_gathers; i++)
+		class_ids[i] = 0; /* class from gather SET_CLASS */
+
+	memset(&sa, 0, sizeof(sa));
+	sa.submit_version = 0;
+	sa.num_syncpt_incrs = si->num_syncpts;
+	sa.num_cmdbufs = si->num_gathers;
+	sa.num_relocs = si->num_relocs;
+	sa.timeout = 5000;
+	sa.syncpt_incrs = (uint32_t)(uintptr_t)si->syncpts;
+	sa.cmdbufs = (uint32_t)(uintptr_t)si->gathers;
+	sa.relocs = (uint32_t)(uintptr_t)si->relocs;
+	sa.reloc_shifts = (uint32_t)(uintptr_t)si->shifts;
+	sa.class_ids = (uint32_t)(uintptr_t)class_ids;
+	sa.fences = (uint32_t)(uintptr_t)si->fences;
+
+	if (ioctl(si->ch_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa)) {
+		perror("SUBMIT");
 		return -1;
 	}
-	printf("  WAIT OK: syncpt=%u value=%u\n", id, wa.value);
+	printf("  submit OK: fence=%u fences=[%u,%u,%u,%u]\n",
+	       sa.fence, si->fences[0], si->fences[1],
+	       si->fences[2], si->fences[3]);
+	return 0;
+}
+
+/* Simple submit: 2 gathers (data + syncpt), 1 syncpt, wait */
+static int submit_and_wait(int ch_fd, struct nvbuf *cmdbuf, int words,
+			   uint32_t syncpt_id, const char *name)
+{
+	struct submit_info si;
+	uint32_t *cmd = (uint32_t *)cmdbuf->cpu;
+	int syncpt_off = words; /* syncpt gather starts right after data */
+
+	/* Append syncpt incr as separate gather */
+	cmd[syncpt_off] = OP_SYNCPT_INCR_IMM(syncpt_id);
+	cmd[syncpt_off + 1] = OP_NOOP;
+
+	memset(&si, 0, sizeof(si));
+	si.ch_fd = ch_fd;
+	si.gathers[0].mem = cmdbuf->dmabuf_fd;
+	si.gathers[0].offset = 0;
+	si.gathers[0].words = words;
+	si.gathers[1].mem = cmdbuf->dmabuf_fd;
+	si.gathers[1].offset = words * 4;
+	si.gathers[1].words = 2;
+	si.num_gathers = 2;
+	si.syncpts[0].syncpt_id = syncpt_id;
+	si.syncpts[0].syncpt_incrs = 1;
+	si.num_syncpts = 1;
+
+	nvbuf_cache_wb(cmdbuf);
+
+	printf("  %s: %d words ...", name, words);
+	if (do_submit(&si))
+		return -1;
+
+	if (syncpt_wait(syncpt_id, si.fences[0], 2000)) {
+		printf("  %s: TIMEOUT\n", name);
+		return -1;
+	}
+	printf("  %s: OK\n", name);
 	return 0;
 }
 
 /* ================================================================
- * Zero-init block builder (matches isp_build_zero_init in isp_t124.c)
- * Produces ~1813 words of INCR/NONINCR opcodes zeroing all ISP regs.
+ * ISP zero-init builder (matches kernel isp_build_zero_init)
  * ================================================================ */
 
 static int build_zero_init(uint32_t *buf)
 {
 	int n = 0;
-
-/* ZI(off, cnt): INCR opcode + cnt zero words */
-#define ZI(off, cnt) do { \
-	buf[n++] = NVHOST_OPCODE_INCR(off, cnt); \
-	memset(&buf[n], 0, (cnt) * 4); n += (cnt); \
-} while (0)
-/* ZN(off, cnt): NONINCR opcode + cnt zero words */
-#define ZN(off, cnt) do { \
-	buf[n++] = NVHOST_OPCODE_NONINCR(off, cnt); \
-	memset(&buf[n], 0, (cnt) * 4); n += (cnt); \
-} while (0)
-
+#define ZI(off, cnt) do { buf[n++] = OP_INCR(off, cnt); \
+	memset(&buf[n], 0, (cnt)*4); n += (cnt); } while(0)
+#define ZN(off, cnt) do { buf[n++] = OP_NONINCR(off, cnt); \
+	memset(&buf[n], 0, (cnt)*4); n += (cnt); } while(0)
 	ZI(0x202, 3); ZI(0x200, 2); ZI(0x205, 4);
 	ZI(0x700, 16); ZI(0x750, 16);
+	ZI(0x500, 6); ZI(0x015, 1);
 	ZI(0xd00, 10); ZI(0xd0a, 1); ZN(0xd0b, 480);
 	ZI(0xd0c, 2); ZI(0xd20, 6);
 	ZI(0x900, 2); ZI(0x902, 1); ZN(0x903, 64);
@@ -355,8 +388,7 @@ static int build_zero_init(uint32_t *buf)
 	ZI(0x910, 9); ZI(0x919, 1); ZN(0x91a, 9);
 	ZI(0x91b, 1); ZN(0x91c, 9);
 	ZI(0x91d, 1); ZN(0x91e, 9);
-	/* 0x91f = 0x00000002 (stock value, not zero) */
-	buf[n++] = NVHOST_OPCODE_INCR(0x91f, 1);
+	buf[n++] = OP_INCR(0x91f, 1);
 	buf[n++] = 0x00000002;
 	ZI(0x506, 9); ZI(0x600, 16); ZI(0x650, 1);
 	ZI(0x651, 1); ZN(0x652, 257);
@@ -364,1309 +396,272 @@ static int build_zero_init(uint32_t *buf)
 	ZI(0x655, 1); ZN(0x656, 257);
 	ZI(0x657, 1); ZN(0x658, 257);
 	ZI(0x300, 4); ZI(0x304, 4);
-	/* Last: INCR(0x053, 2) = [0, work_buf_iova] — caller patches [n-1] */
 	ZI(0x053, 2);
-
 #undef ZI
 #undef ZN
-	return n; /* ~1813 */
+	return n;
 }
 
-/* Append zero_block + trigger(0x0F). Patches work_buf IOVA. Returns new n. */
-static int append_zero_block(uint32_t *buf, int n, uint32_t work_iova)
+/* Build zero block: zero_init + patch work_buf + trigger (matches stock S1/S2/S4) */
+static int build_zero_block(uint32_t *buf, uint32_t safe_iova)
 {
-	int zi = build_zero_init(&buf[n]);
-	/* Patch last word of zero_init: 0x054 = work_buf IOVA */
-	buf[n + zi - 1] = work_iova;
-	n += zi;
-	/* Append trigger POST_APPLY */
-	buf[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
+	int n = build_zero_init(buf);
+	/* Patch last word of zero_init (0x054) = work_buf iova */
+	buf[n - 1] = safe_iova;
+
+	buf[n++] = OP_NONINCR(0x00C, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
 	return n;
 }
 
-/* Append calibration data + trigger. Patches last cal word = work_buf IOVA. Returns new n. */
-static int append_cal_block(uint32_t *buf, int n,
-			    const uint32_t *cal_data, int cal_words,
-			    uint32_t work_iova)
+/* Append cal data + trigger */
+static int append_cal(uint32_t *buf, int n, const uint32_t *cal, int cal_words,
+		      uint32_t work_iova)
 {
-	memcpy(&buf[n], cal_data, cal_words * 4);
+	memcpy(&buf[n], cal, cal_words * 4);
 	n += cal_words;
-	/* Last word of cal data is the IOVA for 0x054 — patch it */
-	buf[n - 1] = work_iova;
-	/* Append trigger */
-	buf[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
+	buf[n - 1] = work_iova; /* patch last word = work_buf iova */
+	buf[n++] = OP_NONINCR(0x00C, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
 	return n;
-}
-
-/* Append IMMEDIATE syncpt incr + NOOP */
-static int append_syncpt_imm(uint32_t *buf, int n, uint32_t syncpt)
-{
-	/* IMM opcode: offset=0x000, value = (cond=0 << 8) | syncpt */
-	buf[n++] = NVHOST_OPCODE_IMM(0x000, (0 << 8) | (syncpt & 0xFF));
-	buf[n++] = NVHOST_OPCODE_NOOP;
-	return n;
-}
-
-/* Submit cmdbuf and wait for syncpt. Returns 0 on success. */
-static int submit_and_wait(int ch_fd, int ctrl_fd,
-			   struct nvbuf *cmdbuf, int words,
-			   uint32_t class_id, uint32_t syncpt,
-			   const char *name)
-{
-	uint32_t fence;
-	struct nvhost_syncpt_incr sp = { syncpt, 1 };
-
-	printf("  %s: %d words ... ", name, words);
-	fflush(stdout);
-
-	if (nvhost_submit(ch_fd, cmdbuf, words, class_id, &sp, 1, NULL, 0, NULL, &fence))
-		return -1;
-
-	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence, 2000);
-	if (ret)
-		printf("  %s: TIMEOUT!\n", name);
-	else
-		printf("  %s: OK\n", name);
-	return ret;
 }
 
 /* ================================================================
- * S5 Runtime Config builder
- * Matches isp_t124.c lines 504-709 exactly.
+ * S5 runtime config (from kernel isp_t124.c)
  * ================================================================ */
 
-static int build_s5_runtime(uint32_t *cmd, int is_b, uint32_t work_iova)
+static int build_s5_runtime(uint32_t *buf, int is_b, uint32_t work_iova,
+			    const uint32_t *cal, int cal_words)
 {
 	int n = 0;
-	uint32_t class_id = is_b ? ISP_B_CLASS : ISP_A_CLASS;
 
-	/* 0x400: runtime config (12 words) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_RT_CONFIG, 12);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = 0x004b0000;
-	cmd[n++] = 0x00930000;
-	cmd[n++] = 0x00220000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x2ff01000;
-	cmd[n++] = 0x00030000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00020000;
-	cmd[n++] = 0x00000000;
+	/* 0x400: runtime config */
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0x400, 12);
+	buf[n++] = 0x00000001;
+	buf[n++] = 0x004b0000;
+	buf[n++] = 0x00930000;
+	buf[n++] = 0x00220000;
+	buf[n++] = work_iova + 0x10000;
+	buf[n++] = work_iova + 0x10000;
+	buf[n++] = work_iova + 0x10000;
+	buf[n++] = work_iova + 0x10000;
+	buf[n++] = 0x00030000;
+	buf[n++] = 0x00000000;
+	buf[n++] = 0x00020000;
+	buf[n++] = 0x00000000;
 
 	/* 0x800: stats buffer A */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_RT_BUF_A, 3);
-	cmd[n++] = work_iova;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0x800, 3);
+	buf[n++] = work_iova; buf[n++] = 0; buf[n++] = 0;
 
 	/* 0x820: stats buffer B */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_RT_BUF_B, 3);
-	cmd[n++] = work_iova;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0x820, 3);
+	buf[n++] = work_iova; buf[n++] = 0; buf[n++] = 0;
 
-	/* 0x930: histogram config (18 words) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(0x930, 18);
-	cmd[n++] = 0x0000001c; cmd[n++] = 0x88888888;
-	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
-	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
-	cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
-	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
-	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
-	cmd[n++] = 0x00000078; cmd[n++] = 0x3fc00000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
+	/* 0x930: histogram config */
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0x930, 18);
+	buf[n++] = 0x0000001c; buf[n++] = 0x88888888;
+	buf[n++] = 0x78787800; buf[n++] = 0x00000078;
+	buf[n++] = 0x88888888; buf[n++] = 0x78787800;
+	buf[n++] = 0x00000078; buf[n++] = 0x88888888;
+	buf[n++] = 0x78787800; buf[n++] = 0x00000078;
+	buf[n++] = 0x88888888; buf[n++] = 0x78787800;
+	buf[n++] = 0x00000078; buf[n++] = 0x3fc00000;
+	buf[n++] = 0x00000000; buf[n++] = 0x00070000;
+	buf[n++] = 0x00000000; buf[n++] = 0x00070000;
 
-	/* 0xC00: extra config */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_RT_EXTRA, 3);
-	cmd[n++] = 0x00000101;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00100000;
+	/* 0xC00 */
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0xC00, 3);
+	buf[n++] = 0x00000101; buf[n++] = 0; buf[n++] = 0x00100000;
 
-	/* 0x202: input config -- sensor-specific dims */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(0x202, 3);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = is_b ? 0x00780078 : 0x02000200; /* 0x203 */
-	cmd[n++] = is_b ? 0x00780078 : 0x02000200; /* 0x204 */
+	/* 0x202-0x208 */
+	buf[n++] = OP_SETCLASS(is_b ? ISP_B_CLASS : ISP_A_CLASS, 0, 0);
+	buf[n++] = OP_INCR(0x202, 3);
+	buf[n++] = 0x00000001;
+	buf[n++] = is_b ? 0x00780078 : 0x02000200;
+	buf[n++] = is_b ? 0x00780078 : 0x02000200;
+	buf[n++] = OP_INCR(0x200, 2);
+	buf[n++] = 0x00000001; buf[n++] = 0;
+	buf[n++] = OP_INCR(0x205, 4);
+	buf[n++] = 0; buf[n++] = 0x000600c8;
+	buf[n++] = 0x000f000f;
+	buf[n++] = is_b ? 0x00000000 : 0x00003333;
 
-	/* 0x200: input enable */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x200, 2);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = 0x00000000;
+	/* 0x700: processing channel A */
+	buf[n++] = OP_INCR(0x700, 16);
+	buf[n++] = 0x00000001; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = is_b ? 0x00001a40 : 0x00001dc0;
+	buf[n++] = 0; buf[n++] = work_iova + 0x30000;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0x00001000;
+	buf[n++] = is_b ? 0x00001a00 : 0x00001c50;
+	buf[n++] = work_iova + 0x20000; buf[n++] = work_iova + 0x20000;
+	buf[n++] = work_iova + 0x20000; buf[n++] = work_iova + 0x20000;
 
-	/* 0x205: input stride/format config */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x205, 4);
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x000600c8;
-	cmd[n++] = 0x000f000f;
-	cmd[n++] = is_b ? 0x00000000 : 0x00003333; /* 0x208 */
+	/* 0x750: processing channel B */
+	buf[n++] = OP_INCR(0x750, 16);
+	buf[n++] = 0x00000003; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = work_iova + 0x20000; buf[n++] = work_iova + 0x20000;
+	buf[n++] = work_iova + 0x20000; buf[n++] = work_iova + 0x20000;
 
-	/* 0x700: processing channel A (16 words) -- sensor-specific strides */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x700, 16);
-	cmd[n++] = 0x00000001; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = is_b ? 0x00001a40 : 0x00001dc0; /* 0x705 */
-	cmd[n++] = 0x00000000; cmd[n++] = 0x10000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00001000;
-	cmd[n++] = is_b ? 0x00001a00 : 0x00001c50; /* 0x70b */
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	/* 0xd20: lens shading extra */
+	buf[n++] = OP_INCR(0xd20, 6);
+	buf[n++] = is_b ? 0x00001101 : 0x00003101;
+	buf[n++] = 0;
+	buf[n++] = is_b ? 0x00210000 : 0x01ec0000;
+	buf[n++] = is_b ? 0x00210000 : 0x01ec0000;
+	buf[n++] = is_b ? 0x00210000 : 0x01ec0000;
+	buf[n++] = is_b ? 0x00210000 : 0x01ec0000;
 
-	/* 0x750: processing channel B (16 words) */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x750, 16);
-	cmd[n++] = 0x00000003; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	/* 0x900 stats */
+	buf[n++] = OP_INCR(0x900, 2);
+	buf[n++] = 1; buf[n++] = 1;
+	buf[n++] = OP_INCR(0x904, 2);
+	buf[n++] = 0x00005555; buf[n++] = 1;
+	buf[n++] = OP_INCR(0x908, 1);
+	buf[n++] = 0x00005555;
 
-	/* 0xd20: lens shading extra -- sensor-specific */
-	cmd[n++] = NVHOST_OPCODE_INCR(0xd20, 6);
-	cmd[n++] = is_b ? 0x00001101 : 0x00003101; /* 0xd20 */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd22 */
-	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd23 */
-	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd24 */
-	cmd[n++] = is_b ? 0x00210000 : 0x01ec0000; /* 0xd25 */
+	/* 0x920 stats window */
+	buf[n++] = OP_INCR(0x920, 10);
+	buf[n++] = 0x00000002; buf[n++] = work_iova + 0x31660;
+	buf[n++] = 0;          buf[n++] = work_iova + 0x3f4a0;
+	buf[n++] = 0x0000fa80; buf[n++] = work_iova + 0x30000;
+	buf[n++] = 0x00001c50; buf[n++] = work_iova + 0x20000;
+	buf[n++] = work_iova + 0x20000; buf[n++] = work_iova + 0x20000;
 
-	/* 0x900: stats enable */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x900, 2);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = 0x00000001;
+	/* 0x909 stats config */
+	buf[n++] = OP_INCR(0x909, 7);
+	buf[n++] = 1; buf[n++] = 0xfc000f00;
+	buf[n++] = 0xf680f320; buf[n++] = 0x0d80fde0;
+	buf[n++] = is_b ? 0x00000030 : 0;
+	buf[n++] = 0x1400002a; buf[n++] = 0x3c00002b;
 
-	/* 0x904/0x908: stats config */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x904, 2);
-	cmd[n++] = 0x00005555;
-	cmd[n++] = 0x00000001;
-	cmd[n++] = NVHOST_OPCODE_INCR(0x908, 1);
-	cmd[n++] = 0x00005555;
+	/* 0x910 */
+	buf[n++] = OP_INCR(0x910, 9);
+	buf[n++] = 3; buf[n++] = 0x00000028; buf[n++] = 0x01480029;
+	buf[n++] = is_b ? 0x0003030b : 0x00177e0b;
+	buf[n++] = 0x00990030; buf[n++] = 0x00000800;
+	buf[n++] = 0x007b0666;
+	buf[n++] = is_b ? 0x00000036 : 0x00000039;
+	buf[n++] = is_b ? 0x00001f1f : 0;
 
-	/* 0x920: stats window (10 words) */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x920, 10);
-	cmd[n++] = 0x00000002; cmd[n++] = 0x10001660;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x1000f4a0;
-	cmd[n++] = 0x0000fa80; cmd[n++] = 0x10000000;
-	cmd[n++] = 0x00001c50; cmd[n++] = 0x30001000;
-	cmd[n++] = 0x30001000; cmd[n++] = 0x30001000;
+	buf[n++] = OP_INCR(0x91b, 1); buf[n++] = 0;
+	buf[n++] = OP_NONINCR(0x91c, 9);
+	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 1;
+	buf[n++] = is_b ? 0x00000025 : 0x00000026;
+	buf[n++] = 0; buf[n++] = 0x00000026; buf[n++] = 0x00000361;
 
-	/* 0x909: stats config (7 words) -- sensor-specific */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x909, 7);
-	cmd[n++] = 0x00000001; cmd[n++] = 0xfc000f00;
-	cmd[n++] = 0xf680f320; cmd[n++] = 0x0d80fde0;
-	cmd[n++] = is_b ? 0x00000030 : 0x00000000; /* 0x90d */
-	cmd[n++] = 0x1400002a;
-	cmd[n++] = 0x3c00002b;
+	buf[n++] = OP_INCR(0x91d, 1); buf[n++] = 0;
+	buf[n++] = OP_NONINCR(0x91e, 9);
+	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0x00000780;
+	buf[n++] = 0; buf[n++] = 0x00000780; buf[n++] = 0x00000200;
 
-	/* 0x910: stats config (9 words) -- sensor-specific */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x910, 9);
-	cmd[n++] = 0x00000003; cmd[n++] = 0x00000028;
-	cmd[n++] = 0x01480029;
-	cmd[n++] = is_b ? 0x0003030b : 0x00177e0b; /* 0x913 */
-	cmd[n++] = 0x00990030; cmd[n++] = 0x00000800;
-	cmd[n++] = 0x007b0666;
-	cmd[n++] = is_b ? 0x00000036 : 0x00000039; /* 0x917 */
-	cmd[n++] = is_b ? 0x00001f1f : 0x00000000; /* 0x918 */
+	buf[n++] = OP_INCR(0x91f, 1); buf[n++] = 0x00000032;
 
-	/* 0x91b */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x91b, 1);
-	cmd[n++] = 0x00000000;
+	/* 0x506 demosaic */
+	buf[n++] = OP_INCR(0x506, 9);
+	buf[n++] = 0x3f3fcff3; buf[n++] = 0;
+	buf[n++] = 0x04c1304c; buf[n++] = 0x08220882;
+	buf[n++] = 0; buf[n++] = 0x03d0f43d;
+	buf[n++] = 0x08621886; buf[n++] = 0x01204812;
+	buf[n++] = 0x06e1b86e;
 
-	/* 0x91c: NONINCR 9 words -- sensor-specific */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x91c, 9);
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000001;
-	cmd[n++] = is_b ? 0x00000025 : 0x00000026; /* word 5 */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000026;
-	cmd[n++] = 0x00000361;
+	/* 0x600 GPP config */
+	buf[n++] = OP_INCR(0x600, 16);
+	buf[n++] = 5; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0x3fff0000; buf[n++] = 0x3fff0000;
+	buf[n++] = 0x3fff0000; buf[n++] = work_iova + 0x31000;
 
-	/* 0x91d */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x91d, 1);
-	cmd[n++] = 0x00000000;
+	/* 0x650 tone curve */
+	buf[n++] = OP_INCR(0x650, 1); buf[n++] = 3;
+	buf[n++] = OP_INCR(0x651, 1); buf[n++] = 0;
 
-	/* 0x91e: NONINCR 9 words */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x91e, 9);
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000780;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000780;
-	cmd[n++] = 0x00000200;
+	/* Cal data (lens shading + tone curves) + trigger */
+	n = append_cal(buf, n, cal, cal_words, work_iova);
 
-	/* 0x91f */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x91f, 1);
-	cmd[n++] = 0x00000032;
-
-	/* 0x506: demosaic processing (9 words) -- same both ISPs */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING2, 9);
-	cmd[n++] = 0x3f3fcff3;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x04c1304c;
-	cmd[n++] = 0x08220882;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x03d0f43d;
-	cmd[n++] = 0x08621886;
-	cmd[n++] = 0x01204812;
-	cmd[n++] = 0x06e1b86e;
-
-	/* 0x600: GPP config (16 words) */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x600, 16);
-	cmd[n++] = 0x00000005; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
-	cmd[n++] = 0x3fff0000; cmd[n++] = 0x3fff0000;
-	cmd[n++] = 0x3fff0000; cmd[n++] = 0x10001000;
-
-	/* 0x650: tone curve enable */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x650, 1);
-	cmd[n++] = 0x00000003;
-
-	/* 0x651 */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x651, 1);
-	cmd[n++] = 0x00000000;
-
+	/* Syncpt (immediate incr on stream syncpt — added by caller) */
 	return n;
 }
 
 /* ================================================================
- * ISP Init Sequence (S1-S5) — matches isp_t124_stream_init() exactly
+ * Per-frame gather — exact stock 45-word format
  * ================================================================ */
 
-static int isp_init(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
-		    struct nvbuf *workbuf, uint32_t class_id, uint32_t syncpt,
-		    int is_b)
+static int build_per_frame(uint32_t *buf, uint32_t class_id,
+			   uint32_t W, uint32_t H,
+			   uint32_t out_iova, uint32_t stats_iova,
+			   uint32_t y_stride, uint32_t uv_stride,
+			   uint32_t sp_mem, uint32_t sp_stats, uint32_t sp_loadv)
 {
-	uint32_t *cmd = cmdbuf->cpu;
-	int n, ret;
-	const uint32_t *cal_data;
-	int cal_words;
-
-	if (is_b) {
-		cal_data = isp_b_cal_data;
-		cal_words = sizeof(isp_b_cal_data) / sizeof(isp_b_cal_data[0]);
-	} else {
-		cal_data = isp_a_cal_data;
-		cal_words = sizeof(isp_a_cal_data) / sizeof(isp_a_cal_data[0]);
-	}
-
-	printf("\n========================================\n");
-	printf("ISP INIT (class=0x%02x, %s)\n", class_id, is_b ? "ISP-B" : "ISP-A");
-	printf("  work_iova=0x%08x cal_words=%d\n", workbuf->iova, cal_words);
-
-	/* PIO write: reg 0xFC = 0x20 (stock does this via NvRmHostModuleRegWr) */
-	{
-		struct {
-			uint32_t id;
-			uint32_t num_offsets;
-			uint32_t block_size;
-			uint32_t offsets;   /* userptr */
-			uint32_t values;    /* userptr */
-			uint32_t write;
-		} rw;
-		uint32_t offset = 0xFC;
-		uint32_t value = 0x20;
-		rw.id = 0; /* module id — 0 for self */
-		rw.num_offsets = 1;
-		rw.block_size = 4;
-		rw.offsets = (uint32_t)(uintptr_t)&offset;
-		rw.values = (uint32_t)(uintptr_t)&value;
-		rw.write = 1;
-		/* NVHOST32_IOCTL_CHANNEL_MODULE_REGRDWR = _IOWR('H', 14, ...) */
-		int r = ioctl(ch_fd, _IOWR('H', 14, rw), &rw);
-		printf("  PIO write 0xFC=0x20: %s (errno=%d)\n",
-		       r == 0 ? "OK" : "FAILED", r ? errno : 0);
-	}
-	printf("========================================\n");
-
-	/* --- S1: zero_block x2 + 0x018 tails + syncpt --- */
-	printf("\n--- S1: zero_block x2 + 0x018 tails ---\n");
-	n = 0;
-	/* First zero_block */
-	n = append_zero_block(cmd, n, workbuf->iova);
-	/* First 0x018 tail (5 words) */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x018, 5);
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000400;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00000200;
-	cmd[n++] = 0x00000002;
-	/* Second zero_block */
-	n = append_zero_block(cmd, n, workbuf->iova);
-	/* Second 0x018 tail (5 words) */
-	cmd[n++] = NVHOST_OPCODE_INCR(0x018, 5);
-	cmd[n++] = 0x0a00500a; cmd[n++] = 0x00008089;
-	cmd[n++] = 0x013645cb; cmd[n++] = 0x000001e7;
-	cmd[n++] = 0x00000001;
-	/* IMMEDIATE syncpt */
-	n = append_syncpt_imm(cmd, n, syncpt);
-	printf("  S1: %d words\n", n);
-
-	ret = submit_and_wait(ch_fd, ctrl_fd, cmdbuf, n, class_id, syncpt, "S1-init");
-	if (ret) return ret;
-
-	/* --- S2: zero_block + trigger + syncpt --- */
-	printf("\n--- S2: zero_block + trigger ---\n");
-	n = 0;
-	n = append_zero_block(cmd, n, workbuf->iova);
-	n = append_syncpt_imm(cmd, n, syncpt);
-	printf("  S2: %d words\n", n);
-
-	ret = submit_and_wait(ch_fd, ctrl_fd, cmdbuf, n, class_id, syncpt, "S2-cal");
-	if (ret) return ret;
-
-	/* --- S3: SET_CLASS + OP_DONE syncpt --- */
-	printf("\n--- S3: SET_CLASS + OP_DONE ---\n");
-	n = 0;
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	/* OP_DONE syncpt: IMM opcode, offset=0x000, value = (cond=1 << 8) | syncpt */
-	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (1 << 8) | (syncpt & 0xFF));
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-	printf("  S3: %d words\n", n);
-
-	ret = submit_and_wait(ch_fd, ctrl_fd, cmdbuf, n, class_id, syncpt, "S3-class");
-	if (ret) return ret;
-
-	/* --- S4: zero_block + trigger + syncpt --- */
-	printf("\n--- S4: zero_block + trigger ---\n");
-	n = 0;
-	n = append_zero_block(cmd, n, workbuf->iova);
-	n = append_syncpt_imm(cmd, n, syncpt);
-	printf("  S4: %d words\n", n);
-
-	ret = submit_and_wait(ch_fd, ctrl_fd, cmdbuf, n, class_id, syncpt, "S4-cal");
-	if (ret) return ret;
-
-	/* --- S5: full runtime config + calibration + trigger + syncpt --- */
-	printf("\n--- S5: runtime config + calibration ---\n");
-	n = 0;
-	n += build_s5_runtime(&cmd[n], is_b, workbuf->iova);
-	/* Append real calibration + trigger */
-	n = append_cal_block(cmd, n, cal_data, cal_words, workbuf->iova);
-	/* IMMEDIATE syncpt */
-	n = append_syncpt_imm(cmd, n, syncpt);
-	printf("  S5: %d words\n", n);
-
-	ret = submit_and_wait(ch_fd, ctrl_fd, cmdbuf, n, class_id, syncpt, "S5-rtcfg");
-	if (ret) return ret;
-
-	printf("\n*** ISP INIT COMPLETE ***\n\n");
-
-	/* SET_EMC — without this, MC may block ISP DMA */
-	{
-		char ctrl_path[64];
-		snprintf(ctrl_path, sizeof(ctrl_path),
-			 "/dev/nvhost-ctrl-isp%s", is_b ? ".1" : "");
-		int cfd = open(ctrl_path, O_RDWR);
-		if (cfd < 0) cfd = open("/dev/nvhost-ctrl-isp", O_RDWR);
-		if (cfd >= 0) {
-			struct { uint32_t bw; uint32_t clk; uint32_t bpp_in; uint32_t bpp_out; } emc;
-			emc.bw = 0; emc.clk = 81600000; emc.bpp_in = 16; emc.bpp_out = 12;
-			int r = ioctl(cfd, _IOW('I', 1, emc), &emc);
-			printf("  SET_EMC: %s\n", r == 0 ? "OK" : "FAILED");
-			close(cfd);
-		} else {
-			printf("  SET_EMC: no ctrl-isp device\n");
-		}
-	}
-
-	return 0;
-}
-
-/* ================================================================
- * Per-frame submit helpers
- * ================================================================ */
-
-static void check_output(struct nvbuf *outbuf)
-{
-	uint32_t *out32 = outbuf->cpu;
-	int changed = 0;
-	int i;
-	printf("  Output first 8 words: ");
-	for (i = 0; i < 8; i++)
-		printf("0x%08x ", out32[i]);
-	printf("\n");
-	/* Check if any word changed from 0xDE fill */
-	for (i = 0; i < 64; i++) {
-		if (out32[i] != 0xDEDEDEDE) {
-			changed = 1;
-			break;
-		}
-	}
-	if (changed)
-		printf("  OUTPUT MODIFIED -- ISP PROCESSED!\n");
-	else
-		printf("  OUTPUT UNCHANGED (still 0xDE fill)\n");
-}
-
-/*
- * Test A: enable=0x03 + trigger=0x05 + cond=4 syncpt (no surfaces)
- * Known working combo from previous testing.
- */
-static int test_A_nosurface(int ch_fd, int ctrl_fd, uint32_t syncpt,
-			    uint32_t class_id, struct nvbuf *cmdbuf,
-			    struct nvbuf *workbuf)
-{
-	uint32_t *cmd = cmdbuf->cpu;
 	int n = 0;
-	uint32_t fence;
-
-	printf("\n=== TEST A: enable=0x03 trigger=0x05 cond4 (no surfaces) ===\n");
-
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-
-	/* ISP_ENABLE */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x00000003;
-
-	/* Stats buffer */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = workbuf->iova;
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-
-	/* cond=4 syncpt incr */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (4 << 8) | (syncpt & 0xFF);
-
-	/* Trigger */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
-
-	/* Safety IMMEDIATE */
-	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (0 << 8) | (syncpt & 0xFF));
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	struct nvhost_syncpt_incr sp = { syncpt, 2 };
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, NULL, 0, NULL, &fence))
-		return -1;
-
-	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence - 1, 500);
-	if (ret) {
-		printf("  cond=4 DID NOT fire\n");
-		nvhost_wait_syncpt(ctrl_fd, syncpt, fence, 2000);
-	} else {
-		printf("  cond=4 FIRED!\n");
-	}
-	return ret;
-}
-
-/*
- * Test B: enable=0x03, trigger=0x05 WITH output+input surfaces + processing + stats
- */
-static int test_B_surfaces(int ch_fd, int ctrl_fd, uint32_t syncpt,
-			   uint32_t class_id, struct nvbuf *cmdbuf,
-			   struct nvbuf *inbuf, struct nvbuf *outbuf,
-			   struct nvbuf *workbuf, uint32_t W, uint32_t H)
-{
-	uint32_t *cmd = cmdbuf->cpu;
-	int n = 0;
-	uint32_t fence;
-	uint32_t in_stride = W * 2;
-	uint32_t y_stride = (W + 63) & ~63;
-	uint32_t uv_stride = ((W / 2) + 63) & ~63;
 	uint32_t y_size = y_stride * H;
 	uint32_t uv_size = uv_stride * (H / 2);
-
-	struct nvhost_reloc relocs[5];
-	struct nvhost_reloc_shift shifts[5];
-	int nr = 0;
-
-	printf("\n=== TEST B: enable=0x03 trigger=0x05 WITH surfaces %ux%u (RELOCS) ===\n", W, H);
-	printf("  in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
-	       inbuf->iova, outbuf->iova, workbuf->iova);
-
-	memset(inbuf->cpu, 0x42, inbuf->size);
-	memset(outbuf->cpu, 0xDE, outbuf->size);
-
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-
-	/* Output config */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
-	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
-	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0x00000000;
-
-	/* Output surfaces Y/U/V — use relocations */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, 0 };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0001; /* placeholder — out Y */
-	cmd[n++] = 0;
-	cmd[n++] = y_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0002; /* placeholder — out U */
-	cmd[n++] = 0;
-	cmd[n++] = uv_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size + uv_size };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0003; /* placeholder — out V */
-	cmd[n++] = 0;
-	cmd[n++] = uv_stride;
-
-	/* Processing block */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-	cmd[n++] = 0; cmd[n++] = 0;
-	cmd[n++] = (H << 16) | W;
-
-	/* Input (v3 reprocess methods) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS, 1);
-	cmd[n++] = (W & 0x7FFF) | (H << 16);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = 0x11000020; /* RAW Bayer single-plane linear */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, inbuf->dmabuf_fd, 0 };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0004; /* placeholder — input */
-	cmd[n++] = 0;
-	cmd[n++] = in_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP, 1);
-	cmd[n++] = W & 0x3FFF;
-
-	/* ISP_ENABLE */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x00000003;
-
-	/* Input trigger */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER, 1);
-	cmd[n++] = 1;
-
-	/* Stats buffer */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, workbuf->dmabuf_fd, 0 };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0005; /* placeholder — stats/work */
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-
-	/* cond=4 syncpt */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (4 << 8) | (syncpt & 0xFF);
-
-	/* Trigger */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
-
-	/* Safety IMMEDIATE */
-	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (0 << 8) | (syncpt & 0xFF));
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	printf("  cmdbuf: %d words, %d relocs\n", n, nr);
-
-	struct nvhost_syncpt_incr sp = { syncpt, 2 };
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, relocs, nr, shifts, &fence))
-		return -1;
-
-	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence - 1, 2000);
-	if (ret) {
-		printf("  cond=4 DID NOT fire\n");
-		nvhost_wait_syncpt(ctrl_fd, syncpt, fence, 5000);
-	} else {
-		printf("  cond=4 FIRED!\n");
-		check_output(outbuf);
-	}
-	return ret;
-}
-
-/* Test B2: output surfaces ONLY (no input) */
-static int test_B2_output_only(int ch_fd, int ctrl_fd, uint32_t syncpt,
-	uint32_t class_id, struct nvbuf *cmdbuf,
-	struct nvbuf *outbuf, struct nvbuf *workbuf, uint32_t W, uint32_t H)
-{
-	uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
-	uint32_t ys=(W+63)&~63, us=((W/2)+63)&~63, ysz=ys*H, usz=us*(H/2);
-	printf("\n=== TEST B2: OUTPUT only (no input) %ux%u ===\n", W, H);
-	memset(outbuf->cpu, 0xDE, outbuf->size);
-	cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH,1); cmd[n++]=((W-1)&0x3FFF)<<16;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT,1); cmd[n++]=((H-1)&0x3FFF)<<16;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT,1); cmd[n++]=ISP_FORMAT_STOCK;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR,1); cmd[n++]=0;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y,3);
-	cmd[n++]=outbuf->iova; cmd[n++]=0; cmd[n++]=ys;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U,3);
-	cmd[n++]=outbuf->iova+ysz; cmd[n++]=0; cmd[n++]=us;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V,3);
-	cmd[n++]=outbuf->iova+ysz+usz; cmd[n++]=0; cmd[n++]=us;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING,6);
-	cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=(H<<16)|W;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF,4);
-	cmd[n++]=workbuf->iova;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;
-	cmd[n++]=NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(4<<8)|(syncpt&0xFF);
-	cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1); cmd[n++]=ISP_TRIGGER_RUNTIME;
-	cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF)); cmd[n++]=NVHOST_OPCODE_NOOP;
-	struct nvhost_syncpt_incr sp2={syncpt,2};
-	if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp2,1,NULL,0,NULL,&fence)) return -1;
-	int ret=nvhost_wait_syncpt(ctrl_fd,syncpt,fence-1,2000);
-	if(ret){printf("  cond=4 DID NOT fire (output config breaks it)\n");
-		nvhost_wait_syncpt(ctrl_fd,syncpt,fence,2000);
-	}else{printf("  cond=4 FIRED (output config alone is OK)\n");check_output(outbuf);}
-	return ret;
-}
-
-/* Test B3: INPUT only (no output) */
-static int test_B3_input_only(int ch_fd, int ctrl_fd, uint32_t syncpt,
-	uint32_t class_id, struct nvbuf *cmdbuf,
-	struct nvbuf *inbuf, struct nvbuf *workbuf, uint32_t W, uint32_t H)
-{
-	uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
-	printf("\n=== TEST B3: INPUT only (no output) %ux%u ===\n", W, H);
-	memset(inbuf->cpu, 0x42, inbuf->size);
-	cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS,1); cmd[n++]=(W&0x7FFF)|(H<<16);
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT,1); cmd[n++]=0x11000020;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0,3);
-	cmd[n++]=inbuf->iova;cmd[n++]=0;cmd[n++]=W*2;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP,1); cmd[n++]=W&0x3FFF;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF,4);
-	cmd[n++]=workbuf->iova;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;
-	cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER,1); cmd[n++]=1;
-	cmd[n++]=NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(4<<8)|(syncpt&0xFF);
-	cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1); cmd[n++]=ISP_TRIGGER_RUNTIME;
-	cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF)); cmd[n++]=NVHOST_OPCODE_NOOP;
-	struct nvhost_syncpt_incr sp3={syncpt,2};
-	if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp3,1,NULL,0,NULL,&fence)) return -1;
-	int ret=nvhost_wait_syncpt(ctrl_fd,syncpt,fence-1,2000);
-	if(ret){printf("  cond=4 DID NOT fire (input config breaks it)\n");
-		nvhost_wait_syncpt(ctrl_fd,syncpt,fence,2000);
-	}else{printf("  cond=4 FIRED (input config alone is OK)\n");}
-	return ret;
-}
-
-/*
- * Test B4: Isolate which input method breaks cond=4.
- * Try each input method individually.
- */
-static int test_B4_input_isolation(int ch_fd, int ctrl_fd, uint32_t syncpt,
-	uint32_t class_id, struct nvbuf *cmdbuf,
-	struct nvbuf *inbuf, struct nvbuf *workbuf, uint32_t W, uint32_t H)
-{
-	int i;
-	printf("\n=== TEST B4: Isolate which input method breaks cond=4 ===\n");
-
-	struct {
-		const char *name;
-		int use_dims, use_fmt, use_surf, use_strip, use_trigger;
-		uint32_t format;
-	} tests[] = {
-		{"dims only",        1,0,0,0,0, 0},
-		{"format only",      0,1,0,0,0, 0x11000020},
-		{"surface only",     0,0,1,0,0, 0},
-		{"trigger only",     0,0,0,0,1, 0},
-		{"strip only",       0,0,0,1,0, 0},
-		{"dims+fmt",         1,1,0,0,0, 0x11000020},
-		{"dims+fmt+strip",   1,1,0,1,0, 0x11000020},
-		{"dims+fmt+trigger", 1,1,0,0,1, 0x11000020},
-		{"surface+trigger",  0,0,1,0,1, 0},
-		{"all input no surf", 1,1,0,1,1, 0x11000020},
-		{"all input",        1,1,1,1,1, 0x11000020},
-		/* Try different format values */
-		{"fmt=0x00000000",   0,1,0,0,0, 0x00000000},
-		{"fmt=0x10000000",   0,1,0,0,0, 0x10000000},
-		{"fmt=0x10000020",   0,1,0,0,0, 0x10000020},
-		{"fmt=0x01000020",   0,1,0,0,0, 0x01000020},
-		/* Key test: dims+surface+trigger (minimum for real processing?) */
-		{"dims+surf+trig",   1,0,1,0,1, 0},
-		/* Full with output too */
-		{"dims+fmt+surf+trig",1,1,1,0,1, 0x11000020},
-		{"dims+fmt+surf+strip+trig",1,1,1,1,1, 0x11000020},
-	};
-	int ntests = sizeof(tests)/sizeof(tests[0]);
-
-	for (i = 0; i < ntests; i++) {
-		uint32_t *cmd = cmdbuf->cpu; int n = 0; uint32_t fence;
-
-		/* Re-init ISP between tests to avoid stale state */
-		{
-			cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
-			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
-			cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1);
-			cmd[n++]=ISP_TRIGGER_POST_APPLY;
-			cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF));
-			cmd[n++]=NVHOST_OPCODE_NOOP;
-			struct nvhost_syncpt_incr sp_reset={syncpt,1};
-			if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp_reset,1,NULL,0,NULL,&fence)==0)
-				nvhost_wait_syncpt(ctrl_fd,syncpt,fence,1000);
-			n = 0;
-		}
-
-		cmd[n++]=NVHOST_OPCODE_SETCLASS(class_id,0,0);
-
-		if (tests[i].use_dims) {
-			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS,1);
-			cmd[n++]=(W&0x7FFF)|(H<<16);
-		}
-		if (tests[i].use_fmt) {
-			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT,1);
-			cmd[n++]=tests[i].format;
-		}
-		if (tests[i].use_surf) {
-			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0,3);
-			cmd[n++]=inbuf->iova;cmd[n++]=0;cmd[n++]=W*2;
-		}
-		if (tests[i].use_strip) {
-			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP,1);
-			cmd[n++]=W&0x3FFF;
-		}
-
-		cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE,1); cmd[n++]=0x03;
-		cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF,4);
-		cmd[n++]=workbuf->iova;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;
-
-		if (tests[i].use_trigger) {
-			cmd[n++]=NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER,1);
-			cmd[n++]=1;
-		}
-
-		cmd[n++]=NVHOST_OPCODE_NONINCR(0x000,1);cmd[n++]=(4<<8)|(syncpt&0xFF);
-		cmd[n++]=NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL,1);cmd[n++]=ISP_TRIGGER_RUNTIME;
-		cmd[n++]=NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF));cmd[n++]=NVHOST_OPCODE_NOOP;
-
-		struct nvhost_syncpt_incr sp={syncpt,2};
-		if(nvhost_submit(ch_fd,cmdbuf,n,class_id,&sp,1,NULL,0,NULL,&fence)) continue;
-		int ret=nvhost_wait_syncpt(ctrl_fd,syncpt,fence-1,500);
-		if(ret){
-			printf("  %-22s cond=4 NO\n", tests[i].name);
-			nvhost_wait_syncpt(ctrl_fd,syncpt,fence,2000);
-		}else{
-			printf("  %-22s cond=4 YES\n", tests[i].name);
-		}
-	}
-	return 0;
-}
-
-/*
- * Test C: enable=0x07, trigger=0x0F WITH surfaces (full pipeline)
- */
-static int test_C_full(int ch_fd, int ctrl_fd, uint32_t syncpt,
-		       uint32_t class_id, struct nvbuf *cmdbuf,
-		       struct nvbuf *inbuf, struct nvbuf *outbuf,
-		       struct nvbuf *workbuf, uint32_t W, uint32_t H)
-{
-	uint32_t *cmd = cmdbuf->cpu;
-	int n = 0;
-	uint32_t fence;
-	uint32_t in_stride = W * 2;
-	uint32_t y_stride = (W + 63) & ~63;
-	uint32_t uv_stride = ((W / 2) + 63) & ~63;
-	uint32_t y_size = y_stride * H;
-	uint32_t uv_size = uv_stride * (H / 2);
-
-	printf("\n=== TEST C: enable=0x07 trigger=0x0F WITH surfaces %ux%u ===\n", W, H);
-	printf("  in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
-	       inbuf->iova, outbuf->iova, workbuf->iova);
-
-	memset(inbuf->cpu, 0x42, inbuf->size);
-	memset(outbuf->cpu, 0xDE, outbuf->size);
-
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-
-	/* Output config */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
-	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
-	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0x00000000;
-
-	/* Output surfaces */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	cmd[n++] = outbuf->iova;
-	cmd[n++] = 0;
-	cmd[n++] = y_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	cmd[n++] = outbuf->iova + y_size;
-	cmd[n++] = 0;
-	cmd[n++] = uv_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	cmd[n++] = outbuf->iova + y_size + uv_size;
-	cmd[n++] = 0;
-	cmd[n++] = uv_stride;
-
-	/* Processing */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-	cmd[n++] = 0; cmd[n++] = 0;
-	cmd[n++] = (H << 16) | W;
-
-	/* Input */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS, 1);
-	cmd[n++] = (W & 0x7FFF) | (H << 16);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = 0x11000020;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0, 3);
-	cmd[n++] = inbuf->iova;
-	cmd[n++] = 0;
-	cmd[n++] = in_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP, 1);
-	cmd[n++] = W & 0x3FFF;
-
-	/* ISP_ENABLE = 0x07 (full pipeline) */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x00000007;
-
-	/* Input trigger */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER, 1);
-	cmd[n++] = 1;
-
-	/* Stats buffer */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = workbuf->iova;
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-
-	/* 3 conditional syncpt incrs: cond 4, 5, 6 */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (4 << 8) | (syncpt & 0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (5 << 8) | (syncpt & 0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (6 << 8) | (syncpt & 0xFF);
-
-	/* Trigger POST_APPLY */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_POST_APPLY;
-
-	/* Safety IMMEDIATE */
-	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (0 << 8) | (syncpt & 0xFF));
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	printf("  cmdbuf: %d words\n", n);
-
-	struct nvhost_syncpt_incr sp = { syncpt, 4 };
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, NULL, 0, NULL, &fence))
-		return -1;
-
-	/* Wait for cond syncpts (fence-1 = after 3 conditional, before immediate) */
-	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, fence - 1, 2000);
-	if (ret) {
-		printf("  cond syncpts DID NOT fire\n");
-		nvhost_wait_syncpt(ctrl_fd, syncpt, fence, 5000);
-	} else {
-		printf("  cond syncpts FIRED!\n");
-		check_output(outbuf);
-	}
-	return ret;
-}
-
-
-/*
- * Test E: Input via method 0x100 (stock streaming path from cmdbuf dump).
- * Stock cmdbuf shows: INCR(0x100, 4) = [IOVA, 0, 0, 0]
- * This is how stock streaming mode passes input address.
- * Combined with output surfaces, ISP_ENABLE=0x04040007, trigger=0x05.
- */
-static int test_E_method100(int ch_fd, int ctrl_fd, uint32_t syncpt,
-	uint32_t class_id, struct nvbuf *cmdbuf,
-	struct nvbuf *inbuf, struct nvbuf *outbuf,
-	struct nvbuf *workbuf, uint32_t W, uint32_t H)
-{
-	uint32_t *cmd = cmdbuf->cpu;
-	int n = 0;
-	uint32_t fence;
-	uint32_t y_stride = (W + 63) & ~63;
-	uint32_t uv_stride = ((W/2) + 63) & ~63;
-	uint32_t y_size = y_stride * H;
-	uint32_t uv_size = uv_stride * (H/2);
-
-	struct nvhost_reloc relocs[5];
-	struct nvhost_reloc_shift shifts[5];
-	int nr = 0;
-
-	printf("\n=== TEST E: Input via 0x100 (stock cmdbuf path) %ux%u ===\n", W, H);
-
-	memset(inbuf->cpu, 0x42, inbuf->size);
-	memset(outbuf->cpu, 0xDE, outbuf->size);
-
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-
-	/* Output config */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
-	cmd[n++] = ((W-1)&0x3FFF)<<16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
-	cmd[n++] = ((H-1)&0x3FFF)<<16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0;
-
-	/* Output Y via RELOC */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
-	relocs[nr].cmdbuf_offset = n * 4;
-	relocs[nr].target = outbuf->dmabuf_fd;
-	relocs[nr].target_offset = 0;
-	shifts[nr].shift = 0; nr++;
-	cmd[n++] = 0xDEAD0001; cmd[n++] = 0; cmd[n++] = y_stride;
-
-	/* Output U via RELOC */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
-	relocs[nr].cmdbuf_offset = n * 4;
-	relocs[nr].target = outbuf->dmabuf_fd;
-	relocs[nr].target_offset = y_size;
-	shifts[nr].shift = 0; nr++;
-	cmd[n++] = 0xDEAD0002; cmd[n++] = 0; cmd[n++] = uv_stride;
-
-	/* Output V via RELOC */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
-	relocs[nr].cmdbuf_offset = n * 4;
-	relocs[nr].target = outbuf->dmabuf_fd;
-	relocs[nr].target_offset = y_size + uv_size;
-	shifts[nr].shift = 0; nr++;
-	cmd[n++] = 0xDEAD0003; cmd[n++] = 0; cmd[n++] = uv_stride;
-
-	/* Processing */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = (H<<16)|W;
-
-	/* Input via method 0x100 — stock cmdbuf format: INCR(0x100, 4) = [IOVA,0,0,0] */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(0x100, 4);
-	relocs[nr].cmdbuf_mem = cmdbuf->dmabuf_fd;
-	relocs[nr].cmdbuf_offset = n * 4;
-	relocs[nr].target = inbuf->dmabuf_fd;
-	relocs[nr].target_offset = 0;
-	shifts[nr].shift = 0; nr++;
-	cmd[n++] = 0xDEAD0004;
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-
-	/* Syncpt incrs: cond 4,5,6 */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (4<<8)|(syncpt&0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (5<<8)|(syncpt&0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (6<<8)|(syncpt&0xFF);
-
-	/* Trigger RUNTIME */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
-
-	/* Safety IMMEDIATE */
-	cmd[n++] = NVHOST_OPCODE_IMM(0x000, (0<<8)|(syncpt&0xFF));
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	printf("  cmdbuf: %d words, %d relocs\n", n, nr);
-
-	/* 4 incrs: cond4 + cond5 + cond6 + immediate */
-	struct nvhost_syncpt_incr sp = { syncpt, 4 };
-	uint32_t before = nvhost_read_syncpt(ctrl_fd, syncpt);
-
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp, 1, relocs, nr, shifts, &fence))
-		return -1;
-
-	/* Wait for all 3 conditional + 1 immediate = before+4 */
-	printf("  syncpt before=%u, waiting for %u (all cond+imm)...\n", before, before+4);
-	int ret = nvhost_wait_syncpt(ctrl_fd, syncpt, before + 3, 3000);
-	if (ret) {
-		uint32_t after = nvhost_read_syncpt(ctrl_fd, syncpt);
-		printf("  cond syncpts DID NOT fire (syncpt: %u→%u, expected %u)\n",
-		       before, after, before+4);
-		/* Drain immediate */
-		nvhost_wait_syncpt(ctrl_fd, syncpt, before + 4, 5000);
-	} else {
-		printf("  ALL cond syncpts FIRED!\n");
-		check_output(outbuf);
-		/* Drain immediate */
-		nvhost_wait_syncpt(ctrl_fd, syncpt, before + 4, 1000);
-	}
-
-	/* Also try with ISP_ENABLE=0x04040007 */
-	printf("\n=== TEST E2: Same but ISP_ENABLE=0x04040007 ===\n");
-	n = 0; nr = 0;
-	memset(outbuf->cpu, 0xDE, outbuf->size);
-
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
-	cmd[n++] = ((W-1)&0x3FFF)<<16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
-	cmd[n++] = ((H-1)&0x3FFF)<<16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
-	relocs[nr].target=outbuf->dmabuf_fd; relocs[nr].target_offset=0;
-	shifts[nr].shift=0; nr++;
-	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=y_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
-	relocs[nr].target=outbuf->dmabuf_fd; relocs[nr].target_offset=y_size;
-	shifts[nr].shift=0; nr++;
-	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=uv_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
-	relocs[nr].target=outbuf->dmabuf_fd; relocs[nr].target_offset=y_size+uv_size;
-	shifts[nr].shift=0; nr++;
-	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=uv_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
-	cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=0;cmd[n++]=(H<<16)|W;
-
-	/* Input via 0x100 */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(0x100, 4);
-	relocs[nr].cmdbuf_mem=cmdbuf->dmabuf_fd; relocs[nr].cmdbuf_offset=n*4;
-	relocs[nr].target=inbuf->dmabuf_fd; relocs[nr].target_offset=0;
-	shifts[nr].shift=0; nr++;
-	cmd[n++]=0xDEAD; cmd[n++]=0; cmd[n++]=0; cmd[n++]=0;
-
-	/* ISP_ENABLE = 0x04040007 (streaming mode) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x04040007;
-
-	/* cond 4,5,6 */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(4<<8)|(syncpt&0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(5<<8)|(syncpt&0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000,1); cmd[n++]=(6<<8)|(syncpt&0xFF);
-
-	/* Trigger RUNTIME */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
-
-	cmd[n++] = NVHOST_OPCODE_IMM(0x000,(0<<8)|(syncpt&0xFF));
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	struct nvhost_syncpt_incr sp2 = { syncpt, 4 };
-	before = nvhost_read_syncpt(ctrl_fd, syncpt);
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, &sp2, 1, relocs, nr, shifts, &fence))
-		return -1;
-	ret = nvhost_wait_syncpt(ctrl_fd, syncpt, before+3, 3000);
-	if (ret) {
-		uint32_t after = nvhost_read_syncpt(ctrl_fd, syncpt);
-		printf("  cond syncpts DID NOT fire (%u→%u)\n", before, after);
-		nvhost_wait_syncpt(ctrl_fd, syncpt, before+4, 5000);
-	} else {
-		printf("  ALL cond syncpts FIRED!\n");
-		check_output(outbuf);
-		nvhost_wait_syncpt(ctrl_fd, syncpt, before+4, 1000);
-	}
-	return 0;
-}
-
-/*
- * Test D: Stock-like per-frame with 4 separate syncpts (memory/stats/loadv/stream)
- * Matches isp_t124_process_frame() exactly.
- * Uses all 4 syncpt params: cond4(param0), cond5(param1), cond6(param3), imm(param2)
- */
-static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
-			struct nvbuf *inbuf, struct nvbuf *outbuf,
-			struct nvbuf *workbuf, uint32_t W, uint32_t H,
-			uint32_t class_id,
-			uint32_t sp_memory, uint32_t sp_stats,
-			uint32_t sp_stream, uint32_t sp_loadv)
-{
-	uint32_t *cmd = cmdbuf->cpu;
-	int n = 0;
-	uint32_t fence;
-	uint32_t in_stride = W * 2;
-	uint32_t y_stride = (W + 63) & ~63;
-	uint32_t uv_stride = ((W / 2) + 63) & ~63;
-	uint32_t y_size = y_stride * H;
-	uint32_t uv_size = uv_stride * (H / 2);
-
-	struct nvhost_reloc relocs[5];
-	struct nvhost_reloc_shift shifts[5];
-	int nr = 0;
-
-	printf("\n=== TEST D: Stock per-frame %ux%u (4 syncpts, RELOCS) ===\n", W, H);
-	printf("  syncpts: mem=%u stats=%u stream=%u loadv=%u\n",
-	       sp_memory, sp_stats, sp_stream, sp_loadv);
-	printf("  in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
-	       inbuf->iova, outbuf->iova, workbuf->iova);
-
-	memset(inbuf->cpu, 0x42, inbuf->size);
-	memset(outbuf->cpu, 0xDE, outbuf->size);
-
-	/* --- G[0]: full per-frame gather --- */
-
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	uint32_t out_y = out_iova;
+	uint32_t out_u = out_iova + y_size;
+	uint32_t out_v = out_iova + y_size + uv_size;
+
+	/* SET_CLASS */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
 
 	/* Output width/height/format/color */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_WIDTH, 1);
-	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_HEIGHT, 1);
-	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0x00000000;
+	buf[n++] = OP_INCR(0xE00, 1); buf[n++] = ((W - 1) & 0x3FFF) << 16;
+	buf[n++] = OP_INCR(0xE01, 1); buf[n++] = ((H - 1) & 0x3FFF) << 16;
+	buf[n++] = OP_INCR(0xE02, 1); buf[n++] = ISP_FORMAT_STOCK;
+	buf[n++] = OP_INCR(0xE03, 1); buf[n++] = 0;
 
-	/* Output Y/U/V surfaces — use relocations */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_Y, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, 0 };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0001; /* placeholder — out Y */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = y_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_U, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0002; /* placeholder — out U */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = uv_stride;
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_OUT_SURF_V, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, outbuf->dmabuf_fd, y_size + uv_size };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0003; /* placeholder — out V */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = uv_stride;
+	/* Y/U/V surfaces */
+	buf[n++] = OP_INCR(0xE04, 3);
+	buf[n++] = out_y; buf[n++] = 0; buf[n++] = y_stride;
+	buf[n++] = OP_INCR(0xE07, 3);
+	buf[n++] = out_u; buf[n++] = 0; buf[n++] = uv_stride;
+	buf[n++] = OP_INCR(0xE0A, 3);
+	buf[n++] = out_v; buf[n++] = 0; buf[n++] = uv_stride;
 
-	/* Processing */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = (H << 16) | W;
+	/* Processing — stock: [0,0,0,0,0,(H<<16)|W] */
+	buf[n++] = OP_INCR(0x500, 6);
+	buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = 0; buf[n++] = 0;
+	buf[n++] = (H << 16) | W;
 
-	/* Input (v3 reprocess methods) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
+	/* NO ISP_ENABLE — stock sets it once in S5, not per-frame */
 
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_DIMS, 1);
-	cmd[n++] = (W & 0x7FFF) | (H << 16);
+	/* Stats */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_INCR(0x100, 4);
+	buf[n++] = stats_iova; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
 
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = 0x11000020; /* RAW Bayer */
+	/* Syncpt incrs: cond=4 (OP_DONE), cond=5 (STATS), cond=6 (RD_DONE) */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_NONINCR(0x000, 1);
+	buf[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | sp_mem;
+	buf[n++] = OP_NONINCR(0x000, 1);
+	buf[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | sp_stats;
+	buf[n++] = OP_NONINCR(0x000, 1);
+	buf[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | sp_loadv;
 
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_SURF0, 3);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, inbuf->dmabuf_fd, 0 };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0004; /* placeholder — input */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = in_stride;
+	/* Trigger */
+	buf[n++] = OP_SETCLASS(class_id, 0, 0);
+	buf[n++] = OP_NONINCR(0x00C, 1);
+	buf[n++] = ISP_TRIGGER_RUNTIME;
 
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_STRIP, 1);
-	cmd[n++] = W & 0x3FFF;
-
-	/* ISP_ENABLE = 0x07 */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x00000007;
-
-	/* Input trigger = 1 */
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_IN_TRIGGER, 1);
-	cmd[n++] = 0x00000001;
-
-	/* Stats buffer */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_INCR(ISP_METHOD_STATS_BUF, 4);
-	relocs[nr] = (struct nvhost_reloc){ cmdbuf->dmabuf_fd, n * 4, workbuf->dmabuf_fd, 0 };
-	shifts[nr] = (struct nvhost_reloc_shift){ 0 }; nr++;
-	cmd[n++] = 0xDEAD0005; /* placeholder — stats/work */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-
-	/* 3 conditional syncpt incrs (memory cond4, stats cond5, loadv cond6) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (4 << 8) | (sp_memory & 0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (5 << 8) | (sp_stats & 0xFF);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = (6 << 8) | (sp_loadv & 0xFF);
-
-	/* Trigger POST_APPLY (0x0F) */
-	cmd[n++] = NVHOST_OPCODE_SETCLASS(class_id, 0, 0);
-	cmd[n++] = NVHOST_OPCODE_NONINCR(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_POST_APPLY;
-
-	int g0_words = n;
-
-	/* --- G[1]: immediate syncpt incr for stream --- */
-	/* (In kernel we use separate gathers; here we just append since
-	 * userspace submit uses a single cmdbuf anyway) */
-	cmd[n++] = NVHOST_OPCODE_NONINCR(0x000, 1);
-	cmd[n++] = sp_stream & 0xFF; /* cond=0 (immediate) */
-
-	printf("  cmdbuf: G[0]=%d words + G[1]=2 words = %d total, %d relocs\n", g0_words, n, nr);
-
-	/* Read current syncpt values BEFORE submit */
-	uint32_t mem_before = nvhost_read_syncpt(ctrl_fd, sp_memory);
-	uint32_t stats_before = nvhost_read_syncpt(ctrl_fd, sp_stats);
-	uint32_t loadv_before = nvhost_read_syncpt(ctrl_fd, sp_loadv);
-	uint32_t stream_before = nvhost_read_syncpt(ctrl_fd, sp_stream);
-	printf("  syncpt values before: mem=%u stats=%u stream=%u loadv=%u\n",
-	       mem_before, stats_before, stream_before, loadv_before);
-
-	/* Submit with 4 syncpt incrs (memory, stats, loadv, stream) */
-	struct nvhost_syncpt_incr sps[4] = {
-		{ sp_memory, 1 },
-		{ sp_stats, 1 },
-		{ sp_loadv, 1 },
-		{ sp_stream, 1 },
-	};
-
-	if (nvhost_submit(ch_fd, cmdbuf, n, class_id, sps, 4, relocs, nr, shifts, &fence))
-		return -1;
-
-	/* Wait on stream syncpt (the immediate one — should always work) */
-	printf("  Waiting for stream syncpt (immediate) ...\n");
-	int ret = nvhost_wait_syncpt(ctrl_fd, sp_stream, stream_before + 1, 2000);
-	if (ret) {
-		printf("  Stream syncpt TIMEOUT!\n");
-		return -1;
-	}
-
-	/* Now check if conditional syncpts fired */
-	printf("  Checking conditional syncpts ...\n");
-	int mem_ok = (nvhost_wait_syncpt(ctrl_fd, sp_memory, mem_before + 1, 500) == 0);
-	int stats_ok = (nvhost_wait_syncpt(ctrl_fd, sp_stats, stats_before + 1, 500) == 0);
-	int loadv_ok = (nvhost_wait_syncpt(ctrl_fd, sp_loadv, loadv_before + 1, 500) == 0);
-
-	uint32_t mem_after = nvhost_read_syncpt(ctrl_fd, sp_memory);
-	uint32_t stats_after = nvhost_read_syncpt(ctrl_fd, sp_stats);
-	uint32_t loadv_after = nvhost_read_syncpt(ctrl_fd, sp_loadv);
-
-	printf("  Results: memory(cond4)=%s(%u→%u) stats(cond5)=%s(%u→%u) loadv(cond6)=%s(%u→%u)\n",
-	       mem_ok ? "YES" : "NO", mem_before, mem_after,
-	       stats_ok ? "YES" : "NO", stats_before, stats_after,
-	       loadv_ok ? "YES" : "NO", loadv_before, loadv_after);
-
-	if (mem_ok || stats_ok || loadv_ok) {
-		printf("  At least one conditional syncpt fired!\n");
-		check_output(outbuf);
-	}
-
-	return ret;
+	printf("  per-frame: %d words\n", n);
+	return n;
 }
 
 /* ================================================================
@@ -1675,151 +670,236 @@ static int test_D_stock(int ch_fd, int ctrl_fd, struct nvbuf *cmdbuf,
 
 int main(int argc, char **argv)
 {
-	int ch_fd, ctrl_fd;
-	uint32_t syncpt;
-	uint32_t sp_memory, sp_stats, sp_stream, sp_loadv;
-	struct nvbuf cmdbuf, inbuf, outbuf, workbuf;
-	const char *isp_dev = "/dev/nvhost-isp";
-	uint32_t class_id = ISP_A_CLASS;
-	int is_b = 0;
-	uint32_t W, H;
+	int is_b = (argc > 1 && argv[1][0] == 'b');
+	uint32_t class_id = is_b ? ISP_B_CLASS : ISP_A_CLASS;
+	const char *dev_path = is_b ? "/dev/nvhost-isp.1" : "/dev/nvhost-isp.0";
+	const uint32_t *cal_data = is_b ? isp_b_cal_data : isp_a_cal_data;
+	int cal_words = is_b ? (int)(sizeof(isp_b_cal_data)/4) : (int)(sizeof(isp_a_cal_data)/4);
 
-	if (argc > 1 && strcmp(argv[1], "b") == 0) {
-		isp_dev = "/dev/nvhost-isp.1";
-		class_id = ISP_B_CLASS;
-		is_b = 1;
-		printf("Using ISP-B (class 0x%02x)\n", class_id);
-	} else {
-		printf("Using ISP-A (class 0x%02x)\n", class_id);
-	}
+	uint32_t W = is_b ? 2592 : 3280;
+	uint32_t H = is_b ? 1944 : 2460;
+	uint32_t y_stride = (W + 63) & ~63;
+	uint32_t uv_stride = ((W/2) + 63) & ~63;
+	uint32_t out_size = y_stride * H + 2 * uv_stride * (H/2);
 
-	/* Default resolutions */
-	if (is_b) { W = 2592; H = 1944; }
-	else      { W = 3280; H = 2460; }
+	int ch_fd = -1;
+	struct nvbuf cmdbuf = {0}, work_buf = {0}, out_buf = {0}, stats_buf = {0};
+	uint32_t sp_stream = 0, sp_mem = 0, sp_stats = 0, sp_loadv = 0;
+	uint32_t *cmd;
+	int n, err;
 
-	if (argc > 2) {
-		W = atoi(argv[2]);
-		H = (argc > 3) ? atoi(argv[3]) : W;
-	}
-	printf("Resolution: %ux%u\n", W, H);
+	printf("=== ISP Test: ISP-%s (%s) %ux%u ===\n",
+	       is_b ? "B" : "A", dev_path, W, H);
 
 	/* Open nvmap */
 	nvmap_fd = open("/dev/nvmap", O_RDWR);
-	if (nvmap_fd < 0) { perror("open /dev/nvmap"); return 1; }
+	if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
-	/* Open ISP channel */
-	ch_fd = open(isp_dev, O_RDWR);
-	if (ch_fd < 0) { perror("open isp"); return 1; }
-
-	/* Open host1x ctrl */
+	/* Open nvhost ctrl */
 	ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
 	if (ctrl_fd < 0) { perror("open nvhost-ctrl"); return 1; }
 
-	/* Set nvmap fd (legacy, no-op on 24.1 but call for compat) */
-	{
-		struct nvhost_set_nvmap_fd_args nfa = { .fd = nvmap_fd };
-		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &nfa);
-	}
+	/* Open ISP channel */
+	ch_fd = open(dev_path, O_RDWR);
+	if (ch_fd < 0) { perror("open isp"); return 1; }
 
-	/* Get all 4 syncpoints (params 0-3) */
+	/* Set nvmap fd */
 	{
-		struct nvhost_get_param_arg gp;
-		int i;
-		uint32_t *sps[] = { &sp_memory, &sp_stats, &sp_stream, &sp_loadv };
-		const char *names[] = { "memory", "stats", "stream", "loadv" };
-
-		for (i = 0; i < 4; i++) {
-			gp.param = i;
-			gp.value = 0;
-			if (ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp)) {
-				perror("GET_SYNCPOINT");
-				printf("  Failed to get syncpt param %d\n", i);
-				return 1;
-			}
-			*sps[i] = gp.value;
-			printf("ISP syncpt[%d] (%s) = %u\n", i, names[i], gp.value);
+		struct nvhost_set_nvmap_fd_args sn = { .fd = nvmap_fd };
+		if (ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &sn)) {
+			perror("SET_NVMAP_FD"); goto out;
 		}
 	}
 
-	/* Use syncpt[0] (memory) as the primary for init submits,
-	 * matching kernel's use of syncpt_stream (param 2) */
-	syncpt = sp_stream;
+	/* Get syncpoints */
+	{
+		struct nvhost_get_param_arg gp;
+		gp.param = 0; /* first syncpt */
+		if (ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp)) {
+			perror("GET_SYNCPOINT 0"); goto out;
+		}
+		sp_stream = gp.value;
+
+		gp.param = 1;
+		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp);
+		sp_mem = gp.value;
+
+		gp.param = 2;
+		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp);
+		sp_stats = gp.value;
+
+		gp.param = 3;
+		ioctl(ch_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gp);
+		sp_loadv = gp.value;
+	}
+	printf("syncpts: stream=%u mem=%u stats=%u loadv=%u\n",
+	       sp_stream, sp_mem, sp_stats, sp_loadv);
 
 	/* Allocate buffers */
-	printf("\nAllocating buffers...\n");
-	uint32_t cmdbuf_size = 128 * 1024; /* 128KB for init (S1-S5 can be large) */
-	uint32_t in_size = W * H * 2;      /* RAW10 = 2 bpp */
-	uint32_t out_size = W * H * 2;     /* YUV420 ~ 1.5 bpp, 2x safety */
+	printf("Allocating buffers...\n");
+	if (nvbuf_alloc(&cmdbuf, 32768, 4096)) goto out;
+	if (nvbuf_alloc(&work_buf, 512*1024, 4096)) goto out;
+	if (nvbuf_alloc(&out_buf, out_size, 4096)) goto out;
+	if (nvbuf_alloc(&stats_buf, 65536, 4096)) goto out;
 
-	printf("  cmdbuf: %u bytes\n", cmdbuf_size);
-	printf("  input:  %u bytes (%ux%u x 2)\n", in_size, W, H);
-	printf("  output: %u bytes\n", out_size);
-	printf("  workbuf: %u bytes\n", 256 * 1024);
+	memset(work_buf.cpu, 0, work_buf.size);
+	memset(out_buf.cpu, 0xDE, out_buf.size);
+	memset(stats_buf.cpu, 0, stats_buf.size);
 
-	if (nvbuf_alloc(&cmdbuf, cmdbuf_size, 256)) return 1;
-	if (nvbuf_alloc(&inbuf, in_size, 256)) return 1;
-	if (nvbuf_alloc(&outbuf, out_size, 256)) return 1;
-	if (nvbuf_alloc(&workbuf, 256 * 1024, 256)) return 1;
+	cmd = (uint32_t *)cmdbuf.cpu;
 
-	/* ============================================================
-	 * PHASE 1: ISP Init (S1-S5) — exactly matching kernel driver
-	 * ============================================================ */
+	/* ---- Test: minimal submit — just SET_CLASS + syncpt ---- */
+	n = 0;
+	cmd[n++] = OP_SETCLASS(class_id, 0, 0);
 
-	if (isp_init(ch_fd, ctrl_fd, &cmdbuf, &workbuf, class_id, syncpt, is_b)) {
-		printf("\nISP INIT FAILED! Aborting per-frame tests.\n");
-		goto cleanup;
+	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "PING");
+	if (err) {
+		printf("PING FAILED — ISP not responding\n");
+		goto out;
 	}
 
-	/* ============================================================
-	 * PHASE 2: Per-frame submit tests
-	 * ============================================================ */
+	/* ---- S1: zero-init ×2 + 0x018 tails ---- */
+	n = 0;
+	cmd[n++] = OP_SETCLASS(class_id, 0, 0); /* host1x needs class before methods */
+	{
+		int z = build_zero_block(&cmd[n], work_buf.iova);
+		n += z;
+	}
+	cmd[n++] = OP_INCR(0x018, 5);
+	cmd[n++] = 0; cmd[n++] = 0x400; cmd[n++] = 0; cmd[n++] = 0x200; cmd[n++] = 2;
+	{
+		int z = build_zero_block(&cmd[n], work_buf.iova);
+		n += z;
+	}
+	cmd[n++] = OP_INCR(0x018, 5);
+	cmd[n++] = 0x0a00500a; cmd[n++] = 0x00008089;
+	cmd[n++] = 0x013645cb; cmd[n++] = 0x000001e7; cmd[n++] = 1;
 
-	printf("\n========================================\n");
-	printf("PER-FRAME TESTS (after full init)\n");
-	printf("========================================\n");
+	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S1");
+	if (err) goto out;
 
-	/* Test A: no surfaces, just enable+trigger+cond4 */
-	test_A_nosurface(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf, &workbuf);
+	/* ---- S2: zero-block ---- */
+	n = build_zero_block(cmd, work_buf.iova);
 
-	/* Test B: enable=0x03, trigger=0x05, WITH surfaces */
-	test_B_surfaces(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-			&inbuf, &outbuf, &workbuf, W, H);
+	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S2");
+	if (err) goto out;
 
-	/* Test B2: output surfaces only */
-	test_B2_output_only(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-			    &outbuf, &workbuf, W, H);
+	/* ---- S3: SET_CLASS (cond=OP_DONE) ---- */
+	n = 0;
+	cmd[n++] = OP_SETCLASS(class_id, 0, 0);
 
-	/* Test B3: input only */
-	test_B3_input_only(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-			   &inbuf, &workbuf, W, H);
+	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S3");
+	if (err) goto out;
 
-	/* Test B4: skip — already know results */
-	/* test_B4_input_isolation(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-				&inbuf, &workbuf, W, H); */
+	/* ---- S4: zero-block ---- */
+	n = build_zero_block(cmd, work_buf.iova);
 
-	/* Test C: enable=0x07, trigger=0x0F, WITH surfaces (full pipeline) */
-	test_C_full(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-		    &inbuf, &outbuf, &workbuf, W, H);
+	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S4");
+	if (err) goto out;
 
-	/* Test E: Input via method 0x100 (stock streaming path) */
-	test_E_method100(ch_fd, ctrl_fd, syncpt, class_id, &cmdbuf,
-			 &inbuf, &outbuf, &workbuf, W, H);
+	/* ---- S5: runtime config + cal ---- */
+	n = build_s5_runtime(cmd, is_b, work_buf.iova, cal_data, cal_words);
 
-	/* Test D: stock-like per-frame with 4 separate syncpts */
-	test_D_stock(ch_fd, ctrl_fd, &cmdbuf,
-		     &inbuf, &outbuf, &workbuf, W, H,
-		     class_id, sp_memory, sp_stats, sp_stream, sp_loadv);
+	err = submit_and_wait(ch_fd, &cmdbuf, n, sp_stream, "S5");
+	if (err) goto out;
 
-cleanup:
-	/* Cleanup */
-	nvbuf_free(&workbuf);
-	nvbuf_free(&outbuf);
-	nvbuf_free(&inbuf);
+	printf("\n=== ISP init S1-S5 complete ===\n\n");
+
+	/* ---- Per-frame test ---- */
+	printf("Submitting per-frame...\n");
+	{
+		int pf_off, pf_words, g2_off;
+		struct submit_info si;
+
+		/* Build per-frame gather */
+		pf_off = 0;
+		pf_words = build_per_frame(cmd, class_id, W, H,
+					   out_buf.iova, stats_buf.iova,
+					   y_stride, uv_stride,
+					   sp_mem, sp_stats, sp_loadv);
+
+		/* G[1]: immediate syncpt incr */
+		g2_off = pf_words;
+		cmd[g2_off] = OP_SYNCPT_INCR_IMM(sp_stream);
+		cmd[g2_off + 1] = OP_NOOP;
+
+		nvbuf_cache_wb(&cmdbuf);
+		nvbuf_cache_wb(&out_buf);
+
+		memset(&si, 0, sizeof(si));
+		si.ch_fd = ch_fd;
+		si.gathers[0].mem = cmdbuf.dmabuf_fd;
+		si.gathers[0].offset = pf_off * 4;
+		si.gathers[0].words = pf_words;
+		si.gathers[1].mem = cmdbuf.dmabuf_fd;
+		si.gathers[1].offset = g2_off * 4;
+		si.gathers[1].words = 2;
+		si.num_gathers = 2;
+
+		si.syncpts[0].syncpt_id = sp_mem;
+		si.syncpts[0].syncpt_incrs = 1;
+		si.syncpts[1].syncpt_id = sp_stats;
+		si.syncpts[1].syncpt_incrs = 1;
+		si.syncpts[2].syncpt_id = sp_loadv;
+		si.syncpts[2].syncpt_incrs = 1;
+		si.syncpts[3].syncpt_id = sp_stream;
+		si.syncpts[3].syncpt_incrs = 1;
+		si.num_syncpts = 4;
+
+		/* Reloc: patch output Y surface address */
+		si.relocs[0].cmdbuf_mem = cmdbuf.dmabuf_fd;
+		si.relocs[0].cmdbuf_offset = 10 * 4; /* word 10 = Y addr after SET_CLASS+8 output words+INCR */
+		si.relocs[0].target = out_buf.dmabuf_fd;
+		si.relocs[0].target_offset = 0;
+		si.shifts[0].shift = 0;
+		si.num_relocs = 1;
+
+		printf("Per-frame submit (pf=%d words, g2=2 words)...\n", pf_words);
+		if (do_submit(&si)) goto out;
+
+		printf("Waiting for stream syncpt (id=%u, fence=%u)...\n",
+		       sp_stream, si.fences[3]);
+		if (syncpt_wait(sp_stream, si.fences[3], 3000)) {
+			printf("PER-FRAME TIMEOUT\n");
+		} else {
+			printf("PER-FRAME OK!\n");
+		}
+
+		/* Check output */
+		{
+			uint32_t *out32 = (uint32_t *)out_buf.cpu;
+			uint32_t total = out_size / 4;
+			uint32_t nz = 0, dead = 0, zero = 0;
+			uint32_t i;
+			for (i = 0; i < total; i++) {
+				if (out32[i] == 0xDEDEDEDE) dead++;
+				else if (out32[i] == 0) zero++;
+				else nz++;
+			}
+			printf("\nOutput: total=%u dead=0x%x zero=%u nonzero=%u\n",
+			       total, dead, zero, nz);
+			if (nz > 0)
+				printf("  FIRST nonzero: out32[?]=0x%08x\n",
+				       out32[0] != 0xDEDEDEDE && out32[0] != 0 ? out32[0] : out32[1]);
+
+			/* Save to file */
+			FILE *f = fopen("/data/local/tmp/isp_out.raw", "wb");
+			if (f) {
+				fwrite(out_buf.cpu, 1, out_size, f);
+				fclose(f);
+				printf("Saved %u bytes to /data/local/tmp/isp_out.raw\n", out_size);
+			}
+		}
+	}
+
+out:
+	nvbuf_free(&stats_buf);
+	nvbuf_free(&out_buf);
+	nvbuf_free(&work_buf);
 	nvbuf_free(&cmdbuf);
-	close(ctrl_fd);
-	close(ch_fd);
-	close(nvmap_fd);
-
-	printf("\nDone.\n");
+	if (ch_fd >= 0) close(ch_fd);
+	if (ctrl_fd >= 0) close(ctrl_fd);
+	if (nvmap_fd >= 0) close(nvmap_fd);
+	printf("Done.\n");
 	return 0;
 }
