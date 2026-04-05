@@ -607,10 +607,9 @@ static int build_s5_runtime(uint32_t *buf, int is_b, uint32_t work_iova,
 
 static int build_per_frame(uint32_t *buf, uint32_t class_id,
 			   uint32_t W, uint32_t H,
-			   uint32_t out_iova, uint32_t in_iova,
+			   uint32_t out_iova,
 			   uint32_t stats_iova,
 			   uint32_t y_stride, uint32_t uv_stride,
-			   uint32_t in_stride,
 			   uint32_t sp_mem, uint32_t sp_stats, uint32_t sp_loadv)
 {
 	int n = 0;
@@ -643,21 +642,11 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = 0; buf[n++] = 0;
 	buf[n++] = (H << 16) | W;
 
-	/* ISP_ENABLE = 7 (full pipeline, reprocess mode) */
-	buf[n++] = OP_SETCLASS(class_id, 0, 0);
-	buf[n++] = OP_INCR(0x015, 1);
-	buf[n++] = 0x00000007;
+	/* NO ISP_ENABLE — stock never writes 0x015 in per-frame.
+	 * ISP caches enable state from init. */
 
-	/* Input: dims, format, surface, strip, trigger */
-	buf[n++] = OP_SETCLASS(class_id, 0, 0);
-	buf[n++] = OP_INCR(0xE31, 1);
-	buf[n++] = (W & 0x7FFF) | (H << 16);          /* input dims */
-	buf[n++] = OP_INCR(0xE33, 1);
-	buf[n++] = 0x11000020;                          /* RAW Bayer format */
-	buf[n++] = OP_INCR(0xE34, 3);                  /* input plane 0 */
-	buf[n++] = in_iova; buf[n++] = 0; buf[n++] = in_stride;
-	buf[n++] = OP_INCR(0xE32, 1);
-	buf[n++] = (W & 0x3FFF);                       /* strip width = full */
+	/* NO input surface/trigger — stock streaming mode gets data from VI.
+	 * For reprocess: stock uses input surface, but we test without it first. */
 
 	/* Stats */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
@@ -673,15 +662,10 @@ static int build_per_frame(uint32_t *buf, uint32_t class_id,
 	buf[n++] = OP_NONINCR(0x000, 1);
 	buf[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | sp_loadv;
 
-	/* Input trigger = FIRE (must be LAST before control trigger) */
-	buf[n++] = OP_SETCLASS(class_id, 0, 0);
-	buf[n++] = OP_INCR(0xE30, 1);
-	buf[n++] = 1;
-
-	/* Trigger — POST_APPLY for reprocess mode */
+	/* Trigger — RUNTIME (0x05) for streaming, matching stock exactly */
 	buf[n++] = OP_SETCLASS(class_id, 0, 0);
 	buf[n++] = OP_NONINCR(0x00C, 1);
-	buf[n++] = ISP_TRIGGER_POST_APPLY;
+	buf[n++] = ISP_TRIGGER_RUNTIME;
 
 	printf("  per-frame (reprocess): %d words\n", n);
 	return n;
@@ -861,10 +845,9 @@ int main(int argc, char **argv)
 		/* Build per-frame gather */
 		pf_off = 0;
 		pf_words = build_per_frame(cmd, class_id, W, H,
-					   out_buf.iova, in_buf.iova,
+					   out_buf.iova,
 					   stats_buf.iova,
 					   y_stride, uv_stride,
-					   in_stride,
 					   sp_mem, sp_stats, sp_loadv);
 
 		/* G[1]: immediate syncpt incr */
