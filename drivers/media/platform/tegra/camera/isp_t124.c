@@ -978,18 +978,37 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		return err;
 	}
 
-	/* Wait on stream syncpt (SP[3]) */
+	/* Save fence for wait phase */
+	isp->frame_fence_id = job->sp[3].id;
+	isp->frame_fence_val = job->sp[3].fence;
+
+	nvhost_job_put(job);
+	return 0;
+}
+EXPORT_SYMBOL(isp_t124_process_frame);
+
+/*
+ * isp_t124_wait_frame() - Wait for ISP frame completion
+ *
+ * Call after VI capture done to wait for ISP to finish processing.
+ */
+int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
+{
+	int err;
+
+	if (!isp->streaming)
+		return -ENODEV;
+
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
-			job->sp[3].id, job->sp[3].fence,
+			isp->frame_fence_id, isp->frame_fence_val,
 			msecs_to_jiffies(500), NULL, NULL);
 	if (err)
 		dev_err(&isp->pdev->dev, "ISP frame timeout: %d\n", err);
 
-	nvhost_job_put(job);
 	nvhost_module_idle(isp->pdev);
 	return err;
 }
-EXPORT_SYMBOL(isp_t124_process_frame);
+EXPORT_SYMBOL(isp_t124_wait_frame);
 
 /* ----------------------------------------------------------------
  * debugfs

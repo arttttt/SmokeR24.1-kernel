@@ -48,6 +48,10 @@ struct tegra_isp_t124 {
 	dma_addr_t cmdbuf_phys;
 	bool streaming;                 /* stream_init called */
 
+	/* Per-frame fence (set by process_frame, used by wait_frame) */
+	u32 frame_fence_id;
+	u32 frame_fence_val;
+
 	/* Frame dimensions (set during stream_init) */
 	u32 width;
 	u32 height;
@@ -71,6 +75,7 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp);
 int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 			   dma_addr_t out_dma, dma_addr_t stats_dma,
 			   u32 vi_syncpt, u32 vi_thresh);
+int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */
 

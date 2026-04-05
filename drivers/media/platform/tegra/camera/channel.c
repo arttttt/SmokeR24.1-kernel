@@ -973,6 +973,19 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		}
 	}
 
+	/* ISP streaming: submit ISP per-frame BEFORE VI trigger so ISP is
+	 * armed and ready to receive pixels via hardware path */
+	if (chan->use_isp) {
+		int isp_err = isp_t124_process_frame(chan->isp,
+				chan->isp_out_dma,
+				chan->isp->work_buf.dma,
+				chan->syncpt[0],
+				thresh[0]);
+		if (isp_err)
+			dev_err(&chan->video.dev,
+				"ISP pre-submit failed: %d\n", isp_err);
+	}
+
 	/* Ensure all CSI ports are ready with setup to avoid timing issue */
 	for (index = 0; index < valid_ports; index++) {
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC)
@@ -1057,36 +1070,26 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		}
 	}
 
-	/* ISP processing: raw → YUV */
+	/* ISP: wait for frame processing completion */
 	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
-		u32 *raw32 = (u32 *)chan->isp_raw_cpu;
-		int isp_err;
-
-		dev_info(&chan->video.dev,
-			 "raw buf check: [0]=0x%08x [1]=0x%08x [100]=0x%08x [1000]=0x%08x\n",
-			 raw32[0], raw32[1], raw32[100], raw32[1000]);
-
-		/* Copy raw to userspace first (test: VI→ISP domain) */
-		{
-			void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
-			size_t copy_sz = min_t(size_t,
-				vb2_plane_size(vb, 0),
-				PAGE_ALIGN(chan->isp_raw_size));
-			if (vb2_vaddr)
-				memcpy(vb2_vaddr, chan->isp_raw_cpu, copy_sz);
-		}
-
-		/* ISP streaming mode — no input surface, VI feeds ISP via HW */
-		isp_err = isp_t124_process_frame(chan->isp,
-				chan->isp_out_dma,
-				chan->isp->work_buf.dma,
-				chan->syncpt[0],
-				thresh[0]);
-		if (isp_err) {
+		int isp_err = isp_t124_wait_frame(chan->isp);
+		if (isp_err)
 			dev_err(&chan->video.dev,
-				"ISP process_frame failed: %d\n", isp_err);
-		} else {
-			/* Scan ISP output for any non-zero data */
+				"ISP wait_frame failed: %d\n", isp_err);
+	}
+
+	/* ISP output check (ISP was submitted before VI trigger) */
+	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
+		/* Copy ISP output to userspace V4L2 buffer */
+		void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
+		size_t copy_sz = min_t(size_t,
+			vb2_plane_size(vb, 0),
+			PAGE_ALIGN(chan->isp_out_size));
+		if (vb2_vaddr)
+			memcpy(vb2_vaddr, chan->isp_out_cpu, copy_sz);
+
+		/* Scan ISP output for any non-zero data */
+		{
 			u32 *out32 = (u32 *)chan->isp_out_cpu;
 			u32 total = chan->isp_out_size / 4;
 			u32 nz = 0, first_nz = 0;
