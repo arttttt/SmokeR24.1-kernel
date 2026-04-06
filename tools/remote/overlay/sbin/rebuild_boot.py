@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-"""Rebuild boot.img with new ramdisk and trampoline version marker.
-Compatible with Python 2.6+ and Python 3.x.
-"""
+# Rebuild boot.img with new ramdisk and trampoline version marker.
+# Compatible with Python 2.6+, Python 3.x, and MicroPython.
 import struct
 import sys
 
@@ -27,19 +26,27 @@ s_off = r_off + pa(rs)
 d_off = s_off + pa(ss)
 
 kernel = boot[k_off:k_off + ks]
-dt = boot[d_off:d_off + ds] if ds > 0 else b''
+if ds > 0:
+    dt = boot[d_off:d_off + ds]
+else:
+    dt = b''
 
 hdr = bytearray(boot[:ps])
 struct.pack_into('<I', hdr, 16, len(new_rd))
-name = ('tr_ver%d' % tr_ver).encode('ascii')
+name = 'tr_ver%d' % tr_ver
 for i in range(16):
-    hdr[48 + i] = name[i] if i < len(name) else 0
+    if i < len(name):
+        hdr[48 + i] = ord(name[i])
+    else:
+        hdr[48 + i] = 0
 
 out = bytes(hdr)
-out += kernel + b'\x00' * (pa(ks) - ks)
-out += new_rd + b'\x00' * (pa(len(new_rd)) - len(new_rd))
+out = out + kernel + b'\x00' * (pa(ks) - ks)
+out = out + new_rd + b'\x00' * (pa(len(new_rd)) - len(new_rd))
 if ds > 0:
-    out += dt + b'\x00' * (pa(ds) - ds)
+    out = out + dt + b'\x00' * (pa(ds) - ds)
 
-open(out_path, 'wb').write(out)
+f = open(out_path, 'wb')
+f.write(out)
+f.close()
 print('OK size=%d tr_ver=%d' % (len(out), tr_ver))

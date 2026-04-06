@@ -65,6 +65,12 @@ patch_ramdisk() {
     chmod 755 sbin/busybox
     ln -sf busybox sbin/telnetd
 
+    # Add micropython if available
+    if [ -f "${SCRIPT_DIR}/bin/micropython-armv7l" ]; then
+        cp "${SCRIPT_DIR}/bin/micropython-armv7l" sbin/micropython
+        chmod 755 sbin/micropython
+    fi
+
     # Add kexec if available
     if [ -f "$CACHE_DIR/kexec" ]; then
         cp "$CACHE_DIR/kexec" sbin/kexec
