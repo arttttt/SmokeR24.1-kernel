@@ -84,8 +84,10 @@ cmd_push() {
 }
 
 cmd_flash() {
-    [ $# -ge 1 ] || die "Usage: mocha-remote flash <boot.img>"
+    [ $# -ge 1 ] || die "Usage: mocha-remote flash <boot.img> [--no-inject]"
     local img="$1"
+    local no_inject=0
+    [ "${2:-}" = "--no-inject" ] && no_inject=1
     [ -f "$img" ] || die "File not found: $img"
     local size
     size=$(stat -f%z "$img" 2>/dev/null || stat -c%s "$img" 2>/dev/null)
@@ -97,9 +99,24 @@ cmd_flash() {
     echo "[*] Flashing to $BOOT_PARTITION..."
     remote_cmd "dd if=$remote_path of=$BOOT_PARTITION bs=4096 && sync"
 
+    # Inject multirom trampoline if multirom is installed
+    if [ "$no_inject" -eq 0 ]; then
+        echo "[*] Checking for MultiROM..."
+        local has_mrom
+        has_mrom=$(remote_cmd "[ -f /data/media/0/multirom/trampoline ] && echo yes || echo no")
+        if [ "$has_mrom" = "yes" ]; then
+            echo "[*] Injecting MultiROM trampoline..."
+            inject_multirom_trampoline
+        fi
+    fi
+
     echo "[*] Rebooting..."
     remote_cmd_async "reboot"
     echo "[+] Done. Device is rebooting."
+}
+
+inject_multirom_trampoline() {
+    remote_cmd 'BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART='"${BOOT_PARTITION}"';rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/boot.img bs=4096 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$TMP/boot.img bs=1 skip=$RO count=$RS of=$TMP/ramdisk.gz 2>/dev/null;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;$BB find .|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;python /sbin/rebuild_boot.py $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK'
 }
 
 cmd_kexec() {
