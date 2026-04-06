@@ -5,52 +5,95 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>mocha-remote</title>
 <style>
+:root{--bg:#111;--bg2:#1a1a1a;--bg3:#222;--border:#333;--text:#ccc;--dim:#666;--accent:#4fc3f7;--danger:#ef5350;--ok:#66bb6a;--radius:6px}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{font-family:monospace;background:#1a1a2e;color:#e0e0e0;padding:8px;display:flex;flex-direction:column}
-h1{font-size:14px;color:#0ff;margin-bottom:8px}
-.tabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
-.tab{padding:4px 12px;background:#16213e;border:1px solid #333;cursor:pointer;font-size:12px;color:#aaa}
-.tab.active{background:#0f3460;color:#0ff;border-color:#0ff}
-.panel{display:none;flex-direction:column;gap:8px;flex:1;min-height:0}
+body{font-family:-apple-system,system-ui,monospace;background:var(--bg);color:var(--text);display:flex;flex-direction:column;font-size:14px}
+
+/* Header */
+.header{padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
+.header h1{font-size:16px;color:var(--accent);font-weight:600}
+.header .chip{font-size:11px;padding:2px 8px;background:var(--bg3);border-radius:10px;color:var(--dim)}
+
+/* Tabs */
+.tabs{display:flex;border-bottom:1px solid var(--border)}
+.tab{padding:10px 20px;cursor:pointer;color:var(--dim);font-size:13px;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Panels */
+.panel{display:none;flex-direction:column;flex:1;min-height:0;padding:12px 16px;gap:10px}
 .panel.active{display:flex}
-#terminal-output{background:#0a0a1a;border:1px solid #333;padding:8px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:12px;word-break:break-all}
-#cmd-input{background:#16213e;border:1px solid #333;color:#0ff;padding:6px;font-family:monospace;font-size:13px;width:100%}
-.btn{padding:5px 14px;background:#0f3460;border:1px solid #0ff;color:#0ff;cursor:pointer;font-family:monospace;font-size:12px}
-.btn:hover{background:#1a5276}
-.btn.danger{border-color:#e74c3c;color:#e74c3c}
-.btn.danger:hover{background:#4a1a1a}
-.btn.small{padding:2px 8px;font-size:11px}
+
+/* Buttons */
+.btn{padding:8px 18px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px;border-radius:var(--radius);transition:all .15s}
+.btn:hover{background:#2a2a2a;border-color:var(--accent)}
+.btn.primary{background:#1565c0;border-color:#1565c0;color:#fff}
+.btn.primary:hover{background:#1976d2}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn.danger:hover{background:#2a1515}
+
+/* Inputs */
+.input{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:13px;border-radius:var(--radius);outline:none}
+.input:focus{border-color:var(--accent)}
+
+/* Layout helpers */
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.input{background:#16213e;border:1px solid #333;color:#e0e0e0;padding:5px;font-family:monospace;font-size:12px}
-.input:focus{border-color:#0ff;outline:none}
-.info-grid{display:grid;grid-template-columns:120px 1fr;gap:4px;font-size:12px}
-.info-grid .label{color:#888}
-.log{background:#0a0a1a;border:1px solid #333;padding:8px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:11px}
-.status{font-size:11px;color:#888;margin-top:4px}
-.drop-zone{border:2px dashed #333;padding:12px;text-align:center;cursor:pointer;font-size:12px;color:#888}
-.drop-zone.dragover{border-color:#0ff;color:#0ff}
-.drop-zone.has-file{border-color:#2ecc71;color:#2ecc71}
-input[type=file]{display:none}
-#dmesg-output{flex:1;min-height:0}
-/* File manager */
-.fm{flex:1;display:flex;flex-direction:column;min-height:0}
-.fm-path{display:flex;gap:4px;align-items:center}
-.fm-list{flex:1;min-height:0;overflow-y:auto;background:#0a0a1a;border:1px solid #333}
-.fm-item{padding:4px 8px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #111}
-.fm-item:hover{background:#16213e}
-.fm-item .icon{color:#0ff;width:16px}
-.fm-item .name{flex:1}
-.fm-item .size{color:#666;font-size:11px}
-.fm-item .actions{display:flex;gap:4px}
-.fm-preview{background:#0a0a1a;border:1px solid #333;padding:8px;max-height:30vh;overflow-y:auto;white-space:pre-wrap;font-size:11px}
+.flex1{flex:1}
+
+/* Terminal */
+#terminal-output{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:13px;font-family:monospace;word-break:break-all;line-height:1.5}
+#cmd-input{width:100%;font-family:monospace}
+
+/* Logs */
+.log{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:12px;font-family:monospace;line-height:1.4}
+
+/* Info */
+.info-grid{display:grid;grid-template-columns:140px 1fr;gap:8px;font-size:13px}
+.info-grid .label{color:var(--dim)}
+
+/* Context menu */
+.ctx-menu{position:fixed;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:4px 0;min-width:160px;z-index:100;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.ctx-menu .ctx-item{padding:8px 16px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px}
+.ctx-menu .ctx-item:hover{background:var(--bg3)}
+.ctx-menu .ctx-item.danger{color:var(--danger)}
+.ctx-menu .ctx-sep{border-top:1px solid var(--border);margin:4px 0}
+.ctx-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:99}
+
+/* File Manager */
+.fm{flex:1;display:flex;flex-direction:column;min-height:0;gap:8px}
+.fm-toolbar{display:flex;gap:8px;align-items:center}
+.fm-list{flex:1;min-height:0;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)}
+.fm-item{padding:8px 12px;cursor:default;font-size:13px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #1a1a1a;user-select:none}
+.fm-item:hover{background:var(--bg3)}
+.fm-item.dir{cursor:pointer}
+.fm-icon{width:20px;text-align:center;font-size:16px}
+.fm-name{flex:1}
+.fm-size{color:var(--dim);font-size:12px;min-width:80px;text-align:right}
+.fm-date{color:var(--dim);font-size:12px;min-width:100px;text-align:right}
+.fm-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:16px;text-align:center;color:var(--dim);cursor:pointer;transition:all .15s}
+.fm-drop:hover,.fm-drop.dragover{border-color:var(--accent);color:var(--accent)}
+.fm-preview{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;max-height:30vh;overflow-y:auto;white-space:pre-wrap;font-size:12px;font-family:monospace}
+
 /* Boot */
-.boot-section{border:1px solid #222;padding:8px;display:flex;flex-direction:column;gap:8px}
-.boot-section h3{font-size:12px;color:#888}
+.boot-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:10px}
+.boot-card h3{font-size:13px;color:var(--dim);font-weight:normal;text-transform:uppercase;letter-spacing:1px}
+.file-chip{display:inline-flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;font-size:12px}
+.file-chip .clear{cursor:pointer;color:var(--dim);font-size:16px}
+.file-chip .clear:hover{color:var(--danger)}
+
+.status{font-size:12px;color:var(--dim)}
+input[type=file]{display:none}
+select.input{appearance:auto}
 </style>
 </head>
 <body>
-<h1>mocha-remote // <span id="dev-name">connecting...</span></h1>
+
+<div class="header">
+<h1>mocha-remote</h1>
+<span id="dev-name" class="chip">...</span>
+</div>
+
 <div class="tabs">
 <div class="tab active" onclick="showTab('terminal')">Terminal</div>
 <div class="tab" onclick="showTab('dmesg')">dmesg</div>
@@ -63,7 +106,7 @@ input[type=file]{display:none}
 <div id="terminal" class="panel active">
 <div id="terminal-output"></div>
 <form onsubmit="runCmd();return false">
-<input id="cmd-input" class="input" placeholder="# command" autofocus style="width:100%">
+<input id="cmd-input" class="input" placeholder="$ enter command..." autofocus style="width:100%;font-family:monospace">
 </form>
 </div>
 
@@ -71,9 +114,9 @@ input[type=file]{display:none}
 <div id="dmesg" class="panel">
 <div class="row">
 <button class="btn" onclick="loadDmesg()">Refresh</button>
-<button class="btn" onclick="tailDmesg()">Tail -f</button>
+<button class="btn" onclick="tailDmesg()">Auto-refresh</button>
 <button class="btn" onclick="stopTail()">Stop</button>
-<input id="dmesg-filter" class="input" placeholder="filter...">
+<input id="dmesg-filter" class="input flex1" placeholder="grep filter...">
 </div>
 <div id="dmesg-output" class="log"></div>
 </div>
@@ -81,56 +124,70 @@ input[type=file]{display:none}
 <!-- Files -->
 <div id="files" class="panel">
 <div class="fm">
-<div class="fm-path row">
-<button class="btn small" onclick="fmUp()">../</button>
-<input id="fm-cwd" class="input" value="/sdcard/" style="flex:1" onkeydown="if(event.key==='Enter')fmGo()">
-<button class="btn small" onclick="fmGo()">Go</button>
-<button class="btn small" onclick="fmMkdir()">mkdir</button>
+<div class="fm-toolbar">
+<button class="btn" onclick="fmUp()">Up</button>
+<input id="fm-cwd" class="input flex1" value="/sdcard/" onkeydown="if(event.key==='Enter')fmGo()">
+<button class="btn" onclick="fmGo()">Go</button>
+<button class="btn" onclick="fmMkdir()">New folder</button>
 </div>
-<div class="fm-list" id="fm-list"></div>
-<div class="row" style="margin-top:4px">
-<div class="drop-zone" id="fm-drop" onclick="document.getElementById('fm-file-input').click()" style="flex:1">
-Drop file or click to upload to current directory
+<div class="fm-list" id="fm-list" oncontextmenu="return false"></div>
+<div class="fm-drop" id="fm-drop" onclick="document.getElementById('fm-file-input').click()">
+Drop files here or click to upload
 <input type="file" id="fm-file-input" onchange="fmUpload()" multiple>
 </div>
-</div>
 <div id="fm-status" class="status"></div>
-<div id="fm-preview-wrap" style="display:none;margin-top:4px">
-<div class="row"><span id="fm-preview-name" style="flex:1;font-size:11px;color:#0ff"></span><button class="btn small" onclick="fmClosePreview()">Close</button></div>
-<div id="fm-preview" class="fm-preview"></div>
+<div id="fm-preview-wrap" style="display:none">
+<div class="row"><span id="fm-preview-name" style="flex:1;color:var(--accent)"></span><button class="btn" onclick="fmClosePreview()">Close</button></div>
+<div id="fm-preview" class="fm-preview" style="margin-top:6px"></div>
 </div>
 </div>
 </div>
 
 <!-- Boot -->
 <div id="boot" class="panel">
-<div class="boot-section">
-<h3>Upload + Flash / Kexec</h3>
+<div class="boot-card">
+<h3>Upload from computer</h3>
 <div class="row">
-<div class="drop-zone" id="boot-drop" onclick="document.getElementById('boot-file-input').click()" style="flex:1">
-Drop boot.img or click to select
+<div class="fm-drop flex1" id="boot-drop" onclick="document.getElementById('boot-file-input').click()">
+<span id="boot-drop-text">Drop boot.img here or click to select</span>
 <input type="file" id="boot-file-input" onchange="bootFileSelected()" accept=".img,.bin">
 </div>
 </div>
-<div class="row">
-<span style="font-size:11px;color:#888">Device path:</span>
-<input id="boot-device-path" class="input" value="/data/local/tmp/boot.img" style="flex:1">
+<div id="boot-file-chip" style="display:none">
+<span class="file-chip">
+<span id="boot-file-name"></span>
+<span class="clear" onclick="bootFileClear()">&times;</span>
+</span>
 </div>
 <div class="row">
-<button class="btn" onclick="bootUploadAndKexec()">Upload + Kexec</button>
-<button class="btn danger" onclick="bootUploadAndFlash()">Upload + Flash LNX</button>
+<span class="status">Upload to:</span>
+<input id="boot-device-path" class="input flex1" value="/data/local/tmp/boot.img">
+</div>
+<div class="row">
+<span class="status">Partition:</span>
+<select id="boot-partition" class="input">
+<option value="/dev/block/platform/sdhci-tegra.3/by-name/LNX">LNX (boot)</option>
+<option value="/dev/block/platform/sdhci-tegra.3/by-name/SOS">SOS (recovery)</option>
+<option value="/dev/block/platform/sdhci-tegra.3/by-name/TOS">TOS (trusted os)</option>
+</select>
+</div>
+<div class="row">
+<button class="btn primary" onclick="bootUploadAndKexec()">Upload + Kexec</button>
+<button class="btn danger" onclick="bootUploadAndFlash()">Upload + Flash</button>
 <span id="boot-upload-status" class="status"></span>
 </div>
 </div>
-<div class="boot-section">
-<h3>Device files</h3>
+
+<div class="boot-card">
+<h3>From device</h3>
 <div class="row">
-<input id="boot-existing" class="input" placeholder="/sdcard/boot.img" style="flex:1">
-<button class="btn" onclick="bootKexecExisting()">Kexec</button>
-<button class="btn danger" onclick="bootFlashExisting()">Flash LNX</button>
+<input id="boot-existing" class="input flex1" placeholder="/sdcard/boot.img">
+<button class="btn primary" onclick="bootKexecExisting()">Kexec</button>
+<button class="btn danger" onclick="bootFlashExisting()">Flash</button>
 </div>
 </div>
-<div class="boot-section">
+
+<div class="boot-card">
 <h3>System</h3>
 <div class="row">
 <button class="btn" onclick="doReboot()">Reboot</button>
@@ -138,7 +195,26 @@ Drop boot.img or click to select
 <button class="btn" onclick="doReboot('bootloader')">Bootloader</button>
 </div>
 </div>
-<div id="boot-log" class="log" style="margin-top:8px"></div>
+<div class="boot-card">
+<h3>Partition Dump</h3>
+<div class="row">
+<select id="dump-partition" class="input">
+<option value="LNX">LNX (boot)</option>
+<option value="SOS">SOS (recovery)</option>
+<option value="TOS">TOS (trusted os)</option>
+<option value="APP">APP (system)</option>
+<option value="UDA">UDA (data)</option>
+<option value="CAC">CAC (cache)</option>
+<option value="MSC">MSC (misc)</option>
+<option value="USP">USP (staging)</option>
+<option value="MDA">MDA (metadata)</option>
+</select>
+<button class="btn" onclick="dumpPartition()">Dump + Download</button>
+<button class="btn" onclick="dumpToSdcard()">Dump to /sdcard</button>
+<span id="dump-status" class="status"></span>
+</div>
+</div>
+<div id="boot-log" class="log" style="max-height:30vh"></div>
 </div>
 
 <!-- Info -->
@@ -147,258 +223,271 @@ Drop boot.img or click to select
 <div id="info-grid" class="info-grid"></div>
 </div>
 
+<!-- Context Menu -->
+<div id="ctx-overlay" class="ctx-overlay" style="display:none" onclick="ctxHide()"></div>
+<div id="ctx-menu" class="ctx-menu" style="display:none"></div>
+
 <script>
-var BASE = location.origin;
-var tailTimer = null;
-var cmdHistory = [];
-var histIdx = -1;
-var bootFile = null;
+var BASE=location.origin,tailTimer=null,cmdHistory=[],histIdx=-1,bootFile=null,ctxTarget=null;
 
-function api(cmd, cb) {
-  var x = new XMLHttpRequest();
-  x.open('POST', BASE + '/cgi-bin/cmd');
-  x.timeout = 30000;
-  x.onload = function() { cb && cb(x.responseText); };
-  x.onerror = function() { cb && cb('[connection error]'); };
-  x.ontimeout = function() { cb && cb('[timeout]'); };
-  x.send(cmd);
-}
+function api(cmd,cb){var x=new XMLHttpRequest();x.open('POST',BASE+'/cgi-bin/cmd');x.timeout=30000;x.onload=function(){cb&&cb(x.responseText)};x.onerror=function(){cb&&cb('[connection error]')};x.ontimeout=function(){cb&&cb('[timeout]')};x.send(cmd)}
+function upload(file,dest,cb,pcb){var x=new XMLHttpRequest();x.open('POST',BASE+'/cgi-bin/upload?path='+encodeURIComponent(dest));x.onload=function(){cb&&cb(x.responseText)};x.onerror=function(){cb&&cb('[error]')};if(pcb)x.upload.onprogress=function(e){if(e.lengthComputable)pcb(Math.round(e.loaded/e.total*100))};x.send(file)}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
 
-function upload(file, dest, cb, progressCb) {
-  var x = new XMLHttpRequest();
-  x.open('POST', BASE + '/cgi-bin/upload?path=' + encodeURIComponent(dest));
-  x.onload = function() { cb && cb(x.responseText); };
-  x.onerror = function() { cb && cb('[upload error]'); };
-  if (progressCb) x.upload.onprogress = function(e) {
-    if (e.lengthComputable) progressCb(Math.round(e.loaded/e.total*100));
-  };
-  x.send(file);
-}
-
-function showTab(name) {
-  document.querySelectorAll('.tab').forEach(function(t,i) {
-    var panels = ['terminal','dmesg','files','boot','info'];
-    t.className = 'tab' + (panels[i] === name ? ' active' : '');
-  });
-  document.querySelectorAll('.panel').forEach(function(p) {
-    p.className = 'panel' + (p.id === name ? ' active' : '');
-  });
-  if (name === 'dmesg') loadDmesg();
-  if (name === 'info') loadInfo();
-  if (name === 'files') fmGo();
+function showTab(n){
+  var names=['terminal','dmesg','files','boot','info'];
+  document.querySelectorAll('.tab').forEach(function(t,i){t.className='tab'+(names[i]===n?' active':'')});
+  document.querySelectorAll('.panel').forEach(function(p){p.className='panel'+(p.id===n?' active':'')});
+  if(n==='dmesg')loadDmesg();if(n==='info')loadInfo();if(n==='files')fmGo();
 }
 
 // === Terminal ===
-var termOut = document.getElementById('terminal-output');
-var cmdInput = document.getElementById('cmd-input');
-cmdInput.addEventListener('keydown', function(e) {
-  if (e.key === 'ArrowUp') { e.preventDefault(); if (histIdx < cmdHistory.length-1) cmdInput.value = cmdHistory[++histIdx]; }
-  if (e.key === 'ArrowDown') { e.preventDefault(); histIdx > 0 ? cmdInput.value = cmdHistory[--histIdx] : (histIdx=-1, cmdInput.value=''); }
+var termOut=document.getElementById('terminal-output'),cmdInput=document.getElementById('cmd-input');
+cmdInput.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'){e.preventDefault();if(histIdx<cmdHistory.length-1)cmdInput.value=cmdHistory[++histIdx]}
+  if(e.key==='ArrowDown'){e.preventDefault();histIdx>0?cmdInput.value=cmdHistory[--histIdx]:(histIdx=-1,cmdInput.value='')}
 });
-function runCmd() {
-  var cmd = cmdInput.value; if (!cmd) return;
-  cmdHistory.unshift(cmd); histIdx = -1;
-  termOut.textContent += '$ ' + cmd + '\n'; cmdInput.value = '';
-  api(cmd, function(r) { termOut.textContent += r + '\n'; termOut.scrollTop = termOut.scrollHeight; });
-}
+function runCmd(){var c=cmdInput.value;if(!c)return;cmdHistory.unshift(c);histIdx=-1;termOut.textContent+='$ '+c+'\n';cmdInput.value='';api(c,function(r){termOut.textContent+=r+'\n';termOut.scrollTop=termOut.scrollHeight})}
 
 // === dmesg ===
-function loadDmesg() {
-  var f = document.getElementById('dmesg-filter').value;
-  api(f ? 'dmesg | grep -i "' + f + '"' : 'dmesg', function(r) {
-    var el = document.getElementById('dmesg-output'); el.textContent = r; el.scrollTop = el.scrollHeight;
+function loadDmesg(){var f=document.getElementById('dmesg-filter').value;api(f?'dmesg|grep -i "'+f+'"':'dmesg',function(r){var el=document.getElementById('dmesg-output');el.textContent=r;el.scrollTop=el.scrollHeight})}
+function tailDmesg(){stopTail();tailTimer=setInterval(loadDmesg,2000)}
+function stopTail(){if(tailTimer){clearInterval(tailTimer);tailTimer=null}}
+
+// === Context Menu ===
+function ctxShow(x,y,items){
+  var m=document.getElementById('ctx-menu'),o=document.getElementById('ctx-overlay');
+  var h='';items.forEach(function(it){
+    if(it==='-')h+='<div class="ctx-sep"></div>';
+    else h+='<div class="ctx-item'+(it.danger?' danger':'')+'" onclick="ctxHide();('+it.fn+')()">'+(it.icon||'')+' '+it.label+'</div>';
   });
+  m.innerHTML=h;m.style.left=Math.min(x,window.innerWidth-180)+'px';m.style.top=Math.min(y,window.innerHeight-items.length*36)+'px';
+  m.style.display='block';o.style.display='block';
 }
-function tailDmesg() { stopTail(); tailTimer = setInterval(loadDmesg, 2000); }
-function stopTail() { if (tailTimer) { clearInterval(tailTimer); tailTimer = null; } }
+function ctxHide(){document.getElementById('ctx-menu').style.display='none';document.getElementById('ctx-overlay').style.display='none'}
 
 // === File Manager ===
-var fmDrop = document.getElementById('fm-drop');
-['dragenter','dragover'].forEach(function(e) { fmDrop.addEventListener(e, function(ev) { ev.preventDefault(); fmDrop.classList.add('dragover'); }); });
-['dragleave','drop'].forEach(function(e) { fmDrop.addEventListener(e, function(ev) { ev.preventDefault(); fmDrop.classList.remove('dragover'); }); });
-fmDrop.addEventListener('drop', function(e) { document.getElementById('fm-file-input').files = e.dataTransfer.files; fmUpload(); });
+var fmDrop=document.getElementById('fm-drop');
+['dragenter','dragover'].forEach(function(e){fmDrop.addEventListener(e,function(ev){ev.preventDefault();fmDrop.classList.add('dragover')})});
+['dragleave','drop'].forEach(function(e){fmDrop.addEventListener(e,function(ev){ev.preventDefault();fmDrop.classList.remove('dragover')})});
+fmDrop.addEventListener('drop',function(e){document.getElementById('fm-file-input').files=e.dataTransfer.files;fmUpload()});
 
-function fmGo(path) {
-  var cwd = path || document.getElementById('fm-cwd').value;
-  if (!cwd.endsWith('/')) cwd += '/';
-  document.getElementById('fm-cwd').value = cwd;
-  api('ls -la "' + cwd + '" 2>&1', function(r) {
-    var list = document.getElementById('fm-list');
-    list.innerHTML = '';
-    r.split('\n').forEach(function(line) {
-      if (!line || line.startsWith('total')) return;
-      var parts = line.split(/\s+/);
-      if (parts.length < 7) return;
-      var perm = parts[0], size = parts[3] || parts[4], name = parts[parts.length-1];
-      if (name === '.' || name === '..') return;
-      var isDir = perm.charAt(0) === 'd';
-      var isLink = perm.charAt(0) === 'l';
-      var item = document.createElement('div');
-      item.className = 'fm-item';
-      item.innerHTML = '<span class="icon">' + (isDir ? 'd' : isLink ? 'l' : '-') + '</span>' +
-        '<span class="name">' + esc(name) + '</span>' +
-        '<span class="size">' + (isDir ? '' : size) + '</span>' +
-        '<span class="actions">' +
-        (isDir ? '' : '<button class="btn small" onclick="fmView(\'' + esc2(cwd + name) + '\')">view</button>') +
-        '<button class="btn small" onclick="fmDownload(\'' + esc2(cwd + name) + '\')">dl</button>' +
-        '<button class="btn small danger" onclick="fmDelete(\'' + esc2(cwd + name) + '\')">rm</button>' +
-        '</span>';
-      if (isDir) item.ondblclick = function() { fmGo(cwd + name + '/'); };
+function fmGo(path){
+  var cwd=path||document.getElementById('fm-cwd').value;
+  if(!cwd.endsWith('/'))cwd+='/';
+  document.getElementById('fm-cwd').value=cwd;
+  api('ls -la "'+cwd+'" 2>&1',function(r){
+    var list=document.getElementById('fm-list'),dirs=[],files=[];
+    r.split('\n').forEach(function(line){
+      if(!line||line.startsWith('total'))return;
+      var p=line.split(/\s+/);if(p.length<7)return;
+      var perm=p[0],name=p[p.length-1];
+      if(name==='.'||name==='..')return;
+      var isDir=perm[0]==='d',isLink=perm[0]==='l';
+      // Parse size and date from ls output
+      var size='',date='';
+      if(p.length>=7){date=p[p.length-3]+' '+p[p.length-2];size=isDir?'':p[p.length-4]||''}
+      var entry={name:name,isDir:isDir,isLink:isLink,perm:perm,size:size,date:date,path:cwd+name};
+      isDir?dirs.push(entry):files.push(entry);
+    });
+    list.innerHTML='';
+    dirs.concat(files).forEach(function(e){
+      var item=document.createElement('div');
+      item.className='fm-item'+(e.isDir?' dir':'');
+      item.innerHTML='<span class="fm-icon">'+(e.isDir?'\uD83D\uDCC1':e.isLink?'\uD83D\uDD17':'\uD83D\uDCC4')+'</span>'
+        +'<span class="fm-name">'+esc(e.name)+'</span>'
+        +'<span class="fm-size">'+esc(e.size)+'</span>'
+        +'<span class="fm-date">'+esc(e.date)+'</span>';
+      if(e.isDir)item.ondblclick=function(){fmGo(e.path+'/')};
+      item.oncontextmenu=function(ev){
+        ev.preventDefault();ctxTarget=e;
+        var items=[];
+        if(e.isDir){
+          items.push({label:'Open',fn:'fmGo("'+e.path+'/")'},'-');
+        }else{
+          items.push({label:'View',fn:'fmView("'+e.path+'")'});
+          items.push({label:'Download',fn:'fmDownload("'+e.path+'")'});
+          items.push('-');
+          items.push({label:'Use as boot.img',fn:'fmUseAsBoot("'+e.path+'")'});
+          items.push('-');
+        }
+        items.push({label:'Rename',fn:'fmRename("'+e.path+'","'+e.name+'")'});
+        items.push({label:'Delete',fn:'fmDelete("'+e.path+'")',danger:true});
+        ctxShow(ev.clientX,ev.clientY,items);
+      };
       list.appendChild(item);
     });
   });
 }
-function fmUp() {
-  var cwd = document.getElementById('fm-cwd').value.replace(/\/+$/, '');
-  var parent = cwd.substring(0, cwd.lastIndexOf('/') + 1) || '/';
-  fmGo(parent);
+function fmUp(){var c=document.getElementById('fm-cwd').value.replace(/\/+$/,''),p=c.substring(0,c.lastIndexOf('/')+1)||'/';fmGo(p)}
+function fmMkdir(){var n=prompt('Folder name:');if(!n)return;api('mkdir -p "'+document.getElementById('fm-cwd').value+n+'"&&echo OK',function(){fmGo()})}
+function fmUpload(){
+  var files=document.getElementById('fm-file-input').files,cwd=document.getElementById('fm-cwd').value,st=document.getElementById('fm-status'),done=0;
+  for(var i=0;i<files.length;i++)(function(f){
+    st.textContent='Uploading '+f.name+'...';
+    upload(f,cwd+f.name,function(r){done++;st.textContent=r;if(done===files.length)fmGo()},function(p){st.textContent=f.name+' '+p+'%'});
+  })(files[i]);
 }
-function fmMkdir() {
-  var name = prompt('Directory name:');
-  if (!name) return;
-  var cwd = document.getElementById('fm-cwd').value;
-  api('mkdir -p "' + cwd + name + '" && echo OK', function(r) { fmGo(); });
-}
-function fmUpload() {
-  var files = document.getElementById('fm-file-input').files;
-  var cwd = document.getElementById('fm-cwd').value;
-  var st = document.getElementById('fm-status');
-  var done = 0;
-  for (var i = 0; i < files.length; i++) {
-    (function(f) {
-      st.textContent = 'Uploading ' + f.name + '...';
-      upload(f, cwd + f.name, function(r) {
-        done++;
-        st.textContent = r + (done < files.length ? ' (' + done + '/' + files.length + ')' : '');
-        if (done === files.length) fmGo();
-      }, function(pct) { st.textContent = f.name + ' ' + pct + '%'; });
-    })(files[i]);
-  }
-}
-function fmView(path) {
-  document.getElementById('fm-preview-wrap').style.display = 'block';
-  document.getElementById('fm-preview-name').textContent = path;
-  api('cat "' + path + '" 2>&1 | head -200', function(r) {
-    document.getElementById('fm-preview').textContent = r;
+function fmView(p){document.getElementById('fm-preview-wrap').style.display='block';document.getElementById('fm-preview-name').textContent=p;api('cat "'+p+'" 2>&1|head -300',function(r){document.getElementById('fm-preview').textContent=r})}
+function fmClosePreview(){document.getElementById('fm-preview-wrap').style.display='none'}
+function fmDelete(p){if(!confirm('Delete '+p+'?'))return;api('rm -rf "'+p+'"&&echo OK',function(){fmGo()})}
+function fmRename(p,old){var n=prompt('New name:',old);if(!n||n===old)return;var dir=p.substring(0,p.lastIndexOf('/')+1);api('mv "'+p+'" "'+dir+n+'"&&echo OK',function(){fmGo()})}
+function fmDownload(p){
+  var name=p.split('/').pop();
+  var st=document.getElementById('fm-status');
+  st.textContent='Getting file size...';
+  api('/sbin/busybox stat -c%s "'+p+'"',function(r){
+    var size=parseInt(r.trim());
+    if(!size||isNaN(size)){st.textContent='Cannot read file';return}
+    st.textContent='Downloading '+name+'...';
+    downloadBinary(p,name,size,function(ok){st.textContent=ok?'Downloaded '+name:'Download failed'});
   });
 }
-function fmClosePreview() { document.getElementById('fm-preview-wrap').style.display = 'none'; }
-function fmDelete(path) {
-  if (!confirm('Delete ' + path + '?')) return;
-  api('rm -rf "' + path + '" && echo DELETED', function(r) { fmGo(); });
-}
-function fmDownload(path) {
-  api('cat "' + path + '"', function(r) {
-    var blob = new Blob([r], {type: 'application/octet-stream'});
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = path.split('/').pop();
-    a.click();
-  });
-}
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
-function esc2(s) { return s.replace(/'/g,"\\'"); }
+function fmUseAsBoot(p){document.getElementById('boot-existing').value=p;showTab('boot')}
 
 // === Boot ===
-var bootDrop = document.getElementById('boot-drop');
-['dragenter','dragover'].forEach(function(e) { bootDrop.addEventListener(e, function(ev) { ev.preventDefault(); bootDrop.classList.add('dragover'); }); });
-['dragleave','drop'].forEach(function(e) { bootDrop.addEventListener(e, function(ev) { ev.preventDefault(); bootDrop.classList.remove('dragover'); }); });
-bootDrop.addEventListener('drop', function(e) { document.getElementById('boot-file-input').files = e.dataTransfer.files; bootFileSelected(); });
+var bootDrop=document.getElementById('boot-drop');
+['dragenter','dragover'].forEach(function(e){bootDrop.addEventListener(e,function(ev){ev.preventDefault();bootDrop.classList.add('dragover')})});
+['dragleave','drop'].forEach(function(e){bootDrop.addEventListener(e,function(ev){ev.preventDefault();bootDrop.classList.remove('dragover')})});
+bootDrop.addEventListener('drop',function(e){document.getElementById('boot-file-input').files=e.dataTransfer.files;bootFileSelected()});
 
-function bootFileSelected() {
-  bootFile = document.getElementById('boot-file-input').files[0];
-  if (bootFile) {
-    bootDrop.textContent = bootFile.name + ' (' + (bootFile.size/1024/1024).toFixed(1) + ' MB)';
-    bootDrop.classList.add('has-file');
+function bootFileSelected(){
+  bootFile=document.getElementById('boot-file-input').files[0];
+  if(bootFile){
+    document.getElementById('boot-file-name').textContent=bootFile.name+' ('+( bootFile.size/1024/1024).toFixed(1)+' MB)';
+    document.getElementById('boot-file-chip').style.display='block';
+    document.getElementById('boot-drop').style.display='none';
   }
 }
-function blogLog(msg) { var el = document.getElementById('boot-log'); el.textContent += msg + '\n'; el.scrollTop = el.scrollHeight; }
+function bootFileClear(){
+  bootFile=null;document.getElementById('boot-file-input').value='';
+  document.getElementById('boot-file-chip').style.display='none';
+  document.getElementById('boot-drop').style.display='block';
+}
+function blogLog(m){var el=document.getElementById('boot-log');el.textContent+=m+'\n';el.scrollTop=el.scrollHeight}
+function getPartition(){return document.getElementById('boot-partition').value}
 
-function bootUploadAndKexec() {
-  if (!bootFile) return alert('Select a boot.img first');
-  var dest = document.getElementById('boot-device-path').value;
-  var st = document.getElementById('boot-upload-status');
-  blogLog('> Uploading ' + bootFile.name + ' to ' + dest);
-  upload(bootFile, dest, function(r) {
-    blogLog(r);
-    blogLog('> Extracting components...');
-    api('BB=/sbin/busybox;F="' + dest + '";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;echo "zImage=$KS ramdisk=$RS dtb=$DS"', function(r) {
-      blogLog(r);
-      blogLog('> Loading kexec...');
-      api('cat /proc/cmdline', function(cmdline) {
-        var kcmd = 'kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="' + cmdline.trim() + '" /data/local/tmp/kexec_zImage 2>&1';
-        api(kcmd, function(r2) {
-          blogLog(r2);
-          blogLog('> Executing kexec...');
-          api('kexec -e', function() {});
-          blogLog('Device rebooting via kexec.');
-        });
-      });
+function bootUploadAndKexec(){
+  if(!bootFile)return alert('Select a file first');
+  var dest=document.getElementById('boot-device-path').value,st=document.getElementById('boot-upload-status');
+  blogLog('> Upload '+bootFile.name+' -> '+dest);
+  upload(bootFile,dest,function(r){
+    blogLog(r);blogLog('> Extracting + loading kexec...');
+    api('BB=/sbin/busybox;F="'+dest+'";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;CMDLINE=$(cat /proc/cmdline);kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="$CMDLINE" /data/local/tmp/kexec_zImage 2>&1',function(r2){
+      blogLog(r2);blogLog('> kexec -e');api('kexec -e',function(){});blogLog('Device rebooting via kexec.');
     });
-  }, function(pct) { st.textContent = pct + '%'; });
+  },function(p){st.textContent=p+'%'});
 }
 
-function bootUploadAndFlash() {
-  if (!bootFile) return alert('Select a boot.img first');
-  if (!confirm('Flash to LNX partition?')) return;
-  var dest = document.getElementById('boot-device-path').value;
-  var st = document.getElementById('boot-upload-status');
-  blogLog('> Uploading ' + bootFile.name);
-  upload(bootFile, dest, function(r) {
-    blogLog(r);
-    blogLog('> Flashing to LNX...');
-    api('dd if="' + dest + '" of=/dev/block/platform/sdhci-tegra.3/by-name/LNX bs=4096 2>&1 && sync && echo FLASH_OK', function(r2) {
+function bootUploadAndFlash(){
+  if(!bootFile)return alert('Select a file first');
+  var part=getPartition();
+  if(!confirm('Flash to '+part.split('/').pop()+'?'))return;
+  var dest=document.getElementById('boot-device-path').value,st=document.getElementById('boot-upload-status');
+  blogLog('> Upload + flash -> '+part.split('/').pop());
+  upload(bootFile,dest,function(r){
+    blogLog(r);blogLog('> Flashing...');
+    api('dd if="'+dest+'" of='+part+' bs=4096 2>&1&&sync&&echo FLASH_OK',function(r2){
       blogLog(r2);
-      blogLog('> Injecting multirom trampoline...');
-      api('BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART=/dev/block/platform/sdhci-tegra.3/by-name/LNX;[ ! -f $MROM/trampoline ]&&echo NO_MULTIROM&&exit 0;rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/boot.img bs=4096 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$TMP/boot.img bs=1 skip=$RO count=$RS of=$TMP/ramdisk.gz 2>/dev/null;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;$BB find .|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;python /sbin/rebuild_boot.py $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK', function(r3) {
-        blogLog(r3);
-        blogLog('> Rebooting...');
-        api('reboot', function() {});
-        blogLog('Device rebooting.');
-      });
+      if(part.indexOf('LNX')>=0){
+        blogLog('> Injecting multirom trampoline...');
+        api('BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART='+part+';[ ! -f $MROM/trampoline ]&&echo NO_MULTIROM&&exit 0;rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/boot.img bs=4096 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$TMP/boot.img bs=1 skip=$RO count=$RS of=$TMP/ramdisk.gz 2>/dev/null;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;$BB find .|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;python /sbin/rebuild_boot.py $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK',function(r3){blogLog(r3)});
+      }
     });
-  }, function(pct) { st.textContent = pct + '%'; });
+  },function(p){st.textContent=p+'%'});
 }
 
-function bootKexecExisting() {
-  var path = document.getElementById('boot-existing').value;
-  if (!path) return alert('Enter path to boot.img on device');
-  blogLog('> Kexec from ' + path);
-  api('BB=/sbin/busybox;F="' + path + '";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;CMDLINE=$(cat /proc/cmdline);kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="$CMDLINE" /data/local/tmp/kexec_zImage 2>&1', function(r) {
-    blogLog(r);
-    blogLog('> kexec -e');
-    api('kexec -e', function() {}); blogLog('Device rebooting.');
+function bootKexecExisting(){
+  var p=document.getElementById('boot-existing').value;if(!p)return alert('Enter path');
+  blogLog('> Kexec '+p);
+  api('BB=/sbin/busybox;F="'+p+'";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;CMDLINE=$(cat /proc/cmdline);kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="$CMDLINE" /data/local/tmp/kexec_zImage 2>&1',function(r){
+    blogLog(r);blogLog('> kexec -e');api('kexec -e',function(){});blogLog('Device rebooting.');
   });
 }
 
-function bootFlashExisting() {
-  var path = document.getElementById('boot-existing').value;
-  if (!path) return alert('Enter path');
-  if (!confirm('Flash ' + path + ' to LNX?')) return;
-  blogLog('> Flash ' + path);
-  api('dd if="' + path + '" of=/dev/block/platform/sdhci-tegra.3/by-name/LNX bs=4096 2>&1 && sync && echo FLASH_OK', function(r) { blogLog(r); });
+function bootFlashExisting(){
+  var p=document.getElementById('boot-existing').value,part=getPartition();
+  if(!p)return alert('Enter path');
+  if(!confirm('Flash '+p+' to '+part.split('/').pop()+'?'))return;
+  blogLog('> Flash '+p+' -> '+part.split('/').pop());
+  api('dd if="'+p+'" of='+part+' bs=4096 2>&1&&sync&&echo FLASH_OK',function(r){blogLog(r)});
 }
 
-function doReboot(mode) {
-  var cmd = mode ? 'reboot ' + mode : 'reboot';
-  blogLog('> ' + cmd);
-  api(cmd, function(r) { blogLog(r || 'sent'); });
+function doReboot(m){var c=m?'reboot '+m:'reboot';blogLog('> '+c);api(c,function(r){blogLog(r||'sent')})}
+
+function dumpPartition(){
+  var name=document.getElementById('dump-partition').value;
+  var part='/dev/block/platform/sdhci-tegra.3/by-name/'+name;
+  var st=document.getElementById('dump-status');
+  st.textContent='Dumping '+name+'...';
+  blogLog('> Dump '+name+' -> download');
+  api('dd if='+part+' of=/data/local/tmp/dump_'+name+'.img bs=4096 2>&1&&/sbin/busybox stat -c%s /data/local/tmp/dump_'+name+'.img',function(r){
+    blogLog(r);
+    var lines=r.trim().split('\n');
+    var size=parseInt(lines[lines.length-1]);
+    if(!size||isNaN(size)){st.textContent='Dump failed';return}
+    st.textContent='Downloading '+name+' ('+(size/1024/1024).toFixed(1)+' MB)...';
+    // Download in chunks via base64 to handle large files
+    downloadBinary('/data/local/tmp/dump_'+name+'.img',name+'.img',size,function(ok){
+      st.textContent=ok?'Done':'Download failed';
+      api('rm /data/local/tmp/dump_'+name+'.img',function(){});
+    });
+  });
+}
+
+function dumpToSdcard(){
+  var name=document.getElementById('dump-partition').value;
+  var part='/dev/block/platform/sdhci-tegra.3/by-name/'+name;
+  var dest='/sdcard/dump_'+name+'.img';
+  var st=document.getElementById('dump-status');
+  st.textContent='Dumping '+name+' to '+dest+'...';
+  blogLog('> Dump '+name+' -> '+dest);
+  api('dd if='+part+' of='+dest+' bs=4096 2>&1&&sync&&ls -la '+dest,function(r){
+    blogLog(r);st.textContent='Saved to '+dest;
+  });
+}
+
+function downloadBinary(remotePath,fileName,totalSize,cb){
+  // Download large binary files in 512KB base64 chunks
+  var CHUNK=524288;
+  var chunks=Math.ceil(totalSize/CHUNK);
+  var buffers=[];
+  var done=0;
+  var st=document.getElementById('dump-status');
+
+  function nextChunk(i){
+    if(i>=chunks){
+      var total=0;buffers.forEach(function(b){total+=b.length});
+      var merged=new Uint8Array(total);var off=0;
+      buffers.forEach(function(b){merged.set(b,off);off+=b.length});
+      var blob=new Blob([merged],{type:'application/octet-stream'});
+      var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fileName;a.click();
+      cb(true);return;
+    }
+    var skip=i*CHUNK;
+    var count=Math.min(CHUNK,totalSize-skip);
+    st.textContent='Downloading... '+Math.round((i+1)/chunks*100)+'%';
+    api('dd if="'+remotePath+'" bs=1 skip='+skip+' count='+count+' 2>/dev/null|/sbin/busybox base64',function(r){
+      try{
+        var bin=atob(r.trim());var arr=new Uint8Array(bin.length);
+        for(var j=0;j<bin.length;j++)arr[j]=bin.charCodeAt(j);
+        buffers.push(arr);nextChunk(i+1);
+      }catch(e){cb(false)}
+    });
+  }
+  nextChunk(0);
 }
 
 // === Info ===
-function loadInfo() {
-  api('uname -a;echo "|||";uptime;echo "|||";cat /proc/meminfo|head -3;echo "|||";ip addr show wlan0|grep "inet ";echo "|||";cat /sys/class/power_supply/battery/capacity 2>/dev/null||echo n/a;echo "|||";getprop init.svc.telnetd;echo "|||";getprop init.svc.remotehttpd;echo "|||";df /data /sdcard 2>/dev/null|tail -2', function(r) {
-    var p = r.split('|||');
-    var l = ['Kernel','Uptime','Memory','WiFi IP','Battery %','telnetd','httpd','Storage'];
-    var h = '';
-    for (var i = 0; i < l.length && i < p.length; i++)
-      h += '<div class="label">' + l[i] + '</div><div>' + esc(p[i].trim()) + '</div>';
-    document.getElementById('info-grid').innerHTML = h;
+function loadInfo(){
+  api('uname -a;echo "|||";uptime;echo "|||";cat /proc/meminfo|head -3;echo "|||";ip addr show wlan0|grep "inet ";echo "|||";cat /sys/class/power_supply/battery/capacity 2>/dev/null||echo n/a;echo "|||";getprop init.svc.telnetd;echo "|||";getprop init.svc.remotehttpd;echo "|||";df /data /sdcard 2>/dev/null|tail -2',function(r){
+    var p=r.split('|||'),l=['Kernel','Uptime','Memory','WiFi IP','Battery %','telnetd','httpd','Storage'],h='';
+    for(var i=0;i<l.length&&i<p.length;i++)h+='<div class="label">'+l[i]+'</div><div>'+esc(p[i].trim())+'</div>';
+    document.getElementById('info-grid').innerHTML=h;
   });
 }
 
-// Init
-api('uname -r', function(r) { document.getElementById('dev-name').textContent = r.trim(); });
+api('uname -r',function(r){document.getElementById('dev-name').textContent=r.trim()});
 </script>
 </body>
 </html>
