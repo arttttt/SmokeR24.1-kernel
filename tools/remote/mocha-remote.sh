@@ -18,6 +18,7 @@
 set -euo pipefail
 
 # --- Mocha hardware constants ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEVICE="${MOCHA_IP:-192.168.10.77}"
 PORT="${MOCHA_PORT:-8080}"
 TELNET_PORT=2323
@@ -105,6 +106,16 @@ cmd_flash() {
         local has_mrom
         has_mrom=$(remote_cmd "[ -f /data/media/0/multirom/trampoline ] && echo yes || echo no")
         if [ "$has_mrom" = "yes" ]; then
+            echo "[*] Ensuring micropython + rebuild script on device..."
+            local has_mpy
+            has_mpy=$(remote_cmd "[ -f /sbin/micropython ] && echo yes || echo no")
+            if [ "$has_mpy" != "yes" ]; then
+                echo "[*] Uploading micropython to /system/bin/..."
+                remote_cmd "mount -o remount,rw /system"
+                remote_upload "${SCRIPT_DIR}/bin/micropython-armv7l" "/system/bin/micropython"
+                remote_upload "${SCRIPT_DIR}/overlay/sbin/rebuild_boot.py" "/system/bin/rebuild_boot.py"
+                remote_cmd "chmod 755 /system/bin/micropython /system/bin/rebuild_boot.py"
+            fi
             echo "[*] Injecting MultiROM trampoline..."
             inject_multirom_trampoline
         fi
@@ -116,7 +127,7 @@ cmd_flash() {
 }
 
 inject_multirom_trampoline() {
-    remote_cmd 'BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART='"${BOOT_PARTITION}"';rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/boot.img bs=4096 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$TMP/boot.img bs=1 skip=$RO count=$RS of=$TMP/ramdisk.gz 2>/dev/null;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;$BB find .|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;micropython /sbin/rebuild_boot.py $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK'
+    remote_cmd 'BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART='"${BOOT_PARTITION}"';rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/hdr bs=2048 count=1 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/hdr|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/hdr|$BB tr -d " ");SS=$($BB od -A n -t u4 -j 24 -N 4 $TMP/hdr|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/hdr|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 $TMP/hdr|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RP=$(((RS+PS-1)/PS*PS));SP=$(((SS+PS-1)/PS*PS));DP=$(((DS+PS-1)/PS*PS));TOTAL=$((PS+KP+RP+SP+DP));dd if=$PART of=$TMP/boot.img bs=$PS count=$((TOTAL/PS)) 2>/dev/null;RO=$((PS+KP));dd if=$TMP/boot.img bs=$PS skip=$((RO/PS)) count=$(((RS+PS-1)/PS)) 2>/dev/null|$BB head -c $RS >$TMP/ramdisk.gz;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;MPY=$TMP/rd/sbin/micropython;RBP=$TMP/rd/sbin/rebuild_boot.py;[ ! -f $MPY ]&&MPY=/sbin/micropython;[ ! -f $MPY ]&&MPY=/system/bin/micropython;[ ! -f $RBP ]&&RBP=/sbin/rebuild_boot.py;[ ! -f $RBP ]&&RBP=/system/bin/rebuild_boot.py;$BB find *|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;chmod 755 $MPY;$MPY $RBP $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK'
 }
 
 cmd_kexec() {
