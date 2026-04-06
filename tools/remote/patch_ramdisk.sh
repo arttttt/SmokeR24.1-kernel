@@ -1,19 +1,20 @@
 #!/bin/bash
 #
 # Patch ramdisk with WiFi remote debug server.
-# Uses overlay from tools/remote/overlay/ and downloads binaries if needed.
+# Uses overlay from tools/remote/overlay/ and binaries from tools/remote/bin/.
 #
 # Usage:
 #   ./tools/remote/patch_ramdisk.sh <ramdisk.img|gz> [output]
 #
 # If output is omitted, patches in-place (with .orig backup).
-# Binaries (busybox, kexec) are cached in tools/remote/.cache/
+# Busybox is cached in tools/remote/.cache/
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OVERLAY_DIR="${SCRIPT_DIR}/overlay"
 CACHE_DIR="${SCRIPT_DIR}/.cache"
+BIN_DIR="${SCRIPT_DIR}/bin"
 
 BUSYBOX_URL="https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l"
 
@@ -27,23 +28,30 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 mkdir -p "$CACHE_DIR"
 
-# --- Download/cache binaries ---
-fetch_busybox() {
+# --- Prepare overlay: copy binaries into overlay/sbin/ ---
+prepare_overlay() {
+    # Busybox: download if needed
     if [ ! -f "$CACHE_DIR/busybox" ]; then
         echo "[*] Downloading busybox..."
         curl -L -o "$CACHE_DIR/busybox" "$BUSYBOX_URL"
-        chmod 755 "$CACHE_DIR/busybox"
     fi
-    echo "[*] busybox: $CACHE_DIR/busybox"
-}
+    cp "$CACHE_DIR/busybox" "$OVERLAY_DIR/sbin/busybox"
+    chmod 755 "$OVERLAY_DIR/sbin/busybox"
+    ln -sf busybox "$OVERLAY_DIR/sbin/telnetd"
+    echo "[*] busybox: ready"
 
-fetch_kexec() {
-    if [ -f "${SCRIPT_DIR}/bin/kexec-armv7l" ]; then
-        cp "${SCRIPT_DIR}/bin/kexec-armv7l" "$CACHE_DIR/kexec"
-        chmod 755 "$CACHE_DIR/kexec"
-        echo "[*] kexec: ${SCRIPT_DIR}/bin/kexec-armv7l"
-    else
-        echo "[!] kexec not found in bin/ (optional, skipping)"
+    # Kexec: from bin/
+    if [ -f "$BIN_DIR/kexec-armv7l" ]; then
+        cp "$BIN_DIR/kexec-armv7l" "$OVERLAY_DIR/sbin/kexec"
+        chmod 755 "$OVERLAY_DIR/sbin/kexec"
+        echo "[*] kexec: ready"
+    fi
+
+    # Micropython: from bin/
+    if [ -f "$BIN_DIR/micropython-armv7l" ]; then
+        cp "$BIN_DIR/micropython-armv7l" "$OVERLAY_DIR/sbin/micropython"
+        chmod 755 "$OVERLAY_DIR/sbin/micropython"
+        echo "[*] micropython: ready"
     fi
 }
 
@@ -57,27 +65,10 @@ patch_ramdisk() {
     cd "$workdir"
     gzip -dc "$RAMDISK" | cpio -idm 2>/dev/null
 
-    # Save original cpio file list (preserves order and no ./ prefix)
+    # Save original cpio file list
     gzip -dc "$RAMDISK" | cpio -t 2>/dev/null > /tmp/_orig_cpio_list.txt
 
-    # Add busybox
-    cp "$CACHE_DIR/busybox" sbin/busybox
-    chmod 755 sbin/busybox
-    ln -sf busybox sbin/telnetd
-
-    # Add micropython if available
-    if [ -f "${SCRIPT_DIR}/bin/micropython-armv7l" ]; then
-        cp "${SCRIPT_DIR}/bin/micropython-armv7l" sbin/micropython
-        chmod 755 sbin/micropython
-    fi
-
-    # Add kexec if available
-    if [ -f "$CACHE_DIR/kexec" ]; then
-        cp "$CACHE_DIR/kexec" sbin/kexec
-        chmod 755 sbin/kexec
-    fi
-
-    # Apply overlay (init.remote.rc, CGI scripts, remote-server.sh)
+    # Apply overlay — everything in overlay/ goes into ramdisk
     cp -R "$OVERLAY_DIR"/* .
     chmod 755 sbin/cgi-bin/cmd sbin/cgi-bin/upload sbin/remote-server.sh
 
@@ -90,7 +81,6 @@ patch_ramdisk() {
     fi
 
     if [ -n "$init_rc" ]; then
-        # Clean old imports
         sed -i.tmp '/init\.telnetd\.rc/d; /init\.remote\.rc/d' "$init_rc"
         rm -f "${init_rc}.tmp"
 
@@ -107,17 +97,11 @@ import init.remote.rc' "$init_rc"
         echo "[*] Added import to $init_rc"
     fi
 
-    # Build new file list: original files + overlay files + extra binaries
+    # Build file list: original + new files (auto-detected)
     local new_files
-    new_files=$(cd "$workdir" && find sbin/busybox sbin/telnetd $(cd "$OVERLAY_DIR" && find . -mindepth 1 | sed 's|^\./||') $([ -f sbin/kexec ] && echo sbin/kexec) -prune 2>/dev/null | sort -u)
+    new_files=$(cd "$workdir" && find . -mindepth 1 | sed 's|^\./||' | sort | comm -23 - <(sort /tmp/_orig_cpio_list.txt))
 
-    # Build file list for cpio: original order + new files appended
-    {
-        cat /tmp/_orig_cpio_list.txt
-        echo "$new_files"
-    } > /tmp/_patched_cpio_list.txt
-
-    # Repack: use python to invoke cpio correctly (macOS cpio mangles ./ prefix)
+    # Repack
     local output_file
     if [ -n "$OUTPUT" ]; then
         output_file="$OUTPUT"
@@ -127,28 +111,32 @@ import init.remote.rc' "$init_rc"
         output_file="$RAMDISK"
     fi
 
+    {
+        cat /tmp/_orig_cpio_list.txt
+        echo "$new_files"
+    } > /tmp/_patched_cpio_list.txt
+
     WORKDIR="$workdir" OUTPUT_FILE="$output_file" python3 << 'PYEOF'
 import gzip, os, struct
 
-def cpio_header(name, stat_info, content_len, is_symlink=False):
-    """Create cpio newc format header with uid=0, gid=0 (root)"""
+def cpio_header(name, stat_info, content_len):
     mode = stat_info.st_mode
     nlink = 2 if os.path.isdir(os.path.join(workdir, name)) else 1
-    namesize = len(name) + 1  # include null terminator
-    h = "070701"                          # magic
+    namesize = len(name) + 1
+    h = "070701"
     h += "%08X" % stat_info.st_ino
     h += "%08X" % mode
-    h += "%08X" % 0                       # uid = root
-    h += "%08X" % 0                       # gid = root
+    h += "%08X" % 0
+    h += "%08X" % 0
     h += "%08X" % nlink
     h += "%08X" % int(stat_info.st_mtime)
     h += "%08X" % content_len
-    h += "%08X" % 0                       # devmajor
-    h += "%08X" % 0                       # devminor
-    h += "%08X" % 0                       # rdevmajor
-    h += "%08X" % 0                       # rdevminor
+    h += "%08X" % 0
+    h += "%08X" % 0
+    h += "%08X" % 0
+    h += "%08X" % 0
     h += "%08X" % namesize
-    h += "%08X" % 0                       # check
+    h += "%08X" % 0
     return h.encode('ascii')
 
 def pad4(n):
@@ -184,7 +172,6 @@ for name in filelist:
         entry += b'\0' * pad4(len(entry))
     out += entry
 
-# TRAILER
 trailer = "TRAILER!!!"
 hdr = "070701" + "00000000" * 12 + "%08X" % (len(trailer) + 1) + "00000000"
 entry = hdr.encode() + trailer.encode() + b'\0'
@@ -196,18 +183,16 @@ with gzip.open(os.environ['OUTPUT_FILE'], 'wb') as f:
 print(f"Packed {len(filelist)} entries, uid=0:gid=0")
 PYEOF
     rm -f /tmp/_orig_cpio_list.txt /tmp/_patched_cpio_list.txt
-
-    local size
-    size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null)
-    echo "[+] Patched ramdisk: $output_file ($size bytes)"
 }
 
 # --- Main ---
 echo "=== Mocha ramdisk patcher ==="
-fetch_busybox
-fetch_kexec
+prepare_overlay
 patch_ramdisk
 
+local_out="${OUTPUT:-${RAMDISK}}"
+local_size=$(stat -f%z "$local_out" 2>/dev/null || stat -c%s "$local_out" 2>/dev/null)
+echo "[+] Patched ramdisk: $local_out ($local_size bytes)"
 echo ""
 echo "Next: build boot.img with this ramdisk, or use:"
 echo "  mocha-remote.sh kexec boot.img"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # Rebuild boot.img with new ramdisk and trampoline version marker.
 # Compatible with Python 2.6+, Python 3.x, and MicroPython.
+# Writes segments directly to file to avoid large memory allocations.
 import struct
 import sys
 
@@ -25,12 +26,7 @@ r_off = k_off + pa(ks)
 s_off = r_off + pa(rs)
 d_off = s_off + pa(ss)
 
-kernel = boot[k_off:k_off + ks]
-if ds > 0:
-    dt = boot[d_off:d_off + ds]
-else:
-    dt = b''
-
+# Update header: new ramdisk size + trampoline version
 hdr = bytearray(boot[:ps])
 struct.pack_into('<I', hdr, 16, len(new_rd))
 name = 'tr_ver%d' % tr_ver
@@ -40,13 +36,16 @@ for i in range(16):
     else:
         hdr[48 + i] = 0
 
-out = bytes(hdr)
-out = out + kernel + b'\x00' * (pa(ks) - ks)
-out = out + new_rd + b'\x00' * (pa(len(new_rd)) - len(new_rd))
-if ds > 0:
-    out = out + dt + b'\x00' * (pa(ds) - ds)
-
+# Write segments directly to file
 f = open(out_path, 'wb')
-f.write(out)
+f.write(bytes(hdr))
+f.write(boot[k_off:k_off + ks])
+f.write(b'\x00' * (pa(ks) - ks))
+f.write(new_rd)
+f.write(b'\x00' * (pa(len(new_rd)) - len(new_rd)))
+if ds > 0:
+    f.write(boot[d_off:d_off + ds])
+    f.write(b'\x00' * (pa(ds) - ds))
+total = f.tell()
 f.close()
-print('OK size=%d tr_ver=%d' % (len(out), tr_ver))
+print('OK size=%d tr_ver=%d' % (total, tr_ver))
