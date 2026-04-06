@@ -1101,14 +1101,6 @@ skip_vi_wait:
 	/* ISP reprocess: VI done writing raw → now submit ISP */
 	if (!err && chan->use_isp && isp_reprocess &&
 	    state == VB2_BUF_STATE_DONE) {
-		/* TEST: fill RAW buffer with 0x55 pattern to check if ISP
-		 * actually reads input data. If ISP output changes compared
-		 * to real RAW data → ISP reads input. If same → ignores it. */
-		memset(chan->isp_raw_cpu, 0x55, chan->isp_raw_size);
-		dev_info(&chan->video.dev,
-			 "TEST: filled RAW buf with 0x55 (%zu bytes)\n",
-			 chan->isp_raw_size);
-		{
 		int isp_err = isp_t124_process_frame_reprocess(chan->isp,
 				chan->isp_raw_dma,
 				chan->isp_out_dma,
@@ -1116,7 +1108,6 @@ skip_vi_wait:
 		if (isp_err)
 			dev_err(&chan->video.dev,
 				"ISP reprocess submit failed: %d\n", isp_err);
-		}
 	}
 
 	/* ISP: wait for frame processing completion */
