@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mocha-remote</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:monospace;background:#1a1a2e;color:#e0e0e0;padding:8px;display:flex;flex-direction:column}
+h1{font-size:14px;color:#0ff;margin-bottom:8px}
+.tabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+.tab{padding:4px 12px;background:#16213e;border:1px solid #333;cursor:pointer;font-size:12px;color:#aaa}
+.tab.active{background:#0f3460;color:#0ff;border-color:#0ff}
+.panel{display:none;flex-direction:column;gap:8px;flex:1;min-height:0}
+.panel.active{display:flex}
+#terminal-output{background:#0a0a1a;border:1px solid #333;padding:8px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:12px;word-break:break-all}
+#cmd-input{background:#16213e;border:1px solid #333;color:#0ff;padding:6px;font-family:monospace;font-size:13px;width:100%}
+.btn{padding:5px 14px;background:#0f3460;border:1px solid #0ff;color:#0ff;cursor:pointer;font-family:monospace;font-size:12px}
+.btn:hover{background:#1a5276}
+.btn.danger{border-color:#e74c3c;color:#e74c3c}
+.btn.danger:hover{background:#4a1a1a}
+.btn.small{padding:2px 8px;font-size:11px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.input{background:#16213e;border:1px solid #333;color:#e0e0e0;padding:5px;font-family:monospace;font-size:12px}
+.input:focus{border-color:#0ff;outline:none}
+.info-grid{display:grid;grid-template-columns:120px 1fr;gap:4px;font-size:12px}
+.info-grid .label{color:#888}
+.log{background:#0a0a1a;border:1px solid #333;padding:8px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:11px}
+.status{font-size:11px;color:#888;margin-top:4px}
+.drop-zone{border:2px dashed #333;padding:12px;text-align:center;cursor:pointer;font-size:12px;color:#888}
+.drop-zone.dragover{border-color:#0ff;color:#0ff}
+.drop-zone.has-file{border-color:#2ecc71;color:#2ecc71}
+input[type=file]{display:none}
+#dmesg-output{flex:1;min-height:0}
+/* File manager */
+.fm{flex:1;display:flex;flex-direction:column;min-height:0}
+.fm-path{display:flex;gap:4px;align-items:center}
+.fm-list{flex:1;min-height:0;overflow-y:auto;background:#0a0a1a;border:1px solid #333}
+.fm-item{padding:4px 8px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #111}
+.fm-item:hover{background:#16213e}
+.fm-item .icon{color:#0ff;width:16px}
+.fm-item .name{flex:1}
+.fm-item .size{color:#666;font-size:11px}
+.fm-item .actions{display:flex;gap:4px}
+.fm-preview{background:#0a0a1a;border:1px solid #333;padding:8px;max-height:30vh;overflow-y:auto;white-space:pre-wrap;font-size:11px}
+/* Boot */
+.boot-section{border:1px solid #222;padding:8px;display:flex;flex-direction:column;gap:8px}
+.boot-section h3{font-size:12px;color:#888}
+</style>
+</head>
+<body>
+<h1>mocha-remote // <span id="dev-name">connecting...</span></h1>
+<div class="tabs">
+<div class="tab active" onclick="showTab('terminal')">Terminal</div>
+<div class="tab" onclick="showTab('dmesg')">dmesg</div>
+<div class="tab" onclick="showTab('files')">Files</div>
+<div class="tab" onclick="showTab('boot')">Boot</div>
+<div class="tab" onclick="showTab('info')">Info</div>
+</div>
+
+<!-- Terminal -->
+<div id="terminal" class="panel active">
+<div id="terminal-output"></div>
+<form onsubmit="runCmd();return false">
+<input id="cmd-input" class="input" placeholder="# command" autofocus style="width:100%">
+</form>
+</div>
+
+<!-- dmesg -->
+<div id="dmesg" class="panel">
+<div class="row">
+<button class="btn" onclick="loadDmesg()">Refresh</button>
+<button class="btn" onclick="tailDmesg()">Tail -f</button>
+<button class="btn" onclick="stopTail()">Stop</button>
+<input id="dmesg-filter" class="input" placeholder="filter...">
+</div>
+<div id="dmesg-output" class="log"></div>
+</div>
+
+<!-- Files -->
+<div id="files" class="panel">
+<div class="fm">
+<div class="fm-path row">
+<button class="btn small" onclick="fmUp()">../</button>
+<input id="fm-cwd" class="input" value="/sdcard/" style="flex:1" onkeydown="if(event.key==='Enter')fmGo()">
+<button class="btn small" onclick="fmGo()">Go</button>
+<button class="btn small" onclick="fmMkdir()">mkdir</button>
+</div>
+<div class="fm-list" id="fm-list"></div>
+<div class="row" style="margin-top:4px">
+<div class="drop-zone" id="fm-drop" onclick="document.getElementById('fm-file-input').click()" style="flex:1">
+Drop file or click to upload to current directory
+<input type="file" id="fm-file-input" onchange="fmUpload()" multiple>
+</div>
+</div>
+<div id="fm-status" class="status"></div>
+<div id="fm-preview-wrap" style="display:none;margin-top:4px">
+<div class="row"><span id="fm-preview-name" style="flex:1;font-size:11px;color:#0ff"></span><button class="btn small" onclick="fmClosePreview()">Close</button></div>
+<div id="fm-preview" class="fm-preview"></div>
+</div>
+</div>
+</div>
+
+<!-- Boot -->
+<div id="boot" class="panel">
+<div class="boot-section">
+<h3>Upload + Flash / Kexec</h3>
+<div class="row">
+<div class="drop-zone" id="boot-drop" onclick="document.getElementById('boot-file-input').click()" style="flex:1">
+Drop boot.img or click to select
+<input type="file" id="boot-file-input" onchange="bootFileSelected()" accept=".img,.bin">
+</div>
+</div>
+<div class="row">
+<span style="font-size:11px;color:#888">Device path:</span>
+<input id="boot-device-path" class="input" value="/data/local/tmp/boot.img" style="flex:1">
+</div>
+<div class="row">
+<button class="btn" onclick="bootUploadAndKexec()">Upload + Kexec</button>
+<button class="btn danger" onclick="bootUploadAndFlash()">Upload + Flash LNX</button>
+<span id="boot-upload-status" class="status"></span>
+</div>
+</div>
+<div class="boot-section">
+<h3>Device files</h3>
+<div class="row">
+<input id="boot-existing" class="input" placeholder="/sdcard/boot.img" style="flex:1">
+<button class="btn" onclick="bootKexecExisting()">Kexec</button>
+<button class="btn danger" onclick="bootFlashExisting()">Flash LNX</button>
+</div>
+</div>
+<div class="boot-section">
+<h3>System</h3>
+<div class="row">
+<button class="btn" onclick="doReboot()">Reboot</button>
+<button class="btn" onclick="doReboot('recovery')">Recovery</button>
+<button class="btn" onclick="doReboot('bootloader')">Bootloader</button>
+</div>
+</div>
+<div id="boot-log" class="log" style="margin-top:8px"></div>
+</div>
+
+<!-- Info -->
+<div id="info" class="panel">
+<button class="btn" onclick="loadInfo()" style="margin-bottom:8px">Refresh</button>
+<div id="info-grid" class="info-grid"></div>
+</div>
+
+<script>
+var BASE = location.origin;
+var tailTimer = null;
+var cmdHistory = [];
+var histIdx = -1;
+var bootFile = null;
+
+function api(cmd, cb) {
+  var x = new XMLHttpRequest();
+  x.open('POST', BASE + '/cgi-bin/cmd');
+  x.timeout = 30000;
+  x.onload = function() { cb && cb(x.responseText); };
+  x.onerror = function() { cb && cb('[connection error]'); };
+  x.ontimeout = function() { cb && cb('[timeout]'); };
+  x.send(cmd);
+}
+
+function upload(file, dest, cb, progressCb) {
+  var x = new XMLHttpRequest();
+  x.open('POST', BASE + '/cgi-bin/upload?path=' + encodeURIComponent(dest));
+  x.onload = function() { cb && cb(x.responseText); };
+  x.onerror = function() { cb && cb('[upload error]'); };
+  if (progressCb) x.upload.onprogress = function(e) {
+    if (e.lengthComputable) progressCb(Math.round(e.loaded/e.total*100));
+  };
+  x.send(file);
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t,i) {
+    var panels = ['terminal','dmesg','files','boot','info'];
+    t.className = 'tab' + (panels[i] === name ? ' active' : '');
+  });
+  document.querySelectorAll('.panel').forEach(function(p) {
+    p.className = 'panel' + (p.id === name ? ' active' : '');
+  });
+  if (name === 'dmesg') loadDmesg();
+  if (name === 'info') loadInfo();
+  if (name === 'files') fmGo();
+}
+
+// === Terminal ===
+var termOut = document.getElementById('terminal-output');
+var cmdInput = document.getElementById('cmd-input');
+cmdInput.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp') { e.preventDefault(); if (histIdx < cmdHistory.length-1) cmdInput.value = cmdHistory[++histIdx]; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); histIdx > 0 ? cmdInput.value = cmdHistory[--histIdx] : (histIdx=-1, cmdInput.value=''); }
+});
+function runCmd() {
+  var cmd = cmdInput.value; if (!cmd) return;
+  cmdHistory.unshift(cmd); histIdx = -1;
+  termOut.textContent += '$ ' + cmd + '\n'; cmdInput.value = '';
+  api(cmd, function(r) { termOut.textContent += r + '\n'; termOut.scrollTop = termOut.scrollHeight; });
+}
+
+// === dmesg ===
+function loadDmesg() {
+  var f = document.getElementById('dmesg-filter').value;
+  api(f ? 'dmesg | grep -i "' + f + '"' : 'dmesg', function(r) {
+    var el = document.getElementById('dmesg-output'); el.textContent = r; el.scrollTop = el.scrollHeight;
+  });
+}
+function tailDmesg() { stopTail(); tailTimer = setInterval(loadDmesg, 2000); }
+function stopTail() { if (tailTimer) { clearInterval(tailTimer); tailTimer = null; } }
+
+// === File Manager ===
+var fmDrop = document.getElementById('fm-drop');
+['dragenter','dragover'].forEach(function(e) { fmDrop.addEventListener(e, function(ev) { ev.preventDefault(); fmDrop.classList.add('dragover'); }); });
+['dragleave','drop'].forEach(function(e) { fmDrop.addEventListener(e, function(ev) { ev.preventDefault(); fmDrop.classList.remove('dragover'); }); });
+fmDrop.addEventListener('drop', function(e) { document.getElementById('fm-file-input').files = e.dataTransfer.files; fmUpload(); });
+
+function fmGo(path) {
+  var cwd = path || document.getElementById('fm-cwd').value;
+  if (!cwd.endsWith('/')) cwd += '/';
+  document.getElementById('fm-cwd').value = cwd;
+  api('ls -la "' + cwd + '" 2>&1', function(r) {
+    var list = document.getElementById('fm-list');
+    list.innerHTML = '';
+    r.split('\n').forEach(function(line) {
+      if (!line || line.startsWith('total')) return;
+      var parts = line.split(/\s+/);
+      if (parts.length < 7) return;
+      var perm = parts[0], size = parts[3] || parts[4], name = parts[parts.length-1];
+      if (name === '.' || name === '..') return;
+      var isDir = perm.charAt(0) === 'd';
+      var isLink = perm.charAt(0) === 'l';
+      var item = document.createElement('div');
+      item.className = 'fm-item';
+      item.innerHTML = '<span class="icon">' + (isDir ? 'd' : isLink ? 'l' : '-') + '</span>' +
+        '<span class="name">' + esc(name) + '</span>' +
+        '<span class="size">' + (isDir ? '' : size) + '</span>' +
+        '<span class="actions">' +
+        (isDir ? '' : '<button class="btn small" onclick="fmView(\'' + esc2(cwd + name) + '\')">view</button>') +
+        '<button class="btn small" onclick="fmDownload(\'' + esc2(cwd + name) + '\')">dl</button>' +
+        '<button class="btn small danger" onclick="fmDelete(\'' + esc2(cwd + name) + '\')">rm</button>' +
+        '</span>';
+      if (isDir) item.ondblclick = function() { fmGo(cwd + name + '/'); };
+      list.appendChild(item);
+    });
+  });
+}
+function fmUp() {
+  var cwd = document.getElementById('fm-cwd').value.replace(/\/+$/, '');
+  var parent = cwd.substring(0, cwd.lastIndexOf('/') + 1) || '/';
+  fmGo(parent);
+}
+function fmMkdir() {
+  var name = prompt('Directory name:');
+  if (!name) return;
+  var cwd = document.getElementById('fm-cwd').value;
+  api('mkdir -p "' + cwd + name + '" && echo OK', function(r) { fmGo(); });
+}
+function fmUpload() {
+  var files = document.getElementById('fm-file-input').files;
+  var cwd = document.getElementById('fm-cwd').value;
+  var st = document.getElementById('fm-status');
+  var done = 0;
+  for (var i = 0; i < files.length; i++) {
+    (function(f) {
+      st.textContent = 'Uploading ' + f.name + '...';
+      upload(f, cwd + f.name, function(r) {
+        done++;
+        st.textContent = r + (done < files.length ? ' (' + done + '/' + files.length + ')' : '');
+        if (done === files.length) fmGo();
+      }, function(pct) { st.textContent = f.name + ' ' + pct + '%'; });
+    })(files[i]);
+  }
+}
+function fmView(path) {
+  document.getElementById('fm-preview-wrap').style.display = 'block';
+  document.getElementById('fm-preview-name').textContent = path;
+  api('cat "' + path + '" 2>&1 | head -200', function(r) {
+    document.getElementById('fm-preview').textContent = r;
+  });
+}
+function fmClosePreview() { document.getElementById('fm-preview-wrap').style.display = 'none'; }
+function fmDelete(path) {
+  if (!confirm('Delete ' + path + '?')) return;
+  api('rm -rf "' + path + '" && echo DELETED', function(r) { fmGo(); });
+}
+function fmDownload(path) {
+  api('cat "' + path + '"', function(r) {
+    var blob = new Blob([r], {type: 'application/octet-stream'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = path.split('/').pop();
+    a.click();
+  });
+}
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function esc2(s) { return s.replace(/'/g,"\\'"); }
+
+// === Boot ===
+var bootDrop = document.getElementById('boot-drop');
+['dragenter','dragover'].forEach(function(e) { bootDrop.addEventListener(e, function(ev) { ev.preventDefault(); bootDrop.classList.add('dragover'); }); });
+['dragleave','drop'].forEach(function(e) { bootDrop.addEventListener(e, function(ev) { ev.preventDefault(); bootDrop.classList.remove('dragover'); }); });
+bootDrop.addEventListener('drop', function(e) { document.getElementById('boot-file-input').files = e.dataTransfer.files; bootFileSelected(); });
+
+function bootFileSelected() {
+  bootFile = document.getElementById('boot-file-input').files[0];
+  if (bootFile) {
+    bootDrop.textContent = bootFile.name + ' (' + (bootFile.size/1024/1024).toFixed(1) + ' MB)';
+    bootDrop.classList.add('has-file');
+  }
+}
+function blogLog(msg) { var el = document.getElementById('boot-log'); el.textContent += msg + '\n'; el.scrollTop = el.scrollHeight; }
+
+function bootUploadAndKexec() {
+  if (!bootFile) return alert('Select a boot.img first');
+  var dest = document.getElementById('boot-device-path').value;
+  var st = document.getElementById('boot-upload-status');
+  blogLog('> Uploading ' + bootFile.name + ' to ' + dest);
+  upload(bootFile, dest, function(r) {
+    blogLog(r);
+    blogLog('> Extracting components...');
+    api('BB=/sbin/busybox;F="' + dest + '";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;echo "zImage=$KS ramdisk=$RS dtb=$DS"', function(r) {
+      blogLog(r);
+      blogLog('> Loading kexec...');
+      api('cat /proc/cmdline', function(cmdline) {
+        var kcmd = 'kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="' + cmdline.trim() + '" /data/local/tmp/kexec_zImage 2>&1';
+        api(kcmd, function(r2) {
+          blogLog(r2);
+          blogLog('> Executing kexec...');
+          api('kexec -e', function() {});
+          blogLog('Device rebooting via kexec.');
+        });
+      });
+    });
+  }, function(pct) { st.textContent = pct + '%'; });
+}
+
+function bootUploadAndFlash() {
+  if (!bootFile) return alert('Select a boot.img first');
+  if (!confirm('Flash to LNX partition?')) return;
+  var dest = document.getElementById('boot-device-path').value;
+  var st = document.getElementById('boot-upload-status');
+  blogLog('> Uploading ' + bootFile.name);
+  upload(bootFile, dest, function(r) {
+    blogLog(r);
+    blogLog('> Flashing to LNX...');
+    api('dd if="' + dest + '" of=/dev/block/platform/sdhci-tegra.3/by-name/LNX bs=4096 2>&1 && sync && echo FLASH_OK', function(r2) {
+      blogLog(r2);
+      blogLog('> Injecting multirom trampoline...');
+      api('BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART=/dev/block/platform/sdhci-tegra.3/by-name/LNX;[ ! -f $MROM/trampoline ]&&echo NO_MULTIROM&&exit 0;rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/boot.img bs=4096 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$TMP/boot.img bs=1 skip=$RO count=$RS of=$TMP/ramdisk.gz 2>/dev/null;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;$BB find .|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;python /sbin/rebuild_boot.py $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK', function(r3) {
+        blogLog(r3);
+        blogLog('> Rebooting...');
+        api('reboot', function() {});
+        blogLog('Device rebooting.');
+      });
+    });
+  }, function(pct) { st.textContent = pct + '%'; });
+}
+
+function bootKexecExisting() {
+  var path = document.getElementById('boot-existing').value;
+  if (!path) return alert('Enter path to boot.img on device');
+  blogLog('> Kexec from ' + path);
+  api('BB=/sbin/busybox;F="' + path + '";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;CMDLINE=$(cat /proc/cmdline);kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="$CMDLINE" /data/local/tmp/kexec_zImage 2>&1', function(r) {
+    blogLog(r);
+    blogLog('> kexec -e');
+    api('kexec -e', function() {}); blogLog('Device rebooting.');
+  });
+}
+
+function bootFlashExisting() {
+  var path = document.getElementById('boot-existing').value;
+  if (!path) return alert('Enter path');
+  if (!confirm('Flash ' + path + ' to LNX?')) return;
+  blogLog('> Flash ' + path);
+  api('dd if="' + path + '" of=/dev/block/platform/sdhci-tegra.3/by-name/LNX bs=4096 2>&1 && sync && echo FLASH_OK', function(r) { blogLog(r); });
+}
+
+function doReboot(mode) {
+  var cmd = mode ? 'reboot ' + mode : 'reboot';
+  blogLog('> ' + cmd);
+  api(cmd, function(r) { blogLog(r || 'sent'); });
+}
+
+// === Info ===
+function loadInfo() {
+  api('uname -a;echo "|||";uptime;echo "|||";cat /proc/meminfo|head -3;echo "|||";ip addr show wlan0|grep "inet ";echo "|||";cat /sys/class/power_supply/battery/capacity 2>/dev/null||echo n/a;echo "|||";getprop init.svc.telnetd;echo "|||";getprop init.svc.remotehttpd;echo "|||";df /data /sdcard 2>/dev/null|tail -2', function(r) {
+    var p = r.split('|||');
+    var l = ['Kernel','Uptime','Memory','WiFi IP','Battery %','telnetd','httpd','Storage'];
+    var h = '';
+    for (var i = 0; i < l.length && i < p.length; i++)
+      h += '<div class="label">' + l[i] + '</div><div>' + esc(p[i].trim()) + '</div>';
+    document.getElementById('info-grid').innerHTML = h;
+  });
+}
+
+// Init
+api('uname -r', function(r) { document.getElementById('dev-name').textContent = r.trim(); });
+</script>
+</body>
+</html>

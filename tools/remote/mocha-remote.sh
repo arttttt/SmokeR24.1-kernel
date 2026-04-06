@@ -216,14 +216,7 @@ print(f'zImage: {ks} bytes, ramdisk: {rs} bytes, DTB: {ds} bytes')
 
     echo "[*] Executing kexec..."
     remote_cmd_async "kexec -e"
-
-    echo "[*] Waiting for device to come back..."
-    sleep 5
-    if wait_for_device 60; then
-        echo "[+] Kexec boot successful."
-    else
-        echo "[!] Device did not come back. Check device screen."
-    fi
+    echo "[+] Kexec sent. Device is rebooting."
 }
 
 cmd_shell() {

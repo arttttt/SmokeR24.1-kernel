@@ -101,19 +101,9 @@ import init.remote.rc' "$init_rc"
         echo "[*] Added import to $init_rc"
     fi
 
-    # Build new file list: original files + new files appended
-    local new_files="init.remote.rc
-sbin/busybox
-sbin/telnetd
-sbin/remote-server.sh
-sbin/cgi-bin
-sbin/cgi-bin/cmd
-sbin/cgi-bin/upload"
-
-    if [ -f sbin/kexec ]; then
-        new_files="$new_files
-sbin/kexec"
-    fi
+    # Build new file list: original files + overlay files + extra binaries
+    local new_files
+    new_files=$(cd "$workdir" && find sbin/busybox sbin/telnetd $(cd "$OVERLAY_DIR" && find . -mindepth 1 | sed 's|^\./||') $([ -f sbin/kexec ] && echo sbin/kexec) -prune 2>/dev/null | sort -u)
 
     # Build file list for cpio: original order + new files appended
     {
