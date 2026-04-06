@@ -1025,8 +1025,18 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				tegra_channel_read(chan, T124_CSI_CIL_E_STATUS));
 		}
 #endif
-		csi_write(chan, index,
-			TEGRA_VI_CSI_SINGLE_SHOT, SINGLE_SHOT_CAPTURE);
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming: stock uses CIL_COMMAND (0x908)
+			 * instead of SINGLE_SHOT for VI→ISP trigger.
+			 * Stock VI gather: INCR(0x242,1) = 0x202 (rear)
+			 * 0x242 * 4 = 0x908 = T124_CSI_PHY_CIL_COMMAND */
+			tegra_channel_write(chan,
+				T124_CSI_PHY_CIL_COMMAND,
+				(chan->port[0] == 0) ? 0x00000202 : 0x00000202);
+		} else {
+			csi_write(chan, index,
+				TEGRA_VI_CSI_SINGLE_SHOT, SINGLE_SHOT_CAPTURE);
+		}
 	}
 
 	chan->capture_state = CAPTURE_GOOD;
