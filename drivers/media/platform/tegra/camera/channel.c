@@ -1739,10 +1739,11 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 				} else {
 					chan->isp = isp;
 					chan->use_isp = true;
-					/* Allocate ISP output buffer */
+					/* Allocate ISP output buffer —
+					 * uses sensor resolution (set by stream_init) */
 					{
-						u32 y_sz = isp->y_stride * chan->format.height;
-						u32 uv_sz = isp->uv_stride * (chan->format.height / 2);
+						u32 y_sz = isp->y_stride * isp->height;
+						u32 uv_sz = isp->uv_stride * (isp->height / 2);
 						chan->isp_out_size = y_sz + 2 * uv_sz;
 						/* Add 64KB padding — ISP writes beyond
 						 * calculated YUV size (stride alignment) */

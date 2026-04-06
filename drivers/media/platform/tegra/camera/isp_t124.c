@@ -469,10 +469,18 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	if (isp->streaming)
 		return -EBUSY;
 
-	isp->width = width;
-	isp->height = height;
-	isp->y_stride = (width + 63) & ~63;
-	isp->uv_stride = ((width / 2) + 63) & ~63;
+	/* ISP output = sensor resolution (stock behavior).
+	 * ISP does NOT downscale — it processes at full sensor res.
+	 * Downscale to user-requested resolution happens later (GPU/scaler). */
+	if (isp->class_id == ISP_A_CLASS_ID) {
+		isp->width = 3280;
+		isp->height = 2464;
+	} else {
+		isp->width = 2592;
+		isp->height = 1944;
+	}
+	isp->y_stride = (isp->width + 63) & ~63;
+	isp->uv_stride = ((isp->width / 2) + 63) & ~63;
 	isp->in_stride = width * 2;  /* RAW10 packed to 16-bit = 2 bytes/pixel */
 	isp->in_format = 0x11000020; /* RAW Bayer single-plane linear (from RE) */
 
