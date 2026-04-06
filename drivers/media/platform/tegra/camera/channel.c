@@ -1752,14 +1752,14 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					chan->isp = isp;
 					chan->use_isp = true;
 					/* Allocate ISP output buffer —
-					 * uses sensor resolution (set by stream_init) */
+					 * uses sensor resolution (set by stream_init).
+					 * ISP writes beyond calculated NV12 size
+					 * (SMMU faults at ~13.5MB for 3280x2464).
+					 * Use 2x safety margin. */
 					{
 						u32 y_sz = isp->y_stride * isp->height;
 						u32 uv_sz = isp->uv_stride * (isp->height / 2);
-						chan->isp_out_size = y_sz + 2 * uv_sz;
-						/* Add 64KB padding — ISP writes beyond
-						 * calculated YUV size (stride alignment) */
-						chan->isp_out_size += 65536;
+						chan->isp_out_size = (y_sz + 2 * uv_sz) * 2;
 						chan->isp_out_cpu = dma_alloc_coherent(
 							&isp->pdev->dev,
 							PAGE_ALIGN(chan->isp_out_size),
