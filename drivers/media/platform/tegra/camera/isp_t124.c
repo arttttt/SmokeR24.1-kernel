@@ -796,9 +796,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	if (err)
 		goto free_cmdbuf;
 
-	/* S6+S7: Only for streaming mode (warmup needs VI pixel path).
-	 * Reprocess mode sets ISP_ENABLE per-frame and doesn't need warmup. */
-	if (!reprocess) {
+	/* S6+S7: DISABLED for testing.
+	 * Stock does histogram config + warmup 8x8 frame between S5 and
+	 * first real frame. Testing if skipping these fixes OP_DONE. */
+	if (0 && !reprocess) {
 	/* S6: Histogram config submit (stock 25 words — between init and first frame)
 	 * Sets 0x930 histogram + ISP enable. Stock does this from userspace. */
 	n = 0;
