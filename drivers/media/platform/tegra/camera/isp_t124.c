@@ -474,7 +474,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	 * Downscale to user-requested resolution happens later (GPU/scaler). */
 	if (isp->class_id == ISP_A_CLASS_ID) {
 		isp->width = 3280;
-		isp->height = 2464;
+		isp->height = 2460;
 	} else {
 		isp->width = 2592;
 		isp->height = 1944;
@@ -1131,11 +1131,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 
 	/* Processing INCR(0x500,6): stock = [0, 0, 0, 0, 0, (H<<16)|W]
 	 * Stock uses INPUT (sensor) resolution here, not output!
-	 * IMX179 (ISP-A) = 3280x2464, OV5693 (ISP-B) = 2592x1944 */
+	 * IMX179 (ISP-A) = 3280x2460, OV5693 (ISP-B) = 2592x1944 */
 	{
 	u32 in_w, in_h;
 	if (isp->class_id == ISP_A_CLASS_ID) {
-		in_w = 3280; in_h = 2464;
+		in_w = 3280; in_h = 2460;
 	} else {
 		in_w = 2592; in_h = 1944;
 	}
@@ -1346,7 +1346,7 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 
 	/* Sensor resolution for processing dim */
 	if (isp->class_id == ISP_A_CLASS_ID) {
-		in_w = 3280; in_h = 2464;
+		in_w = 3280; in_h = 2460;
 	} else {
 		in_w = 2592; in_h = 1944;
 	}
