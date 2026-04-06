@@ -819,8 +819,13 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		dma_addr_t surface_addr;
 		int surface_stride;
 
-		if (chan->use_isp) {
-			/* ISP mode: VI writes raw to internal buffer */
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming: VI sends pixels to ISP via HW path,
+			 * no memory write. Stock uses surface=0. */
+			surface_addr = 0;
+			surface_stride = 0;
+		} else if (chan->use_isp) {
+			/* ISP reprocess: VI writes raw to memory buffer */
 			surface_addr = chan->isp_raw_dma;
 			surface_stride = chan->format.width * 2; /* RAW10 */
 		} else {
