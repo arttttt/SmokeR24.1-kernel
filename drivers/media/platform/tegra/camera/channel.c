@@ -51,7 +51,7 @@ static int t124_csi_tpg = 0;
 module_param(t124_csi_tpg, int, 0644);
 MODULE_PARM_DESC(t124_csi_tpg, "Enable T124 CSI Test Pattern Generator (bypasses sensor MIPI)");
 
-static int isp_reprocess = 1;
+static int isp_reprocess = 0;
 module_param(isp_reprocess, int, 0644);
 MODULE_PARM_DESC(isp_reprocess, "ISP reprocess mode: VI→mem→ISP (1=on, 0=streaming)");
 #endif
