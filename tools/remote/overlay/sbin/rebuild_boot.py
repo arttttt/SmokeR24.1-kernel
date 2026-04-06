@@ -1,5 +1,22 @@
 #!/usr/bin/env python
-# Rebuild boot.img with new ramdisk and trampoline version marker.
+# Rebuild boot.img with a new ramdisk and set multirom trampoline version.
+#
+# Usage:
+#   micropython rebuild_boot.py <boot.img> <new_ramdisk.gz> <tr_ver> <output>
+#   python     rebuild_boot.py <boot.img> <new_ramdisk.gz> <tr_ver> <output>
+#
+# Parameters:
+#   boot.img        — original Android boot.img to use as template
+#   new_ramdisk.gz  — replacement ramdisk (gzipped cpio)
+#   tr_ver          — multirom trampoline version number (integer)
+#   output          — output boot.img path
+#
+# Output: "OK size=<N> tr_ver=<N>" on success
+#
+# Parses the boot.img header, replaces the ramdisk segment, updates the
+# ramdisk size field, and writes "tr_ver<N>" into the board name field
+# (offset 48) so multirom recognizes the trampoline version.
+#
 # Compatible with Python 2.6+, Python 3.x, and MicroPython.
 # Writes segments directly to file to avoid large memory allocations.
 import struct

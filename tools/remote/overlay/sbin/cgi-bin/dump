@@ -1,11 +1,25 @@
 #!/system/bin/sh
-# GET ?part=LNX → dump partition to response
-# Optional: ?save=/sdcard/dump.img to save to file instead of streaming
+# Dump a device partition via HTTP GET (download or save to file).
+#
+# Usage (via httpd):
+#   GET /cgi-bin/dump?part=LNX              — stream partition as binary download
+#   GET /cgi-bin/dump?part=LNX&save=/sdcard/dump.img — save to file on device
+#
+# Parameters:
+#   part  — partition name (default: LNX). Maps to /dev/block/.../by-name/<part>
+#   save  — optional path on device to save dump to (instead of streaming)
+#
+# Output (stream mode): raw partition data as application/octet-stream
+# Output (save mode): "OK: <path> (<size> bytes)"
+#
+# Requires: busybox (for dd, blockdev, stat, sed)
+
 BB=/sbin/busybox
 PARTNAME=$(echo "$QUERY_STRING" | $BB sed 's/.*part=//;s/&.*//')
-SAVE=$(echo "$QUERY_STRING" | $BB sed -n 's/.*save=//p' | $BB sed 's/&.*//' | $BB sed 's/%2F/\//g')
+SAVE=$(echo "$QUERY_STRING" | $BB sed -n 's/.*save=//p' | $BB sed 's/&.*//;s/%2F/\//g;s/%20/ /g;s/%3A/:/g')
 [ -z "$PARTNAME" ] && PARTNAME=LNX
 PART="/dev/block/platform/sdhci-tegra.3/by-name/$PARTNAME"
+[ ! -e "$PART" ] && { echo "Content-Type: text/plain"; echo ""; echo "ERROR: partition $PARTNAME not found"; exit 1; }
 
 if [ -n "$SAVE" ]; then
     echo "Content-Type: text/plain"

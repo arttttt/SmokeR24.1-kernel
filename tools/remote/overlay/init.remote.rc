@@ -1,3 +1,10 @@
+# Android init service definitions for WiFi remote debug.
+# Imported by init.tn8.rc / init.mocha.rc (added by patch_ramdisk.sh).
+#
+# Starts after boot_completed:
+#   - telnetd on port 2323 (interactive shell via telnet)
+#   - remotehttpd on port 8080 (CGI server for cmd/upload/flash/kexec/dump)
+
 service telnetd /sbin/busybox telnetd -l /system/bin/sh -b 0.0.0.0 -p 2323 -F
     class late_start
     disabled

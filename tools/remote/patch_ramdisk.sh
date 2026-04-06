@@ -6,8 +6,19 @@
 # Usage:
 #   ./tools/remote/patch_ramdisk.sh <ramdisk.img|gz> [output]
 #
-# If output is omitted, patches in-place (with .orig backup).
-# Busybox is cached in tools/remote/.cache/
+# Parameters:
+#   ramdisk.img|gz  — gzipped cpio ramdisk to patch (from boot.img)
+#   output          — output file path (optional, default: in-place with .orig backup)
+#
+# Output: patched gzipped cpio ramdisk with remote server overlay injected
+#
+# What it does:
+#   - Copies busybox, kexec, micropython into overlay/sbin/
+#   - Extracts ramdisk, merges overlay files, adds init.remote.rc import
+#   - Repacks as gzipped cpio with uid=0:gid=0
+#
+# Requires: python3, curl (for busybox download on first run)
+# Binaries: tools/remote/bin/kexec-armv7l, tools/remote/bin/micropython-armv7l
 
 set -euo pipefail
 
@@ -66,11 +77,11 @@ patch_ramdisk() {
     gzip -dc "$RAMDISK" | cpio -idm 2>/dev/null
 
     # Save original cpio file list
-    gzip -dc "$RAMDISK" | cpio -t 2>/dev/null > /tmp/_orig_cpio_list.txt
+    gzip -dc "$RAMDISK" | cpio -t 2>/dev/null > "$workdir/_orig_cpio_list.txt"
 
     # Apply overlay — everything in overlay/ goes into ramdisk
     cp -R "$OVERLAY_DIR"/* .
-    chmod 755 sbin/cgi-bin/cmd sbin/cgi-bin/upload sbin/remote-server.sh
+    chmod 755 sbin/cgi-bin/* sbin/remote-server.sh sbin/rebuild_boot.sh sbin/rebuild_boot.py 2>/dev/null
 
     # Add import to init rc
     local init_rc=""
@@ -99,7 +110,7 @@ import init.remote.rc' "$init_rc"
 
     # Build file list: original + new files (auto-detected)
     local new_files
-    new_files=$(cd "$workdir" && find . -mindepth 1 | sed 's|^\./||' | sort | comm -23 - <(sort /tmp/_orig_cpio_list.txt))
+    new_files=$(cd "$workdir" && find . -mindepth 1 | sed 's|^\./||' | sort | comm -23 - <(sort "$workdir/_orig_cpio_list.txt"))
 
     # Repack
     local output_file
@@ -112,9 +123,9 @@ import init.remote.rc' "$init_rc"
     fi
 
     {
-        cat /tmp/_orig_cpio_list.txt
+        cat "$workdir/_orig_cpio_list.txt"
         echo "$new_files"
-    } > /tmp/_patched_cpio_list.txt
+    } > "$workdir/_patched_cpio_list.txt"
 
     WORKDIR="$workdir" OUTPUT_FILE="$output_file" python3 << 'PYEOF'
 import gzip, os, struct
@@ -143,7 +154,7 @@ def pad4(n):
     return (4 - (n % 4)) % 4
 
 workdir = os.environ['WORKDIR']
-filelist = open('/tmp/_patched_cpio_list.txt').read().strip().split('\n')
+filelist = open(os.environ['WORKDIR'] + '/_patched_cpio_list.txt').read().strip().split('\n')
 
 out = bytearray()
 for name in filelist:
@@ -182,7 +193,7 @@ with gzip.open(os.environ['OUTPUT_FILE'], 'wb') as f:
     f.write(bytes(out))
 print(f"Packed {len(filelist)} entries, uid=0:gid=0")
 PYEOF
-    rm -f /tmp/_orig_cpio_list.txt /tmp/_patched_cpio_list.txt
+    rm -f "$workdir/_orig_cpio_list.txt" "$workdir/_patched_cpio_list.txt"
 }
 
 # --- Main ---

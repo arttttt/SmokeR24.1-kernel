@@ -1,4 +1,17 @@
 #!/system/bin/sh
+# Upload a file to the device via HTTP POST.
+#
+# Usage (via httpd):
+#   POST /cgi-bin/upload?path=/sdcard/tmp/boot.img
+#   Request body = raw file contents
+#
+# Parameters:
+#   path  — destination path on device (URL-encoded query param)
+#
+# Output: "OK: <path> (<size> bytes)" on success, "ERROR: ..." on failure
+#
+# Requires: busybox (for sed, cat, ls, awk)
+
 echo "Content-Type: text/plain"
 echo ""
 DEST=$(echo "$QUERY_STRING" | /sbin/busybox sed 's/path=//;s/%2F/\//g;s/%20/ /g')

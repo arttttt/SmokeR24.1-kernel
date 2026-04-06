@@ -1,39 +1,66 @@
 #!/system/bin/sh
-# POST boot.img → dd to partition + multirom trampoline inject
-# Query params: ?part=LNX (default LNX)
+# Flash a boot.img to a partition via HTTP POST, with multirom trampoline inject.
+#
+# Usage (via httpd):
+#   POST /cgi-bin/flash?part=LNX
+#   Request body = raw boot.img contents
+#
+# Parameters:
+#   part  — partition name (default: LNX). Maps to /dev/block/.../by-name/<part>
+#
+# Output: "FLASH_OK partition=<part>" on success, "FLASH_FAILED" on error
+#   If multirom is installed and part=LNX, also injects trampoline into ramdisk
+#   and re-flashes: "INJECT_OK tr_ver=<N>" or "INJECT_FAILED"
+#
+# Requires: busybox, dd, micropython + rebuild_boot.py (for trampoline inject)
+
 echo "Content-Type: text/plain"
 echo ""
 
 BB=/sbin/busybox
-TMP=/data/local/tmp/flash_work
+
+# Use tmpfs for cpio work (sdcard fuse doesn't support symlinks)
+TMP=/dev/flash_work
+cleanup() { cd /; umount $TMP 2>/dev/null; rm -rf $TMP 2>/dev/null; }
+trap cleanup EXIT
+cleanup
+mkdir -p $TMP
+mount -t tmpfs tmpfs $TMP -o size=32m
+mkdir -p $TMP/rd
+
 MROM=/data/media/0/multirom
 PARTNAME=$(echo "$QUERY_STRING" | $BB sed 's/.*part=//;s/&.*//')
 [ -z "$PARTNAME" ] && PARTNAME=LNX
 PART="/dev/block/platform/sdhci-tegra.3/by-name/$PARTNAME"
 
-rm -rf $TMP && mkdir -p $TMP
-
 # Save uploaded boot.img
 $BB cat > $TMP/boot.img
-SIZE=$($BB stat -c%s $TMP/boot.img)
+SIZE=$($BB stat -c%s $TMP/boot.img 2>/dev/null)
+[ -z "$SIZE" ] || [ "$SIZE" -lt 1024 ] && { echo "ERROR: invalid boot.img ($SIZE bytes)"; exit 1; }
 echo "received: $SIZE bytes"
 
 # Flash
-dd if=$TMP/boot.img of=$PART bs=4096 2>&1
+if ! dd if=$TMP/boot.img of=$PART bs=4096 2>&1; then
+    echo "FLASH_FAILED"
+    exit 1
+fi
 sync
 echo "FLASH_OK partition=$PARTNAME"
 
 # Inject multirom trampoline (only for LNX, only if multirom installed)
 if [ "$PARTNAME" = "LNX" ] && [ -f "$MROM/trampoline" ]; then
     echo "injecting trampoline..."
-    mkdir -p $TMP/rd
 
-    # Read boot.img back from partition (trimmed)
+    # Parse boot.img header
     PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img | $BB tr -d " ")
     KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img | $BB tr -d " ")
     RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img | $BB tr -d " ")
-    SS=$($BB od -A n -t u4 -j 24 -N 4 $TMP/boot.img | $BB tr -d " ")
-    DS=$($BB od -A n -t u4 -j 40 -N 4 $TMP/boot.img | $BB tr -d " ")
+
+    if [ -z "$PS" ] || [ "$PS" -eq 0 ] 2>/dev/null; then
+        echo "INJECT_FAILED: bad header"
+        exit 1
+    fi
+
     KP=$(( (KS + PS - 1) / PS * PS ))
     RO=$(( PS + KP ))
 
@@ -53,16 +80,16 @@ if [ "$PARTNAME" = "LNX" ] && [ -f "$MROM/trampoline" ]; then
     $BB ln -s ../main_init sbin/watchdogd
     [ -f $MROM/mrom.fstab ] && cp $MROM/mrom.fstab .
 
-    # Repack ramdisk (find * to avoid . entry with wrong permissions)
+    # Repack ramdisk (find * to avoid . entry with drwx------ permissions)
     $BB find * | $BB cpio -o -H newc 2>/dev/null | $BB gzip > $TMP/ramdisk_new.gz
 
-    # Find micropython
-    MPY=sbin/micropython
-    [ ! -f $MPY ] && MPY=/sbin/micropython
-    [ ! -f $MPY ] && MPY=/system/bin/micropython
-    RBP=sbin/rebuild_boot.py
-    [ ! -f $RBP ] && RBP=/sbin/rebuild_boot.py
+    # Find micropython (prefer system paths — tmpfs may be noexec)
+    MPY=/sbin/micropython
+    [ ! -x $MPY ] && MPY=/system/bin/micropython
+    [ ! -x $MPY ] && MPY=$TMP/rd/sbin/micropython
+    RBP=/sbin/rebuild_boot.py
     [ ! -f $RBP ] && RBP=/system/bin/rebuild_boot.py
+    [ ! -f $RBP ] && RBP=$TMP/rd/sbin/rebuild_boot.py
 
     TR_VER=$($MROM/trampoline -v 2>/dev/null || echo 27)
     cd $TMP
@@ -78,5 +105,4 @@ if [ "$PARTNAME" = "LNX" ] && [ -f "$MROM/trampoline" ]; then
     fi
 fi
 
-rm -rf $TMP
 echo "DONE"

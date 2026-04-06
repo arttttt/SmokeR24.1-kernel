@@ -1,17 +1,36 @@
 #!/system/bin/sh
-# POST boot.img → extract zImage+ramdisk+DTB, load kexec, execute
-# Content-Type of request should be application/octet-stream (raw boot.img)
+# Kexec-boot from a boot.img via HTTP POST (like fastboot boot, no flash).
+#
+# Usage (via httpd):
+#   POST /cgi-bin/kexec
+#   Request body = raw boot.img contents
+#
+# Parses the Android boot.img header, extracts zImage, ramdisk, and DTB,
+# loads them via kexec --load-hardboot, then executes. Device reboots
+# into the new kernel without touching any partition.
+#
+# Output: component sizes, "KEXEC_LOADED", then device reboots
+#
+# Requires: busybox, kexec (hardboot-patched, in /sbin/)
+
 echo "Content-Type: text/plain"
 echo ""
 
 BB=/sbin/busybox
-TMP=/data/local/tmp/kexec_work
+TMP=/dev/kexec_work
 KEXEC=/sbin/kexec
 
-rm -rf $TMP && mkdir -p $TMP
+# Cleanup previous run, mount fresh tmpfs
+cleanup() { cd /; umount $TMP 2>/dev/null; rm -rf $TMP 2>/dev/null; }
+trap cleanup EXIT
+cleanup
+mkdir -p $TMP
+mount -t tmpfs tmpfs $TMP -o size=32m
 
 # Save uploaded boot.img
 $BB cat > $TMP/boot.img
+SIZE=$($BB stat -c%s $TMP/boot.img 2>/dev/null)
+[ -z "$SIZE" ] || [ "$SIZE" -lt 1024 ] && { echo "ERROR: invalid boot.img"; exit 1; }
 
 # Parse header
 KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img | $BB tr -d " ")
@@ -20,6 +39,8 @@ SS=$($BB od -A n -t u4 -j 24 -N 4 $TMP/boot.img | $BB tr -d " ")
 PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img | $BB tr -d " ")
 DS=$($BB od -A n -t u4 -j 40 -N 4 $TMP/boot.img | $BB tr -d " ")
 
+[ -z "$PS" ] || [ "$PS" -eq 0 ] 2>/dev/null && { echo "ERROR: bad header"; exit 1; }
+
 KP=$(( (KS + PS - 1) / PS * PS ))
 RP=$(( (RS + PS - 1) / PS * PS ))
 SP=$(( (SS + PS - 1) / PS * PS ))
@@ -27,7 +48,7 @@ RO=$(( PS + KP ))
 SO=$(( RO + RP ))
 DO=$(( SO + SP ))
 
-# Extract components
+# Extract components using page-aligned dd + truncate
 dd if=$TMP/boot.img bs=$PS skip=1 count=$((KP/PS)) of=$TMP/zImage 2>/dev/null
 $BB truncate -s $KS $TMP/zImage
 dd if=$TMP/boot.img bs=$PS skip=$((RO/PS)) count=$((RP/PS)) of=$TMP/initrd.img 2>/dev/null
@@ -39,10 +60,8 @@ fi
 
 echo "zImage=$KS ramdisk=$RS dtb=$DS"
 
-# Get cmdline
-CMDLINE=$(cat /proc/cmdline)
-
 # Build kexec command
+CMDLINE=$(cat /proc/cmdline)
 KCMD="$KEXEC --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha"
 KCMD="$KCMD --initrd=$TMP/initrd.img"
 [ "$DS" -gt 0 ] && KCMD="$KCMD --dtb=$TMP/dtb.img"
@@ -52,6 +71,6 @@ KCMD="$KCMD $TMP/zImage"
 # Load
 eval $KCMD 2>&1
 
-# Execute (in background, send response first)
+# Execute in background, send response first
 echo "KEXEC_LOADED"
 $KEXEC -e </dev/null >/dev/null 2>&1 &
