@@ -930,6 +930,13 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 
 	isp->streaming = true;
 	isp->reprocess = reprocess;
+
+	/* Stock has ~190ms gap between ISP init and first VI submit.
+	 * ISP needs time to fully initialize pipeline after S5-S7.
+	 * Without this delay, first frames may arrive before ISP is ready. */
+	if (!reprocess)
+		msleep(200);
+
 	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (%s)\n",
 		 width, height, isp->class_id,
 		 reprocess ? "reprocess" : "streaming");
