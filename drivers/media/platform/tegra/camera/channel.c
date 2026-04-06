@@ -1002,6 +1002,12 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		}
 	}
 
+	/* Give ISP gather time to reach hardware before VI trigger.
+	 * Stock has natural gap between ISP submit and VI submit (separate ioctls).
+	 * Without delay, VI may start sending pixels before ISP is armed. */
+	if (chan->use_isp && !isp_reprocess)
+		usleep_range(500, 1000);
+
 	/* Ensure all CSI ports are ready with setup to avoid timing issue */
 	for (index = 0; index < valid_ports; index++) {
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC)
