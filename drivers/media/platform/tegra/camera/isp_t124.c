@@ -1125,7 +1125,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		in_w = 2592; in_h = 1944;
 	}
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000003; /* TEST: processing flags=3 (same as warmup/reprocess) */
+	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
