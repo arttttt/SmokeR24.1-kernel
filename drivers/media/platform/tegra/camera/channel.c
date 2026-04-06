@@ -1033,6 +1033,18 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	if (chan->use_isp && !isp_reprocess) {
 		/* ISP streaming mode: no DEST_MEM → MW_ACK_DONE won't fire.
 		 * Frame completion signaled by ISP cond=4 (wait_frame). */
+
+		/* Diagnostic: read ISP status registers after VI trigger */
+		{
+			u32 isp_en = host1x_readl(chan->isp->pdev, 0x54);
+			u32 isp_ctrl = host1x_readl(chan->isp->pdev, 0x30);
+			u32 isp_status = host1x_readl(chan->isp->pdev, 0xf8);
+			u32 isp_inten = host1x_readl(chan->isp->pdev, 0x14c);
+			dev_info(&chan->video.dev,
+				 "ISP HW: ENABLE=0x%08x CTRL=0x%08x STATUS=0x%08x INTEN=0x%08x\n",
+				 isp_en, isp_ctrl, isp_status, isp_inten);
+		}
+
 		goto skip_vi_wait;
 	}
 	for (index = 0; index < valid_ports; index++) {
