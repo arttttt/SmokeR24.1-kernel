@@ -518,13 +518,17 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 		 width, height, &cmd_phys, &isp->work_buf.dma);
 
 	/* S1 (stock 3654w): zero_block×2 + 0x018 tails + syncpt */
-	/* TEST: skip 0x018 writes — may be clock/PLL config that
-	 * depends on runtime state and our hardcoded values may be wrong */
 	n = 0;
 	n = isp_append_zero_block(isp, cmd, n);
-	/* 0x018 tail 1 — SKIPPED for test */
+	cmd[n++] = nvhost_opcode_incr(0x018, 5);
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000400;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000200;
+	cmd[n++] = 0x00000002;
 	n = isp_append_zero_block(isp, cmd, n);
-	/* 0x018 tail 2 — SKIPPED for test */
+	cmd[n++] = nvhost_opcode_incr(0x018, 5);
+	cmd[n++] = 0x0a00500a; cmd[n++] = 0x00008089;
+	cmd[n++] = 0x013645cb; cmd[n++] = 0x000001e7;
+	cmd[n++] = 0x00000001;
 	n = isp_append_syncpt(isp, cmd, n);
 	dev_info(dev, "S1: %d words\n", n);
 
