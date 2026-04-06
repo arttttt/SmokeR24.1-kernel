@@ -92,42 +92,36 @@ cmd_flash() {
     [ -f "$img" ] || die "File not found: $img"
     local size
     size=$(stat -f%z "$img" 2>/dev/null || stat -c%s "$img" 2>/dev/null)
-    local remote_path="${UPLOAD_DIR}/boot_flash.img"
 
-    echo "[*] Uploading $(basename "$img") ($size bytes)..."
-    remote_upload "$img" "$remote_path"
-
-    echo "[*] Flashing to $BOOT_PARTITION..."
-    remote_cmd "dd if=$remote_path of=$BOOT_PARTITION bs=4096 && sync"
-
-    # Inject multirom trampoline if multirom is installed
+    # Ensure micropython on device for inject
     if [ "$no_inject" -eq 0 ]; then
-        echo "[*] Checking for MultiROM..."
-        local has_mrom
-        has_mrom=$(remote_cmd "[ -f /data/media/0/multirom/trampoline ] && echo yes || echo no")
-        if [ "$has_mrom" = "yes" ]; then
-            echo "[*] Ensuring micropython + rebuild script on device..."
-            local has_mpy
-            has_mpy=$(remote_cmd "[ -f /sbin/micropython ] && echo yes || echo no")
-            if [ "$has_mpy" != "yes" ]; then
-                echo "[*] Uploading micropython to /system/bin/..."
-                remote_cmd "mount -o remount,rw /system"
-                remote_upload "${SCRIPT_DIR}/bin/micropython-armv7l" "/system/bin/micropython"
-                remote_upload "${SCRIPT_DIR}/overlay/sbin/rebuild_boot.py" "/system/bin/rebuild_boot.py"
-                remote_cmd "chmod 755 /system/bin/micropython /system/bin/rebuild_boot.py"
-            fi
-            echo "[*] Injecting MultiROM trampoline..."
-            inject_multirom_trampoline
-        fi
+        ensure_micropython
     fi
+
+    local part_param=""
+    [ "$no_inject" -eq 1 ] && part_param="?part=LNX"
+
+    echo "[*] Uploading + flashing $(basename "$img") ($size bytes)..."
+    local result
+    result=$(curl -s --fail --max-time 300 -X POST --data-binary "@${img}" \
+        "$(url /cgi-bin/flash${part_param})") || die "Flash failed"
+    echo "$result"
 
     echo "[*] Rebooting..."
     remote_cmd_async "reboot"
     echo "[+] Done. Device is rebooting."
 }
 
-inject_multirom_trampoline() {
-    remote_cmd 'BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART='"${BOOT_PARTITION}"';rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/hdr bs=2048 count=1 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/hdr|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/hdr|$BB tr -d " ");SS=$($BB od -A n -t u4 -j 24 -N 4 $TMP/hdr|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/hdr|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 $TMP/hdr|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RP=$(((RS+PS-1)/PS*PS));SP=$(((SS+PS-1)/PS*PS));DP=$(((DS+PS-1)/PS*PS));TOTAL=$((PS+KP+RP+SP+DP));dd if=$PART of=$TMP/boot.img bs=$PS count=$((TOTAL/PS)) 2>/dev/null;RO=$((PS+KP));dd if=$TMP/boot.img bs=$PS skip=$((RO/PS)) count=$(((RS+PS-1)/PS)) 2>/dev/null|$BB head -c $RS >$TMP/ramdisk.gz;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;MPY=$TMP/rd/sbin/micropython;RBP=$TMP/rd/sbin/rebuild_boot.py;[ ! -f $MPY ]&&MPY=/sbin/micropython;[ ! -f $MPY ]&&MPY=/system/bin/micropython;[ ! -f $RBP ]&&RBP=/sbin/rebuild_boot.py;[ ! -f $RBP ]&&RBP=/system/bin/rebuild_boot.py;$BB find *|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;chmod 755 $MPY;$MPY $RBP $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK'
+ensure_micropython() {
+    local has_mpy
+    has_mpy=$(remote_cmd "[ -f /sbin/micropython ] || [ -f /system/bin/micropython ] && echo yes || echo no")
+    if [ "$has_mpy" != "yes" ]; then
+        echo "[*] Installing micropython to /system/bin/..."
+        remote_cmd "mount -o remount,rw /system"
+        remote_upload "${SCRIPT_DIR}/bin/micropython-armv7l" "/system/bin/micropython"
+        remote_upload "${SCRIPT_DIR}/overlay/sbin/rebuild_boot.py" "/system/bin/rebuild_boot.py"
+        remote_cmd "chmod 755 /system/bin/micropython /system/bin/rebuild_boot.py"
+    fi
 }
 
 cmd_kexec() {
@@ -135,94 +129,54 @@ cmd_kexec() {
     local img="$1"
     local dtb_arg="${2:-}"
     [ -f "$img" ] || die "File not found: $img"
+    local size
+    size=$(stat -f%z "$img" 2>/dev/null || stat -c%s "$img" 2>/dev/null)
 
-    local zimage_file="" dtb_file="" ramdisk_file="" cleanup=""
-
-    # Detect if input is boot.img or raw zImage
+    # Detect if input is boot.img — send directly to CGI
     local magic
     magic=$(head -c 8 "$img" | cat -v)
-    if [[ "$magic" == *"ANDROID"* ]]; then
-        echo "[*] Detected boot.img, extracting zImage + ramdisk + DTB..."
-        local tmpdir
-        tmpdir=$(mktemp -d /tmp/mocha_kexec.XXXXXX)
-        cleanup="$tmpdir"
-        python3 -c "
-import struct, sys
-with open('$img', 'rb') as f:
-    d = f.read()
-ks = struct.unpack_from('<I', d, 8)[0]
-rs = struct.unpack_from('<I', d, 16)[0]
-ss = struct.unpack_from('<I', d, 24)[0]
-ps = struct.unpack_from('<I', d, 36)[0]
-ds = struct.unpack_from('<I', d, 40)[0]
-def pages(sz): return ((sz + ps - 1) // ps) * ps
-k_off = ps
-r_off = k_off + pages(ks)
-s_off = r_off + pages(rs)
-d_off = s_off + pages(ss)
-with open('$tmpdir/zImage', 'wb') as f: f.write(d[k_off:k_off+ks])
-if rs > 0:
-    with open('$tmpdir/ramdisk.gz', 'wb') as f: f.write(d[r_off:r_off+rs])
-if ds > 0:
-    with open('$tmpdir/dt.img', 'wb') as f: f.write(d[d_off:d_off+ds])
-print(f'zImage: {ks} bytes, ramdisk: {rs} bytes, DTB: {ds} bytes')
-"
-        zimage_file="$tmpdir/zImage"
-        [ -f "$tmpdir/ramdisk.gz" ] && ramdisk_file="$tmpdir/ramdisk.gz"
-        [ -f "$tmpdir/dt.img" ] && dtb_file="$tmpdir/dt.img"
-    else
-        echo "[*] Using raw zImage"
-        zimage_file="$img"
+    if [[ "$magic" == *"ANDROID"* ]] && [ -z "$dtb_arg" ]; then
+        echo "[*] Uploading boot.img ($size bytes) to kexec CGI..."
+        local result
+        result=$(curl -s --fail --max-time 60 -X POST --data-binary "@${img}" \
+            "$(url /cgi-bin/kexec)") || die "Kexec failed"
+        echo "$result"
+        echo "[+] Kexec sent. Device is rebooting."
+        return
     fi
 
-    # Override DTB if explicitly provided
-    if [ -n "$dtb_arg" ]; then
-        [ -f "$dtb_arg" ] || die "DTB not found: $dtb_arg"
-        dtb_file="$dtb_arg"
-        echo "[*] Using explicit DTB: $dtb_arg"
-    fi
+    # Raw zImage path — upload components separately
+    echo "[*] Using raw zImage"
+    local zimage_file="$img"
 
-    # Upload zImage
-    echo "[*] Uploading zImage ($(stat -f%z "$zimage_file" 2>/dev/null || stat -c%s "$zimage_file") bytes)..."
+    echo "[*] Uploading zImage ($size bytes)..."
     remote_upload "$zimage_file" "${UPLOAD_DIR}/kexec_zImage"
 
-    # Ramdisk: upload from boot.img, or extract from LNX partition on device
-    local initrd_flag=""
-    if [ -n "$ramdisk_file" ]; then
-        echo "[*] Uploading ramdisk ($(stat -f%z "$ramdisk_file" 2>/dev/null || stat -c%s "$ramdisk_file") bytes)..."
-        remote_upload "$ramdisk_file" "${UPLOAD_DIR}/kexec_ramdisk"
-        initrd_flag="--initrd=${UPLOAD_DIR}/kexec_ramdisk"
-    else
-        echo "[*] Extracting ramdisk from LNX partition on device..."
-        remote_cmd 'LNX='"${BOOT_PARTITION}"' D='"${UPLOAD_DIR}"' && dd if=$LNX of=$D/lnx.img bs=4096 2>/dev/null && KS=$(busybox od -A n -t u4 -j 8 -N 4 $D/lnx.img | busybox tr -d " ") && RS=$(busybox od -A n -t u4 -j 16 -N 4 $D/lnx.img | busybox tr -d " ") && PS=$(busybox od -A n -t u4 -j 36 -N 4 $D/lnx.img | busybox tr -d " ") && KP=$(( (KS + PS - 1) / PS * PS )) && RO=$(( PS + KP )) && dd if=$D/lnx.img of=$D/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null && rm -f $D/lnx.img && echo "ramdisk: $RS bytes from LNX"'
-        initrd_flag="--initrd=${UPLOAD_DIR}/kexec_ramdisk"
-    fi
+    # Ramdisk from LNX
+    echo "[*] Extracting ramdisk from LNX partition on device..."
+    remote_cmd 'BB=/sbin/busybox;LNX='"${BOOT_PARTITION}"';D='"${UPLOAD_DIR}"';dd if=$LNX of=$D/hdr bs=2048 count=1 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $D/hdr|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $D/hdr|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $D/hdr|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$LNX bs=$PS skip=$((RO/PS)) count=$(((RS+PS-1)/PS)) 2>/dev/null|$BB head -c $RS >$D/kexec_ramdisk;rm $D/hdr;echo "ramdisk: $RS bytes"'
 
-    # Upload DTB if available
+    # DTB
     local dtb_flag=""
-    if [ -n "$dtb_file" ]; then
-        echo "[*] Uploading DTB ($(stat -f%z "$dtb_file" 2>/dev/null || stat -c%s "$dtb_file") bytes)..."
-        remote_upload "$dtb_file" "${UPLOAD_DIR}/kexec_dtb"
+    if [ -n "$dtb_arg" ]; then
+        [ -f "$dtb_arg" ] || die "DTB not found: $dtb_arg"
+        echo "[*] Uploading DTB..."
+        remote_upload "$dtb_arg" "${UPLOAD_DIR}/kexec_dtb"
         dtb_flag="--dtb=${UPLOAD_DIR}/kexec_dtb"
     fi
 
-    [ -n "$cleanup" ] && rm -rf "$cleanup"
-
-    # Grab current cmdline from device (bootloader passes critical params)
-    echo "[*] Reading device cmdline..."
+    # cmdline
     local cmdline
     cmdline=$(remote_cmd "cat /proc/cmdline")
-    echo "[*] cmdline: ${cmdline:0:80}..."
 
-    # Build kexec command
+    # Load + exec
     local kexec_cmd="kexec --load-hardboot --mem-min=${KEXEC_MEM_MIN} --mem-max=${KEXEC_MEM_MAX}"
-    kexec_cmd+=" --boardname=mocha"
-    [ -n "$initrd_flag" ] && kexec_cmd+=" ${initrd_flag}"
+    kexec_cmd+=" --boardname=mocha --initrd=${UPLOAD_DIR}/kexec_ramdisk"
     [ -n "$dtb_flag" ] && kexec_cmd+=" ${dtb_flag}"
     [ -n "$cmdline" ] && kexec_cmd+=" --append=\"${cmdline}\""
     kexec_cmd+=" ${UPLOAD_DIR}/kexec_zImage"
 
-    echo "[*] Loading kernel via kexec-hardboot..."
+    echo "[*] Loading kexec..."
     remote_cmd "$kexec_cmd 2>&1"
 
     echo "[*] Executing kexec..."

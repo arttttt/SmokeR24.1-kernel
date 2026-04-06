@@ -1,0 +1,82 @@
+#!/system/bin/sh
+# POST boot.img → dd to partition + multirom trampoline inject
+# Query params: ?part=LNX (default LNX)
+echo "Content-Type: text/plain"
+echo ""
+
+BB=/sbin/busybox
+TMP=/data/local/tmp/flash_work
+MROM=/data/media/0/multirom
+PARTNAME=$(echo "$QUERY_STRING" | $BB sed 's/.*part=//;s/&.*//')
+[ -z "$PARTNAME" ] && PARTNAME=LNX
+PART="/dev/block/platform/sdhci-tegra.3/by-name/$PARTNAME"
+
+rm -rf $TMP && mkdir -p $TMP
+
+# Save uploaded boot.img
+$BB cat > $TMP/boot.img
+SIZE=$($BB stat -c%s $TMP/boot.img)
+echo "received: $SIZE bytes"
+
+# Flash
+dd if=$TMP/boot.img of=$PART bs=4096 2>&1
+sync
+echo "FLASH_OK partition=$PARTNAME"
+
+# Inject multirom trampoline (only for LNX, only if multirom installed)
+if [ "$PARTNAME" = "LNX" ] && [ -f "$MROM/trampoline" ]; then
+    echo "injecting trampoline..."
+    mkdir -p $TMP/rd
+
+    # Read boot.img back from partition (trimmed)
+    PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img | $BB tr -d " ")
+    KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img | $BB tr -d " ")
+    RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img | $BB tr -d " ")
+    SS=$($BB od -A n -t u4 -j 24 -N 4 $TMP/boot.img | $BB tr -d " ")
+    DS=$($BB od -A n -t u4 -j 40 -N 4 $TMP/boot.img | $BB tr -d " ")
+    KP=$(( (KS + PS - 1) / PS * PS ))
+    RO=$(( PS + KP ))
+
+    # Extract ramdisk
+    dd if=$TMP/boot.img bs=$PS skip=$((RO/PS)) count=$(((RS+PS-1)/PS)) 2>/dev/null | $BB head -c $RS > $TMP/ramdisk.gz
+
+    # Unpack
+    cd $TMP/rd
+    $BB gzip -d -c $TMP/ramdisk.gz | $BB cpio -i 2>/dev/null
+
+    # Inject trampoline
+    [ ! -f main_init ] && mv init main_init
+    cp $MROM/trampoline init
+    chmod 750 init
+    rm -f sbin/ueventd sbin/watchdogd
+    $BB ln -s ../main_init sbin/ueventd
+    $BB ln -s ../main_init sbin/watchdogd
+    [ -f $MROM/mrom.fstab ] && cp $MROM/mrom.fstab .
+
+    # Repack ramdisk (find * to avoid . entry with wrong permissions)
+    $BB find * | $BB cpio -o -H newc 2>/dev/null | $BB gzip > $TMP/ramdisk_new.gz
+
+    # Find micropython
+    MPY=sbin/micropython
+    [ ! -f $MPY ] && MPY=/sbin/micropython
+    [ ! -f $MPY ] && MPY=/system/bin/micropython
+    RBP=sbin/rebuild_boot.py
+    [ ! -f $RBP ] && RBP=/sbin/rebuild_boot.py
+    [ ! -f $RBP ] && RBP=/system/bin/rebuild_boot.py
+
+    TR_VER=$($MROM/trampoline -v 2>/dev/null || echo 27)
+    cd $TMP
+    chmod 755 $MPY 2>/dev/null
+    $MPY $RBP $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img 2>&1
+
+    if [ -f $TMP/boot_injected.img ]; then
+        dd if=$TMP/boot_injected.img of=$PART bs=4096 2>&1
+        sync
+        echo "INJECT_OK tr_ver=$TR_VER"
+    else
+        echo "INJECT_FAILED"
+    fi
+fi
+
+rm -rf $TMP
+echo "DONE"

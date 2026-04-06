@@ -358,82 +358,75 @@ function getPartition(){return document.getElementById('boot-partition').value}
 
 function bootUploadAndKexec(){
   if(!bootFile)return alert('Select a file first');
-  var dest=document.getElementById('boot-device-path').value,st=document.getElementById('boot-upload-status');
-  blogLog('> Upload '+bootFile.name+' -> '+dest);
-  upload(bootFile,dest,function(r){
-    blogLog(r);blogLog('> Extracting + loading kexec...');
-    api('BB=/sbin/busybox;F="'+dest+'";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;CMDLINE=$(cat /proc/cmdline);kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="$CMDLINE" /data/local/tmp/kexec_zImage 2>&1',function(r2){
-      blogLog(r2);blogLog('> kexec -e');api('kexec -e',function(){});blogLog('Device rebooting via kexec.');
-    });
-  },function(p){st.textContent=p+'%'});
+  var st=document.getElementById('boot-upload-status');
+  blogLog('> Kexec '+bootFile.name+' ('+bootFile.size+' bytes)');
+  var x=new XMLHttpRequest();
+  x.open('POST',BASE+'/cgi-bin/kexec');
+  x.timeout=60000;
+  x.onload=function(){blogLog(x.responseText);blogLog('Device rebooting via kexec.')};
+  x.onerror=function(){blogLog('[connection lost — kexec in progress]')};
+  x.upload.onprogress=function(e){if(e.lengthComputable)st.textContent=Math.round(e.loaded/e.total*100)+'%'};
+  x.send(bootFile);
 }
 
 function bootUploadAndFlash(){
   if(!bootFile)return alert('Select a file first');
-  var part=getPartition();
-  if(!confirm('Flash to '+part.split('/').pop()+'?'))return;
-  var dest=document.getElementById('boot-device-path').value,st=document.getElementById('boot-upload-status');
-  blogLog('> Upload + flash -> '+part.split('/').pop());
-  upload(bootFile,dest,function(r){
-    blogLog(r);blogLog('> Flashing...');
-    api('dd if="'+dest+'" of='+part+' bs=4096 2>&1&&sync&&echo FLASH_OK',function(r2){
-      blogLog(r2);
-      if(part.indexOf('LNX')>=0){
-        blogLog('> Injecting multirom trampoline...');
-        api('BB=/sbin/busybox;TMP=/data/local/tmp/mrom_inject;MROM=/data/media/0/multirom;PART='+part+';[ ! -f $MROM/trampoline ]&&echo NO_MULTIROM&&exit 0;rm -rf $TMP;mkdir -p $TMP/rd;dd if=$PART of=$TMP/boot.img bs=4096 2>/dev/null;KS=$($BB od -A n -t u4 -j 8 -N 4 $TMP/boot.img|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 $TMP/boot.img|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 $TMP/boot.img|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));dd if=$TMP/boot.img bs=1 skip=$RO count=$RS of=$TMP/ramdisk.gz 2>/dev/null;cd $TMP/rd;$BB gzip -d -c $TMP/ramdisk.gz|$BB cpio -i 2>/dev/null;[ ! -f main_init ]&&mv init main_init;cp $MROM/trampoline init;chmod 750 init;rm -f sbin/ueventd sbin/watchdogd;$BB ln -s ../main_init sbin/ueventd;$BB ln -s ../main_init sbin/watchdogd;[ -f $MROM/mrom.fstab ]&&cp $MROM/mrom.fstab .;$BB find .|$BB cpio -o -H newc 2>/dev/null|$BB gzip >$TMP/ramdisk_new.gz;TR_VER=$($MROM/trampoline -v 2>/dev/null||echo 27);cd $TMP;python /sbin/rebuild_boot.py $TMP/boot.img $TMP/ramdisk_new.gz $TR_VER $TMP/boot_injected.img;dd if=$TMP/boot_injected.img of=$PART bs=4096 2>/dev/null&&sync;rm -rf $TMP;echo INJECT_OK',function(r3){blogLog(r3)});
-      }
-    });
-  },function(p){st.textContent=p+'%'});
+  var partSel=document.getElementById('boot-partition');
+  var partName=partSel.options[partSel.selectedIndex].text;
+  if(!confirm('Flash to '+partName+'?'))return;
+  var part=partSel.value.split('/').pop();
+  var st=document.getElementById('boot-upload-status');
+  blogLog('> Flash '+bootFile.name+' -> '+partName);
+  var x=new XMLHttpRequest();
+  x.open('POST',BASE+'/cgi-bin/flash?part='+part);
+  x.timeout=300000;
+  x.onload=function(){blogLog(x.responseText)};
+  x.onerror=function(){blogLog('[error]')};
+  x.upload.onprogress=function(e){if(e.lengthComputable)st.textContent=Math.round(e.loaded/e.total*100)+'%'};
+  x.send(bootFile);
 }
 
 function bootKexecExisting(){
   var p=document.getElementById('boot-existing').value;if(!p)return alert('Enter path');
-  blogLog('> Kexec '+p);
-  api('BB=/sbin/busybox;F="'+p+'";KS=$($BB od -A n -t u4 -j 8 -N 4 "$F"|$BB tr -d " ");RS=$($BB od -A n -t u4 -j 16 -N 4 "$F"|$BB tr -d " ");PS=$($BB od -A n -t u4 -j 36 -N 4 "$F"|$BB tr -d " ");DS=$($BB od -A n -t u4 -j 40 -N 4 "$F"|$BB tr -d " ");KP=$(((KS+PS-1)/PS*PS));RO=$((PS+KP));RP=$(((RS+PS-1)/PS*PS));SO=$((RO+RP));SS=$($BB od -A n -t u4 -j 24 -N 4 "$F"|$BB tr -d " ");SP=$(((SS+PS-1)/PS*PS));DO=$((SO+SP));dd if="$F" of=/data/local/tmp/kexec_zImage bs=1 skip=$PS count=$KS 2>/dev/null;dd if="$F" of=/data/local/tmp/kexec_ramdisk bs=1 skip=$RO count=$RS 2>/dev/null;[ "$DS" -gt 0 ]&&dd if="$F" of=/data/local/tmp/kexec_dtb bs=1 skip=$DO count=$DS 2>/dev/null;CMDLINE=$(cat /proc/cmdline);kexec --load-hardboot --mem-min=0x85000000 --mem-max=0xd0000000 --boardname=mocha --initrd=/data/local/tmp/kexec_ramdisk --dtb=/data/local/tmp/kexec_dtb --append="$CMDLINE" /data/local/tmp/kexec_zImage 2>&1',function(r){
-    blogLog(r);blogLog('> kexec -e');api('kexec -e',function(){});blogLog('Device rebooting.');
+  blogLog('> Kexec from device: '+p);
+  api('cat "'+p+'" > /data/local/tmp/_kexec_tmp.img && /sbin/cgi-bin/kexec < /data/local/tmp/_kexec_tmp.img 2>&1; rm -f /data/local/tmp/_kexec_tmp.img',function(r){
+    blogLog(r);
   });
 }
 
 function bootFlashExisting(){
-  var p=document.getElementById('boot-existing').value,part=getPartition();
+  var p=document.getElementById('boot-existing').value;
+  var part=document.getElementById('boot-partition').value.split('/').pop();
   if(!p)return alert('Enter path');
-  if(!confirm('Flash '+p+' to '+part.split('/').pop()+'?'))return;
-  blogLog('> Flash '+p+' -> '+part.split('/').pop());
-  api('dd if="'+p+'" of='+part+' bs=4096 2>&1&&sync&&echo FLASH_OK',function(r){blogLog(r)});
+  if(!confirm('Flash '+p+' to '+part+'?'))return;
+  blogLog('> Flash '+p+' -> '+part);
+  api('cat "'+p+'" | /sbin/cgi-bin/flash 2>&1',function(r){blogLog(r)});
 }
 
 function doReboot(m){var c=m?'reboot '+m:'reboot';blogLog('> '+c);api(c,function(r){blogLog(r||'sent')})}
 
 function dumpPartition(){
   var name=document.getElementById('dump-partition').value;
-  var part='/dev/block/platform/sdhci-tegra.3/by-name/'+name;
   var st=document.getElementById('dump-status');
-  st.textContent='Dumping '+name+'...';
+  st.textContent='Downloading '+name+'...';
   blogLog('> Dump '+name+' -> download');
-  api('dd if='+part+' of=/data/local/tmp/dump_'+name+'.img bs=4096 2>&1&&/sbin/busybox stat -c%s /data/local/tmp/dump_'+name+'.img',function(r){
-    blogLog(r);
-    var lines=r.trim().split('\n');
-    var size=parseInt(lines[lines.length-1]);
-    if(!size||isNaN(size)){st.textContent='Dump failed';return}
-    st.textContent='Downloading '+name+' ('+(size/1024/1024).toFixed(1)+' MB)...';
-    // Download in chunks via base64 to handle large files
-    downloadBinary('/data/local/tmp/dump_'+name+'.img',name+'.img',size,function(ok){
-      st.textContent=ok?'Done':'Download failed';
-      api('rm /data/local/tmp/dump_'+name+'.img',function(){});
-    });
-  });
+  var a=document.createElement('a');
+  a.href=BASE+'/cgi-bin/dump?part='+name;
+  a.download=name+'.img';
+  a.click();
+  st.textContent='Download started';
 }
 
 function dumpToSdcard(){
   var name=document.getElementById('dump-partition').value;
-  var part='/dev/block/platform/sdhci-tegra.3/by-name/'+name;
   var dest='/sdcard/dump_'+name+'.img';
   var st=document.getElementById('dump-status');
   st.textContent='Dumping '+name+' to '+dest+'...';
   blogLog('> Dump '+name+' -> '+dest);
-  api('dd if='+part+' of='+dest+' bs=4096 2>&1&&sync&&ls -la '+dest,function(r){
-    blogLog(r);st.textContent='Saved to '+dest;
-  });
+  var x=new XMLHttpRequest();
+  x.open('GET',BASE+'/cgi-bin/dump?part='+name+'&save='+encodeURIComponent(dest));
+  x.onload=function(){blogLog(x.responseText);st.textContent='Saved to '+dest};
+  x.send();
 }
 
 function downloadBinary(remotePath,fileName,totalSize,cb){
