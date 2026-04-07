@@ -352,8 +352,8 @@ static int isp_build_zero_init(u32 *buf)
 } while (0)
 	ZI(0x202, 3); ZI(0x200, 2); ZI(0x205, 4);
 	ZI(0x700, 16); ZI(0x750, 16);
-	/* Processing (500-505), ISP_ENABLE (015) */
-	ZI(0x500, 6); ZI(0x015, 1);
+	/* Stock does NOT zero 0x500 (Processing) or 0x015 (ISP_ENABLE) here.
+	 * Zeroing 0x015 disables ISP at wrong time, 0x500 not needed. */
 	ZI(0xd00, 10); ZI(0xd0a, 1); ZN(0xd0b, 480);
 	ZI(0xd0c, 2); ZI(0xd20, 6);
 	ZI(0x900, 2); ZI(0x902, 1); ZN(0x903, 64);
@@ -370,51 +370,30 @@ static int isp_build_zero_init(u32 *buf)
 	ZI(0x655, 1); ZN(0x656, 257);
 	ZI(0x657, 1); ZN(0x658, 257);
 	ZI(0x300, 4); ZI(0x304, 4);
-	ZI(0x053, 1); ZI(0x054, 1);
+	/* Stock uses INCR(0x053,2) — combined write for 0x053+0x054 */
+	buf[n++] = nvhost_opcode_incr(0x053, 2);
+	buf[n++] = 0x00000000; /* 0x053 */
+	buf[n++] = 0x00000000; /* 0x054 */
 #undef ZI
 #undef ZN
-	return n; /* 1813 */
+	return n; /* 1815 — matches stock */
 }
 
 /* Append zero-init block + trigger. Returns new n. */
 static int isp_append_zero_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
-	u32 safe = (u32)isp->work_buf.dma;
-	int zi = isp_build_zero_init(&buf[n]);
-	/* Patch 0x053 (ISP global enable) and 0x054 (work_buf IOVA).
-	 * ZI(0x053,1)+ZI(0x054,1) = last 4 words: [opcode][0x053_data][opcode][0x054_data]
-	 * buf[zi-1] = 0x054 data, buf[zi-3] = 0x053 data
-	 * Stock: 0x053 = 1 (ISP enable ON), 0x054 = work_buf IOVA */
-	buf[n + zi - 3] = 0x00000001; /* 0x053: ISP global enable = 1 */
-	buf[n + zi - 1] = safe;       /* 0x054: work_buf IOVA */
+	int zi;
+	/* Stock: SETCLASS at start of each zero_block */
+	buf[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	zi = isp_build_zero_init(&buf[n]);
+	/* Stock keeps 0x053=0 (ISP global enable OFF) in S1/S2/S4 zero_blocks.
+	 * Setting 0x053=1 here breaks ISP streaming (confirmed via isp_patch_override).
+	 * 0x053 is set to 1 only in S5 runtime config.
+	 * 0x054 (work_buf) left as 0 — stock also leaves it 0 in zero_blocks. */
 	n += zi;
 
-	/* Set output/input/stats surface DMA addresses to safe value (work_buf)
-	 * to prevent ISP writing to stale bootloader addresses.
-	 * 0xE00-0xE03 = width,height,format,color — leave zero
-	 * 0xE04,0xE07,0xE0A = Y,U,V surface addr — set to safe */
-	buf[n++] = nvhost_opcode_incr(0xE00, 11);
-	buf[n++] = 0;    /* 0xE00: width */
-	buf[n++] = 0;    /* 0xE01: height */
-	buf[n++] = 0;    /* 0xE02: format */
-	buf[n++] = 0;    /* 0xE03: color */
-	buf[n++] = safe; /* 0xE04: Y addr */
-	buf[n++] = 0;    /* 0xE05: Y unk */
-	buf[n++] = 0;    /* 0xE06: Y stride */
-	buf[n++] = safe; /* 0xE07: U addr */
-	buf[n++] = 0;    /* 0xE08: U unk */
-	buf[n++] = 0;    /* 0xE09: U stride */
-	buf[n++] = safe; /* 0xE0A: V addr */
-	/* 0xE30: input surfaces — same layout, only set addr fields */
-	buf[n++] = nvhost_opcode_incr(0xE30, 11);
-	buf[n++] = 0;    buf[n++] = 0;    buf[n++] = 0;    buf[n++] = 0;
-	buf[n++] = safe; buf[n++] = 0;    buf[n++] = 0;
-	buf[n++] = safe; buf[n++] = 0;    buf[n++] = 0;
-	buf[n++] = safe;
-	/* 0x100: stats buffer addr */
-	buf[n++] = nvhost_opcode_incr(0x100, 4);
-	buf[n++] = safe; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
-
+	/* Stock has SETCLASS before trigger in each zero_block */
+	buf[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
 	return n;
@@ -426,9 +405,8 @@ static int isp_append_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 	memcpy(&buf[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
 	/* Cal data ends with INCR(0x053, 2) + [val, val].
-	 * Patch: 0x053 = 1 (ISP global enable), 0x054 = work_buf IOVA */
-	buf[n - 2] = 0x00000001;              /* 0x053: ISP global enable = 1 */
-	buf[n - 1] = (u32)isp->work_buf.dma;  /* 0x054: work_buf IOVA */
+	 * Stock keeps 0x053=0, 0x054=0 in S2/S4 cal blocks.
+	 * 0x053=1 only in S5. Do not patch here. */
 	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	buf[n++] = ISP_TRIGGER_POST_APPLY;
 	return n;
@@ -539,14 +517,18 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	dev_info(dev, "stream_init: %ux%u cmdbuf=0x%pad work=0x%pad\n",
 		 width, height, &cmd_phys, &isp->work_buf.dma);
 
-	/* S1 (stock 3654w): zero_block×2 + 0x018 tails + syncpt */
+	/* S1 (stock 3654w): zero_block×2 + 0x018 tails + syncpt
+	 * Stock structure: SETCLASS + zero_init + SETCLASS + trigger +
+	 *                  SETCLASS + 0x018_tail + (repeat) + syncpt */
 	n = 0;
 	n = isp_append_zero_block(isp, cmd, n);
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(0x018, 5);
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000400;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000200;
 	cmd[n++] = 0x00000002;
 	n = isp_append_zero_block(isp, cmd, n);
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(0x018, 5);
 	cmd[n++] = 0x0a00500a; cmd[n++] = 0x00008089;
 	cmd[n++] = 0x013645cb; cmd[n++] = 0x000001e7;
@@ -826,7 +808,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	n = 0;
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(0x930, 18);
-	cmd[n++] = 0x0000001c; cmd[n++] = 0x88888888;
+	cmd[n++] = 0x0000001d; cmd[n++] = 0x88888888; /* stock S6 = 0x1d (differs from S5 0x1c) */
 	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
 	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
 	cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
