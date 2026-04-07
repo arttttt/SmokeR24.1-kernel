@@ -220,6 +220,7 @@ static void submit_gathers(struct nvhost_job *job)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(job->ch->dev);
 	void *cpuva = NULL;
+	u32 class_id = 0;
 	int i;
 
 	/* push user gathers */
@@ -231,10 +232,13 @@ static void submit_gathers(struct nvhost_job *job)
 		if (pdata->resource_policy == RESOURCE_PER_DEVICE)
 			add_sync_waits(job->ch, g->pre_fence);
 
-		if (g->class_id)
+		/* Stock: only push SET_CLASS on class transition, not every gather */
+		if (g->class_id != class_id) {
 			nvhost_cdma_push(&job->ch->cdma,
 				nvhost_opcode_setclass(g->class_id, 0, 0),
 				NVHOST_OPCODE_NOOP);
+			class_id = g->class_id;
+		}
 
 		/* If register is specified, add a gather with incr/nonincr.
 		 * This allows writing large amounts of data directly from
@@ -379,8 +383,10 @@ static int host1x_channel_submit(struct nvhost_job *job)
 		nvhost_syncpt_mark_used(sp, ch->chid,
 					job->client_managed_syncpt);
 
-	submit_gathers(job);
+	/* Stock kernel: serialize BEFORE gathers (wait for previous jobs first).
+	 * 24.1 had serialize AFTER gathers — caused ISP OP_DONE to never fire. */
 	serialize(job);
+	submit_gathers(job);
 	lock_device(job, false);
 	submit_work_done_increment(job);
 
@@ -416,10 +422,32 @@ static int t124_channel_init_gather_filter(struct nvhost_channel *ch)
 
 	struct platform_device *pdev = ch->dev;
 	struct nvhost_master *master = nvhost_get_host(pdev);
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 	int err;
 
 	if (!nvhost_gather_filter_enabled(&master->syncpt))
 		return -EINVAL;
+
+	/* Skip gather filter for ISP — ISP methods require SET_CLASS
+	 * inside gathers for proper method dispatch. Stock kernel
+	 * had gather filter disabled globally. */
+	if (pdata->class == 0x32 || pdata->class == 0x34) {
+		u32 val;
+		err = nvhost_module_busy(nvhost_get_parent(pdev));
+		if (err) {
+			dev_warn(&pdev->dev, "failed to disable gather filter for ISP");
+			return err;
+		}
+		/* Read-modify-write: clear only the gather filter bit */
+		val = host1x_channel_readl(ch, host1x_channel_channelctrl_r());
+		val &= ~host1x_channel_channelctrl_kernel_filter_gbuffer_f(1);
+		host1x_channel_writel(ch, host1x_channel_channelctrl_r(), val);
+		nvhost_module_idle(nvhost_get_parent(pdev));
+		dev_info(&pdev->dev,
+			 "gather filter DISABLED for ISP class 0x%x\n",
+			 pdata->class);
+		return 0;
+	}
 
 	err = nvhost_module_busy(nvhost_get_parent(pdev));
 	if (err) {

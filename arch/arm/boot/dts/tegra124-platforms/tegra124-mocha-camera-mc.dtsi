@@ -53,7 +53,9 @@
 		vi {
 			/*
 			 * T124 VI with MC framework support
-			 * 3 channels: IMX179 (CSI-A), OV5693 (CSI-E), AD5823 (focuser)
+			 * 3 channels: IMX179 (CSI-A), OV5693 (CSI-E),
+			 *             AD5823 (focuser)
+			 * ISP disabled — 24.1 submit path broken, paused
 			 */
 			num-channels = <3>;
 			status = "okay";
@@ -102,17 +104,66 @@
 						remote-endpoint = <&mocha_ad5823_out0>;
 					};
 				};
+
+				/*
+				 * ISP channels — disabled, 24.1 submit path broken
+				 *
+				 * port@3 {
+				 *	reg = <3>;
+				 *	mocha_vi_in3: endpoint {
+				 *		remote-endpoint = <&mocha_isp_a_out0>;
+				 *	};
+				 * };
+				 *
+				 * port@4 {
+				 *	reg = <4>;
+				 *	mocha_vi_in4: endpoint {
+				 *		remote-endpoint = <&mocha_isp_b_out0>;
+				 *	};
+				 * };
+				 */
 			};
 		};
 
-		/* ISP A */
+		/*
+		 * ISP A & B — disabled, 24.1 submit path broken
+		 *
+		 * isp@54600000 {
+		 *	status = "okay";
+		 *	ports {
+		 *		#address-cells = <1>;
+		 *		#size-cells = <0>;
+		 *		port@0 {
+		 *			reg = <0>;
+		 *			mocha_isp_a_out0: endpoint {
+		 *				remote-endpoint = <&mocha_vi_in3>;
+		 *			};
+		 *		};
+		 *	};
+		 * };
+		 *
+		 * isp@54680000 {
+		 *	status = "okay";
+		 *	ports {
+		 *		#address-cells = <1>;
+		 *		#size-cells = <0>;
+		 *		port@0 {
+		 *			reg = <0>;
+		 *			mocha_isp_b_out0: endpoint {
+		 *				remote-endpoint = <&mocha_vi_in4>;
+		 *			};
+		 *		};
+		 *	};
+		 * };
+		 */
+
+		/* Override shield dtsi — force ISP disabled */
 		isp@54600000 {
-			status = "okay";
+			status = "disabled";
 		};
 
-		/* ISP B */
 		isp@54680000 {
-			status = "okay";
+			status = "disabled";
 		};
 	};
 

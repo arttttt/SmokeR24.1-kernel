@@ -1,0 +1,125 @@
+%s: BTA_FM_AF_JMP_EVT status = %i rssi = %i freq = %i 
+%s: BTA_FM_AUD_PATH_EVT, bta audio_path: %d, status: %d
+%s: BTA_FM_MUTE_AUD_EVT
+%s: BTA_FM_NFL_EVT: NFL = %d
+%s: BTA_FM_RDS_MODE_EVT: status=%d, RDS=%s, AF=%s
+%s: BTA_FM_RDS_TYPE_EVT: status=%d rds_type=0x%x
+%s: BTA_FM_SCAN_STEP_EVT
+%s: BTA_FM_SEARCH_CMPL_EVT status = %i rssi = %i freq = %i 
+%s: BTA_FM_SEARCH_EVT rssi = %i snr = %i freq = %i 
+%s: BTA_FM_SEARCH_EVT status = %i rssi = %i freq = %i 
+%s: BTA_FM_SET_DEEMPH_EVT
+%s: BTA_FM_SET_REGION_EVT
+%s: BTA_FM_TUNE_EVT status = %i rssi = %i freq = %i 
+%s: BTA_FM_VOLUME_EVT: status = %d, volume = %d
+%s: event= BTA_FM_AUD_MODE_EVT,audio_mode = %d
+%s: event= BTA_FM_DISABLE_EVT
+%s: event= BTA_FM_ENABLE_EVT
+bta_fm_abort
+bta_fm_action
+bta_fm_af_abort
+bta_fm_af_ber_jump
+bta_fm_af_jump
+bta_fm_af_jump_decision
+bta_fm_af_w4_pause
+bta_fm_api_enable
+bta_fm_cal_thresh
+bta_fm_cb
+bta_fm_cfg
+bta_fm_cfg_blend_mute
+bta_fm_check_rds
+bta_fm_check_reg_param
+bta_fm_chg_rds_type
+bta_fm_co_close
+bta_fm_co_init
+bta_fm_co_rds_data
+bta_fm_co_reset_rds_engine
+bta_fm_cur_freq
+bta_fm_disable
+bta_fm_disable_cmpl
+bta_fm_do_nfe
+bta_fm_enable
+bta_fm_filter_signal
+bta_fm_find_af
+bta_fm_find_af ===> find duplicate frequency
+bta_fm_flag_tout
+bta_fm_freq_in_range
+bta_fm_freq_in_range : freq is in range for FAST SCAN. Return TRUE
+bta_fm_get_a_group
+bta_fm_get_chipversion
+bta_fm_get_group_type
+bta_fm_hdl_event
+bta_fm_init_co
+bta_fm_init_delay
+bta_fm_int_cmpl
+bta_fm_jump_cmpl
+bta_fm_live_update
+bta_fm_mute_aud
+bta_fm_next_inq
+bta_fm_notify
+bta_fm_post_msg
+bta_fm_proc_sch_evt in_range = %d p_cb->combo_sch= %02x is_efreq = %d
+bta_fm_proc_vsc
+bta_fm_proc_vse
+bta_fm_q_evt
+bta_fm_rank_af_list
+bta_fm_read_rds
+bta_fm_scan_freq
+bta_fm_scan_init_param: region = %02x
+bta_fm_sch_cmpl_act
+bta_fm_sch_step_size
+bta_fm_set_aud_mode
+bta_fm_set_audio_path
+bta_fm_set_deemphasis
+bta_fm_set_mask
+bta_fm_set_rds_mode
+bta_fm_set_region
+bta_fm_set_step
+bta_fm_sm_execute
+bta_fm_snd_vendor_cmd
+bta_fm_st_tbl
+bta_fm_start_nfe
+bta_fm_tune_freq
+bta_fm_update_aud_data
+bta_fm_update_maint
+bta_fm_vcmd_deq
+bta_fm_vcmd_empty
+bta_fm_vcmd_enq
+bta_fm_vcmd_no_pending
+bta_fm_vcmd_pending
+bta_fm_vcmd_qhead
+bta_fm_vnd_cmd_read
+bta_fm_vnd_cmd_write_1b
+bta_fm_vnd_cmd_write_2b
+bta_fm_vsc_cmpl
+bta_fm_write_search_boundary
+btif_fm_af_merge_list
+btif_fm_cleanup
+btif_fm_combo_search
+btif_fm_config_deemphasis
+btif_fm_config_signal_notification
+btif_fm_disable
+btif_fm_enable
+btif_fm_estimate_noise_floor
+btif_fm_get_interface
+btif_fm_init
+btif_fm_mute
+btif_fm_rdsp_cback
+btif_fm_read_audio_quality
+btif_fm_search
+btif_fm_search_abort
+btif_fm_set_audio_mode
+btif_fm_set_audio_path
+btif_fm_set_audio_path(requested audioPath: %d) , current_bta_path: %d
+btif_fm_set_rds_mode
+btif_fm_set_rds_mode_int
+btif_fm_set_rds_type
+btif_fm_set_region
+btif_fm_set_scan_step
+btif_fm_set_search_criteria
+btif_fm_set_volume
+btif_fm_tune
+btif_fm_upstreams_evt
+btif_fm_volume_control(volume: %d) on current_bta_path: %d
+get_fm_interface 
+p_bta_fm_cfg

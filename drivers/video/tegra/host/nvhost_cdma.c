@@ -547,9 +547,15 @@ static void trace_write_gather(struct nvhost_cdma *cdma,
  */
 void nvhost_cdma_push(struct nvhost_cdma *cdma, u32 op1, u32 op2)
 {
+	struct platform_device *pdev = cdma_to_channel(cdma)->dev;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+
 	if (nvhost_debug_trace_cmdbuf)
-		trace_nvhost_cdma_push(cdma_to_channel(cdma)->dev->name,
-				op1, op2);
+		trace_nvhost_cdma_push(pdev->name, op1, op2);
+
+	/* ISP pushbuffer debug dump */
+	if (pdata->class == 0x32 || pdata->class == 0x34)
+		dev_info(&pdev->dev, "PB: %08x %08x\n", op1, op2);
 
 	nvhost_cdma_push_gather(cdma, NULL, 0, 0, op1, op2);
 }
@@ -564,9 +570,16 @@ void nvhost_cdma_push_gather(struct nvhost_cdma *cdma,
 {
 	u32 slots_free = cdma->slots_free;
 	struct push_buffer *pb = &cdma->push_buffer;
+	struct platform_device *pdev = cdma_to_channel(cdma)->dev;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 
 	if (cpuva)
 		trace_write_gather(cdma, cpuva, iova, offset, op1 & 0x1fff);
+
+	/* ISP gather debug dump */
+	if (pdata->class == 0x32 || pdata->class == 0x34)
+		dev_info(&pdev->dev, "PB_G: %08x %08x (iova=%pad off=%u)\n",
+			 op1, op2, &iova, offset);
 
 	if (slots_free == 0) {
 		slots_free = nvhost_cdma_wait_locked(cdma,
@@ -587,13 +600,29 @@ void nvhost_cdma_end(struct nvhost_cdma *cdma,
 		struct nvhost_job *job)
 {
 	bool was_idle = list_empty(&cdma->sync_queue);
+	bool is_isp = false;
 
-	add_to_sync_queue(cdma,
-			job,
-			cdma->slots_used,
-			cdma->first_get);
+	if (job->ch && job->ch->dev) {
+		struct nvhost_device_data *pdata = platform_get_drvdata(job->ch->dev);
+		if (pdata) {
+			is_isp = (pdata->class == 0x32) || (pdata->class == 0x34);
+			if (is_isp)
+				dev_dbg(&job->ch->dev->dev,
+					"cdma_end: ISP kick-first order, class=0x%x\n",
+					pdata->class);
+		}
+	}
 
-	cdma_op().kick(cdma);
+	if (is_isp) {
+		/* ISP: stock kick order — kick BEFORE sync_queue */
+		cdma_op().kick(cdma);
+		add_to_sync_queue(cdma, job,
+				cdma->slots_used, cdma->first_get);
+	} else {
+		add_to_sync_queue(cdma, job,
+				cdma->slots_used, cdma->first_get);
+		cdma_op().kick(cdma);
+	}
 
 	/* start timer on idle -> active transitions */
 	if (job->timeout && was_idle)

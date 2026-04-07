@@ -21,6 +21,7 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_graph.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 
@@ -41,6 +42,7 @@
 #include "vi/vi.h"
 #include "nvhost_acm.h"
 #include "mipi_cal.h"
+#include "isp_t124.h"
 #include "t124_registers.h"
 #include "t210_registers.h"
 
@@ -48,6 +50,10 @@
 static int t124_csi_tpg = 0;
 module_param(t124_csi_tpg, int, 0644);
 MODULE_PARM_DESC(t124_csi_tpg, "Enable T124 CSI Test Pattern Generator (bypasses sensor MIPI)");
+
+static int isp_reprocess = 0;
+module_param(isp_reprocess, int, 0644);
+MODULE_PARM_DESC(isp_reprocess, "ISP reprocess mode: VI→mem→ISP (1=on, 0=streaming)");
 #endif
 
 
@@ -276,6 +282,7 @@ static int tegra_channel_capture_setup(struct tegra_channel *chan)
 	}
 
 	if (chan->vi->pg_mode ||
+	   chan->use_isp ||
 	   (chan->fmtinfo->vf_code == TEGRA_VF_YUV422) ||
 	   (chan->fmtinfo->vf_code == TEGRA_VF_RGB888))
 		bypass_pixel_transform = 0;
@@ -520,9 +527,25 @@ static int tegra_channel_enable_stream(struct tegra_channel *chan)
 		}
 
 		/* VI CSI image config — port specific base */
-		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
-		       (t124_csi_tpg ? 0 : (1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
-		       (format << IMAGE_DEF_FORMAT_OFFSET) | IMAGE_DEF_DEST_MEM);
+		{
+			u32 dest;
+			if (chan->use_isp && !isp_reprocess)
+				dest = (chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B;
+			else
+				dest = IMAGE_DEF_DEST_MEM;
+			tegra_channel_write(chan,
+				vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
+				(t124_csi_tpg ? 0 :
+					(1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
+				(format << IMAGE_DEF_FORMAT_OFFSET) | dest);
+		}
+		/* Enable VI→ISP interface if ISP streaming (not reprocess) */
+		if (chan->use_isp && !isp_reprocess)
+			tegra_channel_write(chan,
+				vi_csi_base + TEGRA_VI_CSI_ISPINTF_CONFIG,
+				ISPINTF_CONFIG_ENABLE);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DT,
 		       data_type);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE_WC,
@@ -794,17 +817,33 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	int state = VB2_BUF_STATE_DONE;
 
 	for (index = 0; index < valid_ports; index++) {
+		dma_addr_t surface_addr;
+		int surface_stride;
+
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming: VI sends pixels to ISP via HW path,
+			 * no memory write. Stock uses surface=0. */
+			surface_addr = 0;
+			surface_stride = 0;
+		} else if (chan->use_isp) {
+			/* ISP reprocess: VI writes raw to memory buffer */
+			surface_addr = chan->isp_raw_dma;
+			surface_stride = chan->format.width * 2; /* RAW10 */
+		} else {
+			surface_addr = buf->addr + chan->buffer_offset[index];
+			surface_stride = bytes_per_line;
+		}
+
 		/* Program buffer address by using surface 0 */
 		csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_MSB, 0x0);
 		csi_write(chan, index,
-			TEGRA_VI_CSI_SURFACE0_OFFSET_LSB,
-			(buf->addr + chan->buffer_offset[index]));
+			TEGRA_VI_CSI_SURFACE0_OFFSET_LSB, surface_addr);
 		csi_write(chan, index,
-			TEGRA_VI_CSI_SURFACE0_STRIDE, bytes_per_line);
+			TEGRA_VI_CSI_SURFACE0_STRIDE, surface_stride);
 		dev_dbg(&chan->video.dev,
-			"capture_frame[%d]: buf_addr=0x%08x offset=0x%x stride=%d\n",
-			index, (u32)(buf->addr + chan->buffer_offset[index]),
-			chan->buffer_offset[index], bytes_per_line);
+			"capture_frame[%d]: buf_addr=0x%08x stride=%d%s\n",
+			index, (u32)surface_addr, surface_stride,
+			chan->use_isp ? " (ISP raw)" : "");
 
 		/* Program syncpoints */
 		thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
@@ -859,7 +898,13 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 				return err;
 			}
 			val = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
-			csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
+			if (chan->use_isp)
+				csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
+					val | ((chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B));
+			else
+				csi_write(chan, 0, TEGRA_VI_CSI_IMAGE_DEF,
 					val | IMAGE_DEF_DEST_MEM);
 		}
 
@@ -922,11 +967,39 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			tegra_channel_ring_buffer(chan, vb, &ts, state);
 			return err;
 		}
-		/* Bit controls VI memory write, enable after all regs */
+		/* Bit controls VI destination, enable after all regs */
 		for (index = 0; index < valid_ports; index++) {
 			val = csi_read(chan, index, TEGRA_VI_CSI_IMAGE_DEF);
-			csi_write(chan, index, TEGRA_VI_CSI_IMAGE_DEF,
+			if (chan->use_isp && !isp_reprocess)
+				csi_write(chan, index,
+					TEGRA_VI_CSI_IMAGE_DEF,
+					val | ((chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B));
+			else
+				csi_write(chan, index,
+					TEGRA_VI_CSI_IMAGE_DEF,
 					val | IMAGE_DEF_DEST_MEM);
+		}
+	}
+
+	/* ISP streaming: submit ISP per-frame BEFORE VI trigger so ISP is
+	 * armed and ready to receive pixels via hardware path */
+	if (chan->use_isp && !isp_reprocess) {
+		int isp_err = isp_t124_process_frame(chan->isp,
+				chan->isp_out_dma,
+				chan->isp->work_buf.dma);
+		if (isp_err)
+			dev_err(&chan->video.dev,
+				"ISP pre-submit failed: %d\n", isp_err);
+
+		/* Diagnostic: verify VI→ISP routing is set */
+		if (!chan->bfirst_fstart || isp_err == 0) {
+			u32 img_def = csi_read(chan, 0, TEGRA_VI_CSI_IMAGE_DEF);
+			u32 ispintf = csi_read(chan, 0, TEGRA_VI_CSI_ISPINTF_CONFIG);
+			dev_info(&chan->video.dev,
+				 "VI→ISP diag: IMAGE_DEF=0x%08x ISPINTF_CONFIG=0x%08x\n",
+				 img_def, ispintf);
 		}
 	}
 
@@ -958,6 +1031,23 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 	}
 
 	chan->capture_state = CAPTURE_GOOD;
+	if (chan->use_isp && !isp_reprocess) {
+		/* ISP streaming mode: no DEST_MEM → MW_ACK_DONE won't fire.
+		 * Frame completion signaled by ISP cond=4 (wait_frame). */
+
+		/* Diagnostic: read ISP status registers after VI trigger */
+		{
+			u32 isp_en = host1x_readl(chan->isp->pdev, 0x54);
+			u32 isp_ctrl = host1x_readl(chan->isp->pdev, 0x30);
+			u32 isp_status = host1x_readl(chan->isp->pdev, 0xf8);
+			u32 isp_inten = host1x_readl(chan->isp->pdev, 0x14c);
+			dev_info(&chan->video.dev,
+				 "ISP HW: ENABLE=0x%08x CTRL=0x%08x STATUS=0x%08x INTEN=0x%08x\n",
+				 isp_en, isp_ctrl, isp_status, isp_inten);
+		}
+
+		goto skip_vi_wait;
+	}
 	for (index = 0; index < valid_ports; index++) {
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
@@ -1002,6 +1092,7 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		}
 	}
 
+skip_vi_wait:
 	if (!err && !chan->vi->pg_mode) {
 		/* Marking error frames and resume capture */
 		/* TODO: TPG has frame height short error always set */
@@ -1011,6 +1102,69 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 			chan->capture_state = CAPTURE_ERROR;
 			/* do we have to run recover here ?? */
 			/* tegra_channel_ec_recover(chan); */
+		}
+	}
+
+	/* Debug: check if VI wrote raw data (DEST_MEM active) */
+	if (!err && chan->use_isp && chan->isp_raw_cpu) {
+		u32 *raw32 = (u32 *)chan->isp_raw_cpu;
+		u32 rnz = 0, i;
+		for (i = 0; i < 256; i++)
+			if (raw32[i]) rnz++;
+		dev_dbg(&chan->video.dev,
+			 "raw check: first 1KB: %u/256 nonzero, [0]=0x%08x [1]=0x%08x\n",
+			 rnz, raw32[0], raw32[1]);
+	}
+
+	/* ISP reprocess: VI done writing raw → now submit ISP */
+	if (!err && chan->use_isp && isp_reprocess &&
+	    state == VB2_BUF_STATE_DONE) {
+		int isp_err = isp_t124_process_frame_reprocess(chan->isp,
+				chan->isp_raw_dma,
+				chan->isp_out_dma,
+				chan->isp->work_buf.dma);
+		if (isp_err)
+			dev_err(&chan->video.dev,
+				"ISP reprocess submit failed: %d\n", isp_err);
+	}
+
+	/* ISP: wait for frame processing completion */
+	/* ISP: always wait (balances nvhost_module_busy in process_frame) */
+	if (chan->use_isp) {
+		int isp_err = isp_t124_wait_frame(chan->isp);
+		if (isp_err && state == VB2_BUF_STATE_DONE)
+			dev_err(&chan->video.dev,
+				"ISP wait_frame failed: %d\n", isp_err);
+	}
+
+	/* ISP output check — copy even on timeout for diagnostics */
+	if (chan->use_isp) {
+		/* Copy ISP output to userspace V4L2 buffer */
+		void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
+		size_t copy_sz = min_t(size_t,
+			vb2_plane_size(vb, 0),
+			PAGE_ALIGN(chan->isp_out_size));
+		if (vb2_vaddr)
+			memcpy(vb2_vaddr, chan->isp_out_cpu, copy_sz);
+
+		/* Scan ISP output for any non-zero data */
+		{
+			u32 *out32 = (u32 *)chan->isp_out_cpu;
+			u32 total = chan->isp_out_size / 4;
+			u32 nz = 0, first_nz = 0;
+			u32 i;
+			for (i = 0; i < total; i++) {
+				if (out32[i] != 0) {
+					if (!nz)
+						first_nz = i;
+					nz++;
+				}
+			}
+			dev_info(&chan->video.dev,
+				 "ISP out: %u/%u nonzero, first@%u=0x%08x last@%u\n",
+				 nz, total, first_nz,
+				 nz ? out32[first_nz] : 0,
+				 nz ? i - 1 : 0);
 		}
 	}
 
@@ -1082,6 +1236,10 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 	}
 
 	for (index = 0; index < chan->valid_ports; index++) {
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming mode: no DEST_MEM → MW_ACK_DONE won't fire. */
+			break;
+		}
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 			chan->syncpt[index], thresh[index],
 			chan->timeout, NULL, &ts);
@@ -1560,6 +1718,85 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 	chan->sequence = 0;
 	tegra_channel_init_ring_buffer(chan);
 
+	/* ISP pipeline setup: allocate raw buffer, init ISP */
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
+	if (!chan->vi->pg_mode && chan->valid_ports > 0) {
+		u8 isp_class = (chan->port[0] == 0) ?
+			ISP_A_CLASS_ID : ISP_B_CLASS_ID;
+		struct tegra_isp_t124 *isp = isp_t124_get_isp(isp_class);
+
+		dev_info(&chan->video.dev,
+			 "ISP setup: port[0]=%d -> %s (class=0x%02x)\n",
+			 chan->port[0],
+			 isp_class == ISP_A_CLASS_ID ? "ISP-A" : "ISP-B",
+			 isp_class);
+
+		if (isp) {
+			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
+			chan->isp_raw_size = chan->format.width *
+					    chan->format.height * raw_bpp;
+			/* Allocate raw buffer through ISP device —
+			 * Test: can VI write to ISP SMMU domain? */
+			chan->isp_raw_cpu = dma_alloc_coherent(
+					&isp->pdev->dev,
+					PAGE_ALIGN(chan->isp_raw_size),
+					&chan->isp_raw_dma, GFP_KERNEL);
+			if (chan->isp_raw_cpu) {
+				ret = isp_t124_stream_init(isp,
+						chan->format.width,
+						chan->format.height,
+						isp_reprocess);
+				if (ret) {
+					dev_warn(&chan->video.dev,
+						 "ISP init failed: %d\n", ret);
+					dma_free_coherent(
+						&isp->pdev->dev,
+						PAGE_ALIGN(chan->isp_raw_size),
+						chan->isp_raw_cpu,
+						chan->isp_raw_dma);
+					chan->isp_raw_cpu = NULL;
+				} else {
+					chan->isp = isp;
+					chan->use_isp = true;
+					/* Allocate ISP output buffer —
+					 * uses sensor resolution (set by stream_init).
+					 * ISP writes beyond calculated NV12 size
+					 * (SMMU faults at ~13.5MB for 3280x2464).
+					 * Use 2x safety margin. */
+					{
+						u32 y_sz = isp->y_stride * isp->height;
+						u32 uv_sz = isp->uv_stride * (isp->height / 2);
+						chan->isp_out_size = (y_sz + 2 * uv_sz) * 2;
+						chan->isp_out_cpu = dma_alloc_coherent(
+							&isp->pdev->dev,
+							PAGE_ALIGN(chan->isp_out_size),
+							&chan->isp_out_dma,
+							GFP_KERNEL);
+						if (!chan->isp_out_cpu) {
+							dev_warn(&chan->video.dev,
+								 "ISP out buf alloc failed\n");
+							chan->use_isp = false;
+							isp_t124_stream_stop(isp);
+							dma_free_coherent(&isp->pdev->dev,
+								PAGE_ALIGN(chan->isp_raw_size),
+								chan->isp_raw_cpu,
+								chan->isp_raw_dma);
+							chan->isp_raw_cpu = NULL;
+						}
+					}
+					if (chan->use_isp)
+						dev_info(&chan->video.dev,
+							 "ISP pipeline active: %ux%u out_dma=0x%pad raw_dma=0x%pad\n",
+							 chan->format.width,
+							 chan->format.height,
+							 &chan->isp_out_dma,
+							 &chan->isp_raw_dma);
+				}
+			}
+		}
+	}
+#endif
+
 	/* Update clock and bandwidth based on the format */
 	tegra_channel_update_clknbw(chan, 1);
 
@@ -1626,6 +1863,25 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 
 	if (!chan->bypass)
 		tegra_channel_update_clknbw(chan, 0);
+
+	/* ISP pipeline cleanup */
+	if (chan->isp_out_cpu && chan->isp) {
+		dma_free_coherent(&chan->isp->pdev->dev,
+				  PAGE_ALIGN(chan->isp_out_size),
+				  chan->isp_out_cpu, chan->isp_out_dma);
+		chan->isp_out_cpu = NULL;
+	}
+	if (chan->isp_raw_cpu && chan->isp) {
+		dma_free_coherent(&chan->isp->pdev->dev,
+				  PAGE_ALIGN(chan->isp_raw_size),
+				  chan->isp_raw_cpu, chan->isp_raw_dma);
+		chan->isp_raw_cpu = NULL;
+	}
+	if (chan->use_isp) {
+		isp_t124_stream_stop(chan->isp);
+		chan->use_isp = false;
+		chan->isp = NULL;
+	}
 
 	tegra_mipi_bias_pad_disable();
 
@@ -2412,8 +2668,48 @@ static void tegra_channel_csi_init(struct tegra_mc_vi *vi, unsigned int index)
 	chan->valid_ports = chan->total_ports ? 1 : 0;
 
 	if (chan->valid_ports == 0) {
-		chan->is_lens_channel = true;
-		dev_dbg(vi->dev, "channel %u: lens-only (no CSI port)\n", index);
+		/* No CSI port — check if this is an ISP or lens channel.
+		 * Use of_graph_get_remote_port_parent() to find the device
+		 * node of the remote endpoint and check its compatible.
+		 */
+		struct device_node *ports, *port, *ep, *remote_dev;
+		bool found_isp = false;
+
+		ports = of_get_child_by_name(vi->dev->of_node, "ports");
+		if (ports) {
+			for_each_child_of_node(ports, port) {
+				u32 reg;
+				if (of_node_cmp(port->name, "port"))
+					continue;
+				if (of_property_read_u32(port, "reg", &reg))
+					continue;
+				if (reg != index)
+					continue;
+				ep = of_get_next_child(port, NULL);
+				if (!ep)
+					break;
+				remote_dev = of_graph_get_remote_port_parent(ep);
+				of_node_put(ep);
+				if (remote_dev &&
+				    of_device_is_compatible(remote_dev,
+							   "nvidia,tegra124-isp"))
+					found_isp = true;
+				of_node_put(remote_dev);
+				of_node_put(port);
+				break;
+			}
+			of_node_put(ports);
+		}
+
+		if (found_isp) {
+			chan->is_isp_channel = true;
+			dev_dbg(vi->dev, "channel %u: ISP (no CSI port)\n",
+				index);
+		} else {
+			chan->is_lens_channel = true;
+			dev_dbg(vi->dev, "channel %u: lens-only (no CSI port)\n",
+				index);
+		}
 	}
 }
 
@@ -2453,6 +2749,21 @@ static int tegra_channel_init(struct tegra_mc_vi *vi, unsigned int index)
 		/* Name for debug, but no video_register_device */
 		snprintf(chan->video.name, sizeof(chan->video.name), "%s-lens-%u",
 			dev_name(vi->dev), chan->port[0]);
+
+		return 0;
+	}
+
+	if (chan->is_isp_channel) {
+		/* ISP channel: media entity only, no video device or VB2 queue.
+		 * ISP subdev will be bound via async notifier.
+		 */
+		chan->pad.flags = MEDIA_PAD_FL_SINK;
+		ret = media_entity_init(&chan->video.entity, 1, &chan->pad, 0);
+		if (ret < 0)
+			return ret;
+
+		snprintf(chan->video.name, sizeof(chan->video.name), "%s-isp-%u",
+			dev_name(vi->dev), index);
 
 		return 0;
 	}
@@ -2545,6 +2856,14 @@ vb2_init_error:
 
 static int tegra_channel_cleanup(struct tegra_channel *chan)
 {
+	if (chan->is_lens_channel || chan->is_isp_channel) {
+		/* These channels have no video device or VB2 queue */
+		media_entity_cleanup(&chan->video.entity);
+		if (chan->is_lens_channel)
+			v4l2_ctrl_handler_free(&chan->ctrl_handler);
+		return 0;
+	}
+
 	video_unregister_device(&chan->video);
 
 	v4l2_ctrl_handler_free(&chan->ctrl_handler);

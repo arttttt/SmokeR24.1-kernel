@@ -32,6 +32,8 @@
 #include "camera/core.h"
 #include "csi/csi.h"
 
+struct tegra_isp_t124;
+
 #define MAX_FORMAT_NUM	64
 #define	MAX_SUBDEVICES	4
 #define	QUEUED_BUFFERS	4
@@ -175,7 +177,19 @@ struct tegra_channel {
 	unsigned long requested_hz;
 	int grp_id;
 	bool is_lens_channel;	/* true = focuser/lens, no CSI capture */
+	bool is_isp_channel;	/* true = ISP entity, no video device */
 	struct tegra_channel *lens_chan; /* capture chan -> associated lens */
+
+	/* ISP pipeline integration */
+	bool use_isp;			/* true = VI→ISP pipeline active */
+	struct tegra_isp_t124 *isp;	/* ISP instance (A or B) */
+	void *isp_raw_cpu;		/* internal raw buffer for VI output */
+	dma_addr_t isp_raw_dma;
+	size_t isp_raw_size;
+	void *isp_out_cpu;		/* ISP output buffer (ISP device IOVA) */
+	dma_addr_t isp_out_dma;
+	size_t isp_out_size;
+	struct page *isp_out_page;	/* backing pages for isp_out */
 };
 
 #define to_tegra_channel(vdev) \

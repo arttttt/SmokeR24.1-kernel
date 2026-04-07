@@ -135,6 +135,9 @@ static struct swgid_fixup tegra_swgid_fixup_t124[] = {
 	{ .name = "tegra-udc",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
 	{ .name = "vic",	.swgids = SWGIDS_ERROR_CODE, },
 	{ .name = "vi",	.swgids = TEGRA_SWGROUP_BIT(VI), },
+	{ .name = "isp",	.swgids = TEGRA_SWGROUP_BIT(ISP2) |
+					  TEGRA_SWGROUP_BIT(ISP2B), },
+	{ .name = "isp.1",	.swgids = TEGRA_SWGROUP_BIT(ISP2B), },
 	{ .name = "therm_est",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
 #ifdef CONFIG_PLATFORM_ENABLE_IOMMU
 	{ .name = dummy_name,	.swgids = TEGRA_SWGROUP_BIT(PPCS) },
@@ -214,6 +217,9 @@ u64 tegra_smmu_fixup_swgids(struct device *dev, struct iommu_linear_map **map)
 
 		if (map)
 			*map = table->linear_map;
+
+		pr_info("smmu fixup: %s -> swgids 0x%llx\n",
+			dev_name(dev), table->swgids);
 
 		if (dev->of_node)
 			break;

@@ -1,0 +1,1680 @@
+<6>[    0.000000] Booting Linux on physical CPU 0x0
+<6>[    0.000000] Initializing cgroup subsys cpu
+<6>[    0.000000] Initializing cgroup subsys cpuacct
+<5>[    0.000000] Linux version 3.10.24-Smoke-kernel-1.2 (artem@artem-g77790) (gcc version 4.9.4 (Linaro GCC 4.9-2017.01) ) #8 SMP PREEMPT Fri Apr 3 18:57:53 EEST 2026
+<4>[    0.000000] CPU: ARMv7 Processor [413fc0f3] revision 3 (ARMv7), cr=30c7387d
+<4>[    0.000000] CPU: PIPT / VIPT nonaliasing data cache, PIPT instruction cache
+<6>[    0.000000] Machine: mocha, model: NVIDIA Tegra124 TN8, serial: 0
+<6>[    0.000000] Found tsec, start=0xfe000000 size=2000000
+<6>[    0.000000] Found tegra_fbmem: 01820000@ad012000
+<6>[    0.000000] Tegra reserved memory:
+<6>[    0.000000] LP0:                    fdfff000 - fdfffb4f
+<6>[    0.000000] Bootloader framebuffer: ad012000 - ae831fff
+<6>[    0.000000] Bootloader framebuffer2: 00000000 - 00000000
+<6>[    0.000000] Framebuffer:            fb400000 - fc5fffff
+<6>[    0.000000] 2nd Framebuffer:        fc600000 - fd5fffff
+<6>[    0.000000] Carveout:               00000000 - 00000000
+<6>[    0.000000] Vpr:                    00000000 - 00000000
+<6>[    0.000000] Tsec:                   fe000000 - ffffffff
+<6>[    0.000000] Nvdumper:               fd700000 - fd700fff
+<6>[    0.000000] Tzram:               fda00000 - fddfffff
+<3>[    0.000000] Hardboot page reserved at 0xFB100000
+<6>[    0.000000] cma: CMA: reserved 16 MiB at 96000000
+<4>[    0.000000] Memory policy: ECC disabled, Data cache writealloc
+<7>[    0.000000] On node 0 totalpages: 504832
+<7>[    0.000000] free_area_init_node: node 0, pgdat c0fdd1c0, node_mem_map c2115000
+<7>[    0.000000]   Normal zone: 736 pages used for memmap
+<7>[    0.000000]   Normal zone: 0 pages reserved
+<7>[    0.000000]   Normal zone: 94208 pages, LIFO batch:31
+<7>[    0.000000]   HighMem zone: 3276 pages used for memmap
+<7>[    0.000000]   HighMem zone: 410624 pages, LIFO batch:31
+<6>[    0.000000] DTS File Name: arch/arm/boot/dts/tegra124-mocha.dts
+<6>[    0.000000] Tegra12: CPU Speedo ID 5, Soc Speedo ID 0, Gpu Speedo ID 1
+<6>[    0.000000] Tegra12: CPU Process ID 0,Soc Process ID 1,Gpu Process ID 0
+<6>[    0.000000] Tegra Revision: unknown SKU: 0x27 CPU Process: 0 Core Process: 1
+<6>[    0.000000] tegra: PLLP fixed rate: 408000000
+<6>[    0.000000] pll_d2: val=00583201 m=1 n=50 p_div=5 input_rate=12000000
+<6>[    0.000000] pll_c4: val=00583201 m=1 n=50 p_div=5 input_rate=12000000
+<6>[    0.000000] pll_dp: val=00583201 m=1 n=50 p_div=5 input_rate=12000000
+<6>[    0.000000] Lowering cpu_lp maximum rate from 1350000000 to 1044000000
+<6>[    0.000000] Lowering sbus maximum rate from 408000000 to 372000000
+<6>[    0.000000] Lowering vic03 maximum rate from 900000000 to 756000000
+<6>[    0.000000] Lowering tsec maximum rate from 900000000 to 756000000
+<6>[    0.000000] Lowering msenc maximum rate from 600000000 to 480000000
+<6>[    0.000000] Lowering se maximum rate from 600000000 to 480000000
+<6>[    0.000000] Lowering vde maximum rate from 600000000 to 480000000
+<6>[    0.000000] Lowering host1x maximum rate from 500000000 to 408000000
+<6>[    0.000000] Lowering vi maximum rate from 700000000 to 600000000
+<6>[    0.000000] Lowering isp maximum rate from 700000000 to 600000000
+<6>[    0.000000] Lowering c4bus maximum rate from 700000000 to 600000000
+<6>[    0.000000] Lowering pll_c maximum rate from 1400000000 to 1066000000
+<6>[    0.000000] Lowering pll_c2 maximum rate from 1200000000 to 1066000000
+<6>[    0.000000] Lowering pll_c3 maximum rate from 1200000000 to 1066000000
+<6>[    0.000000] Lowering hdmi maximum rate from 594000000 to 297000000
+<6>[    0.000000] Lowering nor maximum rate from 127000000 to 102000000
+<6>[    0.000000] Lowering sdmmc1 maximum rate from 208000000 to 204000000
+<6>[    0.000000] Lowering sdmmc3 maximum rate from 208000000 to 204000000
+<6>[    0.000000] Lowering gbus maximum rate from 1032000000 to 1008000000
+<6>[    0.000000] Lowering cpu_g maximum rate from 3000000000 to 2499000000
+<6>[    0.000000] tegra dvfs: VDD_CPU nominal 1260mV, scaling enabled
+<6>[    0.000000] tegra dvfs: VDD_CORE nominal 1150mV, scaling enabled
+<6>[    0.000000] tegra dvfs: VDD_GPU nominal 1260mV, scaling enabled
+<6>[    0.000000] Switching to timer-based delay loop
+<6>[    0.000000] tegra_powergate_init: DONE
+<3>[    0.000000] Timed out waiting for pll_e lock bit ([0xec] = 0x4300)
+<6>[    0.000000] PERCPU: Embedded 9 pages/cpu @c30f1000 s15360 r8192 d13312 u36864
+<7>[    0.000000] pcpu-alloc: s15360 r8192 d13312 u36864 alloc=9*4096
+<7>[    0.000000] pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3 
+<4>[    0.000000] Built 1 zonelists in Zone order, mobility grouping on.  Total pages: 504096
+<5>[    0.000000] Kernel command line: vmalloc=640M androidboot.selinux=permissive tegraid=40.1.1.0.0 mem=2006M@2048M memtype=0 tsec=32M@4064M otf_key=a561c23a1664d281de760770b4bfdf0d tzram=4M@4058M ddr_die=1024M@2048M ddr_die=1024M@3072M section=128M commchip_id=0 usb_port_owner_info=0 lane_owner_info=0 emc_max_dvfs=0 androidboot.serialno=110C2083 androidboot.cpuid=17408C144040000000F070200 androidboot.commchip_id=0 androidboot.modem=none bl_version=1.0 syspart=system  touch_id=0@2150632020 video=tegrafb no_console_suspend=1 console=none debug_uartport=hsport usbcore.old_scheme_first=1 lp0_vec=2896@0xfdfff000 tegra_fbmem=25296896@0xad012000 nvdumper_reserved=0xfd700000 core_edp_mv=1150 core_edp_ma=4000 pmuboard=0x06c8:0x03e8:0x00:0x44:0x04 displayboard=0x8038:0x0000:0x00:0x00:0x00 power_supply=Battery board_info=0x06f4:0x044c:0x03:0x41:0x07 tegraboot=sdmmc gpt gpt_sector=4095 modem_id=0 androidboot.hwversion=1 panel_id=32 android.kerneltype=normal
+<6>[    0.000000] PID hash table entries: 2048 (order: 1, 8192 bytes)
+<6>[    0.000000] Dentry cache hash table entries: 65536 (order: 6, 262144 bytes)
+<6>[    0.000000] Inode-cache hash table entries: 32768 (order: 5, 131072 bytes)
+<6>[    0.000000] Memory: 1972MB = 1972MB total
+<5>[    0.000000] Memory: 1936608k/1936608k available, 117536k reserved, 1614720K highmem
+<5>[    0.000000] Virtual kernel memory layout:
+<5>[    0.000000]     vector  : 0xffff0000 - 0xffff1000   (   4 kB)
+<5>[    0.000000]     fixmap  : 0xfff00000 - 0xfffe0000   ( 896 kB)
+<5>[    0.000000]     vmalloc : 0xd7800000 - 0xff000000   ( 632 MB)
+<5>[    0.000000]     lowmem  : 0xc0000000 - 0xd7000000   ( 368 MB)
+<5>[    0.000000]     pkmap   : 0xbfe00000 - 0xc0000000   (   2 MB)
+<5>[    0.000000]     modules : 0xbf000000 - 0xbfe00000   (  14 MB)
+<5>[    0.000000]       .text : 0xc0008000 - 0xc0d4e27c   (13593 kB)
+<5>[    0.000000]       .init : 0xc0d4f000 - 0xc0de2c00   ( 591 kB)
+<5>[    0.000000]       .data : 0xc0de4000 - 0xc0ffe114   (2153 kB)
+<5>[    0.000000]        .bss : 0xc0ffe114 - 0xc127e0c4   (2560 kB)
+<6>[    0.000000] Preemptible hierarchical RCU implementation.
+<6>[    0.000000] NR_IRQS:960
+<6>[    0.000000] the number of interrupt controllers found is 5
+<6>[    0.000000] Architected local timer running at 12.00MHz (phys).
+<6>[    0.000000] Ignoring duplicate/late registration of read_current_timer delay
+<6>[    0.000000] sched_clock: 32 bits at 12MHz, resolution 83ns, wraps every 357913ms
+<6>[    0.000326] Calibrating delay loop (skipped), value calculated using timer frequency.. lpj=12000
+<6>[    0.000344] pid_max: default: 32768 minimum: 301
+<6>[    0.000495] Security Framework initialized
+<6>[    0.000523] SELinux:  Initializing.
+<7>[    0.000559] SELinux:  Starting in permissive mode
+<6>[    0.000630] Mount-cache hash table entries: 512
+<6>[    0.026116] Initializing cgroup subsys freezer
+<6>[    0.026132] Initializing cgroup subsys bfqio
+<6>[    0.026183] CPU: Testing write buffer coherency: ok
+<6>[    0.026224] ftrace: allocating 34636 entries in 68 pages
+<6>[    0.069925] CPU0: thread -1, cpu 0, socket 0, mpidr 80000000
+<6>[    0.069956] Setting up static identity map for 0xc093f268 - 0xc093f314
+<4>[    0.069975] reboot reason bit is 0x10000200
+<6>[    0.073902] ftrace: Allocated trace_printk buffers
+<6>[    0.080509] CPU1: thread -1, cpu 1, socket 0, mpidr 80000001
+<6>[    0.083511] CPU2: thread -1, cpu 2, socket 0, mpidr 80000002
+<6>[    0.086556] CPU3: thread -1, cpu 3, socket 0, mpidr 80000003
+<6>[    0.086670] Brought up 4 CPUs
+<6>[    0.086690] SMP: Total of 4 processors activated.
+<6>[    0.086697] CPU: All CPU(s) started in SVC mode.
+<6>[    0.094982] bootinfo_init: powerup reason=0x8
+<6>[    0.094998] CPA: inner cache maint threshold=2097152
+<6>[    0.097309] pinctrl core: initialized pinctrl subsystem
+<6>[    0.097635] regulator-dummy: no parameters
+<6>[    0.098345] NET: Registered protocol family 16
+<6>[    0.101213] DMA: preallocated 256 KiB pool for atomic coherent allocations
+<6>[    0.101534] tegra_smmu tegra_smmu: Loaded Tegra IOMMU driver
+<6>[    0.103027] console [pstore-1] enabled
+<6>[    0.103039] ramoops: attached 0x200000@0xfb200000, ecc: 0/0
+<6>[    0.103357] cpuidle: using governor ladder
+<6>[    0.103369] cpuidle: using governor menu
+<4>[    0.104876] tn8_new_sysedp_init: Unknown tn8 display board id, 0x8038!  Assuming E1937.
+<6>[    0.107986] tegra-gpio 6000d000.gpio: Initialising GPIO state 0: name default
+<7>[    0.108092] gpiochip_add: registered GPIOs 0 to 255 on device: tegra-gpio
+<6>[    0.123823] Wake16 for irq=34
+<6>[    0.126228] Wake58 for irq=81
+<6>[    0.126288] Wake41 for irq=129
+<6>[    0.126299] Wake43 for irq=129
+<6>[    0.126341] Wake40 for irq=53
+<6>[    0.126351] Wake42 for irq=53
+<6>[    0.129183] board_info: id:sku:fab:major:minor = 0x06f4:0x044c:0x03:0x41:0x07
+<7>[    0.129219] disp1 pclk=214824960
+<6>[    0.129477] Shield ERS 0x6f4
+<6>[    0.129550] gpio wake54 for gpio=133
+<6>[    0.129561] Enabling wake54
+<4>[    0.129573] ardbeg_bq27520_init: soc_int_gpio=133 soc_int_irq=310
+<3>[    0.131436] PMC dt information non-NULL tegra_init_suspend
+<3>[    0.131449] PMC DT attribute sysclkreq_high=0, board value=1
+<3>[    0.131459] PMC DT attribute corereq_high=0, board value=1
+<3>[    0.131470] PMC DT attribute cpu_off_timer=-1073571192, board value=300
+<3>[    0.131480] PMC DT attribute cpu_timer=-1073571192, board value=500
+<3>[    0.131490] PMC DT attribute suspend_mode=0, board value=3
+<6>[    0.131969] Clear bootloader IO dpd settings
+<6>[    0.132036] memory id = 3
+<6>[    0.132277] tegra: emc: Derated table is valid.
+<6>[    0.132290] tegra: pll_m is selected as scalable EMC clock source
+<6>[    0.132318] Lowering emc maximum rate from 1200000000 to 924000000
+<6>[    0.132351] tegra: validated EMC DFS table
+<6>[    0.132458] tn8_edp_init: CPU regulator 12000 mA
+<6>[    0.604667] tn8_edp_init: GPU regulator 12000 mA
+<6>[    0.609938] swapper/0 isomgr_init(): iso emc max clk=924000KHz
+<6>[    0.609949] swapper/0 isomgr_init(): max_iso_bw=7392000KB<6>[    0.610223]  ardbeg_touch_init init atmel touch
+<6>[    0.647268] platform tegradc.0: IOVA linear map 0x00000000fb400000(1200000)
+<6>[    0.651416] platform tegradc.0: IOVA linear map 0x00000000fc600000(1000000)
+<6>[    0.655705] platform tegradc.0: IOVA linear map 0x00000000ad012000(1820000)
+<6>[    0.656634] tegra11_soctherem_oc_int_init(): OC interrupts enabled successful
+<6>[    0.657291] No ATAGs?
+<6>[    0.657323] hw-breakpoint: found 5 (+1 reserved) breakpoint and 4 watchpoint registers.
+<6>[    0.657337] hw-breakpoint: maximum watchpoint size is 8 bytes.
+<6>[    0.657509] mc-err: Started MC error interface!
+<6>[    0.669619] bio: create slab <bio-0> at 0
+<4>[    0.671036] reg-fixed-voltage 0.regulator: Consumer c1 does not have device name
+<7>[    0.671054] of_get_named_gpio_flags: can't parse gpios property
+<6>[    0.671158] vdd_ac_bat: 5000 mV 
+<6>[    0.672598] vgaarb: loaded
+<5>[    0.673161] SCSI subsystem initialized
+<7>[    0.673361] libata version 3.00 loaded.
+<6>[    0.673552] usbcore: registered new interface driver usbfs
+<6>[    0.673607] usbcore: registered new interface driver hub
+<6>[    0.673705] usbcore: registered new device driver usb
+<7>[    0.673884] of_get_named_gpio_flags exited with status 20
+<7>[    0.673895] of_get_named_gpio_flags exited with status 21
+<7>[    0.676462] of_get_named_gpio_flags exited with status 157
+<7>[    0.676476] of_get_named_gpio_flags exited with status 158
+<7>[    0.677122] of_get_named_gpio_flags exited with status 217
+<7>[    0.677135] of_get_named_gpio_flags exited with status 218
+<7>[    0.677358] of_get_named_gpio_flags exited with status 172
+<7>[    0.677388] of_get_named_gpio_flags exited with status 173
+<7>[    0.677737] of_get_named_gpio_flags exited with status 206
+<7>[    0.677749] of_get_named_gpio_flags exited with status 207
+<6>[    0.678373] palmas 4-0058: Irq flag is 0x00000000
+<6>[    0.679368] palmas 4-0058: Warmboot trace  0x0
+<6>[    0.679828] palmas 4-0058: Internal DesignRev 0x04, SWRev 0xBE
+<6>[    0.679844] palmas 4-0058: ES version 2.3: ChipRevision 0xB3BE
+<7>[    0.683184] gpiochip_find_base: found new base at 1016
+<7>[    0.683272] gpiochip_add: registered GPIOs 1016 to 1023 on device: gpio.7
+<6>[    0.688803] palmas-pinctrl pinmux.9: Muxing GPIO dfde, PWM 0, LED 0
+<4>[    0.689579] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.689615] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.689652] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.689666] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.689680] palmas-pmic pmic.14: Consumer c3 does not have device name
+<4>[    0.689694] palmas-pmic pmic.14: Consumer c4 does not have device name
+<4>[    0.689727] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.689790] palmas-pmic pmic.14: Consumer c7 does not have device name
+<4>[    0.689803] palmas-pmic pmic.14: Consumer c8 does not have device name
+<4>[    0.689816] palmas-pmic pmic.14: Consumer c9 does not have device name
+<4>[    0.689830] palmas-pmic pmic.14: Consumer c10 does not have device name
+<4>[    0.689845] palmas-pmic pmic.14: Consumer c12 does not have device name
+<4>[    0.689861] palmas-pmic pmic.14: Consumer c14 does not have device name
+<4>[    0.689885] palmas-pmic pmic.14: Consumer c20 does not have device name
+<4>[    0.689897] palmas-pmic pmic.14: Consumer c21 does not have device name
+<4>[    0.689910] palmas-pmic pmic.14: Consumer c22 does not have device name
+<4>[    0.689923] palmas-pmic pmic.14: Consumer c23 does not have device name
+<4>[    0.689936] palmas-pmic pmic.14: Consumer c24 does not have device name
+<4>[    0.689949] palmas-pmic pmic.14: Consumer c25 does not have device name
+<4>[    0.689962] palmas-pmic pmic.14: Consumer c26 does not have device name
+<4>[    0.689975] palmas-pmic pmic.14: Consumer c27 does not have device name
+<4>[    0.689992] palmas-pmic pmic.14: Consumer c30 does not have device name
+<4>[    0.690012] palmas-pmic pmic.14: Consumer c35 does not have device name
+<4>[    0.690025] palmas-pmic pmic.14: Consumer c36 does not have device name
+<4>[    0.690056] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690074] palmas-pmic pmic.14: Consumer c4 does not have device name
+<4>[    0.690087] palmas-pmic pmic.14: Consumer c5 does not have device name
+<4>[    0.690141] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690155] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690168] palmas-pmic pmic.14: Consumer c3 does not have device name
+<4>[    0.690211] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690224] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690236] palmas-pmic pmic.14: Consumer c3 does not have device name
+<4>[    0.690249] palmas-pmic pmic.14: Consumer c4 does not have device name
+<4>[    0.690263] palmas-pmic pmic.14: Consumer c5 does not have device name
+<4>[    0.690276] palmas-pmic pmic.14: Consumer c6 does not have device name
+<4>[    0.690289] palmas-pmic pmic.14: Consumer c7 does not have device name
+<4>[    0.690301] palmas-pmic pmic.14: Consumer c8 does not have device name
+<4>[    0.690314] palmas-pmic pmic.14: Consumer c9 does not have device name
+<4>[    0.690351] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690364] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690377] palmas-pmic pmic.14: Consumer c3 does not have device name
+<4>[    0.690398] palmas-pmic pmic.14: Consumer c8 does not have device name
+<4>[    0.690449] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690462] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690474] palmas-pmic pmic.14: Consumer c3 does not have device name
+<4>[    0.690487] palmas-pmic pmic.14: Consumer c4 does not have device name
+<4>[    0.690558] palmas-pmic pmic.14: Consumer c8 does not have device name
+<4>[    0.690572] palmas-pmic pmic.14: Consumer c9 does not have device name
+<4>[    0.690585] palmas-pmic pmic.14: Consumer c10 does not have device name
+<4>[    0.690598] palmas-pmic pmic.14: Consumer c11 does not have device name
+<4>[    0.690630] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690643] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690691] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690704] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690749] palmas-pmic pmic.14: Consumer c1 does not have device name
+<4>[    0.690780] palmas-pmic pmic.14: Consumer c2 does not have device name
+<4>[    0.690818] palmas-pmic pmic.14: Consumer c3 does not have device name
+<4>[    0.690855] palmas-pmic pmic.14: Consumer c1 does not have device name
+<7>[    0.690887] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690901] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690912] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690924] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690936] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690947] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690958] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690969] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690980] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.690991] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691001] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691012] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691022] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691032] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691043] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691053] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691065] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691075] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.691086] of_get_named_gpio_flags: can't parse gpios property
+<6>[    0.692011] vdd-cpu: 700 <--> 1400 mV at 1000 mV 
+<6>[    0.694103] vdd-gpu: applied init 1000000uV constraint
+<6>[    0.694860] vdd-gpu: 700 <--> 1400 mV at 1000 mV 
+<6>[    0.696403] vddio-ddr: 1200 mV 
+<6>[    0.697036] vdd-core: 700 <--> 1400 mV at 1150 mV 
+<6>[    0.699116] vdd-1v8: 1800 mV 
+<6>[    0.699956] vdd-snsr: 3300 mV 
+<6>[    0.700913] vdd-out2-5v0: 5000 mV 
+<6>[    0.702446] vdd-out1-5v0: 5000 mV 
+<6>[    0.702681] vdd-out1-5v0: supplied by vdd-out2-5v0
+<6>[    0.703623] avdd-pll: 1050 mV 
+<6>[    0.703827] avdd-pll: supplied by vddio-ddr
+<6>[    0.706249] vdd-lcd-io: 1800 mV 
+<6>[    0.706455] vdd-lcd-io: supplied by vddio-ddr
+<6>[    0.707904] vdd-touch: 3300 mV 
+<6>[    0.708112] vdd-touch: supplied by vdd-out2-5v0
+<6>[    0.709513] avdd-cam: 2700 mV 
+<6>[    0.711089] avdd-dsi-csi: 1200 mV 
+<6>[    0.711296] avdd-dsi-csi: supplied by vdd-1v8
+<6>[    0.712631] vdd-cam-af: 1800 mV 
+<6>[    0.712852] vdd-cam-af: supplied by vdd-snsr
+<6>[    0.714289] avdd-cam-af: 2700 mV 
+<6>[    0.714498] avdd-cam-af: supplied by vdd-snsr
+<6>[    0.716600] vdd-rtc: 950 mV 
+<6>[    0.717388] vddio-sdmmc-2: 1800 <--> 3300 mV at 900 mV 
+<6>[    0.717597] vddio-sdmmc-2: supplied by vdd-snsr
+<6>[    0.719680] vddio-hv: 3300 mV 
+<6>[    0.719903] vddio-hv: supplied by vdd-out2-5v0
+<6>[    0.721876] avdd-usb: 3300 mV 
+<6>[    0.722546] REGEN1: at 4300 mV 
+<6>[    0.722668] REGEN2: at 4300 mV 
+<6>[    0.722800] REGEN3: at 4300 mV 
+<6>[    0.722936] SYSEN1: at 4300 mV 
+<6>[    0.723066] SYSEN2: at 4300 mV 
+<7>[    0.723194] of_get_named_gpio_flags: can't parse gpios property
+<7>[    0.723204] of_get_named_gpio_flags: can't parse gpios property
+<6>[    0.723660] Linux video capture interface: v2.00
+<7>[    0.723821] of_get_named_gpio_flags: can't parse gpios property
+<6>[    0.724083] bq2419x 1-006b: chip type BQ2419X/3 detected
+<6>[    0.725279] bq2419x-charger: normal standby
+<6>[    0.725365] bq2419x 1-006b: Registering battery charger driver
+<6>[    0.726021] gpio wake33 for gpio=72
+<6>[    0.726167] bq2419x-vbus: normal standby
+<6>[    0.726247] bq2419x 1-006b: Charging enabled
+<6>[    0.726633] bq2419x 1-006b: Charging enabled
+<6>[    0.728990] Advanced Linux Sound Architecture Driver Initialized.
+<6>[    0.729436] Bluetooth: Core ver 2.16
+<6>[    0.729479] NET: Registered protocol family 31
+<6>[    0.729491] Bluetooth: HCI device and connection manager initialized
+<6>[    0.729508] Bluetooth: HCI socket layer initialized
+<6>[    0.729525] Bluetooth: L2CAP socket layer initialized
+<6>[    0.729559] Bluetooth: SCO socket layer initialized
+<6>[    0.729905] cfg80211: Calling CRDA to update world regulatory domain
+<6>[    0.730090] nfc: nfc_init: NFC Core ver 0.1
+<6>[    0.730151] NET: Registered protocol family 39
+<3>[    0.730179] ardbeg_wifi_power: 1
+<7>[    0.830801] of_get_named_gpio_flags exited with status 108
+<6>[    0.830901] usb0-vbus: 5000 mV 
+<7>[    0.831047] of_get_named_gpio_flags exited with status 109
+<6>[    0.831150] usb1-vbus: 5000 mV 
+<6>[    0.831200] usb1-vbus: supplied by vdd-out2-5v0
+<7>[    0.831383] of_get_named_gpio_flags exited with status 249
+<6>[    0.831479] usb2-vbus: 5000 mV 
+<6>[    0.831523] usb2-vbus: supplied by vdd-out2-5v0
+<4>[    0.831707] reg-fixed-sync-voltage 29.regulator: Consumer c1 does not have device name
+<7>[    0.831724] of_get_named_gpio_flags exited with status 68
+<6>[    0.831819] avdd-lcd-vsp: 5500 mV 
+<4>[    0.831968] reg-fixed-sync-voltage 2a.regulator: Consumer c1 does not have device name
+<7>[    0.831985] of_get_named_gpio_flags exited with status 146
+<6>[    0.832081] avdd-lcd-vsn: 5500 mV 
+<4>[    0.832209] reg-fixed-sync-voltage 5.regulator: Consumer c1 does not have device name
+<7>[    0.832238] of_get_named_gpio_flags exited with status 1020
+<6>[    0.832857] vdd-lcd: 1200 mV 
+<6>[    0.832902] vdd-lcd: supplied by vdd-1v8
+<7>[    0.833085] of_get_named_gpio_flags exited with status 1022
+<6>[    0.833700] ldoen: 1200 mV 
+<6>[    0.833750] ldoen: supplied by vdd-1v8
+<4>[    0.833923] reg-fixed-sync-voltage 8.regulator: Consumer c1 does not have device name
+<7>[    0.833940] of_get_named_gpio_flags exited with status 58
+<6>[    0.834042] en-lcd-bl: 5000 mV 
+<7>[    0.834178] of_get_named_gpio_flags exited with status 86
+<6>[    0.834270] vdd-hdmi: 5000 mV 
+<6>[    0.834315] vdd-hdmi: supplied by vdd-out1-5v0
+<4>[    0.834697] reg-fixed-sync-voltage a.regulator: Consumer c1 does not have device name
+<7>[    0.834726] of_get_named_gpio_flags exited with status 1017
+<6>[    0.835336] vdd-cam-1v8: 1800 mV 
+<6>[    0.835380] vdd-cam-1v8: supplied by vdd-1v8
+<4>[    0.835541] reg-fixed-sync-voltage b.regulator: Consumer c1 does not have device name
+<7>[    0.835568] of_get_named_gpio_flags exited with status 1018
+<6>[    0.836167] vdd-cam-1v2: 1200 mV 
+<6>[    0.836211] vdd-cam-1v2: supplied by vdd-1v8
+<6>[    0.841918] palmas-usb extcon.10: vbus-irq() INT3_LINE_STATE 0x80
+<6>[    0.841958] palmas-usb extcon.10: USB cable is attached
+<6>[    1.144670] palmas-usb extcon.10: id-state: 0x10
+<6>[    1.144684] palmas-usb extcon.10: All cable detached
+<6>[    1.148250] tegra: started io power detection dynamic control
+<6>[    1.148263] tegra: NO_IO_POWER setting 0x2000
+<6>[    1.148277] Switching to clocksource arch_sys_counter
+<6>[    1.180681] nvmap_heap_init: nvmap_heap_init: created heap block cache
+<6>[    1.180850] nvmap uc page pool size=61031 pages
+<6>[    1.200101] nvmap pool = uc, highmem=25600, pool_size=61031,totalram=488248, freeram=459402, totalhigh=403680, freehigh=377948
+<6>[    1.200789] nvmap wc page pool size=61031 pages
+<6>[    1.220022] nvmap pool = wc, highmem=25600, pool_size=61031,totalram=488248, freeram=433672, totalhigh=403680, freehigh=352218
+<6>[    1.221180] misc nvmap: created heap iram base 0x40001000 size (252KiB)
+<6>[    1.221382] nvmap:inner cache maint threshold=2097152
+<6>[    1.222458] Wake39 for irq=52
+<6>[    1.222489] Wake39 for irq=52
+<6>[    1.222500] Enabling wake39
+<6>[    1.222562] tegra-otg tegra-otg: otg transceiver registered
+<6>[    1.222824] NET: Registered protocol family 2
+<6>[    1.223452] TCP established hash table entries: 4096 (order: 3, 32768 bytes)
+<6>[    1.223560] TCP bind hash table entries: 4096 (order: 3, 32768 bytes)
+<6>[    1.223655] TCP: Hash tables configured (established 4096 bind 4096)
+<6>[    1.223706] TCP: reno registered
+<6>[    1.223722] UDP hash table entries: 256 (order: 1, 8192 bytes)
+<6>[    1.223751] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes)
+<6>[    1.224024] NET: Registered protocol family 1
+<6>[    1.224404] RPC: Registered named UNIX socket transport module.
+<6>[    1.224417] RPC: Registered udp transport module.
+<6>[    1.224426] RPC: Registered tcp transport module.
+<6>[    1.224436] RPC: Registered tcp NFSv4.1 backchannel transport module.
+<7>[    1.224448] PCI: CLS 0 bytes, default 64
+<3>[    1.224587] tegra_fuse_probe: no fuse_regulator. fuse write disabled
+<6>[    1.225006] Unpacking initramfs...
+<6>[    1.292851] Freeing initrd memory: 1104K (c2000000 - c2114000)
+<6>[    1.297488] host1x host1x: initialized
+<6>[    1.299357] CPU PMU: probing PMU on CPU 0
+<6>[    1.299384] hw perfevents: enabled with ARMv7 Cortex-A15 PMU driver, 7 counters available
+<6>[    1.300166] tegra_throttle : init passed
+<6>[    1.300257] Tegra cpuquiet initialized: disabled
+<6>[    1.300354] cpu-tegra: init EDP limit: 2499 MHz
+<6>[    1.301478] thermal thermal_zone0: Registering thermal zone thermal_zone0 for type CPU-therm
+<6>[    1.301867] thermal thermal_zone1: Registering thermal zone thermal_zone1 for type GPU-therm
+<6>[    1.302099] thermal thermal_zone2: Registering thermal zone thermal_zone2 for type MEM-therm
+<6>[    1.302377] thermal thermal_zone3: Registering thermal zone thermal_zone3 for type PLL-therm
+<4>[    1.302390] soctherm: Suspend feature CANNOT be enabled when any OC alarm is enabled
+<6>[    1.302802] nvdumper: last reboot was unknown
+<6>[    1.303399] audit: initializing netlink socket (disabled)
+<5>[    1.303434] type=2000 audit(1.272:1): initialized
+<4>[    1.304259] bounce pool size: 64 pages
+<6>[    1.305688] NTFS driver 2.1.30 [Flags: R/W].
+<6>[    1.305770] fuse init (API version 7.22)
+<7>[    1.305913] SELinux:  Registering netfilter hooks
+<6>[    1.308035] io scheduler noop registered (default)
+<6>[    1.308050] io scheduler deadline registered
+<6>[    1.308098] io scheduler cfq registered
+<6>[    1.308141] io scheduler bfq registered
+<6>[    1.308150] BFQ I/O-scheduler: v7r8
+<6>[    1.313922] msenc msenc: initialized
+<6>[    1.314800] tsec tsec: initialized
+<6>[    1.316444] isp isp.0: initialized
+<6>[    1.316462] isp isp.0: isp_dma_test: syncpt=32
+<6>[    1.316497] isp isp.0: ISP DMA test ready (syncpt=32)
+<6>[    1.317394] isp isp.1: initialized
+<6>[    1.318705] gk20a gk20a.0: initialized
+<6>[    1.320419] vic03 vic03.0: initialized
+<4>[    1.321074] tegradc tegradc.0: DSI: Failed to get chip info
+<6>[    1.321167] tegradc tegradc.0: DSI: HS clock rate is 322500
+<6>[    1.348350] panel: dsi_s_wqxga_7_9_enable - TEGRA_DC_OUT_INITIALIZED_MODE flag marked
+<6>[    1.358580] tegradc tegradc.0: probed
+<6>[    1.358865] tegradc tegradc.0: probed
+<6>[    1.369051] tegra-apbdma tegra-apbdma: Tegra20 APB DMA driver register 32 channels
+<6>[    1.369655] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+<6>[    1.370654] serial-tegra.0: ttyTHS0 at MMIO 0x70006000 (irq = 68) is a SERIAL_TEGRA
+<6>[    1.370876] serial-tegra.1: ttyTHS1 at MMIO 0x70006040 (irq = 69) is a SERIAL_TEGRA
+<6>[    1.371079] serial-tegra.2: ttyTHS2 at MMIO 0x70006200 (irq = 78) is a SERIAL_TEGRA
+<6>[    1.373891] loop: module loaded
+<6>[    1.374032] AKM compass driver: initialize.
+<4>[    1.374201] tegra-i2c tegra12-i2c.0: no acknowledge from address 0xc
+<3>[    1.374303] akm09911 0-000c: akm_i2c_rxdata: transfer failed.
+<4>[    1.374348] akm09911: probe of 0-000c failed with error -121
+<6>[    1.374425] Silicon Labs C2 port support v. 0.51.0 - (C) 2007 Rodolfo Giometti
+<6>[    1.374818] nct1008_nct72 0-004c: success in enabling rail vdd_nct72
+<6>[    1.378041] NCT72: Register overheat warning at 113.00C
+<6>[    1.378174] gpio wake35 for gpio=70
+<6>[    1.378248] nct1008_nct72 0-004c: nct1008_probe: initialized
+<6>[    1.378797] thermal thermal_zone4: Registering thermal zone thermal_zone4 for type Tboard_tegra
+<4>[    1.382899] NCT72: Warning: Temperature (4294937.79C) is above SHUTDOWN (^)
+<6>[    1.382925] thermal thermal_zone5: Registering thermal zone thermal_zone5 for type Tdiode_tegra
+<6>[    1.384274] nct1008_nct72 0-004d: success in enabling rail vdd_nct72
+<4>[    1.384373] tegra-i2c tegra12-i2c.0: no acknowledge from address 0x4d
+<3>[    1.384464] nct1008_nct72 0-004d: nct1008_write_reg: err -121
+<3>[    1.384478] nct1008_nct72 0-004d: 
+<3>[    1.384478]  exit nct1008_configure_sensor, err=-121 
+<3>[    1.384494] nct1008_nct72 0-004d: 
+<3>[    1.384494]  error file: drivers/misc/nct1008.c : nct1008_probe(), line=1453 
+<3>[    1.384508] nct1008_nct72 0-004d: 
+<3>[    1.384508]  exit nct1008_probe, err=-121 
+<6>[    1.384523] nct1008_nct72 0-004d: success in disabling rail vdd_nct72
+<4>[    1.384596] nct1008_nct72: probe of 0-004d failed with error -121
+<4>[    1.385163] bluedroid_pm_probe: regulator avdd not available
+<4>[    1.385186] bluedroid_pm_probe: regulator dvdd not available
+<6>[    1.385296] gpio wake7 for gpio=166
+<6>[    1.385466] tegra_profiler: Branch: Dev
+<6>[    1.385476] tegra_profiler: Version: 1.64
+<6>[    1.385486] tegra_profiler: Samples version: 25
+<6>[    1.385495] tegra_profiler: IO version: 11
+<6>[    1.385504] armv7_pmu: arch: Cortex A15
+<6>[    1.385514] tegra_profiler: PMU: amount of events: 10
+<6>[    1.385523] tegra_profiler: PMU event: cpu-cycles
+<6>[    1.385532] tegra_profiler: PMU event: instructions
+<6>[    1.385540] tegra_profiler: PMU event: branch_instruction
+<6>[    1.385548] tegra_profiler: PMU event: branch_misses
+<6>[    1.385556] tegra_profiler: PMU event: bus-cycles
+<6>[    1.385564] tegra_profiler: PMU event: l1_d_read
+<6>[    1.385572] tegra_profiler: PMU event: l1_d_write
+<6>[    1.385580] tegra_profiler: PMU event: l1_i
+<6>[    1.385588] tegra_profiler: PMU event: l2_d_read
+<6>[    1.385596] tegra_profiler: PMU event: l2_d_write
+<6>[    1.385604] tegra_profiler: PL310 not found
+<6>[    1.385640] tegra_profiler: power_clk: init
+<6>[    1.385724] tegra_profiler: auth: init
+<6>[    1.387948] tun: Universal TUN/TAP device driver, 1.6
+<6>[    1.387961] tun: (C) 1999-2004 Max Krasnyansky <maxk@qualcomm.com>
+<6>[    1.388086] PPP generic driver version 2.4.2
+<6>[    1.388187] PPP BSD Compression module registered
+<6>[    1.388198] PPP Deflate Compression module registered
+<6>[    1.388217] PPP MPPE Compression module registered
+<6>[    1.388227] NET: Registered protocol family 24
+<6>[    1.388294] usbcore: registered new interface driver asix
+<6>[    1.388369] usbcore: registered new interface driver ax88179_178a
+<6>[    1.388414] usbcore: registered new interface driver cdc_ether
+<6>[    1.388470] usbcore: registered new interface driver smsc95xx
+<6>[    1.388514] usbcore: registered new interface driver cdc_subset
+<6>[    1.388596] usbcore: registered new interface driver cdc_ncm
+<6>[    1.388620] ehci_hcd: USB 2.0 'Enhanced' Host Controller (EHCI) Driver
+<6>[    1.388788] tegra USB phy - inst[1] platform info:
+<6>[    1.388798] port_otg: no
+<6>[    1.388806] has_hostpc: yes
+<6>[    1.388814] phy_interface: USB_PHY_INTF_UTMI
+<6>[    1.388823] op_mode: TEGRA_USB_OPMODE_HOST
+<6>[    1.388831] vbus_gpio: -1
+<6>[    1.388840] hot_plug: disabled
+<6>[    1.388849] remote_wakeup: enabled
+<6>[    1.390515] usb_phy: utmip_xcvr_cfg0_0: 0x6002a0a
+<6>[    1.390620] tegra-ehci tegra-ehci.1: Tegra EHCI Host Controller
+<6>[    1.390650] tegra-ehci tegra-ehci.1: new USB bus registered, assigned bus number 1
+<6>[    1.390758] Wake40 for irq=53
+<6>[    1.390769] Wake42 for irq=53
+<6>[    1.390796] tegra-ehci tegra-ehci.1: irq 53, io mem 0x7d004000
+<6>[    1.396360] tegra-ehci tegra-ehci.1: USB 2.0 started, EHCI 1.10
+<6>[    1.396450] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002
+<6>[    1.396465] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+<6>[    1.396477] usb usb1: Product: Tegra EHCI Host Controller
+<6>[    1.396489] usb usb1: Manufacturer: Linux 3.10.24-Smoke-kernel-1.2 ehci_hcd
+<6>[    1.396501] usb usb1: SerialNumber: tegra-ehci.1
+<6>[    1.396856] hub 1-0:1.0: USB hub found
+<6>[    1.396882] hub 1-0:1.0: 1 port detected
+<6>[    1.397089] Wake40 for irq=53
+<6>[    1.397100] Wake42 for irq=53
+<6>[    1.397109] Enabling wake40
+<6>[    1.397118] Enabling wake42
+<6>[    1.397228] tegra USB phy - inst[2] platform info:
+<6>[    1.397238] port_otg: no
+<6>[    1.397247] has_hostpc: yes
+<6>[    1.397255] phy_interface: USB_PHY_INTF_UTMI
+<6>[    1.397264] op_mode: TEGRA_USB_OPMODE_HOST
+<6>[    1.397273] vbus_gpio: -1
+<6>[    1.397281] hot_plug: disabled
+<6>[    1.397290] remote_wakeup: enabled
+<6>[    1.398894] usb_phy: utmip_xcvr_cfg0_0: 0x6002a0a
+<6>[    1.398992] tegra-ehci tegra-ehci.2: Tegra EHCI Host Controller
+<6>[    1.399019] tegra-ehci tegra-ehci.2: new USB bus registered, assigned bus number 2
+<6>[    1.399121] Wake41 for irq=129
+<6>[    1.399132] Wake43 for irq=129
+<6>[    1.399157] tegra-ehci tegra-ehci.2: irq 129, io mem 0x7d008000
+<6>[    1.404358] tegra-ehci tegra-ehci.2: USB 2.0 started, EHCI 1.10
+<6>[    1.404436] usb usb2: New USB device found, idVendor=1d6b, idProduct=0002
+<6>[    1.404451] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+<6>[    1.404463] usb usb2: Product: Tegra EHCI Host Controller
+<6>[    1.404476] usb usb2: Manufacturer: Linux 3.10.24-Smoke-kernel-1.2 ehci_hcd
+<6>[    1.404487] usb usb2: SerialNumber: tegra-ehci.2
+<6>[    1.404819] hub 2-0:1.0: USB hub found
+<6>[    1.404843] hub 2-0:1.0: 1 port detected
+<6>[    1.405060] Wake41 for irq=129
+<6>[    1.405071] Wake43 for irq=129
+<6>[    1.405081] Enabling wake41
+<6>[    1.405090] Enabling wake43
+<6>[    1.405213] ehci-pci: EHCI PCI platform driver
+<6>[    1.405468] tegra_xusb_read_usb_calib: usb_calib0 = 0x0305038a
+<6>[    1.405679] usbcore: registered new interface driver cdc_acm
+<6>[    1.405689] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+<6>[    1.405734] usbcore: registered new interface driver cdc_wdm
+<6>[    1.405811] usbcore: registered new interface driver usb-storage
+<6>[    1.405917] usbcore: registered new interface driver usbserial
+<6>[    1.405959] usbcore: registered new interface driver option
+<6>[    1.405993] usbserial: USB Serial support registered for GSM modem (1-port)
+<6>[    1.406097] usbcore: registered new interface driver pl2303
+<6>[    1.406130] usbserial: USB Serial support registered for pl2303
+<6>[    1.406182] usbcore: registered new interface driver modem_boot_hsic
+<6>[    1.406227] usbcore: registered new interface driver nvshieldled
+<6>[    1.406383] Nvidia Tegra High-Speed USB Device Controller driver (Apr 30, 2012)
+<6>[    1.406675] tegra USB phy - inst[0] platform info:
+<6>[    1.406685] port_otg: yes
+<6>[    1.406693] has_hostpc: yes
+<6>[    1.406702] phy_interface: USB_PHY_INTF_UTMI
+<6>[    1.406710] op_mode: TEGRA_USB_OPMODE_DEVICE
+<6>[    1.406783] vbus_pmu_irq: 0
+<6>[    1.406793] vbus_gpio: -1
+<6>[    1.406801] charging: disabled
+<6>[    1.406809] remote_wakeup: disabled
+<6>[    1.408545] usb_phy: utmip_xcvr_cfg0_0: 0x4002a14
+<6>[    1.410129] otg state changed: SUSPEND --> PERIPHERAL
+<6>[    1.410200] usb_phy: utmip_xcvr_cfg0_0: 0x4002a14
+<6>[    1.411446] usbcore: registered new interface driver xpad
+<6>[    1.412234] input: isl29035 as /devices/virtual/input/input0
+<4>[    1.412704] tegra-i2c tegra12-i2c.0: no acknowledge from address 0x77
+<6>[    1.412775] [E]<BMP280><bmp_check_chip_id><224>read bmp280 chip id failed, read value = 0
+<6>[    1.412775] 
+<6>[    1.412789] [E]<BMP280><bmp_probe><1530>Bosch Sensortec Device not found, chip id mismatch!
+<6>[    1.412789] 
+<6>[    1.416315] palmas-rtc rtc.8: rtc core: registered rtc.8 as rtc0
+<6>[    1.417866] i2c /dev entries driver
+<6>[    1.418346] virtual_init
+<6>[    1.420381] nvavp nvavp: allocated IOVA at 8ff00000 for AVP os
+<6>[    1.420868] ar0832_init: ++
+<6>[    1.421404] [IMX135] sensor driver loading
+<6>[    1.421472] [IMX179] sensor driver loading
+<6>[    1.421538] [imx132] sensor driver loading
+<6>[    1.421604] [ar0261] sensor driver loading
+<6>[    1.421806] ov7695 sensor driver loading
+<6>[    1.421873] mt9m114 sensor driver loading
+<6>[    1.422258] usbcore: registered new interface driver uvcvideo
+<6>[    1.422269] USB Video Class driver (1.1.1)
+<6>[    1.429025] ashmem: initialized
+<6>[    1.429491] logger: created 2048K log 'log_main'
+<6>[    1.429620] logger: created 256K log 'log_events'
+<6>[    1.429754] logger: created 256K log 'log_radio'
+<6>[    1.430217] logger: created 2048K log 'log_system'
+<6>[    1.430812] ozwpan ozwpan: Ozmo Devices WPAN
+<6>[    1.430830] ozwpan ozwpan: new USB bus registered, assigned bus number 3
+<6>[    1.430909] usb usb3: New USB device found, idVendor=1d6b, idProduct=0001
+<6>[    1.430923] usb usb3: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+<6>[    1.430936] usb usb3: Product: Ozmo Devices WPAN
+<6>[    1.430948] usb usb3: Manufacturer: Linux 3.10.24-Smoke-kernel-1.2 Ozmo WPAN
+<6>[    1.430960] usb usb3: SerialNumber: ozwpan
+<6>[    1.431297] hub 3-0:1.0: USB hub found
+<6>[    1.431342] hub 3-0:1.0: 8 ports detected
+<7>[    1.431895] p->oz_protocol_init = 0xc063c560
+<6>[    1.432098] bq27x00_battery_probe: start
+<4>[    1.432125] bq27x00-battery 1-0055: fixup func not set, using default thermistor behavior
+<6>[    1.455964] bq27x00-battery 1-0055: Gas Gauge fw version 0x0329; df version 0x0105
+<6>[    1.460656] thermal thermal_zone6: Registering thermal zone thermal_zone6 for type battery
+<6>[    1.460702] bq27x00-battery 1-0055: support ver. 1.2.0 enabled
+<6>[    1.460874] gpio wake54 for gpio=133
+<6>[    1.460948] bq27x00-battery 1-0055: Registering battery gauge driver
+<6>[    1.460974] bq27x00-battery 1-0055: Battery thermal zone battery-temp is not registered yet
+<4>[    1.461529] tegra-i2c tegra12-i2c.1: no acknowledge from address 0xb
+<6>[    1.495010] bq27x00-battery 1-0055: lg battery IC 981
+<6>[    1.495028] bq27x00-battery 1-0055: id 0 ver 105, df_ver 105 rom 0
+<6>[    1.520242] bq27x00 BMS soc 45 46 v 3825000 i 123000 t 260 c 1 rm 2797 2686 fcc 6239 5910 flag 129
+<4>[    1.520374] i2c-core: driver [bq27x00-battery] using legacy suspend method
+<4>[    1.520385] i2c-core: driver [bq27x00-battery] using legacy resume method
+<6>[    1.524259] tegra_wdt tegra_wdt.0: last reset is due to power on reset
+<6>[    1.524391] WDT heartbeat enabled on probe
+<6>[    1.524402] tegra_wdt_probe done
+<6>[    1.524514] device-mapper: uevent: version 1.0.3
+<6>[    1.524633] device-mapper: ioctl: 4.24.0-ioctl (2013-01-15) initialised: dm-devel@redhat.com
+<6>[    1.524891] sdhci: Secure Digital Host Controller Interface driver
+<6>[    1.524902] sdhci: Copyright(c) Pierre Ossman
+<6>[    1.524911] sdhci-pltfm: SDHCI platform and OF driver helper
+<3>[    1.525187] vdd-1v8: operation not allowed
+<3>[    1.525205] sdhci-tegra sdhci-tegra.3: Init volt(1900000uV-1900000uV) setting failed -1
+<6>[    1.525500] sdhci-tegra sdhci-tegra.3: Speedo value 2426
+<6>[    1.525517] sdhci-tegra sdhci-tegra.3: Tuning constraints: nom_mv 1150, boot_mv 1150, min_or_mv 1150
+<6>[    1.525557] mmc0: no vqmmc regulator found
+<6>[    1.525580] mmc0: no vmmc regulator found
+<6>[    1.525591] mmc0: Invalid maximum block size, assuming 512 bytes
+<6>[    1.549359] mmc0: SDHCI controller on sdhci-tegra.3 [sdhci-tegra.3] using ADMA
+<6>[    1.552008] sdhci-tegra sdhci-tegra.2: Speedo value 2426
+<6>[    1.552025] sdhci-tegra sdhci-tegra.2: Tuning constraints: nom_mv 1150, boot_mv 1150, min_or_mv 1150
+<6>[    1.552063] mmc1: no vqmmc regulator found
+<6>[    1.552087] mmc1: no vmmc regulator found
+<6>[    1.552097] mmc1: Invalid maximum block size, assuming 512 bytes
+<6>[    1.576356] mmc1: SDHCI controller on sdhci-tegra.2 [sdhci-tegra.2] using ADMA
+<6>[    1.576462] gpio wake56 for gpio=170
+<6>[    1.576532] gpio wake56 for gpio=170
+<6>[    1.576543] Enabling wake56
+<3>[    1.576748] vdd-1v8: operation not allowed
+<3>[    1.576766] sdhci-tegra sdhci-tegra.0: Init volt(1900000uV-1900000uV) setting failed -1
+<6>[    1.576846] sdhci-tegra sdhci-tegra.0: vddio_sd_slot regulator not found: -517. Assuming vddio_sd_slot is not required.
+<6>[    1.576992] sdhci-tegra sdhci-tegra.0: Speedo value 2426
+<6>[    1.577006] sdhci-tegra sdhci-tegra.0: Tuning constraints: nom_mv 1150, boot_mv 1150, min_or_mv 1150
+<6>[    1.577042] mmc2: no vqmmc regulator found
+<6>[    1.577065] mmc2: no vmmc regulator found
+<6>[    1.577076] mmc2: Invalid maximum block size, assuming 512 bytes
+<6>[    1.577108] sysedp_create_consumer: unable to create sdhci-tegra.0, no consumer_data for sdhci-tegra.0 found
+<6>[    1.601370] mmc2: SDHCI controller on sdhci-tegra.0 [sdhci-tegra.0] using ADMA
+<6>[    1.617383] mmc0: BKOPS_EN bit is not set
+<6>[    1.623037] sdhci-tegra sdhci-tegra.3: Found T2T coeffs data
+<6>[    1.623053] sdhci-tegra sdhci-tegra.3: 200MHz tap hole coeffs found
+<6>[    1.649121] lp5521 0-0032: internal clock used
+<6>[    1.650526] lp5521 0-0032: lp5521 programmable led chip found
+<6>[    1.654071] tegra-se tegra12-se: tegra_se_probe: complete
+<6>[    1.656637] usbcore: registered new interface driver usbhid
+<6>[    1.656650] usbhid: USB HID core driver
+<3>[    1.656830] Warning: enabling a non-LP0 wake source 139
+<4>[    1.757525] tegra-i2c tegra12-i2c.0: no acknowledge from address 0x68
+<3>[    1.757625] i2c i2c-0: inv_mpu_probe failed -121
+<4>[    1.757645] inv-mpu-iio: probe of 0-0068 failed with error -5
+<3>[    1.759010] st-sensor-hub-i2c 0-0008: st_sensor_hub_i2c_probe.
+<7>[    1.759030] of_get_named_gpio_flags exited with status 144
+<7>[    1.759111] of_get_named_gpio_flags exited with status 139
+<7>[    1.759182] of_get_named_gpio_flags exited with status 181
+<3>[    1.759265] st-sensor-hub-i2c 0-0008: st_sensor_hub_i2c_probe, irq=316, wakeup=144, reset=181.
+<6>[    1.867649] st-sensor-hub-i2c 0-0008: fw size:53904
+<1>[    1.876686] drv2604 probe succeeded
+<1>[    1.876907] drv2604: initialized on M3
+<6>[    1.879476] st-sensor-hub-i2c 0-0008: ymodem_transmit: initial packet has been sent, err=0
+<7>[    1.883133] ALSA sound/pci/hda/hda_intel.c:3987 tegra30-hda: chipset global capabilities = 0x2403
+<7>[    1.886597] ALSA sound/pci/hda/hda_intel.c:1291 tegra30-hda: codec_mask = 0x8
+<7>[    1.886811] ALSA sound/pci/hda/hda_intel.c:1950 tegra30-hda: Enable delay in RIRB handling
+<7>[    1.889414] ALSA sound/pci/hda/hda_intel.c:1867 tegra30-hda: codec #3 probed OK
+<7>[    1.961374] ALSA sound/pci/hda/patch_hdmi.c:1295 HDMI status: Codec=3 Pin=5 Presence_Detect=0 ELD_Valid=0
+<6>[    1.961856] usbcore: registered new interface driver snd-usb-audio
+<6>[    1.966264] Codec driver version 0.0.5 alsa 1.0.25
+<6>[    2.088693] gpio wake12 for gpio=178
+<6>[    2.088762] gpio wake12 for gpio=178
+<6>[    2.088774] Enabling wake12
+<6>[    2.104124] Only get approximation about PLL
+<6>[    2.104145] rt5671 0-001c: bypass=0 m=14 n=129 k=2
+<6>[    2.105055] rt5671 0-001c: pll_in=12000000 pll_out=24576000 pll_src=0
+<6>[    2.105441] tegra-snd-rt5671 tegra-snd-rt5671.0:  rt5671-aif1 <-> tegra30-i2s.0 mapping ok
+<6>[    2.105894] tegra-snd-rt5671 tegra-snd-rt5671.0:  tfa98xx-dai <-> rt5671-aif2 mapping ok
+<6>[    2.106364] tegra-snd-rt5671 tegra-snd-rt5671.0:  tfa98xx-dai <-> rt5671-aif2 mapping ok
+<6>[    2.106809] tegra-snd-rt5671 tegra-snd-rt5671.0:  rt5671-aif3 <-> dit-hifi mapping ok
+<6>[    2.107313] tegra-snd-rt5671 tegra-snd-rt5671.0:  rt5671-aif4 <-> dit-hifi mapping ok
+<6>[    2.109783] input: tegra-rt5671 headphone detect as /devices/platform/tegra-snd-rt5671.0/sound/card1/input1
+<4>[    2.110973] platform oprofile-perf.0: Not attached
+<6>[    2.111026] oprofile: using timer interrupt.
+<6>[    2.111126] GACT probability NOT on
+<6>[    2.111200] Mirror/redirect action on
+<6>[    2.111214] u32 classifier
+<6>[    2.111222]     Actions configured
+<6>[    2.111234] Netfilter messages via NETLINK v0.30.
+<6>[    2.111293] nf_conntrack version 0.5.0 (16384 buckets, 65536 max)
+<6>[    2.111767] NF_TPROXY: Transparent proxy support initialized, version 4.1.0
+<6>[    2.111780] NF_TPROXY: Copyright (c) 2006-2007 BalaBit IT Ltd.
+<6>[    2.112042] xt_time: kernel timezone is -0000
+<6>[    2.112411] ip_tables: (C) 2000-2006 Netfilter Core Team
+<6>[    2.112561] arp_tables: (C) 2002 David S. Miller
+<6>[    2.112604] TCP: cubic registered
+<6>[    2.112789] NET: Registered protocol family 10
+<6>[    2.113639] mip6: Mobile IPv6
+<6>[    2.113679] ip6_tables: (C) 2000-2006 Netfilter Core Team
+<6>[    2.113881] sit: IPv6 over IPv4 tunneling driver
+<6>[    2.115028] NET: Registered protocol family 17
+<6>[    2.115064] NET: Registered protocol family 15
+<6>[    2.115078] Bluetooth: HIDP (Human Interface Emulation) ver 1.2
+<6>[    2.115096] Bluetooth: HIDP socket layer initialized
+<6>[    2.115131] NET: Registered protocol family 35
+<6>[    2.115421] NET: Registered protocol family 37
+<6>[    2.115433] NET: Registered protocol family 41
+<6>[    2.117677] VFP support v0.3: implementor 41 architecture 4 part 30 variant f rev 0
+<5>[    2.150626] Registering SWP/SWPB emulation handler
+<6>[    2.150647] last reset is due to power on reset
+<6>[    2.150647] 
+<4>[    2.156653] Disabling clocks left on by bootloader:
+<4>[    2.156665]    audio_2x
+<4>[    2.156681]    audio
+<4>[    2.156691]    audio4
+<4>[    2.156701]    audio3
+<4>[    2.156710]    audio2
+<4>[    2.156774]    audio1
+<4>[    2.156785]    audio0
+<4>[    2.156870]    clk72mhz
+<4>[    2.156882]    entropy
+<4>[    2.156894]    dsiblp
+<4>[    2.156910]    dsi2-fixed
+<4>[    2.156919]    dsi1-fixed
+<4>[    2.156937]    uartd
+<4>[    2.156950]    mipi-cal-fixed
+<4>[    2.156960]    mipi-cal
+<4>[    2.157091]    trace
+<4>[    2.157108]    bsev
+<4>[    2.157120]    sdmmc4_ddr
+<4>[    2.157217]    cclk_lp
+<4>[    2.157282]    pll_x_out0
+<4>[    2.157294]    pll_u_12M
+<4>[    2.157331]    pll_m_out1
+<6>[    2.159489] Tegra CPU DFLL is initialized with use_dfll = 1
+<6>[    2.159559] CPU rate: 696 MHz
+<6>[    2.159725] cpu_cold cooling device is registered
+<6>[    2.165932] **********Auto tuning windows*************
+<6>[    2.165943] WIN_ATTR legend: 0-BOUN_ST, 1-BOUN_END, 2-HOLE
+<6>[    2.165953] win[0]: 0(0) - 69(1)
+<6>[    2.165963] win[1]: 75(0) - 160(1)
+<6>[    2.165973] win[2]: 166(0) - 252(1)
+<6>[    2.165980] ***************************************
+<6>[    2.166000] ********tuning windows after inserting holes*****
+<6>[    2.166008] WIN_ATTR legend: 0-BOUN_ST, 1-BOUN_END, 2-HOLE
+<6>[    2.166019] win[0]:-16(0) - 49(2)
+<6>[    2.166028] win[1]:51(2) - 69(1)
+<6>[    2.166037] win[2]:75(0) - 140(2)
+<6>[    2.166046] win[3]:142(2) - 160(1)
+<6>[    2.166054] win[4]:166(0) - 231(2)
+<6>[    2.166063] win[5]:233(2) - 252(1)
+<6>[    2.166071] ***********************************************
+<6>[    2.166081] **********Tuning values*********
+<6>[    2.166088] **estimated values**
+<6>[    2.166098] T2T_Vmax 52, T2T_Vmin 71, 1'st_hole_Vmax 53, UI_Vmax 96
+<6>[    2.166106] **Calculated values**
+<6>[    2.166115] T2T_Vmax 54, 1'st_hole_Vmax 50, UI_Vmax 91
+<6>[    2.166123] T2T_Vmin 54, 1'st_hole_Vmin 50, UI_Vmin 92
+<6>[    2.166131] ***********************************
+<6>[    2.166142] ***********final tuning windows**********
+<6>[    2.166151] win[0]: 2 - 39
+<6>[    2.166159] win[1]: 62 - 51
+<6>[    2.166167] win[2]: 93 - 125
+<6>[    2.166176] win[3]: 159 - 142
+<6>[    2.166184] win[4]: 184 - 210
+<6>[    2.166193] win[5]: 255 - 234
+<6>[    2.166200] ********************************
+<3>[    2.166209] best tap win - (2-39), best tap value 21
+<3>[    2.166225] sdhci-tegra sdhci-tegra.3: sdhci_tegra_verify_best_tap: tuning freq 200000000hz, best tap 21
+<6>[    2.168702] mmc0: new HS200 MMC card at address 0001
+<6>[    2.168938] mmcblk mmc0:0001: Card claimed for testing.
+<6>[    2.169130] mmcblk0: mmc0:0001 SDW64G 58.2 GiB 
+<6>[    2.169295] mmcblk0rpmb: mmc0:0001 SDW64G partition 3 4.00 MiB
+<6>[    2.171259]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26 p27 p28 p29
+<6>[    2.456565] sdhci-tegra sdhci-tegra.0: Found T2T coeffs data
+<6>[    2.456586] sdhci-tegra sdhci-tegra.0: 204MHz tap hole coeffs found
+<6>[    2.520397] tegra dvfs: tegra sysfs cap interface is initialized
+<6>[    2.520514] tegra dvfs: tegra sysfs gpu & emc interface is initialized
+<6>[    2.523441] tegra_actmon.emc: Completed initialization (0)
+<6>[    2.523699] tegra_actmon.avp: Completed initialization (0)
+<6>[    2.523842] tegra_mon.cpu_emc: Completed initialization (0)
+<6>[    2.533251] thermal thermal_zone7: Registering thermal zone thermal_zone7 for type therm_est
+<6>[    2.535142] sysedp: 45 3937333 120000 8644 9000 8644 25068
+<6>[    2.535674] vi vi.0: vi_probe: ++
+<6>[    2.536424] vi vi.0: initialized
+<6>[    2.536642] vi vi.1: vi_probe: ++
+<6>[    2.537384] vi vi.1: initialized
+<4>[    2.539994] dhd_module_init in
+<4>[    2.540155] found wifi platform device bcm4329_wlan
+<4>[    2.540307] Power-up adapter 'DHD generic adapter'
+<4>[    2.540362] wifi_platform_set_power = 1
+<3>[    2.540388] ardbeg_wifi_power: 1
+<4>[    2.841377] wifi_platform_bus_enumerate device present 1
+<6>[    3.049835] **********Auto tuning windows*************
+<6>[    3.049848] WIN_ATTR legend: 0-BOUN_ST, 1-BOUN_END, 2-HOLE
+<6>[    3.049861] win[0]: 13(0) - 89(1)
+<6>[    3.049873] win[1]: 103(0) - 180(1)
+<6>[    3.049884] win[2]: 194(0) - 255(1)
+<6>[    3.049893] ***************************************
+<6>[    3.049906] ********tuning windows after inserting holes*****
+<6>[    3.049915] WIN_ATTR legend: 0-BOUN_ST, 1-BOUN_END, 2-HOLE
+<6>[    3.049927] win[0]:13(0) - 37(2)
+<6>[    3.049939] win[1]:39(2) - 89(1)
+<6>[    3.049950] win[2]:103(0) - 128(2)
+<6>[    3.049960] win[3]:130(2) - 180(1)
+<6>[    3.049970] win[4]:194(0) - 219(2)
+<6>[    3.049980] win[5]:221(2) - 255(1)
+<6>[    3.049988] ***********************************************
+<6>[    3.049998] **********Tuning values*********
+<6>[    3.050006] **estimated values**
+<6>[    3.050016] T2T_Vmax 55, T2T_Vmin 73, 1'st_hole_Vmax 37, UI_Vmax 89
+<6>[    3.050024] **Calculated values**
+<6>[    3.050033] T2T_Vmax 53, 1'st_hole_Vmax 38, UI_Vmax 91
+<6>[    3.050043] T2T_Vmin 53, 1'st_hole_Vmin 38, UI_Vmin 92
+<6>[    3.050056] ***********************************
+<6>[    3.050067] ***********final tuning windows**********
+<6>[    3.050079] win[0]: 31 - 28
+<6>[    3.050088] win[1]: 49 - 71
+<6>[    3.050102] win[2]: 121 - 113
+<6>[    3.050110] win[3]: 147 - 162
+<6>[    3.050119] win[4]: 212 - 199
+<6>[    3.050128] win[5]: 244 - 237
+<6>[    3.050136] ********************************
+<3>[    3.050146] best tap win - (49-71), best tap value 60
+<3>[    3.050161] sdhci-tegra sdhci-tegra.0: sdhci_tegra_verify_best_tap: tuning freq 204000000hz, best tap 60
+<4>[    3.058699] mmc2: queuing unknown CIS tuple 0x91 (3 bytes)
+<6>[    3.058772] mmc2: new ultra high speed SDR104 SDIO card at address 0001
+<6>[    3.076747] SDIO Vendor ID:02d0 and SDIO Device ID: 4354
+<4>[    3.088364] F1 signature OK, socitype:0x1 chip:0x4354 rev:0x1 pkg:0x2
+<4>[    3.089835] DHD: dongle ram size is set to 786432(orig 786432) at 0x180000
+<4>[    3.089994] wifi_platform_prealloc: failed to alloc static mem section 7
+<4>[    3.090031] wifi_platform_get_mac_addr
+<3>[    3.090077] ardbeg_wifi_get_mac_addr: cannot open /mnt/factory/wifi/wifi_mac.txt
+<4>[    3.090087] get mac here
+<4>[    3.090857] wl_create_event_handler(): thread:wl_event_handler:82 started
+<6>[    3.090876] CFG80211-ERROR) wl_event_handler : tsk Enter, tsk = 0xd4a6144c
+<4>[    3.091065] dhd_attach(): thread:dhd_watchdog_thread:83 started
+<4>[    3.091149] dhd_attach(): thread:dhd_dpc:84 started
+<4>[    3.091248] dhd_attach(): thread:dhd_rxf:85 started
+<4>[    3.091270] dhd_deferred_work_init: work queue initialized 
+<4>[    3.091955] Dongle Host Driver, version 1.141.46 (r)
+<4>[    3.091955] Compiled in drivers/net/wireless/bcmdhd on Apr  3 2026 at 18:57:37
+<4>[    3.092769] Register interface [wlan0]  MAC: 00:90:4c:11:22:33
+<4>[    3.092769] 
+<4>[    3.092794] dhd_prot_ioctl : bus is down. we have nothing to do
+<4>[    3.095343] wifi_platform_set_power = 0
+<3>[    3.095356] ardbeg_wifi_power: 0
+<6>[    3.195727] file system registered
+<6>[    3.196479] android_usb gadget: Mass Storage Function, version: 2009/09/11
+<6>[    3.196494] android_usb gadget: Number of LUNs=1
+<6>[    3.196506]  lun0: LUN: removable read only CD-ROM file: (no medium)
+<6>[    3.196753] android_usb gadget: android_usb ready
+<6>[    3.196766] tegra-udc: bind to driver android_usb
+<7>[    3.196964] of_get_named_gpio_flags exited with status 128
+<7>[    3.196982] of_get_named_gpio_flags exited with status 135
+<7>[    3.196998] of_get_named_gpio_flags exited with status 134
+<7>[    3.197013] of_get_named_gpio_flags exited with status 179
+<7>[    3.197028] of_get_named_gpio_flags exited with status 69
+<6>[    3.197058] gpio wake51 for gpio=128
+<6>[    3.197217] gpio wake11 for gpio=179
+<6>[    3.197272] gpio wake23 for gpio=69
+<6>[    3.197511] input: gpio-keys.4 as /devices/platform/gpio-keys.4/input/input2
+<6>[    3.197846] atmel_mxt_ts 3-004a: ########## regulator enable ###########
+<6>[    3.197920] atmel_mxt_ts 3-004a: Atmel regulator_get for vdd succeeded
+<6>[    3.300394] recv[0] = 0xa4
+<6>[    3.300407] recv[1] = 0x4
+<6>[    3.300417] recv[2] = 0x10
+<6>[    3.300427] recv[3] = 0xaa
+<6>[    3.300436] recv[4] = 0x29
+<6>[    3.300444] recv[5] = 0x48
+<6>[    3.300453] recv[6] = 0x25
+<6>[    3.300461] recv[7] = 0x25
+<6>[    3.300470] recv[8] = 0xe8
+<6>[    3.300478] recv[9] = 0x0
+<6>[    3.300486] recv[10] = 0x81
+<6>[    3.300496] recv[11] = 0x0
+<6>[    3.300504] recv[12] = 0x0
+<6>[    3.300513] recv[13] = 0x2c
+<6>[    3.300521] recv[14] = 0x6a
+<6>[    3.300529] recv[15] = 0x1
+<6>[    3.300538] recv[16] = 0x0
+<6>[    3.300546] recv[17] = 0x0
+<6>[    3.300554] recv[18] = 0x0
+<6>[    3.300563] recv[19] = 0x5
+<6>[    3.300571] recv[20] = 0x6b
+<6>[    3.300579] recv[21] = 0x1
+<6>[    3.300587] recv[22] = 0xa
+<6>[    3.300596] recv[23] = 0x0
+<6>[    3.300604] recv[24] = 0x0
+<6>[    3.300613] recv[25] = 0x6
+<6>[    3.300621] recv[26] = 0x76
+<6>[    3.300629] recv[27] = 0x1
+<6>[    3.300637] recv[28] = 0x6
+<6>[    3.300646] recv[29] = 0x0
+<6>[    3.300655] #### vinfo = 0x16b, pinfo = 0xa
+<6>[    3.301044] atmel_mxt_ts 3-004a: Family ID: 164 Variant ID: 4 Version: 1.0.AA Object Num: 37
+<6>[    3.308541] atmel_mxt_ts 3-004a: select config 0
+<6>[    3.356610] atmel_mxt_ts 3-004a: T19: vendor_id = 0x8
+<6>[    3.356627] atmel_mxt_ts 3-004a: msg for t109 = 0x5 0x0 
+<6>[    3.356640] atmel_mxt_ts 3-004a: Calibration start!
+<6>[    3.356658] atmel_mxt_ts 3-004a: Config CRC 0xF28977: OK
+<6>[    3.358351] atmel_mxt_ts 3-004a: xrange = 2047, yrange = 1535
+<6>[    3.358367] atmel_mxt_ts 3-004a: Matrix Size X41Y72 Touchscreen size X2047Y1535
+<6>[    3.358392] atmel_mxt_ts 3-004a: report area
+<6>[    3.358404] atmel_mxt_ts 3-004a: report pressure
+<6>[    3.358584] input: atmel-maxtouch as /devices/platform/tegra12-i2c.3/i2c-3/3-004a/input/input3
+<6>[    3.358775] gpio wake49 for gpio=143
+<6>[    4.358516] synaptics_dsx_i2c 3-0020:  power_gpio = -1
+<6>[    4.358532] synaptics_dsx_i2c 3-0020:  reset_gpio = 84
+<6>[    4.358546] synaptics_dsx_i2c 3-0020:  irq_gpio = 143
+<6>[    4.358557] synaptics_dsx_i2c 3-0020:  x_flip = 0
+<6>[    4.358569] synaptics_dsx_i2c 3-0020:  y_flip = 0
+<6>[    4.358580] synaptics_dsx_i2c 3-0020: swap_axes = 0
+<6>[    4.358591] synaptics_dsx_i2c 3-0020: power_on_state = 1
+<6>[    4.358602] synaptics_dsx_i2c 3-0020: reset_on_state = 0
+<6>[    4.358614] synaptics_dsx_i2c 3-0020: panel_x = 1536
+<6>[    4.358624] synaptics_dsx_i2c 3-0020: panel_y = 2048
+<6>[    4.358635] synaptics_dsx_i2c 3-0020: power_delay_ms = 160
+<6>[    4.358661] synaptics_dsx_i2c 3-0020: reset_delay_ms = 100
+<6>[    4.358672] synaptics_dsx_i2c 3-0020: reset_active_ms = 20
+<6>[    4.358685] synaptics_dsx_i2c 3-0020: key[0] = 139
+<6>[    4.358703] synaptics_dsx_i2c 3-0020: key[1] = 102
+<6>[    4.358714] synaptics_dsx_i2c 3-0020: key[2] = 158
+<7>[    4.519368] _gpio_request: gpio-143 (rmi4_irq_gpio) status -16
+<3>[    4.519383] synaptics_dsx_i2c 3-0020: synaptics_rmi4_set_gpio: unable to request gpio [143]
+<3>[    4.519398] synaptics_dsx synaptics_dsx.0: synaptics_rmi4_probe: Failed to set up GPIO's
+<4>[    4.519471] synaptics_dsx: probe of synaptics_dsx.0 failed with error -16
+<6>[    4.520243] palmas-rtc rtc.8: setting system clock to 2026-04-03 15:59:34 UTC (1775231974)
+<6>[    4.520822] power-supply-extcon power-supply-extcon: Unknown cable detected
+<6>[    4.520885] power-supply-extcon power-supply-extcon: psy_extcon_probe() get success
+<6>[    4.521242] ALSA device list:
+<6>[    4.521256]   #0: HDA NVIDIA Tegra at 0x70038000 irq 113
+<6>[    4.521266]   #1: tegra-rt5671
+<3>[    4.521385] Warning: unable to open an initial console.
+<6>[    4.521882] Freeing unused kernel memory: 588K (c0d4f000 - c0de2000)
+<7>[    4.532450] SELinux: 512 avtab hash slots, 1350 rules.
+<7>[    4.533483] SELinux: 512 avtab hash slots, 1350 rules.
+<7>[    4.533504] SELinux:  1 users, 2 roles, 293 types, 1 bools, 1 sens, 1024 cats
+<7>[    4.533520] SELinux:  84 classes, 1350 rules
+<6>[    4.534899] SELinux:  Permission attach_queue in class tun_socket not defined in policy.
+<6>[    4.534918] SELinux: the above unknown classes and permissions will be denied
+<7>[    4.534952] SELinux:  Completing initialization.
+<7>[    4.534959] SELinux:  Setting up existing superblocks.
+<7>[    4.534984] SELinux: initialized (dev sysfs, type sysfs), uses genfs_contexts
+<7>[    4.535005] SELinux: initialized (dev rootfs, type rootfs), uses genfs_contexts
+<7>[    4.535156] SELinux: initialized (dev bdev, type bdev), not configured for labeling
+<7>[    4.535175] SELinux: initialized (dev proc, type proc), uses genfs_contexts
+<7>[    4.535205] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    4.535231] SELinux: initialized (dev debugfs, type debugfs), uses genfs_contexts
+<7>[    4.551256] SELinux: initialized (dev sockfs, type sockfs), uses task SIDs
+<7>[    4.551359] SELinux: initialized (dev pipefs, type pipefs), uses task SIDs
+<7>[    4.551377] SELinux: initialized (dev anon_inodefs, type anon_inodefs), not configured for labeling
+<7>[    4.551394] SELinux: initialized (dev devpts, type devpts), uses transition SIDs
+<7>[    4.551422] SELinux: initialized (dev selinuxfs, type selinuxfs), uses genfs_contexts
+<7>[    4.551516] SELinux: initialized (dev configfs, type configfs), not configured for labeling
+<7>[    4.551530] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    4.551570] SELinux: initialized (dev sysfs, type sysfs), uses genfs_contexts
+<5>[    4.579618] type=1403 audit(1775231974.558:2): policy loaded auid=4294967295 ses=4294967295
+<12>[    4.579831] SELinux: Loaded policy from /sepolicy
+<6>[    6.021469] st-sensor-hub-i2c 0-0008: ymodem_transmit: the last zere-packet sent, err=0
+<6>[    6.021491] st-sensor-hub-i2c 0-0008: ymodem_transmit: err=0
+<11>[    7.155472] init: init.t124.rc: 416: invalid command 'umount'
+<11>[    7.155850] init: could not import file 'init.none.rc' from 'init.t124.rc'
+<11>[    7.155936] init: could not import file 'init.tf.rc' from 'init.t124.rc'
+<11>[    7.156142] init: /init.miui.rc: 15: invalid command 'restorecon_recursive'
+<11>[    7.156181] init: /init.miui.rc: 24: ignored duplicate definition of service 'mdbd'
+<11>[    7.156272] init: /init.miui.rc: 61: ignored duplicate definition of service 'otad'
+<11>[    7.156504] init: could not import file '/init.miui8.rc' from '/init.miui.rc'
+<4>[    7.156629] init (1): /proc/1/oom_adj is deprecated, please use /proc/1/oom_score_adj instead.
+<6>[    7.437602] bq27x00 BMS soc 45 46 v 3829000 i 8000 t 259 c 1 rm 2797 2686 fcc 6239 5910 flag 129
+<11>[    7.501075] init: /dev/hw_random not found
+<6>[    7.501180] keychord: using input dev gpio-keys.4 for fevent
+<7>[    7.501851] SELinux: initialized (dev cgroup, type cgroup), uses genfs_contexts
+<7>[    7.502277] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    7.505094] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    7.505381] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    7.507225] SELinux: initialized (dev cgroup, type cgroup), uses genfs_contexts
+<7>[    7.509832] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    7.511490] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<7>[    7.512112] SELinux: initialized (dev cgroup, type cgroup), uses genfs_contexts
+<6>[    7.518768] EXT4-fs (mmcblk0p26): mounted filesystem with ordered data mode. Opts: barrier=1
+<7>[    7.518801] SELinux: initialized (dev mmcblk0p26, type ext4), uses xattr
+<4>[    7.519383] EXT4-fs (mmcblk0p29): Ignoring removed nomblk_io_submit option
+<6>[    7.531411] EXT4-fs (mmcblk0p29): mounted filesystem with ordered data mode. Opts: nomblk_io_submit,errors=remount-ro
+<7>[    7.531439] SELinux: initialized (dev mmcblk0p29, type ext4), uses xattr
+<14>[    7.533973] fs_mgr: Running /system/bin/e2fsck on /dev/block/platform/sdhci-tegra.3/by-name/userdata
+<14>[    7.585231] e2fsck: e2fsck 1.41.14 (22-Dec-2010)
+<14>[    7.585291] e2fsck: /dev/block/platform/sdhci-tegra.3/by-name/userdata: clean, 1587/3595104 files, 633162/14352384 blocks (check in 5 mounts)
+<6>[    7.597680] EXT4-fs (mmcblk0p29): mounted filesystem with ordered data mode. Opts: barrier=1,data=ordered,noauto_da_alloc
+<7>[    7.597710] SELinux: initialized (dev mmcblk0p29, type ext4), uses xattr
+<6>[    7.602885] EXT4-fs (mmcblk0p28): mounted filesystem with ordered data mode. Opts: data=ordered,nodelalloc
+<7>[    7.602916] SELinux: initialized (dev mmcblk0p28, type ext4), uses xattr
+<6>[    7.718406] EXT4-fs (mmcblk0p16): mounted filesystem with ordered data mode. Opts: barrier=1,noauto_da_alloc
+<7>[    7.718439] SELinux: initialized (dev mmcblk0p16, type ext4), uses xattr
+<7>[    7.720579] SELinux: initialized (dev pstore, type pstore), not configured for labeling
+<7>[    7.721487] SELinux: initialized (dev functionfs, type functionfs), not configured for labeling
+<3>[    7.754230] texfat: version magic '3.10.24-g6f7cff7 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<4>[    7.754256] texfat: module license 'Commercial. For support email exfat-support@tuxera.com' taints kernel.
+<4>[    7.754268] Disabling lock debugging due to kernel taint
+<6>[    7.756199] Tuxera exFAT driver version 3014.1.24 [Flags: R/W MODULE].
+<6>[    7.760776] SELinux:  Context u:object_r:media_rw_data_file:s0 is not valid (left unmapped).
+<11>[    7.767358] init: /dev/hw_random not found
+<11>[    7.768410] init_hook_E: Could not find /cust/cust and /data/miui/cust
+<11>[    7.769384] init_hook_I: cust prop white key: persist.sys.timezone
+<11>[    7.769407] init_hook_I: cust prop white key: ro.carrier.name
+<11>[    7.769426] init_hook_I: cust prop white key: ro.miui.cust_variant
+<11>[    7.769448] init_hook_I: cust prop white key: ro.miui.region
+<11>[    7.769475] init_hook_I: cust prop white key: ro.product.locale.language
+<11>[    7.769493] init_hook_I: cust prop white key: ro.product.locale.region
+<11>[    7.769509] init_hook_I: cust prop white key: ro.miui.mcc
+<11>[    7.769526] init_hook_I: cust prop white key: ro.miui.mnc
+<11>[    7.769543] init_hook_I: cust prop white key: ro.com.android.mobiledata
+<11>[    7.769560] init_hook_I: cust prop white key: ro.build.hardware.version
+<6>[    7.801120] binder: 172:172 transaction failed 29189, size 0-0
+<11>[    7.801527] init: cannot find '/system/bin/rild', disabling 'ril-daemon'
+<5>[    7.804598] type=1400 audit(1775231977.783:3): avc:  denied  { entrypoint } for  pid=176 comm="init" path="/sbin/setlockstate" dev="rootfs" ino=3919 scontext=u:r:vold:s0 tcontext=u:object_r:rootfs:s0 tclass=file
+<11>[    7.805202] init: cannot find '/system/etc/install-recovery.sh', disabling 'flash_recovery'
+<11>[    7.807953] init: cannot find '/system/bin/pbc', disabling 'pbc'
+<11>[    7.809474] init: cannot find '/vendor/bin/cvc', disabling 'cvc'
+<6>[    7.823930] SELinux:  Context u:object_r:install_data_file:s0 is not valid (left unmapped).
+<11>[    7.824441] init: cannot find '/system/xbin/mqsasd', disabling 'mqsasd'
+<6>[    7.844595] warning: `su' uses 32-bit capabilities (legacy support in use)
+<3>[    7.861292] symsearch: version magic '3.10.24 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<6>[    7.864093] symsearch: found kallsyms_lookup_name on 0xc00c0398.
+<3>[    7.908631] zen_iosched: version magic '3.10.24 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<6>[    7.909148] io scheduler zen registered
+<3>[    7.919422] vr_iosched: version magic '3.10.24 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<6>[    7.920030] io scheduler vr registered
+<3>[    7.927311] sio_iosched: version magic '3.10.24 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<6>[    7.927903] io scheduler sio registered
+<6>[    7.931556] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<3>[    7.935416] cpufreq_smartmax: version magic '3.10.24 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<3>[    7.971386] cpufreq_lionheart: version magic '3.10.24 SMP preempt mod_unload ARMv7 p2v8 ' should be '3.10.24-Smoke-kernel-1.2 SMP preempt mod_unload ARMv7 p2v8 '
+<6>[    7.974879] Tegra cpuquiet clusterswitch enabled
+<4>[    7.989592] ------------[ cut here ]------------
+<4>[    7.989627] WARNING: at arch/arm/mach-tegra/clock.c:309 clk_disable+0x44/0x8c()
+<12>[    7.894787] fdpp: main: start daemon. fdpp: startAsDaemon: called. 
+<4>[    7.989641] Attempting to disable clock gbus with refcnt 0Modules linked in: cpufreq_lionheart(O) cpufreq_smartmax(O) sio_iosched vr_iosched zen_iosched symsearch(O) texfat(PO)
+<4>[    7.989735] CPU: 2 PID: 1 Comm: init Tainted: P           O 3.10.24-Smoke-kernel-1.2 #8
+<4>[    7.989769] [<c0016f18>] (unwind_backtrace+0x0/0x134) from [<c0013134>] (show_stack+0x18/0x1c)
+<4>[    7.989795] [<c0013134>] (show_stack+0x18/0x1c) from [<c0067f78>] (warn_slowpath_common+0x5c/0x74)
+<4>[    7.989819] [<c0067f78>] (warn_slowpath_common+0x5c/0x74) from [<c0067fc8>] (warn_slowpath_fmt+0x38/0x48)
+<4>[    7.989840] [<c0067fc8>] (warn_slowpath_fmt+0x38/0x48) from [<c0027624>] (clk_disable+0x44/0x8c)
+<4>[    7.989859] [<c0027624>] (clk_disable+0x44/0x8c) from [<c002825c>] (clk_enable_locked+0xd0/0x174)
+<4>[    7.989877] [<c002825c>] (clk_enable_locked+0xd0/0x174) from [<c0028344>] (clk_enable+0x44/0x98)
+<4>[    7.989898] [<c0028344>] (clk_enable+0x44/0x98) from [<c002cafc>] (_floor_update+0x88/0xf4)
+<4>[    7.989919] [<c002cafc>] (_floor_update+0x88/0xf4) from [<c002ca70>] (bus_limit_state_store+0xa0/0xa4)
+<4>[    7.989942] [<c002ca70>] (bus_limit_state_store+0xa0/0xa4) from [<c01a24f8>] (sysfs_write_file+0x160/0x1bc)
+<4>[    7.989962] [<c01a24f8>] (sysfs_write_file+0x160/0x1bc) from [<c014646c>] (vfs_write+0xb8/0x194)
+<4>[    7.989982] [<c014646c>] (vfs_write+0xb8/0x194) from [<c01469d4>] (SyS_write+0x44/0x80)
+<4>[    7.990003] [<c01469d4>] (SyS_write+0x44/0x80) from [<c000ef80>] (ret_fast_syscall+0x0/0x30)
+<4>[    7.990017] ---[ end trace b9a605a7a0cd4285 ]---
+<3>[    7.990031] _floor_update: Failed to floor floor.profile.gbus at level 1008000000
+<4>[    7.990120] ------------[ cut here ]------------
+<4>[    7.990138] WARNING: at arch/arm/mach-tegra/clock.c:309 clk_disable+0x44/0x8c()
+<4>[    7.990148] Attempting to disable clock gbus with refcnt 0
+<4>[    7.990156] Modules linked in: cpufreq_lionheart(O) cpufreq_smartmax(O) sio_iosched vr_iosched zen_iosched symsearch(O) texfat(PO)
+<4>[    7.990227] CPU: 2 PID: 1 Comm: init Tainted: P        W  O 3.10.24-Smoke-kernel-1.2 #8
+<4>[    7.990250] [<c0016f18>] (unwind_backtrace+0x0/0x134) from [<c0013134>] (show_stack+0x18/0x1c)
+<4>[    7.990269] [<c0013134>] (show_stack+0x18/0x1c) from [<c0067f78>] (warn_slowpath_common+0x5c/0x74)
+<4>[    7.990290] [<c0067f78>] (warn_slowpath_common+0x5c/0x74) from [<c0067fc8>] (warn_slowpath_fmt+0x38/0x48)
+<4>[    7.990308] [<c0067fc8>] (warn_slowpath_fmt+0x38/0x48) from [<c0027624>] (clk_disable+0x44/0x8c)
+<4>[    7.990354] [<c0027624>] (clk_disable+0x44/0x8c) from [<c002825c>] (clk_enable_locked+0xd0/0x174)
+<4>[    7.990372] [<c002825c>] (clk_enable_locked+0xd0/0x174) from [<c0028344>] (clk_enable+0x44/0x98)
+<4>[    7.990391] [<c0028344>] (clk_enable+0x44/0x98) from [<c002cafc>] (_floor_update+0x88/0xf4)
+<4>[    7.990412] [<c002cafc>] (_floor_update+0x88/0xf4) from [<c002c9b8>] (bus_limit_level_store+0x60/0x78)
+<4>[    7.990435] [<c002c9b8>] (bus_limit_level_store+0x60/0x78) from [<c01a24f8>] (sysfs_write_file+0x160/0x1bc)
+<4>[    7.990455] [<c01a24f8>] (sysfs_write_file+0x160/0x1bc) from [<c014646c>] (vfs_write+0xb8/0x194)
+<4>[    7.990485] [<c014646c>] (vfs_write+0xb8/0x194) from [<c01469d4>] (SyS_write+0x44/0x80)
+<4>[    7.990519] [<c01469d4>] (SyS_write+0x44/0x80) from [<c000ef80>] (ret_fast_syscall+0x0/0x30)
+<4>[    7.990531] ---[ end trace b9a605a7a0cd4286 ]---
+<3>[    7.990543] _floor_update: Failed to floor floor.profile.gbus at level 72000000
+<11>[    7.998049] init: property 'sys.powerctl' doesn't exist while expanding '${sys.powerctl}'
+<11>[    7.998092] init: powerctl: cannot expand '${sys.powerctl}'
+<11>[    7.998139] init: property 'sys.sysctl.extra_free_kbytes' doesn't exist while expanding '${sys.sysctl.extra_free_kbytes}'
+<11>[    7.998176] init: cannot expand '${sys.sysctl.extra_free_kbytes}' while writing to '/proc/sys/vm/extra_free_kbytes'
+<11>[    7.998217] init: property 'sys.sysctl.tcp_def_init_rwnd' doesn't exist while expanding '${sys.sysctl.tcp_def_init_rwnd}'
+<11>[    7.998249] init: cannot expand '${sys.sysctl.tcp_def_init_rwnd}' while writing to '/proc/sys/net/ipv4/tcp_default_init_rwnd'
+<11>[    7.998364] init: service 'console' requires console
+<3>[    8.035660] android_usb: already disabled
+<6>[    8.037078]  lun0: unable to open backing file: /data/miui/cdrom_install.iso
+<7>[    8.038885] SELinux: initialized (dev fuse, type fuse), uses genfs_contexts
+<6>[    8.083495] read descriptors
+<6>[    8.083545] read strings
+<6>[    8.083621] mtp_bind_config
+<6>[    8.088000] bq2419x 1-006b: Setting charging current 2
+<6>[    8.139877] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<6>[    8.158609] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<6>[    8.182765] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<6>[    8.212284] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<11>[    8.216484] octvm: [239]: /system/bin/mcd init 4 
+<7>[    8.216676] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<11>[    8.216857] octvm: mount cgroup memory subsys failed: No such file or directory
+<7>[    8.226434] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<11>[    8.245358] init: untracked pid 316 exited
+<6>[    8.247434] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<6>[    8.288346] bq2419x 1-006b: Charging enabled
+<4>[    8.302956] gk20a gk20a.0: gr_gk20a_init_ctx_vars_fw: NETLIST_REGIONID_CTXREG_PMPPC skipped
+<6>[    8.325827] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<5>[    8.377682] type=1400 audit(1775231978.356:4): avc:  denied  { getattr } for  pid=374 comm="df" name="/" dev="pstore" ino=9964 scontext=u:r:init:s0 tcontext=u:object_r:unlabeled:s0 tclass=filesystem
+<6>[    8.383419] android_work: did not send uevent (0 0   (null))
+<3>[    8.423146] end_request: I/O error, dev mmcblk0, sector 6537424
+<6>[    8.429097] android_work: sent uevent USB_STATE=CONNECTED
+<3>[    8.432306] end_request: I/O error, dev mmcblk0, sector 6799784
+<3>[    8.433623] end_request: I/O error, dev mmcblk0, sector 6803480
+<3>[    8.434485] end_request: I/O error, dev mmcblk0, sector 6807592
+<3>[    8.434770] end_request: I/O error, dev mmcblk0, sector 6811712
+<3>[    8.434977] end_request: I/O error, dev mmcblk0, sector 6815912
+<3>[    8.435933] end_request: I/O error, dev mmcblk0, sector 7073784
+<6>[    8.438550] android_usb gadget: high-speed config #1: android
+<6>[    8.438711] tegra-udc tegra-udc.0: connected to SDP
+<6>[    8.438729] bq2419x 1-006b: Setting charging current 500
+<6>[    8.438845] android_work: sent uevent USB_STATE=CONFIGURED
+<3>[    8.446347] end_request: I/O error, dev mmcblk0, sector 7391680
+<3>[    8.447358] end_request: I/O error, dev mmcblk0, sector 7589168
+<3>[    8.451349] end_request: I/O error, dev mmcblk0, sector 8118464
+<6>[    8.609842] vic03 vic03.0: fw name:vic03_ucode.bin
+<6>[    8.639394] bq2419x 1-006b: Charging enabled
+<6>[    8.671964] panel: tegra_fb_blank  FB_BLANK_POWERDOWN ---
+<5>[    8.728943] pcl-generic pcl-generic: layout empty.
+<6>[    8.728986] pcl-generic pcl-generic: virtual_device_add
+<6>[    8.730183] pcl-generic pcl-generic: virtual_device_add
+<6>[    8.740160] pcl-generic pcl-generic: virtual_device_add
+<3>[    8.747848] [IMX179]: probing sensor.
+<3>[    8.748102] [IMX179]: end of probing sensor.
+<6>[    8.763547] ardbeg_ad5823_power_on
+<6>[    8.763562] ardbeg_ad5823_power_on finshed
+<6>[    8.763690] ardbeg_imx179_power_on
+<6>[    8.765413] ardbeg_imx179_power_on finished
+<6>[    8.765487] imx179_get_sensor_id
+<6>[    8.791356] power-supply-extcon power-supply-extcon: USB charger cable detected
+<6>[    8.867426] imx179 module vendor ID: 0x08 06
+<6>[    8.874382] stock pin[0]: id=1026 addr=0x80060000
+<6>[    8.874393] stock pin[1]: id=1026 addr=0x80060000
+<6>[    8.874411] stock_PB_G: 60000e46 80060000 off=0
+<6>[    8.874418] stock_PB_G: 60000002 80063918 off=14616
+<6>[    8.874541] stock pin[0]: id=1027 addr=0x80068000
+<6>[    8.874551] stock pin[1]: id=1027 addr=0x80068000
+<6>[    8.874563] stock_PB_G: 60000719 80068000 off=0
+<6>[    8.874571] stock_PB_G: 60000002 80069c64 off=7268
+<6>[    8.874653] stock pin[0]: id=1027 addr=0x80068000
+<6>[    8.874661] stock pin[1]: id=1027 addr=0x80068000
+<6>[    8.874674] stock_PB_G: 60000001 80069c6c off=7276
+<6>[    8.874681] stock_PB_G: 60000002 80069c70 off=7280
+<6>[    8.874773] stock pin[0]: id=1026 addr=0x80060000
+<6>[    8.874782] stock pin[1]: id=1026 addr=0x80060000
+<6>[    8.874792] stock_PB_G: 60000719 80060000 off=0
+<6>[    8.874798] stock_PB_G: 60000002 80061c64 off=7268
+<6>[    8.909480] stock pin[0]: id=1026 addr=0x80060000
+<6>[    8.909495] stock pin[1]: id=1026 addr=0x80060000
+<6>[    8.909517] stock_PB_G: 600004d6 80061c6c off=7276
+<6>[    8.909527] stock_PB_G: 60000002 80062fc4 off=12228
+<7>[    8.989164] SELinux: initialized (dev tmpfs, type tmpfs), uses transition SIDs
+<6>[    9.010548] panel: tegra_fb_blank  FB_BLANK_UNBLANK  +++
+<6>[    9.020582] ardbeg_imx179_power_off finished
+<6>[    9.023593] ardbeg_ad5823_power_off
+<6>[    9.023608] ardbeg_ad5823_power_off finished
+<6>[    9.026088] ardbeg_ov5693_power_on
+<4>[    9.026126] vdd-cam-1v2: Failed to create debugfs directory
+<4>[    9.026139] vdd-cam-1v8: Failed to create debugfs directory
+<4>[    9.026156] avdd-cam-af: Failed to create debugfs directory
+<6>[    9.030636] ardbeg_ov5693_power_on finished
+<6>[    9.377977] ardbeg_ov5693_power_off
+<6>[    9.379214] ardbeg_ov5693_power_off finished
+<6>[    9.934812] EXT4-fs (mmcblk0p26): re-mounted. Opts: (null)
+<6>[    9.948910] SELinux:  Context u:object_r:media_rw_data_file:s0:c512,c768 is not valid (left unmapped).
+<6>[   11.752900] SELinux:  Context u:object_r:vold_data_file:s0 is not valid (left unmapped).
+<4>[   13.421853] EXT4-fs (mmcblk0p27): warning: mounting unchecked fs, running e2fsck is recommended
+<6>[   13.422092] EXT4-fs (mmcblk0p27): mounted filesystem without journal. Opts: (null)
+<7>[   13.422107] SELinux: initialized (dev mmcblk0p27, type ext4), uses xattr
+<6>[   13.557654] ardbeg_ad5823_power_on
+<6>[   13.557667] ardbeg_ad5823_power_on finshed
+<6>[   13.557760] ardbeg_imx179_power_on
+<6>[   13.559275] ardbeg_imx179_power_on finished
+<6>[   13.559334] imx179_get_sensor_id
+<6>[   13.678589] imx179 module vendor ID: 0x08 06
+<6>[   13.694877] stock pin[0]: id=1026 addr=0x8006c000
+<6>[   13.694898] stock pin[1]: id=1026 addr=0x8006c000
+<6>[   13.694935] stock_PB_G: 60000e46 8006c000 off=0
+<6>[   13.694951] stock_PB_G: 60000002 8006f918 off=14616
+<6>[   13.695112] stock pin[0]: id=1027 addr=0x80074000
+<6>[   13.695135] stock pin[1]: id=1027 addr=0x80074000
+<6>[   13.695165] stock_PB_G: 60000719 80074000 off=0
+<6>[   13.695178] stock_PB_G: 60000002 80075c64 off=7268
+<6>[   13.695259] stock pin[0]: id=1027 addr=0x80074000
+<6>[   13.695271] stock pin[1]: id=1027 addr=0x80074000
+<6>[   13.695290] stock_PB_G: 60000001 80075c6c off=7276
+<6>[   13.695303] stock_PB_G: 60000002 80075c70 off=7280
+<6>[   13.695453] stock pin[0]: id=1026 addr=0x8006c000
+<6>[   13.695465] stock pin[1]: id=1026 addr=0x8006c000
+<6>[   13.695483] stock_PB_G: 60000719 8006c000 off=0
+<6>[   13.695495] stock_PB_G: 60000002 8006dc64 off=7268
+<6>[   13.706178] stock pin[0]: id=1026 addr=0x8006c000
+<6>[   13.706200] stock pin[1]: id=1026 addr=0x8006c000
+<6>[   13.706230] stock_PB_G: 600004d6 8006dc6c off=7276
+<6>[   13.706245] stock_PB_G: 60000002 8006efc4 off=12228
+<6>[   13.826239] ardbeg_imx179_power_off finished
+<6>[   13.829540] ardbeg_ad5823_power_off
+<6>[   13.829564] ardbeg_ad5823_power_off finished
+<6>[   13.833193] ardbeg_ov5693_power_on
+<6>[   13.835859] ardbeg_ov5693_power_on finished
+<6>[   14.282311] ardbeg_ov5693_power_off
+<6>[   14.283473] ardbeg_ov5693_power_off finished
+<6>[   18.641643] bq27x00 BMS soc 45 46 v 3815000 i 231000 t 260 c 1 rm 2796 2684 fcc 6239 5909 flag 129
+<6>[   18.745705] lowmemorykiller: lowmem_shrink: convert oom_adj to oom_score_adj:
+<6>[   18.745717] lowmemorykiller: oom_adj 0 => oom_score_adj 0
+<6>[   18.745722] lowmemorykiller: oom_adj 1 => oom_score_adj 58
+<6>[   18.745728] lowmemorykiller: oom_adj 2 => oom_score_adj 117
+<6>[   18.745732] lowmemorykiller: oom_adj 3 => oom_score_adj 176
+<6>[   18.745737] lowmemorykiller: oom_adj 9 => oom_score_adj 529
+<6>[   18.745742] lowmemorykiller: oom_adj 15 => oom_score_adj 1000
+<6>[   20.313402] acc_open
+<6>[   20.313454] acc_release
+<5>[   20.888211] type=1400 audit(1775231990.866:5): avc:  denied  { getattr } for  pid=1379 comm="zygote" path="socket:[6936]" dev="sockfs" ino=6936 scontext=u:r:untrusted_app:s0 tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+<5>[   20.888290] type=1400 audit(1775231990.866:6): avc:  denied  { getopt } for  pid=1379 comm="zygote" path="/dev/socket/zygote" scontext=u:r:untrusted_app:s0 tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+<6>[   20.916915] usb_phy: utmip_xcvr_cfg0_0: 0x6002a0a
+<6>[   20.917215] usb_phy: utmip_xcvr_cfg0_0: 0x6002a0a
+<6>[   21.262042] nvavp nvavp: using SMMU at 8ff00000 to load AVP kernel
+<6>[   21.266531] nvavp nvavp: read firmware from 'nvavp_os_8ff00000.bin' (15900 bytes)
+<6>[   21.267167] nvavp nvavp: entry=00000094 control=00004bf0 debug=000053f0 size=15876
+<6>[   21.267227] nvavp nvavp: AVP os at vaddr=d7b7c000 paddr=8ff00000 reset_addr=8ff00094
+<6>[   21.273502] nvavp nvavp: read ucode firmware from 'nvavp_vid_ucode_alt.bin' (39852 bytes)
+<6>[   22.877287] mtp_open
+<5>[   23.670398] type=1400 audit(1775231993.649:7): avc:  denied  { write } for  pid=1379 comm="com.miui.home" name="phsd.ctl" dev="mmcblk0p29" ino=787991 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:system_data_file:s0 tclass=sock_file
+<11>[   24.170065] octvm: [2008]: /system/bin/mcd 
+<6>[   24.196574] bq27x00 BMS soc 45 46 v 3741000 i 847000 t 264 c 1 rm 2795 2684 fcc 6239 5909 flag 129
+<7>[   24.201808] powerup_reason_show: pu_reason [0x8], first non-zero bit 3
+<6>[   24.828312] tfa98xx 0-0034: Download firmware tfa9890_boot.patch
+<6>[   24.829589] tfa98xx 0-0034: Download firmware tfa9890_rom.patch
+<6>[   24.863049] tfa98xx 0-0037: Download firmware tfa9890_boot.patch
+<6>[   24.885144] tfa98xx 0-0037: Download firmware tfa9890_rom.patch
+<6>[   24.943551] tfa98xx 0-0034: Download firmware tfa9890_left.speaker
+<6>[   24.961561] tfa98xx 0-0037: Download firmware tfa9890_right.speaker
+<6>[   24.972131] tfa98xx 0-0034: Download firmware tfa9890.config
+<6>[   25.002842] tfa98xx 0-0037: Download firmware tfa9890.config
+<6>[   25.007102] tfa98xx 0-0034: Download firmware tfa9890_left_music.preset
+<6>[   25.023069] tfa98xx 0-0037: Download firmware tfa9890_right_music.preset
+<6>[   25.025409] tfa98xx 0-0034: Download firmware tfa9890_left_music.eq
+<6>[   25.039302] tfa98xx 0-0037: Download firmware tfa9890_right_music.eq
+<6>[   25.044435] tfa98xx 0-0034: Load the calibration value from mtp
+<6>[   25.049626] tfa98xx 0-0034: Finish one time calibration
+<6>[   25.056729] tfa98xx 0-0037: Load the calibration value from mtp
+<6>[   25.057064] tfa98xx 0-0037: Finish one time calibration
+<11>[   26.277862] init: sys_prop: permission denied uid:1000  name:events.cpu
+<5>[   26.746295] type=1400 audit(1775231996.724:8): avc:  denied  { getattr } for  pid=2242 comm="zygote" path="socket:[6936]" dev="sockfs" ino=6936 scontext=u:r:untrusted_app:s0 tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+<5>[   26.746617] type=1400 audit(1775231996.725:9): avc:  denied  { getopt } for  pid=2242 comm="zygote" path="/dev/socket/zygote" scontext=u:r:untrusted_app:s0 tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+<5>[   26.849763] type=1400 audit(1775231996.828:10): avc:  denied  { search } for  pid=2265 comm="IntentService[S" name="/" dev="selinuxfs" ino=1 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:selinuxfs:s0 tclass=dir
+<5>[   26.849839] type=1400 audit(1775231996.828:11): avc:  denied  { read } for  pid=2265 comm="IntentService[S" name="enforce" dev="selinuxfs" ino=4 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:selinuxfs:s0 tclass=file
+<5>[   26.849942] type=1400 audit(1775231996.828:12): avc:  denied  { open } for  pid=2265 comm="IntentService[S" path="/sys/fs/selinux/enforce" dev="selinuxfs" ino=4 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:selinuxfs:s0 tclass=file
+<5>[   26.849994] type=1400 audit(1775231996.828:13): avc:  denied  { getattr } for  pid=2265 comm="IntentService[S" path="/sys/fs/selinux/enforce" dev="selinuxfs" ino=4 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:selinuxfs:s0 tclass=file
+<7>[   26.872319] powerup_reason_show: pu_reason [0x8], first non-zero bit 3
+<5>[   26.962999] type=1400 audit(1775231996.941:14): avc:  denied  { read } for  pid=2309 comm="su" name="/" dev="selinuxfs" ino=1 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:selinuxfs:s0 tclass=dir
+<5>[   28.758888] type=1400 audit(1775231998.737:15): avc:  denied  { getattr } for  pid=2531 comm="zygote" path="socket:[6936]" dev="sockfs" ino=6936 scontext=u:r:untrusted_app:s0 tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+<5>[   28.758963] type=1400 audit(1775231998.737:16): avc:  denied  { getopt } for  pid=2531 comm="zygote" path="/dev/socket/zygote" scontext=u:r:untrusted_app:s0 tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+<6>[   30.685934] bq27x00 BMS soc 45 46 v 3775000 i 523000 t 264 c 1 rm 2794 2682 fcc 6239 5909 flag 129
+<7>[   30.896612] powerup_reason_show: pu_reason [0x8], first non-zero bit 3
+<6>[   53.652302] stock pin[0]: id=1024 addr=0x82200000
+<6>[   53.652427] stock pin[1]: id=1025 addr=0x82200000
+<6>[   53.652446] stock pin[2]: id=1026 addr=0x82200000
+<6>[   53.652463] stock pin[3]: id=1026 addr=0x81200000
+<6>[   53.652478] stock pin[4]: id=1026 addr=0x80078000
+<6>[   53.652504] stock reloc: off=0x1874 phys=0x82200000+0x0=0x82200000
+<6>[   53.652520] stock reloc: off=0x18c4 phys=0x81200000+0x0=0x81200000
+<6>[   53.652536] stock reloc: off=0x1894 phys=0x82200000+0x9c2700=0x82bc2700
+<6>[   53.652551] stock reloc: off=0x1884 phys=0x82200000+0x7cec00=0x829cec00
+<6>[   53.652594] stock_PB: 00000c80 20000000
+<6>[   53.652609] stock_PB_G: 00000c80 20000000 off=0
+<6>[   53.652627] stock_PB_G: 6000063a 80078000 off=0
+<4>[   54.654521] ---- mlocks ----
+<4>[   54.654584] 0: unlocked
+<4>[   54.654620] 1: unlocked
+<4>[   54.654654] 2: unlocked
+<4>[   54.654687] 3: unlocked
+<4>[   54.654720] 4: unlocked
+<4>[   54.654750] 5: unlocked
+<4>[   54.654781] 6: unlocked
+<4>[   54.654811] 7: unlocked
+<4>[   54.654841] 8: unlocked
+<4>[   54.654870] 9: unlocked
+<4>[   54.654901] 10: unlocked
+<4>[   54.654932] 11: unlocked
+<4>[   54.654963] 12: unlocked
+<4>[   54.654993] 13: unlocked
+<4>[   54.655024] 14: unlocked
+<4>[   54.655053] 15: unlocked
+<4>[   54.655082] 
+<4>[   54.655112] ---- syncpts ----
+<4>[   54.655163] id 5 (disp0d) min 301 max 301
+<4>[   54.655207] id 8 (disp0) min 301 max 301
+<4>[   54.655263] id 18 (vic) min 44 max 44
+<4>[   54.655302] id 20 (disp0b) min 301 max 301
+<4>[   54.655397] id 24 (disp0c) min 301 max 301
+<4>[   54.655439] id 26 (vblank0) min 3200 max 0
+<4>[   54.655488] id 32 (ispa_memory) min 0 max 1
+<4>[   54.655529] id 34 (ispa_stream) min 10 max 10
+<4>[   54.655575] id 38 (ispb_stream) min 10 max 10
+<4>[   54.655619] id 42 (vi0_stream) min 2 max 2
+<4>[   54.655665] id 47 (vi1_stream) min 2 max 2
+<4>[   54.655732] id 64 (gk20a) min 6 max 6
+<4>[   54.655770] id 65 (gk20a) min 1289 max 1289
+<4>[   54.655809] id 66 (gk20a) min 560 max 560
+<4>[   54.655846] id 67 (gk20a) min 2 max 2
+<4>[   54.655884] id 69 (gk20a) min 6 max 6
+<4>[   54.655920] id 70 (gk20a) min 146 max 146
+<4>[   54.655957] id 71 (gk20a) min 17 max 17
+<4>[   54.655994] id 72 (gk20a) min 23 max 23
+<4>[   54.656031] id 73 (gk20a) min 178 max 178
+<4>[   54.656068] id 74 (gk20a) min 500 max 500
+<4>[   54.656566] 
+<4>[   54.656599] ---- channels ----
+<6>[   54.656662] msenc msenc: fw name:nvhost_msenc031.fw
+<4>[   54.662649] 4: fifo:
+<4>[   54.662697] FIFOSTAT 80100840
+<4>[   54.662697] [empty]
+<6>[    8.438912] [setup_received_irq]host system may be mac os or linux
+<4>[   54.662751] 4-msenc (0): inactive
+<4>[   54.662789] 
+<6>[   54.662974] tsec tsec: fw name:nvhost_tsec.fw
+<4>[   54.667857] 5: fifo:
+<4>[   54.667900] FIFOSTAT 80100840
+<4>[   54.667900] [empty]
+<4>[   54.667945] 5-tsec (0): inactive
+<4>[   54.667945] 
+<4>[   54.668181] 0: fifo:
+<4>[   54.668229] FIFOSTAT 003f0000, 000 - 03f, RD 037, WR 037
+<4>[   54.668261] 00018f48 00018200 000184c8 000165d8 0001ba58 0001a500 0001a5e0 00018550 0001e590 0001cde0 0001cd48 0001a518 00019480 00018778 00018088 00016de8 000156b0 000155c0 00015248 000144e8 00012718 00012578 00012248 00011fc0 00010a08 00010ae0 00010988 000109a0 00010a08 00010ae0 00010988 000109a0 0000e5c8 0000e7b8 0000e6a8 0000f100 0000e750 0000e930 0000ea88 0000f270 00010878 00010a58 00010990 000105b0 00010878 00010a58 00010990 000105b0 00012b70 00012990 00012770 00012290 00015788 00015440 00015178 000137f0 00019758 00018c60 00018728 00016db8 000195c8 00019010 000187a0 00016fd8 
+<4>[   54.669909] 0-isp.0 (1): active class 1aa, offset 0004, val 00016df0
+<4>[   54.669974] DMAPUT 800080b0, DMAGET 800080b0, DMACTL 00000000
+<4>[   54.670010] CBREAD 00016df0, CBSTAT 01aa0004
+<4>[   54.670062] 
+<4>[   54.670062] d7fe4000: JOB, syncpt_id=32, syncpt_val=1, first_get=800080a0, timeout=1000, ctx=d2dc2e40, num_slots=2, num_handles=3
+<4>[   54.670125]     GATHER at 80078000+0000, 1594 words
+<4>[   54.670156] 00000c80 1d00000a 00000001 009fd800 004fec00 009fd800 00d4c770 006a9000 00d578e0 06680334 04ce0268 00000021 1d0a0001 00000000 2d0b01e0 0002e028 0002aca8 0002b518 00028058 000257c0 000232b8 00023730 00020f50 00027668 00024b60 00025740 000225e8 00024d70 000226a0 00023118 00020260 00024d70 000226a0 00023118 00020260 000217a8 0001f138 0001ff78 0001d0b8 00021988 0001f2a0 00020058 0001cf88 00024bb0 00022528 00023158 0001fe98 00024bb0 00022528 00023158 0001fe98 00027540 00024f48 00025a30 00022260 000254a8 00022ec0 00023528 00020ca8 0002d590 0002a960 0002b528 00027908 00022a58 00020a20 00020c38 0001e648 00026688 000240a8 00024a88 00021e08 0001f6c0 0001d2b8 0001d8b0 0001afb8 0001e460 0001c378 0001cba0 0001a518 0001e460 0001c378 0001cba0 0001a518 0001abb0 00019148 00019b68 000176e0 0001add0 000194e0 00019e88 000176c8 0001e150 0001c0f8 0001c970 00019eb0 0001e150 0001c0f8 0001c970 00019eb0 0001e808 0001c768 0001ceb8 0001a7d8 000263f8 000239a0 00024380 00020728 000219f0 0001fc40 0001fc88 0001d978 00024ac0 00022558 000224f8 0001fe00 0001bb40 0001a4b0 0001a618 000184a0 0001c1a8 0001a890 0001acc8 00018fe8 0001a320 000191c8 00019758 000178f0 0001a320 000191c8 00019758 000178f0 00017c58 00017110 00017808 00016198 000178e0 000167d0 00016f50 000157d0 0001a538 00019340 000198f0 00017698 0001a538 00019340 000198f0 00017698 0001c148 0001a830 0001acf0 00018878 0001c318 0001ad78 0001aee0 00018c38 00023848 000213c8 00021908 0001ea98 0001edf8 0001d398 0001d248 0001b1c0 0001b4f0 0001a360 0001a2c0 000187f0 00019248 00018310 00018538 00016e48 00017388 00016908 00016b50 00015820 00017388 00016908 00016b50 00015820 000132c8 00012c00 00013060 00012628 000135e0 00013080 00013468 00012790 000175a8 00016a98 00016df0 00015630 000175a8 00016a98 00016df0 00015630 00018f48 00018200 000184c8 000165d8 0001ba58 0001a500 0001a5e0 00018550 0001e590 0001cde0 0001cd48 0001a518 00019480 00018778 00018088 00016de8 000156b0 000155c0 00015248 000144e8 00012718 00012578 00012248 00011fc0 00010a08 00010ae0 00010988 000109a0 00010a08 00010ae0 00010988 000109a0 0000e5c8 0000e7b8 0000e6a8 0000f100 0000e750 0000e930 0000ea88 0000f270 00010878 00010a58 00010990 000105b0 00010878 00010a58 00010990 000105b0 00012b70 00012990 00012770 00012290 00015788 00015440 00015178 000137f0 00019758 00018c60 00018728 00016db8 000195c8 00019010 000187a0 00016fd8 000152c0 000153a0 00014d28 000140c0 00012be0 00012bf8 00012998 00012548 00010348 000106e8 00010420 00010320 00010348 000106e8 00010420 00010320 0000d520 0000d860 0000d820 0000dee8 0000d510 0000db30 0000d9b8 0000de70 000105d0 000109b0 00010830 00010408 000105d0 000109b0 00010830 00010408 00012850 00012ce0 00012af0 00011da8 000157f0 00015908 00015318 000144c0 00019150 000188c8 000183a0 00016458 0001f468 0001dd88 0001d8b8 0001ba68 0001bac8 0001ae20 0001ac50 00019118 00019998 00018dc8 00018bf8 00017540 000178b8 00017260 00017268 00015fa8 000178b8 00017260 00017268 00015fa8 000138d8 000135c8 00013740 00012e30 00013948 00013870 00013b30 00012f28 000179b8 000172e8 000173f8 00015e30 000179b8 000172e8 000173f8 00015e30 000199c8 00018f70 00019118 00017650 0001bbd0 0001ace0 0001aa60 00018a60 0001ec68 0001d758 0001d578 0001b198 00023cc8 00022378 00021ff8 0001fb18 0001e4b8 0001ca58 0001c870 0001aa78 0001c520 0001b2f0 0001b488 00019430 0001ae20 0001a0e8 0001a2b8 00018700 0001ae20 0001a0e8 0001a2b8 00018700 00018068 00017820 00017d18 00016710 00017f88 00017ac0 00017e98 000168d8 0001afe0 0001a160 0001a560 000184e8 0001afe0 0001a160 0001a560 000184e8 0001bff8 0001b298 0001b358 000196a0 0001e348 0001c430 0001c558 00019b98 00023b00 00022348 00022378 0001f920 00023560 00020d90 00020c30 0001ebb0 00023310 00021a70 00021bb0 0001f7f8 00020c88 0001eb80 0001ed28 0001cd58 0001e908 0001cc40 0001cfb8 0001abe0 0001e908 0001cc40 0001cfb8 0001abe0 0001b2c0 00019de8 0001a508 00018508 0001b598 00019c10 0001a220 000182d0 0001e6e8 0001cb80 0001d000 0001ab00 0001e6e8 0001cb80 0001d000 0001ab00 00020ea0 0001e748 0001ed18 0001c8a8 00022f38 00021b30 00021ea0 0001f470 00021f88 0001faf8 0001fbd0 0001e150 000308d0 0002dcc0 0002dff8 0002ab10 00027380 00025538 00025490 000229e8 00026f08 00024b10 000252a0 00022630 000251e0 000233f8 00023948 00020dd0 000251e0 000233f8 00023948 00020dd0 00021f70 0001ffd0 00020888 0001e180 00022038 00020258 00020be8 0001dc30 000254a0 000234b8 00023cc0 000210f0 000254a0 000234b8 00023cc0 000210f0 000269a8 00024b30 00025270 00022268 00027550 00024e50 000252a0 00022750 00030008 0002d948 0002dde0 0002a220 1d200006 00003101 0000004c 07ae0444 07ae0444 07ae0444 07ae0444 16510001 00000000 26520101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 16530001 00000000 26540101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 16550001 00000000 26560101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 16570001 00000000 26580101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 10530002 00000001 00745f5c 00000c80 1e310001 099c0cd0 1e330001 04fe00e6 1e320001 00000d00 10150001 00000007 1e300001 00000001 1e000001 0ccf0000 1e010001 099b0000 1e020001 04fe00e6 1e030001 00000000 1e040003 82200000 00000000 00000d00 1e070003 829cec00 00000000 00000680 1e0a0003 82bc2700 00000000 00000680 15000006 00000000 00000000 00000000 00000000 00000000 099c0cd0 00000c80 11000004 81200000 00000000 00000000 00000000 00000c80 200c0001 00000005 40000120 20000000 
+<4>[   54.701760] 
+<4>[   54.701862] 1: fifo:
+<4>[   54.701898] FIFOSTAT 80100840
+<4>[   54.701898] [empty]
+<4>[   54.701943] 1-isp.1 (0): inactive
+<4>[   54.701943] 
+<4>[   54.702054] gk20a.0 pbdma 0: id: 1 (channel), next_id: 1 (channel) status: invalid
+<4>[   54.702137] PUT: 0000000008104fd0 GET: 0000000008104fd0 FETCH: 00000c3d HEADER: 60400000
+<4>[   54.702168] 
+<4>[   54.702201] gk20a.0 eng 0: id: 1 (channel), next_id: 1 (channel), ctx: invalid 
+<4>[   54.702276] gk20a.0 eng 1: id: 0 (channel), next_id: 0 (channel), ctx: invalid 
+<4>[   54.702405] 
+<4>[   54.702444] 0-gk20a.0, pid 179:  in use idle not busy
+<4>[   54.702535] TOP: 8000000008008030 PUT: 0000000008008030 GET: 0000000008008030 FETCH: 0000000008008030
+<4>[   54.702535] HEADER: 60400000 COUNT: 80000000
+<4>[   54.702535] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   54.702580] 
+<4>[   54.702613] 1-gk20a.0, pid 179:  in use idle not busy
+<4>[   54.702700] TOP: 8000000008104fd0 PUT: 0000000008104fd0 GET: 0000000008104fd0 FETCH: 0000000008104fd0
+<4>[   54.702700] HEADER: 60400000 COUNT: 80000000
+<4>[   54.702700] SYNCPOINT 00000142 00004a10 SEMAPHORE 00000004 00120600 00000000 00000002
+<4>[   54.702744] 
+<4>[   54.702776] 2-gk20a.0, pid 1219:  in use idle not busy
+<4>[   54.702858] TOP: 8000000100009a88 PUT: 0000000100009a88 GET: 0000000100009a88 FETCH: 0000000100009a88
+<4>[   54.702858] HEADER: 60400000 COUNT: 80000000
+<4>[   54.702858] SYNCPOINT 00000000 00004201 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   54.702902] 
+<4>[   54.702933] 3-gk20a.0, pid 1219:  in use idle not busy
+<4>[   54.703014] TOP: 80000001000ff018 PUT: 00000001000ff018 GET: 00000001000ff018 FETCH: 00000001000ff018
+<4>[   54.703014] HEADER: 60400000 COUNT: 80000000
+<4>[   54.703014] SYNCPOINT 00000000 00004301 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   54.703055] 
+<4>[   54.703086] 4-gk20a.0, pid 1219:  in use idle not busy
+<4>[   54.703164] TOP: 0000000000000000 PUT: 0000000000000000 GET: 0000000000000000 FETCH: 0000000000000000
+<4>[   54.703164] HEADER: 60400000 COUNT: 00000000
+<4>[   54.703164] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   54.703205] 
+<4>[   54.703238] 7-gk20a.0, pid 1379:  in use idle not busy
+<4>[   54.703316] TOP: 8000000008008040 PUT: 0000000008008040 GET: 0000000008008040 FETCH: 0000000008008040
+<4>[   54.703316] HEADER: 60400000 COUNT: 80000000
+<4>[   54.703316] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   54.703431] 
+<4>[   54.703466] 8-gk20a.0, pid 1318:  in use idle not busy
+<4>[   54.703546] TOP: 8000000008008090 PUT: 0000000008008090 GET: 0000000008008090 FETCH: 0000000008008090
+<4>[   54.703546] HEADER: 60400000 COUNT: 80000000
+<4>[   54.703546] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   54.703588] 
+<4>[   54.703619] 9-gk20a.0, pid 1379:  in use idle not busy
+<4>[   54.703697] TOP: 80000000080ffb40 PUT: 00000000080ffb40 GET: 00000000080ffb40 FETCH: 00000000080ffb40
+<4>[   54.703697] HEADER: 60400000 COUNT: 80000000
+<4>[   54.703697] SYNCPOINT 00000018 00001210 SEMAPHORE 00000004 01940600 00000000 00000002
+<4>[   54.703737] 
+<4>[   54.703770] 10-gk20a.0, pid 1318:  in use idle not busy
+<4>[   54.703850] TOP: 8000000008101340 PUT: 0000000008101340 GET: 0000000008101340 FETCH: 0000000008101340
+<4>[   54.703850] HEADER: 60400000 COUNT: 80000000
+<4>[   54.703850] SYNCPOINT 0000010c 00001410 SEMAPHORE 00000004 00200600 00000000 00000002
+<4>[   54.703890] 
+<4>[   54.703968] 7: fifo:
+<4>[   54.704003] FIFOSTAT 80100840
+<4>[   54.704003] [empty]
+<4>[   54.704047] 7-vic03.0 (0): inactive
+<4>[   54.704047] 
+<4>[   54.704616] 2: fifo:
+<4>[   54.704657] FIFOSTAT 80100840
+<4>[   54.704657] [empty]
+<4>[   54.704703] 2-vi.0 (0): inactive
+<4>[   54.704703] 
+<4>[   54.705152] 3: fifo:
+<4>[   54.705191] FIFOSTAT 80100840
+<4>[   54.705191] [empty]
+<4>[   54.705236] 3-vi (0): inactive
+<4>[   54.705236] 
+<4>[   54.705564] host1x host1x: cdma_timeout_handler: timeout: 32 (ispa_memory) ctx 0xd2dc2e40, HW thresh 0, done 1
+<6>[   54.705670] isp isp.0:     SYNCPT_ID   32
+<6>[   54.705709] isp isp.0:     SYNCPT_VAL  1
+<6>[   54.705747] isp isp.0:     FIRST_GET   0x800080a0
+<6>[   54.705783] isp isp.0:     TIMEOUT     1000
+<6>[   54.705819] isp isp.0:     CTX 0xd2dc2e40
+<6>[   54.705854] isp isp.0:     NUM_SLOTS   2
+<6>[   54.705888] isp isp.0:     NUM_HANDLES 3
+<6>[   62.743782] bq27x00 BMS soc 45 46 v 3851000 i -195000 t 261 c 1 rm 2795 2684 fcc 6239 5910 flag 128
+<6>[   62.743855] sysedp: 45 3937333 120000 8644 9000 8644 25068
+<6>[   67.828711] bq27x00 BMS soc 45 46 v 3853000 i -198000 t 261 c 1 rm 2795 2684 fcc 6239 5910 flag 128
+<6>[   75.165487] stock pin[0]: id=1024 addr=0x82200000
+<6>[   75.165522] stock pin[1]: id=1025 addr=0x82200000
+<6>[   75.165539] stock pin[2]: id=1026 addr=0x82200000
+<6>[   75.165554] stock pin[3]: id=1026 addr=0x81200000
+<6>[   75.165568] stock pin[4]: id=1026 addr=0x80078000
+<6>[   75.165592] stock reloc: off=0x1874 phys=0x82200000+0x0=0x82200000
+<6>[   75.165608] stock reloc: off=0x18c4 phys=0x81200000+0x0=0x81200000
+<6>[   75.165622] stock reloc: off=0x1894 phys=0x82200000+0x9c2700=0x82bc2700
+<6>[   75.165636] stock reloc: off=0x1884 phys=0x82200000+0x7cec00=0x829cec00
+<6>[   75.165676] stock_PB: 00000c80 20000000
+<6>[   75.165691] stock_PB_G: 00000c80 20000000 off=0
+<6>[   75.165709] stock_PB_G: 6000063a 80078000 off=0
+<6>[   75.284655] stock pin[0]: id=1027 addr=0x85500000
+<6>[   75.284682] stock pin[1]: id=1028 addr=0x85500000
+<6>[   75.284694] stock pin[2]: id=1029 addr=0x85500000
+<6>[   75.284704] stock pin[3]: id=1029 addr=0x88900000
+<6>[   75.284714] stock pin[4]: id=1029 addr=0x8008c000
+<6>[   75.284733] stock reloc: off=0x1874 phys=0x85500000+0x0=0x85500000
+<6>[   75.284745] stock reloc: off=0x18c4 phys=0x88900000+0x0=0x88900000
+<6>[   75.284755] stock reloc: off=0x1894 phys=0x85500000+0x9c2700=0x85ec2700
+<6>[   75.284765] stock reloc: off=0x1884 phys=0x85500000+0x7cec00=0x85ccec00
+<6>[   75.284796] stock_PB: 00000c80 20000000
+<6>[   75.284807] stock_PB_G: 00000c80 20000000 off=0
+<6>[   75.284819] stock_PB_G: 6000063a 8008c000 off=0
+<6>[   75.423015] stock pin[0]: id=1030 addr=0x8a900000
+<6>[   75.423029] stock pin[1]: id=1031 addr=0x8a900000
+<6>[   75.423037] stock pin[2]: id=1032 addr=0x8a900000
+<6>[   75.423043] stock pin[3]: id=1032 addr=0x89900000
+<6>[   75.423206] stock pin[4]: id=1032 addr=0x800a4000
+<6>[   75.423219] stock reloc: off=0x1874 phys=0x8a900000+0x0=0x8a900000
+<6>[   75.423225] stock reloc: off=0x18c4 phys=0x89900000+0x0=0x89900000
+<6>[   75.423232] stock reloc: off=0x1894 phys=0x8a900000+0x9c2700=0x8b2c2700
+<6>[   75.423238] stock reloc: off=0x1884 phys=0x8a900000+0x7cec00=0x8b0cec00
+<6>[   75.423256] stock_PB: 00000c80 20000000
+<6>[   75.423263] stock_PB_G: 00000c80 20000000 off=0
+<6>[   75.423270] stock_PB_G: 6000063a 800a4000 off=0
+<6>[   75.544804] stock pin[0]: id=1033 addr=0x8c500000
+<6>[   75.545009] stock pin[1]: id=1034 addr=0x8c500000
+<6>[   75.545065] stock pin[2]: id=1035 addr=0x8c500000
+<6>[   75.545071] stock pin[3]: id=1035 addr=0x8b500000
+<6>[   75.545077] stock pin[4]: id=1035 addr=0x800ac000
+<6>[   75.545086] stock reloc: off=0x1874 phys=0x8c500000+0x0=0x8c500000
+<6>[   75.545127] stock reloc: off=0x18c4 phys=0x8b500000+0x0=0x8b500000
+<6>[   75.545134] stock reloc: off=0x1894 phys=0x8c500000+0x9c2700=0x8cec2700
+<6>[   75.545140] stock reloc: off=0x1884 phys=0x8c500000+0x7cec00=0x8cccec00
+<6>[   75.545153] stock_PB: 00000c80 20000000
+<6>[   75.545159] stock_PB_G: 00000c80 20000000 off=0
+<6>[   75.545165] stock_PB_G: 6000063a 800ac000 off=0
+<6>[   75.655873] stock pin[0]: id=1036 addr=0x8e100000
+<6>[   75.655891] stock pin[1]: id=1037 addr=0x8e100000
+<6>[   75.655896] stock pin[2]: id=1038 addr=0x8e100000
+<6>[   75.655902] stock pin[3]: id=1038 addr=0x8d100000
+<6>[   75.655911] stock pin[4]: id=1038 addr=0x800b4000
+<6>[   75.655921] stock reloc: off=0x1874 phys=0x8e100000+0x0=0x8e100000
+<6>[   75.655926] stock reloc: off=0x18c4 phys=0x8d100000+0x0=0x8d100000
+<6>[   75.655931] stock reloc: off=0x1894 phys=0x8e100000+0x9c2700=0x8eac2700
+<6>[   75.655935] stock reloc: off=0x1884 phys=0x8e100000+0x7cec00=0x8e8cec00
+<6>[   75.655948] stock_PB: 00000c80 20000000
+<6>[   75.655953] stock_PB_G: 00000c80 20000000 off=0
+<6>[   75.655964] stock_PB_G: 6000063a 800b4000 off=0
+<6>[   75.761093] stock pin[0]: id=1039 addr=0x90100000
+<6>[   75.761104] stock pin[1]: id=1040 addr=0x90100000
+<6>[   75.761109] stock pin[2]: id=1041 addr=0x90100000
+<6>[   75.761291] stock pin[3]: id=1041 addr=0x8ed00000
+<6>[   75.761358] stock pin[4]: id=1041 addr=0x800bc000
+<6>[   75.761370] stock reloc: off=0x1874 phys=0x90100000+0x0=0x90100000
+<6>[   75.761377] stock reloc: off=0x18c4 phys=0x8ed00000+0x0=0x8ed00000
+<6>[   75.761384] stock reloc: off=0x1894 phys=0x90100000+0x9c2700=0x90ac2700
+<6>[   75.761390] stock reloc: off=0x1884 phys=0x90100000+0x7cec00=0x908cec00
+<6>[   75.761444] stock_PB: 00000c80 20000000
+<6>[   75.761449] stock_PB_G: 00000c80 20000000 off=0
+<6>[   75.761454] stock_PB_G: 6000063a 800bc000 off=0
+<4>[   76.166370] ---- mlocks ----
+<4>[   76.166410] 0: unlocked
+<4>[   76.166425] 1: unlocked
+<4>[   76.166438] 2: unlocked
+<4>[   76.166452] 3: unlocked
+<4>[   76.166465] 4: unlocked
+<4>[   76.166478] 5: unlocked
+<4>[   76.166491] 6: unlocked
+<4>[   76.166504] 7: unlocked
+<4>[   76.166516] 8: unlocked
+<4>[   76.166529] 9: unlocked
+<4>[   76.166542] 10: unlocked
+<4>[   76.166556] 11: unlocked
+<4>[   76.166569] 12: unlocked
+<4>[   76.166582] 13: unlocked
+<4>[   76.166595] 14: unlocked
+<4>[   76.166608] 15: unlocked
+<4>[   76.166620] 
+<4>[   76.166634] ---- syncpts ----
+<4>[   76.166659] id 5 (disp0d) min 326 max 326
+<4>[   76.166679] id 8 (disp0) min 326 max 326
+<4>[   76.166705] id 18 (vic) min 44 max 44
+<4>[   76.166721] id 20 (disp0b) min 326 max 326
+<4>[   76.166740] id 24 (disp0c) min 326 max 326
+<4>[   76.166757] id 26 (vblank0) min 4489 max 0
+<4>[   76.166779] id 32 (ispa_memory) min 1 max 7
+<4>[   76.166796] id 34 (ispa_stream) min 10 max 10
+<4>[   76.166814] id 38 (ispb_stream) min 10 max 10
+<4>[   76.166833] id 42 (vi0_stream) min 2 max 2
+<4>[   76.166853] id 47 (vi1_stream) min 2 max 2
+<4>[   76.166886] id 64 (gk20a) min 6 max 6
+<4>[   76.166901] id 65 (gk20a) min 1504 max 1504
+<4>[   76.166916] id 66 (gk20a) min 562 max 562
+<4>[   76.166931] id 67 (gk20a) min 2 max 2
+<4>[   76.166947] id 69 (gk20a) min 6 max 6
+<4>[   76.166962] id 70 (gk20a) min 146 max 146
+<4>[   76.166977] id 71 (gk20a) min 17 max 17
+<4>[   76.166992] id 72 (gk20a) min 23 max 23
+<4>[   76.167007] id 73 (gk20a) min 245 max 245
+<4>[   76.167022] id 74 (gk20a) min 508 max 508
+<4>[   76.167154] waitbase id 0 val 1
+<4>[   76.167265] 
+<4>[   76.167278] ---- channels ----
+<6>[   76.167310] msenc msenc: fw name:nvhost_msenc031.fw
+<4>[   76.169805] 4: fifo:
+<4>[   76.169822] FIFOSTAT 80100840
+<4>[   76.169822] [empty]
+<4>[   76.169843] 4-msenc (0): inactive
+<4>[   76.169843] 
+<6>[   76.169939] tsec tsec: fw name:nvhost_tsec.fw
+<4>[   76.171377] 5: fifo:
+<4>[   76.171393] FIFOSTAT 80100840
+<4>[   76.171393] [empty]
+<4>[   76.171412] 5-tsec (0): inactive
+<4>[   76.171412] 
+<4>[   76.171515] 0: fifo:
+<4>[   76.171535] FIFOSTAT 003f0000, 000 - 03f, RD 009, WR 009
+<4>[   76.171548] 00018f48 00018200 000184c8 000165d8 0001ba58 0001a500 0001a5e0 00018550 0001e590 0001cde0 0001cd48 0001a518 00019480 00018778 00018088 00016de8 000156b0 000155c0 00015248 000144e8 00012718 00012578 00012248 00011fc0 00010a08 00010ae0 00010988 000109a0 00010a08 00010ae0 00010988 000109a0 0000e5c8 0000e7b8 0000e6a8 0000f100 0000e750 0000e930 0000ea88 0000f270 00010878 00010a58 00010990 000105b0 00010878 00010a58 00010990 000105b0 00012b70 00012990 00012770 00012290 00015788 00015440 00015178 000137f0 00019758 00018c60 00018728 00016db8 000195c8 00019010 000187a0 00016fd8 
+<4>[   76.172115] 0-isp.0 (6): active class 1aa, offset 0004, val 00016df0
+<4>[   76.172140] DMAPUT 80008110, DMAGET 800080c0, DMACTL 00000000
+<4>[   76.172154] CBREAD 00016df0, CBSTAT 01aa0004
+<4>[   76.172173] 
+<4>[   76.172173] d7fe4000: JOB, syncpt_id=32, syncpt_val=2, first_get=800080b0, timeout=1000, ctx=d090a140, num_slots=2, num_handles=3
+<4>[   76.172199]     GATHER at 80078000+0000, 1594 words
+<4>[   76.172211] 00000c80 1d00000a 00000001 009fd800 004fec00 009fd800 00d4c770 006a9000 00d578e0 06680334 04ce0268 00000021 1d0a0001 00000000 2d0b01e0 0002e028 0002aca8 0002b518 00028058 000257c0 000232b8 00023730 00020f50 00027668 00024b60 00025740 000225e8 00024d70 000226a0 00023118 00020260 00024d70 000226a0 00023118 00020260 000217a8 0001f138 0001ff78 0001d0b8 00021988 0001f2a0 00020058 0001cf88 00024bb0 00022528 00023158 0001fe98 00024bb0 00022528 00023158 0001fe98 00027540 00024f48 00025a30 00022260 000254a8 00022ec0 00023528 00020ca8 0002d590 0002a960 0002b528 00027908 00022a58 00020a20 00020c38 0001e648 00026688 000240a8 00024a88 00021e08 0001f6c0 0001d2b8 0001d8b0 0001afb8 0001e460 0001c378 0001cba0 0001a518 0001e460 0001c378 0001cba0 0001a518 0001abb0 00019148 00019b68 000176e0 0001add0 000194e0 00019e88 000176c8 0001e150 0001c0f8 0001c970 00019eb0 0001e150 0001c0f8 0001c970 00019eb0 0001e808 0001c768 0001ceb8 0001a7d8 000263f8 000239a0 00024380 00020728 000219f0 0001fc40 0001fc88 0001d978 00024ac0 00022558 000224f8 0001fe00 0001bb40 0001a4b0 0001a618 000184a0 0001c1a8 0001a890 0001acc8 00018fe8 0001a320 000191c8 00019758 000178f0 0001a320 000191c8 00019758 000178f0 00017c58 00017110 00017808 00016198 000178e0 000167d0 00016f50 000157d0 0001a538 00019340 000198f0 00017698 0001a538 00019340 000198f0 00017698 0001c148 0001a830 0001acf0 00018878 0001c318 0001ad78 0001aee0 00018c38 00023848 000213c8 00021908 0001ea98 0001edf8 0001d398 0001d248 0001b1c0 0001b4f0 0001a360 0001a2c0 000187f0 00019248 00018310 00018538 00016e48 00017388 00016908 00016b50 00015820 00017388 00016908 00016b50 00015820 000132c8 00012c00 00013060 00012628 000135e0 00013080 00013468 00012790 000175a8 00016a98 00016df0 00015630 000175a8 00016a98 00016df0 00015630 00018f48 00018200 000184c8 000165d8 0001ba58 0001a500 0001a5e0 00018550 0001e590 0001cde0 0001cd48 0001a518 00019480 00018778 00018088 00016de8 000156b0 000155c0 00015248 000144e8 00012718 00012578 00012248 00011fc0 00010a08 00010ae0 00010988 000109a0 00010a08 00010ae0 00010988 000109a0 0000e5c8 0000e7b8 0000e6a8 0000f100 0000e750 0000e930 0000ea88 0000f270 00010878 00010a58 00010990 000105b0 00010878 00010a58 00010990 000105b0 00012b70 00012990 00012770 00012290 00015788 00015440 00015178 000137f0 00019758 00018c60 00018728 00016db8 000195c8 00019010 000187a0 00016fd8 000152c0 000153a0 00014d28 000140c0 00012be0 00012bf8 00012998 00012548 00010348 000106e8 00010420 00010320 00010348 000106e8 00010420 00010320 0000d520 0000d860 0000d820 0000dee8 0000d510 0000db30 0000d9b8 0000de70 000105d0 000109b0 00010830 00010408 000105d0 000109b0 00010830 00010408 00012850 00012ce0 00012af0 00011da8 000157f0 00015908 00015318 000144c0 00019150 000188c8 000183a0 00016458 0001f468 0001dd88 0001d8b8 0001ba68 0001bac8 0001ae20 0001ac50 00019118 00019998 00018dc8 00018bf8 00017540 000178b8 00017260 00017268 00015fa8 000178b8 00017260 00017268 00015fa8 000138d8 000135c8 00013740 00012e30 00013948 00013870 00013b30 00012f28 000179b8 000172e8 000173f8 00015e30 000179b8 000172e8 000173f8 00015e30 000199c8 00018f70 00019118 00017650 0001bbd0 0001ace0 0001aa60 00018a60 0001ec68 0001d758 0001d578 0001b198 00023cc8 00022378 00021ff8 0001fb18 0001e4b8 0001ca58 0001c870 0001aa78 0001c520 0001b2f0 0001b488 00019430 0001ae20 0001a0e8 0001a2b8 00018700 0001ae20 0001a0e8 0001a2b8 00018700 00018068 00017820 00017d18 00016710 00017f88 00017ac0 00017e98 000168d8 0001afe0 0001a160 0001a560 000184e8 0001afe0 0001a160 0001a560 000184e8 0001bff8 0001b298 0001b358 000196a0 0001e348 0001c430 0001c558 00019b98 00023b00 00022348 00022378 0001f920 00023560 00020d90 00020c30 0001ebb0 00023310 00021a70 00021bb0 0001f7f8 00020c88 0001eb80 0001ed28 0001cd58 0001e908 0001cc40 0001cfb8 0001abe0 0001e908 0001cc40 0001cfb8 0001abe0 0001b2c0 00019de8 0001a508 00018508 0001b598 00019c10 0001a220 000182d0 0001e6e8 0001cb80 0001d000 0001ab00 0001e6e8 0001cb80 0001d000 0001ab00 00020ea0 0001e748 0001ed18 0001c8a8 00022f38 00021b30 00021ea0 0001f470 00021f88 0001faf8 0001fbd0 0001e150 000308d0 0002dcc0 0002dff8 0002ab10 00027380 00025538 00025490 000229e8 00026f08 00024b10 000252a0 00022630 000251e0 000233f8 00023948 00020dd0 000251e0 000233f8 00023948 00020dd0 00021f70 0001ffd0 00020888 0001e180 00022038 00020258 00020be8 0001dc30 000254a0 000234b8 00023cc0 000210f0 000254a0 000234b8 00023cc0 000210f0 000269a8 00024b30 00025270 00022268 00027550 00024e50 000252a0 00022750 00030008 0002d948 0002dde0 0002a220 1d200006 00003101 0000004c 07ae0444 07ae0444 07ae0444 07ae0444 16510001 00000000 26520101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 16530001 00000000 26540101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 16550001 00000000 26560101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 16570001 00000000 26580101 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001000 00001176 000012a9 00001396 0000148c 00001594 0000169b 00001796 00001884 00001965 00001a38 00001b00 00001bbd 00001c6f 00001d16 00001db3 00001e48 00001ed4 00001f58 00001fd6 0000204d 000020bf 0000212b 00002192 000021f4 00002252 000022ab 00002301 00002352 000023a1 000023ec 00002434 00002479 000024bc 000024fc 0000253a 00002575 000025af 000025e7 0000261c 00002650 00002683 000026b3 000026e3 00002711 0000273d 00002769 00002793 000027bc 000027e4 0000280b 00002831 00002857 0000287c 000028a0 000028c3 000028e6 00002908 0000292a 0000294c 0000296d 0000298d 000029ad 000029cd 000029ed 00002a0c 00002a2c 00002a4b 00002a69 00002a88 00002aa6 00002ac5 00002ae2 00002b00 00002b1e 00002b3b 00002b58 00002b75 00002b91 00002bad 00002bc9 00002be5 00002c01 00002c1c 00002c37 00002c52 00002c6c 00002c86 00002ca0 00002cba 00002cd3 00002ced 00002d05 00002d1e 00002d37 00002d4f 00002d66 00002d7e 00002d95 00002dad 00002dc3 00002dda 00002df1 00002e07 00002e1d 00002e33 00002e48 00002e5e 00002e73 00002e88 00002e9d 00002eb2 00002ec7 00002edb 00002eef 00002f04 00002f18 00002f2c 00002f3f 00002f53 00002f67 00002f7a 00002f8e 00002fa1 00002fb4 00002fc7 00002fda 00002fed 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 00003000 10530002 00000001 00745f5c 00000c80 1e310001 099c0cd0 1e330001 04fe00e6 1e320001 00000d00 10150001 00000007 1e300001 00000001 1e000001 0ccf0000 1e010001 099b0000 1e020001 04fe00e6 1e030001 00000000 1e040003 82200000 00000000 00000d00 1e070003 829cec00 00000000 00000680 1e0a0003 82bc2700 00000000 00000680 15000006 00000000 00000000 00000000 00000000 00000000 099c0cd0 00000c80 11000004 81200000 00000000 00000000 00000000 00000c80 200c0001 0000000f 40000120 20000000 
+<4>[   76.183838] 
+<4>[   76.183877] 1: fifo:
+<4>[   76.183891] FIFOSTAT 80100840
+<4>[   76.183891] [empty]
+<4>[   76.183910] 1-isp.1 (0): inactive
+<4>[   76.183910] 
+<4>[   76.183963] gk20a.0 pbdma 0: id: 1 (channel), next_id: 1 (channel) status: invalid
+<4>[   76.183999] PUT: 0000000008105d40 GET: 0000000008105d40 FETCH: 00000fea HEADER: 60400000
+<4>[   76.184010] 
+<4>[   76.184023] gk20a.0 eng 0: id: 1 (channel), next_id: 1 (channel), ctx: invalid 
+<4>[   76.184053] gk20a.0 eng 1: id: 0 (channel), next_id: 0 (channel), ctx: invalid 
+<4>[   76.184080] 
+<4>[   76.184095] 0-gk20a.0, pid 179:  in use idle not busy
+<4>[   76.184131] TOP: 8000000008008030 PUT: 0000000008008030 GET: 0000000008008030 FETCH: 0000000008008030
+<4>[   76.184131] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184131] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   76.184149] 
+<4>[   76.184162] 1-gk20a.0, pid 179:  in use idle not busy
+<4>[   76.184196] TOP: 8000000008105d40 PUT: 0000000008105d40 GET: 0000000008105d40 FETCH: 0000000008105d40
+<4>[   76.184196] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184196] SYNCPOINT 00000142 00004a10 SEMAPHORE 00000004 00120600 00000000 00000002
+<4>[   76.184212] 
+<4>[   76.184226] 2-gk20a.0, pid 1219:  in use idle not busy
+<4>[   76.184259] TOP: 8000000100009ab8 PUT: 0000000100009ab8 GET: 0000000100009ab8 FETCH: 0000000100009ab8
+<4>[   76.184259] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184259] SYNCPOINT 00000000 00004201 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   76.184275] 
+<4>[   76.184288] 3-gk20a.0, pid 1219:  in use idle not busy
+<4>[   76.184341] TOP: 80000001000ff018 PUT: 00000001000ff018 GET: 00000001000ff018 FETCH: 00000001000ff018
+<4>[   76.184341] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184341] SYNCPOINT 00000000 00004301 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   76.184358] 
+<4>[   76.184371] 4-gk20a.0, pid 1219:  in use idle not busy
+<4>[   76.184402] TOP: 0000000000000000 PUT: 0000000000000000 GET: 0000000000000000 FETCH: 0000000000000000
+<4>[   76.184402] HEADER: 60400000 COUNT: 00000000
+<4>[   76.184402] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   76.184417] 
+<4>[   76.184430] 7-gk20a.0, pid 1379:  in use idle not busy
+<4>[   76.184462] TOP: 8000000008008040 PUT: 0000000008008040 GET: 0000000008008040 FETCH: 0000000008008040
+<4>[   76.184462] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184462] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   76.184478] 
+<4>[   76.184491] 8-gk20a.0, pid 1318:  in use idle not busy
+<4>[   76.184522] TOP: 8000000008008090 PUT: 0000000008008090 GET: 0000000008008090 FETCH: 0000000008008090
+<4>[   76.184522] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184522] SYNCPOINT 00000000 00000000 SEMAPHORE 00000000 00000000 00000000 00000000
+<4>[   76.184537] 
+<4>[   76.184550] 9-gk20a.0, pid 1379:  in use idle not busy
+<4>[   76.184582] TOP: 80000000080fff70 PUT: 00000000080fff70 GET: 00000000080fff70 FETCH: 00000000080fff70
+<4>[   76.184582] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184582] SYNCPOINT 00000018 00001210 SEMAPHORE 00000004 01940600 00000000 00000002
+<4>[   76.184597] 
+<4>[   76.184610] 10-gk20a.0, pid 1318:  in use idle not busy
+<4>[   76.184642] TOP: 80000000081013c0 PUT: 00000000081013c0 GET: 00000000081013c0 FETCH: 00000000081013c0
+<4>[   76.184642] HEADER: 60400000 COUNT: 80000000
+<4>[   76.184642] SYNCPOINT 0000010c 00001410 SEMAPHORE 00000004 00200600 00000000 00000002
+<4>[   76.184657] 
+<4>[   76.184691] 7: fifo:
+<4>[   76.184705] FIFOSTAT 80100840
+<4>[   76.184705] [empty]
+<4>[   76.184725] 7-vic03.0 (0): inactive
+<4>[   76.184725] 
+<4>[   76.184873] 2: fifo:
+<4>[   76.184888] FIFOSTAT 80100840
+<4>[   76.184888] [empty]
+<4>[   76.184907] 2-vi.0 (0): inactive
+<4>[   76.184907] 
+<4>[   76.185080] 3: fifo:
+<4>[   76.185095] FIFOSTAT 80100840
+<4>[   76.185095] [empty]
+<4>[   76.185113] 3-vi (0): inactive
+<4>[   76.185113] 
+<4>[   76.185208] host1x host1x: cdma_timeout_handler: timeout: 32 (ispa_memory) ctx 0xd090a140, HW thresh 1, done 2
+<6>[   76.185269] isp isp.0:     SYNCPT_ID   32
+<6>[   76.185284] isp isp.0:     SYNCPT_VAL  2
+<6>[   76.185298] isp isp.0:     FIRST_GET   0x800080b0
+<6>[   76.185312] isp isp.0:     TIMEOUT     1000
+<6>[   76.185355] isp isp.0:     CTX 0xd090a140
+<6>[   76.185370] isp isp.0:     NUM_SLOTS   2
+<6>[   76.185382] isp isp.0:     NUM_HANDLES 3
+<6>[   76.185415] isp isp.0:     SYNCPT_ID   32
+<6>[   76.185429] isp isp.0:     SYNCPT_VAL  3
+<6>[   76.185442] isp isp.0:     FIRST_GET   0x800080c0
+<6>[   76.185456] isp isp.0:     TIMEOUT     1000
+<6>[   76.185469] isp isp.0:     CTX 0xd090a140
+<6>[   76.185483] isp isp.0:     NUM_SLOTS   2
+<6>[   76.185495] isp isp.0:     NUM_HANDLES 3
+<6>[   76.185511] isp isp.0:     SYNCPT_ID   32
+<6>[   76.185524] isp isp.0:     SYNCPT_VAL  4
+<6>[   76.185538] isp isp.0:     FIRST_GET   0x800080d0
+<6>[   76.185551] isp isp.0:     TIMEOUT     1000
+<6>[   76.185565] isp isp.0:     CTX 0xd090a140
+<6>[   76.185578] isp isp.0:     NUM_SLOTS   2
+<6>[   76.185590] isp isp.0:     NUM_HANDLES 3
+<6>[   76.185607] isp isp.0:     SYNCPT_ID   32
+<6>[   76.185620] isp isp.0:     SYNCPT_VAL  5
+<6>[   76.185633] isp isp.0:     FIRST_GET   0x800080e0
+<6>[   76.185646] isp isp.0:     TIMEOUT     1000
+<6>[   76.185659] isp isp.0:     CTX 0xd090a140
+<6>[   76.185672] isp isp.0:     NUM_SLOTS   2
+<6>[   76.185685] isp isp.0:     NUM_HANDLES 3
+<6>[   76.185701] isp isp.0:     SYNCPT_ID   32
+<6>[   76.185715] isp isp.0:     SYNCPT_VAL  6
+<6>[   76.185728] isp isp.0:     FIRST_GET   0x800080f0
+<6>[   76.185741] isp isp.0:     TIMEOUT     1000
+<6>[   76.185754] isp isp.0:     CTX 0xd090a140
+<6>[   76.185767] isp isp.0:     NUM_SLOTS   2
+<6>[   76.185780] isp isp.0:     NUM_HANDLES 3
+<6>[   76.185796] isp isp.0:     SYNCPT_ID   32
+<6>[   76.185809] isp isp.0:     SYNCPT_VAL  7
+<6>[   76.185822] isp isp.0:     FIRST_GET   0x80008100
+<6>[   76.185836] isp isp.0:     TIMEOUT     1000
+<6>[   76.185849] isp isp.0:     CTX 0xd090a140
+<6>[   76.185862] isp isp.0:     NUM_SLOTS   2
+<6>[   76.185875] isp isp.0:     NUM_HANDLES 3

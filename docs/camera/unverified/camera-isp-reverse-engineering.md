@@ -536,14 +536,25 @@ This is why the **V4L2 + kernel ISP driver** approach is recommended (see sectio
 |------|--------|-------|
 | Step 1: Device Tree + Power | **COMPLETE** | Both cameras + focuser |
 | Step 2: V4L2 RAW Capture | **COMPLETE** | IMX179 + OV5693 + AD5823 via MC framework |
-| Step 3: Minimal ISP | **NOT STARTED** | Next step — kernel ISP entity |
-| Step 4: Full ISP Calibration | **NOT STARTED** | Load mocha ISP profiles |
-| Step 5: 3A Statistics | **NOT STARTED** | AE/AWB/AF |
+| Step 3: Minimal ISP | **IN PROGRESS** | ISP entity in MC graph, host1x submit works, DMA confirmed on stock |
+| Step 4: Full ISP Calibration | **NOT STARTED** | Stock calibration captured (binary blobs ready) |
+| Step 5: 3A Statistics | **NOT STARTED** | Stats readback mechanism decoded (DMA buffer at +0x20000) |
 
-**All cameras work without ISP**, producing RAW Bayer frames directly via V4L2:
-- IMX179 rear: RGGB 10-bit, 3 modes (3280x2460, 1920x1080, 1280x720@90)
-- OV5693 front: BGGR 10-bit, 6 capture + 2 HDR modes
-- AD5823 focuser: VCM control via lens channel in MC graph
+**ISP T124 MC driver** (`drivers/media/platform/tegra/camera/isp_t124.c`):
+- V4L2 subdev registered in MC graph
+- Host1x channel + syncpoint working (ping 438 µs)
+- All ISP methods probed and accepted
+- Separate from legacy `isp.c` (stock, untouched)
+- Called from legacy `isp_probe()` via `tegra_isp_t124_mc_init()` hook
+
+**ISP DMA confirmed** on stock kernel via userspace test (`tools/camera/isp_test.c`):
+- ISP-A (IMX179): full BGRA output with trigger 0x05
+- ISP-B (OV5693): output confirmed with trigger 0x05
+- Requires: stock calibration block + stock dimensions + relocs for SMMU
+
+**Gather filter**: SmokeR24.1 kernel has `t124_channel_init_gather_filter` enabled.
+Stock kernel does not. ISP driver must not use SET_CLASS inside gathers —
+use `class_id` parameter in `nvhost_job_add_client_gather_address()` instead.
 
 ### Architecture: ISP as MC Entity
 
@@ -663,43 +674,391 @@ Step 5: 3A Statistics
 
 ---
 
-## 11. File Index
+## 11. Stock Command Buffer Capture (April 2026)
+
+### Method
+
+Modified Smoke kernel 1.2 (tag `1.2` from `Insei/Smoke-kernel-mocha`) with ISP
+cmdbuf hex dump in `nvhost_cdma.c` `trace_write_gather` path. Built with
+Linaro 4.9.4, flashed to device, launched stock camera app.
+
+### Per-Frame ISP Command Buffer Structure
+
+Each frame consists of 6 submits in order:
+
+| Submit | Words | Content |
+|--------|-------|---------|
+| 1 | 2 | Syncpt increment (host1x class) |
+| 2 | 45 | **Output config + surfaces + input + trigger** |
+| 3 | 2 | Syncpt increment |
+| 4 | 8 | Syncpt wait (host1x WAIT_SYNCPT for VI completion) |
+| 5 | 2 | Syncpt increment |
+| 6 | ~1545 | **Full ISP calibration (lens shading, tone curve, etc.)** |
+
+### Decoded 45-Word Output Block (ISP-A, IMX179 3280x2460)
+
+```
+[000] 0x00000C80 = SET_CLASS(0x32)
+[001] 0x1E000001 = INCR(0xE00, 1)
+[002] 0x0CCF0000 = ((width-1) & 0x3FFF) << 16 = (3279 << 16)
+[003] 0x1E010001 = INCR(0xE01, 1)
+[004] 0x099B0000 = ((height-1) & 0x3FFF) << 16 = (2459 << 16)
+[005] 0x1E020001 = INCR(0xE02, 1)
+[006] 0x04FE00E6 = output format (0xE6) + flags (0x04FE00)
+[007] 0x1E030001 = INCR(0xE03, 1)
+[008] 0x00000000 = color space params
+
+[009] 0x1E040003 = INCR(0xE04, 3) — output surface Y plane
+[010] IOVA address (changes per frame)
+[011] 0x00000000
+[012] 0x00000D00 = stride 3328 (3280 aligned to 64)
+
+[013] 0x1E070003 = INCR(0xE07, 3) — output surface U plane
+[014] IOVA address
+[015] 0x00000000
+[016] 0x00000680 = stride 1664 (half Y stride)
+
+[017] 0x1E0A0003 = INCR(0xE0A, 3) — output surface V plane
+[018] IOVA address
+[019] 0x00000000
+[020] 0x00000680 = stride 1664
+
+[021] 0x15000006 = INCR(0x500, 6) — processing/demosaic
+[022-026] 0x00000000 (5 zeros)
+[027] 0x099C0CD0 = (height << 16) | width = (2460 << 16) | 3280
+
+[028] 0x00000C80 = SET_CLASS(0x32)
+[029] 0x11000004 = INCR(0x100, 4) — input buffer
+[030] IOVA address (changes per frame)
+[031-033] 0x00000000
+
+[034-035] SET_CLASS(0x32)
+[036-041] 3x NONINCR(0x000, 1) — syncpt increments (host1x method)
+         values: 0x420, 0x521, 0x623 (syncpt IDs + conditions)
+
+[042] SET_CLASS(0x32)
+[043] 0x200C0001 = NONINCR(0x00C, 1) — control trigger
+[044] 0x00000005 = trigger value
+```
+
+### ISP-B Comparison (OV5693 2592x1944)
+
+```
+SET_CLASS: 0x0D00 (class 0x34 = ISP-B)
+0xE00: 0x0A1F0000 = (2591 << 16)
+0xE01: 0x07970000 = (1943 << 16)
+0xE02: 0x04FE00E6 = same format
+Y stride: 0x0A40 (2624, 2592 aligned to 64)
+UV stride: 0x0540 (1344)
+0x500 dims: 0x07980A20 = (1944 << 16) | 2592
+0x00C trigger: 0x05 = same
+Calibration: different values (per-sensor), same structure
+```
+
+### Surface Descriptor Format
+
+```
+INCR(0xE04 + 3*i, 3):
+  Word 0: IOVA buffer address
+  Word 1: 0 (always zero in stock)
+  Word 2: stride in bytes (aligned to 64)
+```
+
+3 surfaces for YUV planar: Y at 0xE04, U at 0xE07, V at 0xE0A.
+Input at 0xE34+3*i follows same format (confirmed from RE).
+
+### Syncpt Wait Block (8 words)
+
+```
+[0] 0x00000040 = SET_CLASS(0x01) — host1x class
+[1] 0x20080001 = NONINCR(0x008, 1) — WAIT_SYNCPT
+[2] syncpt_id | (value << 8)
+[3] SET_CLASS(ISP) — back to ISP class
+[4-7] repeat for second syncpt wait
+```
+
+### Per-Frame Dynamic Values
+
+Only buffer addresses change per frame (rotating pool):
+- Output Y/U/V addresses ([010], [014], [018])
+- Input address ([030])
+
+All register values, format codes, strides, calibration — **constant** across frames.
+
+### MMIO Register Values During Streaming
+
+```
+Method  MMIO    ISP-A (rear)    ISP-B (front)   Description
+0x008   0x20    0xF000F800      0xF000F800      Input config (hw default)
+0x00C   0x30    0x00000004      0x00000004      Control (streaming state)
+0x00D   0x34    0x00000100      0x00000100      Status
+0x015   0x54    0x04040007      0x04040007      ISP enable + mode
+0x018   0x60    0x0A00500A      0x0A00500A      Processing params
+0x019   0x64    0x00008089      0x00008089      Processing params
+0x01A   0x68    0x013645CB      0x013645CB      Calibration
+0x01B   0x6C    0x000001E7      0x000001E7      Calibration
+0x01C   0x70    0x00000001      0x00000001      Clock gate
+0x01D   0x74    0x00000001      0x00000001      ISP_CG_CTRL
+0x01F   0x7C    0x00000003      0x00000003      Mode
+```
+
+Note: 0x00C shows 0x04 during streaming, not 0x05 (trigger value) or 0x0F
+(post-apply). This suggests 0x04 is the "streaming active" state after
+the trigger write completes.
+
+### Calibration Block Structure (~1545 words for ISP-A, ~1538 for ISP-B)
+
+Fully decoded in `docs/camera/isp-calibration-decoded.md`.
+
+```
+SET_CLASS(ISP)
+INCR(0xD00, 10)      — Lens shading control (per-sensor coefficients)
+INCR(0xD0A, 1)       — Lens shading enable
+NONINCR(0xD0B, 480)  — Lens shading correction table (FIFO, 4ch x 120 points)
+INCR(0xD20, 6)       — Lens shading extra (ISP-A only, absent in ISP-B)
+4x {
+  INCR(0x65N, 1)     — Tone curve channel N control
+  NONINCR(0x65(N+1), 257) — Tone curve channel N LUT (FIFO)
+}
+INCR(0x053, 2)       — ISP enable + buffer address
+```
+
+Note: Tone curve methods (0x651-0x658) differ from original RE (0x101).
+Lens shading methods (0xD00-0xD20) differ from original RE (0xD31/0xDAF).
+This is because stock uses a different binary (Shield 63KB) vs original
+RE (Mocha 50KB), or different code paths.
+
+Stock tone curves are **all linear** (0x1000 = 1.0 for all 257 entries).
+Real gamma/tone mapping would come from ISP calibration profiles in
+`docs/camera-isp-profiles/`:
+- `imx179_primax_lfi_v3.09.isp` — IMX179 rear (latest)
+- `imx179_primax_v2.27.isp` — IMX179 rear
+- `imx179_primax_v2.18.isp` — IMX179 rear
+- `ov5693_sunny_v2.13.isp` — OV5693 front
+
+### Key Corrections from Stock Capture
+
+| What | Our assumption | Stock reality |
+|------|---------------|---------------|
+| SET_CLASS in gather | Blocked by filter | Works in stock kernel |
+| Surface word order | [addr, stride, dims] | [addr, 0, stride] |
+| Output format | Simple | YUV planar (3 surfaces Y/U/V) |
+| 0x500 processing | All zeros | 5 zeros + (h<<16)\|w |
+| 0x00C trigger | 0x0F or 0x01 | 0x05 |
+| 0x015 enable | 0x01 | 0x04040007 |
+| Input via 0x200 | DMA descriptor | Wrong — 0x200 is coefficients |
+| Input via 0x100 | reloc + zeros | Confirmed: INCR(0x100,4) |
+
+### Stock Firmware Build for ISP Tracing
+
+Source: `Insei/Smoke-kernel-mocha` tag `1.2`
+Modification: unconditional ISP cmdbuf hex dump in `nvhost_cdma.c`
+Toolchain: Linaro 4.9.4 (same as SmokeR24.1)
+Ramdisk: extracted from stock boot partition via `dd`
+Built with: `/home/artem/Projects/Smoke-kernel-mocha/` on build server
+
+---
+
+## 13. ISP DMA Breakthrough — Dual Trigger Discovery (April 2026)
+
+### Summary
+
+ISP requires **two-phase trigger** to process a frame:
+1. **Trigger 0x0F** (static config apply) — loads calibration into ISP pipeline
+2. **Trigger 0x05** (runtime frame processing) — starts DMA read/write
+
+Both must be sent via `NONINCR(0x00C, 1)` in sequential host1x submits.
+Trigger 0x0F alone produces no output. Trigger 0x05 alone (without prior 0x0F)
+produces no output. Only 0x0F followed by 0x05 produces ISP DMA output.
+
+### Discovery Method
+
+Running `isp_test tests` on stock Smoke kernel 1.2 (cold boot, no camera app):
+
+```
+Test 1: trigger=0x0F, format=0x04FE00E6 → output: 0/4096 non-zero (untouched)
+Test 2: trigger=0x05, format=0x04FE00E6 → output: 4096/4096 non-zero (ISP WROTE DATA!)
+  hex: 86 63 d9 ff 86 63 d9 ff 86 63 d9 ff ...  (BGRA pattern)
+```
+
+Test 1 (0x0F) initialized ISP but produced no output.
+Test 2 (0x05) ran on already-initialized ISP and produced DMA output.
+
+### Test Conditions
+
+- **Kernel**: Stock Smoke 1.2, unmodified, freshly flashed MiuiSmoke_V8_MiPad_7.2.9_4.4.4
+- **Boot state**: Cold boot, NO camera app launched, NO prior ISP init
+- **Power**: ISP power-on via `open(/dev/nvhost-isp)` → `nvhost_module_busy()`
+- **Calibration**: Loaded from `/data/local/tmp/isp_cal.bin` (1545 words, stock ISP-A)
+- **Input buffer**: Uninitialized (nvmap mmap failed on stock, using zero-filled memory)
+- **Output buffer**: nvmap IOVMM allocation, checked via `NVMAP_IOC_READ`
+- **Relocs**: 4 relocs (3 output Y/U/V + 1 input), patched by kernel at submit
+- **Syncpt**: ISP-A syncpt 32, OP_DONE condition
+- **Submit**: Single gather with SET_CLASS(0x32) + calibration + output config + trigger
+
+### Cold Boot Verification
+
+Confirmed ISP does NOT work on cold boot with single trigger:
+
+```
+Cold boot + trigger 0x05 only → output untouched
+Cold boot + trigger 0x0F only → output untouched
+Cold boot + trigger 0x0F then 0x05 (sequential submits) → ISP WROTE DATA!
+```
+
+Also confirmed on SmokeR24.1 kernel:
+```
+24.1 kernel + trigger 0x05 only → output untouched (tested extensively)
+24.1 kernel + MMIO init + trigger 0x05 → output untouched
+24.1 userspace isp_test_24 + relocs + trigger 0x05 → output untouched
+```
+
+### MMIO Register State
+
+**Cold boot (power gated)**: All 0xFFFFFFFF — ISP completely off
+
+**After power-on (pre-init)**: All 0x00000000 — hardware defaults
+
+**During stock camera streaming** (captured via devmem):
+```
+Method  MMIO    Value           Description
+0x008   0x020   0xF000F800      Input config
+0x00C   0x030   0x00000004      Control (streaming active state)
+0x00D   0x034   0x00000100      Status
+0x014   0x050   0x000000A9      Per-sensor parameter
+0x015   0x054   0x04040007      ISP enable mode
+0x018   0x060   0x0A00500A      Processing params
+0x019   0x064   0x00008089      Processing params
+0x01A   0x068   0x013645CB      Calibration coefficient
+0x01B   0x06c   0x000001E7      Calibration coefficient
+0x01C   0x070   0x00000001      Unknown
+0x01D   0x074   0x00000001      ISP_CG_CTRL (clock gating)
+0x01F   0x07c   0x00000003      Mode
+0x024   0x090   0xC6BFF67C      Unknown (same for A and B)
+0x038   0x0e0   0x242CB07B      Unknown
+0x03F   0x0fc   0x00000020      Unknown
+0x051   0x144   0x017BA537      Unknown
+0x053   0x14C   0x00000001      ISP_ENABLE
+0x054   0x150   0x00585B18      Working buffer address (IOVA)
+0x05E   0x178   0x00003232      Unknown
+```
+
+**After camera close**: Immediately 0xFFFFFFFF — ISP power gated by nvhost idle.
+
+### Key Finding: ISP Power Gate Timing
+
+After `am force-stop` camera app, ISP is **immediately** power gated.
+Register 0x054 = 0xFFFFFFFF within 1 second of camera close.
+Previous successful tests likely had camera still partially active,
+or ISP power gate was slower on earlier firmware.
+
+### Ruled Out Hypotheses
+
+| Hypothesis | Result |
+|-----------|--------|
+| Gather filter blocks ISP gathers | NO — disabled filter, same result |
+| Need relocs for SMMU mapping | NO — userspace with relocs, same result |
+| Need contiguous Y/U/V buffer | NO — tested contiguous, same result |
+| Need valid ISP working buffer (0x054) | NO — patched address, same result |
+| Need MMIO pre-init | NO — wrote all known MMIO values, same result |
+| Single trigger 0x05 sufficient | NO — needs 0x0F first |
+| ISP works only with real RAW data | NO — works with uninitialized input |
+| Problem specific to 24.1 kernel | NO — same on stock without dual trigger |
+
+### Trigger Semantics
+
+```
+0x0F = NvCameraHwSettingsApply post-apply callback (static config commit)
+       Loads calibration (lens shading, tone curves) into ISP pipeline registers.
+       Must be sent BEFORE runtime trigger. Does not produce output.
+
+0x05 = NvIspProcessFrame3 runtime trigger (frame processing)
+       Starts ISP DMA: reads input buffer, processes, writes output Y/U/V.
+       Only works AFTER 0x0F has been sent on the same channel.
+
+0x04 = Hardware state during active streaming (read from MMIO 0x030).
+       Not a trigger value — this is the ISP "busy" state.
+
+0x09 = Unknown runtime mode (tested, no output)
+```
+
+### Stock Per-Frame Submit Sequence (6 submits)
+
+From stock cmdbuf capture (Section 11), each frame has 6 submits:
+```
+Submit 1: 2 words  — Syncpt increment
+Submit 2: 45 words — Output config + surfaces + input + trigger 0x05
+Submit 3: 2 words  — Syncpt increment
+Submit 4: 8 words  — Syncpt WAIT (wait for VI frame)
+Submit 5: 2 words  — Syncpt increment
+Submit 6: ~1545 words — Calibration + trigger 0x0F (via static callback)
+```
+
+Note: trigger 0x0F (submit 6) comes AFTER trigger 0x05 (submit 2) in the
+per-frame sequence. This means on the FIRST frame, 0x0F was already sent
+during `NvIspSetConfiguration` (static init phase). Subsequent frames
+send 0x05 first (new frame), then 0x0F (update calibration for next frame).
+
+### Historical Note
+
+Commit `4b45d0c3eb7` "ISP DMA CONFIRMED WORKING" (on stock kernel) used
+`isp_test tests` which runs test suite: trigger 0x0F first, then 0x05.
+The dependency was not noticed at the time — both triggers appeared to
+"work" independently, but in reality 0x05 only worked because 0x0F had
+already been sent in the previous test. This is confirmed by running
+each trigger independently on cold boot (both produce zero output).
+   - Submit 1: calibration + output config + trigger 0x0F (init)
+   - Submit 2: input + output surfaces + trigger 0x05 (process)
+2. Test on 24.1 kernel with dual trigger
+3. If works: integrate into VI capture pipeline (channel.c)
+
+---
+
+## 14. File Index (updated)
 
 ### Documentation:
-- `docs/camera-isp-reverse-engineering.md` — this file (ISP register map + reverse engineering)
-- `docs/camera-reverse-engineering.md` — camera architecture overview
-- `docs/camera-isp-profiles/` — extracted ISP calibration data from Xiaomi stock
+- `docs/camera/camera-isp-reverse-engineering.md` — this file
+- `docs/camera/camera-reverse-engineering.md` — camera architecture overview
+- `docs/camera/isp-calibration-decoded.md` — decoded calibration block structure
+- `docs/camera/isp-reverse-engineering-status.md` — current RE status for assistant
+- `docs/camera/isp-stats-readback.md` — stats readback mechanism
+- `docs/camera-isp-profiles/` — extracted ISP calibration data from Xiaomi stock (.isp text files)
 
-### Kernel (existing):
-- `drivers/video/tegra/host/isp/isp.c` — ISP host1x platform driver
-- `drivers/video/tegra/host/isp/isp_isr_v1.c` — ISP interrupt handler
-- `drivers/video/tegra/host/t124/hardware_t124.h` — host1x opcode definitions
-- `drivers/video/tegra/host/class_ids.h` — ISP class IDs
-- `drivers/media/platform/soc_camera/tegra_camera/vi2.c` — V4L2 VI host (T124)
-- `drivers/media/platform/tegra/camera/channel.c` — V4L2 video device
-- `drivers/media/platform/tegra/camera/graph.c` — media controller graph
-- `drivers/media/platform/tegra/csi/csi.c` — CSI transceiver
-- `drivers/media/i2c/soc_camera/ov5693_v4l2.c` — OV5693 V4L2 subdev
-- `drivers/media/i2c/soc_camera/imx135_v4l2.c` — IMX135 V4L2 subdev (template for IMX179)
-- `drivers/media/platform/tegra/imx179.c` — IMX179 legacy miscdevice driver
-- `drivers/media/platform/tegra/ov5693.c` — OV5693 legacy miscdevice driver
-- `drivers/media/platform/tegra/ad5823.c` — AD5823 focuser legacy driver
-- `arch/arm/boot/dts/tegra124-soc-base.dtsi` — VI/ISP device tree nodes
+### Stock Command Buffer Captures:
+- `docs/camera/stock-isp-a-cmdbuf-dump.txt` — full ISP-A dmesg trace (IMX179 rear)
+- `docs/camera/stock-isp-b-cmdbuf-dump.txt` — full ISP-B dmesg trace (OV5693 front)
+- `docs/camera/stock-isp-a-calibration.txt` — ISP-A calibration block (1545 words)
+- `docs/camera/stock-isp-b-calibration.txt` — ISP-B calibration block (1538 words)
+- `docs/camera/stock-isp-mmio-rear.txt` — MMIO register dump during rear streaming
+- `docs/camera/stock-isp-mmio-front.txt` — MMIO register dump during front streaming
+
+### Kernel (SmokeR24.1, isp/v4l2-driver branch):
+- `drivers/media/platform/tegra/camera/isp_t124.c` — T124 ISP MC driver (V4L2 subdev + host1x + debugfs)
+- `drivers/media/platform/tegra/camera/isp_t124.h` — ISP method offsets and stock values
+- `drivers/media/platform/tegra/camera/isp_t124_cal.h` — stock calibration data arrays
+- `drivers/video/tegra/host/isp/isp.c` — legacy nvhost ISP (stock + mc_init hook)
+- `drivers/media/platform/tegra/camera/channel.c` — V4L2 video device + ISP channel
+- `drivers/media/platform/tegra/camera/graph.c` — media controller graph + ISP entity
+- `drivers/media/platform/tegra/camera/mc_common.h` — is_isp_channel flag
+- `arch/arm/boot/dts/tegra124-platforms/tegra124-mocha-camera-mc.dtsi` — camera DTS
+
+### Tools:
+- `tools/camera/v4l2_diag.c` — capture diagnostic tool (existing, works)
+- `tools/camera/isp_test.c` — userspace ISP test for stock kernel (nvmap + nvhost ioctl)
+- `tools/camera/isp_test_24.c` — userspace ISP test adapted for SmokeR24.1 (nvmap write/read)
+- `tools/camera/isp_init_test.c` — ISP blob init test (NvIspOpen via vendor blob)
 
 ### Stock blobs (reference only):
-- `libnvisp_v3.so` (50KB) — ISP HW programming, 6 blocks, 39 exports
-- `libnvvicsi_v3.so` (17KB) — VI/CSI HW programming
+- `libnvisp_v3.so` — ISP HW programming (Shield 63KB variant used for RE)
 - `libnvmm_camera_v3.so` (1.4MB) — pipeline orchestrator, 3A
 - `libnvrm_graphics.so` (21KB) — host1x command buffer — **SOURCE OBTAINED**
 - `libnvodm_imager.so` (2.4MB) — sensor drivers + ISP calibration
 
 ### JXD S192 vendor source:
 - `tegra/core/drivers/nvrm/graphics/nvrm_stream.c` — NvRmStream* full source (37KB)
-- `tegra/core/drivers/nvrm/graphics/nvrm_channel_linux.c` — NvRmChannel* Linux impl (42KB)
 - `tegra/core/include/nvrm_channel.h` — Public API + opcode macros (75KB)
+- `tegra/core/include/nvrm_surface.h` — NvRmSurface (0x30 bytes)
+- `tegra/multimedia-partner/nvmm/include/nvmm_buffertype.h` — NvMMSurfaceDescriptor (0xB0)
 - `tegra/camera/core_v3/include/nvcamera_isp.h` — ISP attribute API (49KB)
-- `tegra/camera-partner/imager/sensor_bayer_imx179.c` — IMX179 sensor driver source
-- `tegra/camera-partner/imager/sensor_bayer_ov5693.c` — OV5693 sensor driver source
-- `tegra/camera-partner/imager/focuser_ad5823.c` — AD5823 focuser driver source
 - `tegra/camera-partner/imager/configs/sensor_bayer_imx179_camera_config.h` — ISP cal (194KB)
 - `tegra/camera-partner/android/libnvcamerategra/camera_v3/` — Camera HAL3 source

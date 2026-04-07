@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mocha-remote</title>
+<style>
+:root{--bg:#111;--bg2:#1a1a1a;--bg3:#222;--border:#333;--text:#ccc;--dim:#666;--accent:#4fc3f7;--danger:#ef5350;--ok:#66bb6a;--radius:6px}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:-apple-system,system-ui,monospace;background:var(--bg);color:var(--text);display:flex;flex-direction:column;font-size:14px}
+
+/* Header */
+.header{padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
+.header h1{font-size:16px;color:var(--accent);font-weight:600}
+.header .chip{font-size:11px;padding:2px 8px;background:var(--bg3);border-radius:10px;color:var(--dim)}
+
+/* Tabs */
+.tabs{display:flex;border-bottom:1px solid var(--border)}
+.tab{padding:10px 20px;cursor:pointer;color:var(--dim);font-size:13px;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Panels */
+.panel{display:none;flex-direction:column;flex:1;min-height:0;padding:12px 16px;gap:10px}
+.panel.active{display:flex}
+
+/* Buttons */
+.btn{padding:8px 18px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px;border-radius:var(--radius);transition:all .15s}
+.btn:hover{background:#2a2a2a;border-color:var(--accent)}
+.btn.primary{background:#1565c0;border-color:#1565c0;color:#fff}
+.btn.primary:hover{background:#1976d2}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn.danger:hover{background:#2a1515}
+
+/* Inputs */
+.input{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:13px;border-radius:var(--radius);outline:none}
+.input:focus{border-color:var(--accent)}
+
+/* Layout helpers */
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.flex1{flex:1}
+
+/* Terminal */
+#terminal-output{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:13px;font-family:monospace;word-break:break-all;line-height:1.5}
+#cmd-input{width:100%;font-family:monospace}
+
+/* Logs */
+.log{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;flex:1;min-height:0;overflow-y:auto;white-space:pre-wrap;font-size:12px;font-family:monospace;line-height:1.4}
+
+/* Info */
+.info-grid{display:grid;grid-template-columns:140px 1fr;gap:8px;font-size:13px}
+.info-grid .label{color:var(--dim)}
+
+/* Context menu */
+.ctx-menu{position:fixed;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:4px 0;min-width:160px;z-index:100;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.ctx-menu .ctx-item{padding:8px 16px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px}
+.ctx-menu .ctx-item:hover{background:var(--bg3)}
+.ctx-menu .ctx-item.danger{color:var(--danger)}
+.ctx-menu .ctx-sep{border-top:1px solid var(--border);margin:4px 0}
+.ctx-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:99}
+
+/* File Manager */
+.fm{flex:1;display:flex;flex-direction:column;min-height:0;gap:8px}
+.fm-toolbar{display:flex;gap:8px;align-items:center}
+.fm-list{flex:1;min-height:0;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)}
+.fm-item{padding:8px 12px;cursor:default;font-size:13px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #1a1a1a;user-select:none}
+.fm-item:hover{background:var(--bg3)}
+.fm-item.dir{cursor:pointer}
+.fm-icon{width:20px;text-align:center;font-size:16px}
+.fm-name{flex:1}
+.fm-size{color:var(--dim);font-size:12px;min-width:80px;text-align:right}
+.fm-date{color:var(--dim);font-size:12px;min-width:100px;text-align:right}
+.fm-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:16px;text-align:center;color:var(--dim);cursor:pointer;transition:all .15s}
+.fm-drop:hover,.fm-drop.dragover{border-color:var(--accent);color:var(--accent)}
+
+/* Boot */
+.boot-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:10px}
+.boot-card h3{font-size:13px;color:var(--dim);font-weight:normal;text-transform:uppercase;letter-spacing:1px}
+.file-chip{display:inline-flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;font-size:12px}
+.file-chip .clear{cursor:pointer;color:var(--dim);font-size:16px}
+.file-chip .clear:hover{color:var(--danger)}
+
+.status{font-size:12px;color:var(--dim)}
+input[type=file]{display:none}
+select.input{appearance:auto;padding-right:24px}
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1>mocha-remote</h1>
+<span id="dev-name" class="chip">...</span>
+</div>
+
+<div class="tabs">
+<div class="tab active" onclick="showTab('terminal')">Terminal</div>
+<div class="tab" onclick="showTab('dmesg')">dmesg</div>
+<div class="tab" onclick="showTab('files')">Files</div>
+<div class="tab" onclick="showTab('boot')">Boot</div>
+<div class="tab" onclick="showTab('info')">Info</div>
+</div>
+
+<!-- Terminal -->
+<div id="terminal" class="panel active">
+<div id="terminal-output"></div>
+<form onsubmit="runCmd();return false">
+<input id="cmd-input" class="input" placeholder="$ enter command..." autofocus style="width:100%;font-family:monospace">
+</form>
+</div>
+
+<!-- dmesg -->
+<div id="dmesg" class="panel">
+<div class="row">
+<button class="btn" onclick="loadDmesg()">Refresh</button>
+<button class="btn" onclick="tailDmesg()">Auto-refresh</button>
+<button class="btn" onclick="stopTail()">Stop</button>
+<input id="dmesg-filter" class="input flex1" placeholder="grep filter...">
+</div>
+<div id="dmesg-output" class="log"></div>
+</div>
+
+<!-- Files -->
+<div id="files" class="panel">
+<div class="fm">
+<div class="fm-toolbar">
+<button class="btn" onclick="fmUp()">Up</button>
+<input id="fm-cwd" class="input flex1" value="/sdcard/" onkeydown="if(event.key==='Enter')fmGo()">
+<button class="btn" onclick="fmGo()">Go</button>
+<button class="btn" onclick="fmMkdir()">New folder</button>
+</div>
+<div class="fm-list" id="fm-list" oncontextmenu="return false"></div>
+<div class="fm-drop" id="fm-drop" onclick="document.getElementById('fm-file-input').click()">
+Drop files here or click to upload
+<input type="file" id="fm-file-input" onchange="fmUpload()" multiple>
+</div>
+<div id="fm-status" class="status"></div>
+</div>
+</div>
+
+<!-- Boot -->
+<div id="boot" class="panel">
+<div class="boot-card">
+<h3>Upload from computer</h3>
+<div class="row">
+<div class="fm-drop flex1" id="boot-drop" onclick="document.getElementById('boot-file-input').click()">
+<span id="boot-drop-text">Drop boot.img here or click to select</span>
+<input type="file" id="boot-file-input" onchange="bootFileSelected()" accept=".img,.bin">
+</div>
+</div>
+<div id="boot-file-chip" style="display:none">
+<span class="file-chip">
+<span id="boot-file-name"></span>
+<span class="clear" onclick="bootFileClear()">&times;</span>
+</span>
+</div>
+<div class="row">
+<span class="status">Upload to:</span>
+<input id="boot-device-path" class="input flex1" value="/sdcard/boot.img">
+</div>
+<div class="row">
+<span class="status">Partition:</span>
+<select id="boot-partition" class="input">
+<option value="/dev/block/platform/sdhci-tegra.3/by-name/LNX">LNX (boot)</option>
+<option value="/dev/block/platform/sdhci-tegra.3/by-name/SOS">SOS (recovery)</option>
+<option value="/dev/block/platform/sdhci-tegra.3/by-name/TOS">TOS (trusted os)</option>
+</select>
+</div>
+<div class="row">
+<button class="btn primary" onclick="bootUploadAndKexec()">Upload + Kexec</button>
+<button class="btn danger" onclick="bootUploadAndFlash()">Upload + Flash</button>
+<span id="boot-upload-status" class="status"></span>
+</div>
+</div>
+
+<div class="boot-card">
+<h3>From device</h3>
+<div class="row">
+<input id="boot-existing" class="input flex1" placeholder="/sdcard/boot.img">
+<button class="btn primary" onclick="bootKexecExisting()">Kexec</button>
+<button class="btn danger" onclick="bootFlashExisting()">Flash</button>
+</div>
+</div>
+
+<div class="boot-card">
+<h3>System</h3>
+<div class="row">
+<button class="btn" onclick="doReboot()">Reboot</button>
+<button class="btn" onclick="doReboot('recovery')">Recovery</button>
+<button class="btn" onclick="doReboot('bootloader')">Bootloader</button>
+</div>
+</div>
+<div class="boot-card">
+<h3>Partition Dump</h3>
+<div class="row">
+<select id="dump-partition" class="input">
+<option value="LNX">LNX (boot)</option>
+<option value="SOS">SOS (recovery)</option>
+<option value="TOS">TOS (trusted os)</option>
+<option value="APP">APP (system)</option>
+<option value="UDA">UDA (data)</option>
+<option value="CAC">CAC (cache)</option>
+<option value="MSC">MSC (misc)</option>
+<option value="USP">USP (staging)</option>
+<option value="MDA">MDA (metadata)</option>
+</select>
+<button class="btn" onclick="dumpPartition()">Dump + Download</button>
+<button class="btn" onclick="dumpToSdcard()">Dump to /sdcard</button>
+<span id="dump-status" class="status"></span>
+</div>
+</div>
+<div id="boot-log" class="log" style="max-height:30vh"></div>
+</div>
+
+<!-- Info -->
+<div id="info" class="panel">
+<button class="btn" onclick="loadInfo()" style="margin-bottom:8px">Refresh</button>
+<div id="info-grid" class="info-grid"></div>
+</div>
+
+<!-- Context Menu -->
+<div id="ctx-overlay" class="ctx-overlay" style="display:none" onclick="ctxHide()"></div>
+<div id="ctx-menu" class="ctx-menu" style="display:none"></div>
+
+<script>
+var BASE=location.origin,tailTimer=null,cmdHistory=[],histIdx=-1,bootFile=null,ctxTarget=null;
+
+function api(cmd,cb){var x=new XMLHttpRequest();x.open('POST',BASE+'/cgi-bin/cmd');x.timeout=30000;x.onload=function(){cb&&cb(x.responseText)};x.onerror=function(){cb&&cb('[connection error]')};x.ontimeout=function(){cb&&cb('[timeout]')};x.send(cmd)}
+function upload(file,dest,cb,pcb){var x=new XMLHttpRequest();x.open('POST',BASE+'/cgi-bin/upload?path='+encodeURIComponent(dest));x.onload=function(){cb&&cb(x.responseText)};x.onerror=function(){cb&&cb('[error]')};if(pcb)x.upload.onprogress=function(e){if(e.lengthComputable)pcb(Math.round(e.loaded/e.total*100))};x.send(file)}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+
+function showTab(n){
+  var names=['terminal','dmesg','files','boot','info'];
+  document.querySelectorAll('.tab').forEach(function(t,i){t.className='tab'+(names[i]===n?' active':'')});
+  document.querySelectorAll('.panel').forEach(function(p){p.className='panel'+(p.id===n?' active':'')});
+  if(n==='dmesg')loadDmesg();if(n==='info')loadInfo();if(n==='files')fmGo();
+}
+
+// === Terminal ===
+var termOut=document.getElementById('terminal-output'),cmdInput=document.getElementById('cmd-input');
+cmdInput.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'){e.preventDefault();if(histIdx<cmdHistory.length-1)cmdInput.value=cmdHistory[++histIdx]}
+  if(e.key==='ArrowDown'){e.preventDefault();histIdx>0?cmdInput.value=cmdHistory[--histIdx]:(histIdx=-1,cmdInput.value='')}
+});
+function runCmd(){var c=cmdInput.value;if(!c)return;cmdHistory.unshift(c);histIdx=-1;termOut.textContent+='$ '+c+'\n';cmdInput.value='';api(c,function(r){termOut.textContent+=r+'\n';termOut.scrollTop=termOut.scrollHeight})}
+
+// === dmesg ===
+function loadDmesg(){var f=document.getElementById('dmesg-filter').value;api(f?'dmesg|grep -i "'+f+'"':'dmesg',function(r){var el=document.getElementById('dmesg-output');el.textContent=r;el.scrollTop=el.scrollHeight})}
+function tailDmesg(){stopTail();tailTimer=setInterval(loadDmesg,2000)}
+function stopTail(){if(tailTimer){clearInterval(tailTimer);tailTimer=null}}
+
+// === Context Menu ===
+function ctxShow(x,y,items){
+  var m=document.getElementById('ctx-menu'),o=document.getElementById('ctx-overlay');
+  var h='';items.forEach(function(it){
+    if(it==='-')h+='<div class="ctx-sep"></div>';
+    else h+='<div class="ctx-item'+(it.danger?' danger':'')+'" onclick="ctxHide();('+it.fn+')()">'+(it.icon||'')+' '+it.label+'</div>';
+  });
+  m.innerHTML=h;m.style.left=Math.min(x,window.innerWidth-180)+'px';m.style.top=Math.min(y,window.innerHeight-items.length*36)+'px';
+  m.style.display='block';o.style.display='block';
+}
+function ctxHide(){document.getElementById('ctx-menu').style.display='none';document.getElementById('ctx-overlay').style.display='none'}
+
+// === File Manager ===
+var fmDrop=document.getElementById('fm-drop');
+['dragenter','dragover'].forEach(function(e){fmDrop.addEventListener(e,function(ev){ev.preventDefault();fmDrop.classList.add('dragover')})});
+['dragleave','drop'].forEach(function(e){fmDrop.addEventListener(e,function(ev){ev.preventDefault();fmDrop.classList.remove('dragover')})});
+fmDrop.addEventListener('drop',function(e){document.getElementById('fm-file-input').files=e.dataTransfer.files;fmUpload()});
+
+function fmGo(path){
+  var cwd=path||document.getElementById('fm-cwd').value;
+  if(!cwd.endsWith('/'))cwd+='/';
+  document.getElementById('fm-cwd').value=cwd;
+  api('ls -la "'+cwd+'" 2>&1',function(r){
+    var list=document.getElementById('fm-list'),dirs=[],files=[];
+    r.split('\n').forEach(function(line){
+      if(!line||line.startsWith('total'))return;
+      var p=line.split(/\s+/);if(p.length<7)return;
+      var perm=p[0],name=p[p.length-1];
+      if(name==='.'||name==='..')return;
+      var isDir=perm[0]==='d',isLink=perm[0]==='l';
+      // Parse size and date from ls output
+      var size='',date='';
+      if(p.length>=7){date=p[p.length-3]+' '+p[p.length-2];size=isDir?'':p[p.length-4]||''}
+      var entry={name:name,isDir:isDir,isLink:isLink,perm:perm,size:size,date:date,path:cwd+name};
+      isDir?dirs.push(entry):files.push(entry);
+    });
+    list.innerHTML='';
+    dirs.concat(files).forEach(function(e){
+      var item=document.createElement('div');
+      item.className='fm-item'+(e.isDir?' dir':'');
+      item.innerHTML='<span class="fm-icon">'+(e.isDir?'\uD83D\uDCC1':e.isLink?'\uD83D\uDD17':'\uD83D\uDCC4')+'</span>'
+        +'<span class="fm-name">'+esc(e.name)+'</span>'
+        +'<span class="fm-size">'+esc(e.size)+'</span>'
+        +'<span class="fm-date">'+esc(e.date)+'</span>';
+      if(e.isDir)item.ondblclick=function(){fmGo(e.path+'/')};
+      item.oncontextmenu=function(ev){
+        ev.preventDefault();ctxTarget=e;
+        var items=[];
+        if(e.isDir){
+          items.push({label:'Open',fn:'fmGo("'+e.path+'/")'},'-');
+        }else{
+          items.push({label:'Download',fn:'fmDownload("'+e.path+'")'});
+          items.push('-');
+        }
+        items.push({label:'Rename',fn:'fmRename("'+e.path+'","'+e.name+'")'});
+        items.push({label:'Delete',fn:'fmDelete("'+e.path+'")',danger:true});
+        ctxShow(ev.clientX,ev.clientY,items);
+      };
+      list.appendChild(item);
+    });
+  });
+}
+function fmUp(){var c=document.getElementById('fm-cwd').value.replace(/\/+$/,''),p=c.substring(0,c.lastIndexOf('/')+1)||'/';fmGo(p)}
+function fmMkdir(){var n=prompt('Folder name:');if(!n)return;api('mkdir -p "'+document.getElementById('fm-cwd').value+n+'"&&echo OK',function(){fmGo()})}
+function fmUpload(){
+  var files=document.getElementById('fm-file-input').files,cwd=document.getElementById('fm-cwd').value,st=document.getElementById('fm-status'),done=0;
+  for(var i=0;i<files.length;i++)(function(f){
+    st.textContent='Uploading '+f.name+'...';
+    upload(f,cwd+f.name,function(r){done++;st.textContent=r;if(done===files.length)fmGo()},function(p){st.textContent=f.name+' '+p+'%'});
+  })(files[i]);
+}
+function fmDelete(p){if(!confirm('Delete '+p+'?'))return;api('rm -rf "'+p+'"&&echo OK',function(){fmGo()})}
+function fmRename(p,old){var n=prompt('New name:',old);if(!n||n===old)return;var dir=p.substring(0,p.lastIndexOf('/')+1);api('mv "'+p+'" "'+dir+n+'"&&echo OK',function(){fmGo()})}
+function fmDownload(p){
+  var name=p.split('/').pop();
+  var st=document.getElementById('fm-status');
+  st.textContent='Getting file size...';
+  api('/sbin/busybox stat -c%s "'+p+'"',function(r){
+    var size=parseInt(r.trim());
+    if(!size||isNaN(size)){st.textContent='Cannot read file';return}
+    st.textContent='Downloading '+name+'...';
+    downloadBinary(p,name,size,function(ok){st.textContent=ok?'Downloaded '+name:'Download failed'});
+  });
+}
+
+// === Boot ===
+var bootDrop=document.getElementById('boot-drop');
+['dragenter','dragover'].forEach(function(e){bootDrop.addEventListener(e,function(ev){ev.preventDefault();bootDrop.classList.add('dragover')})});
+['dragleave','drop'].forEach(function(e){bootDrop.addEventListener(e,function(ev){ev.preventDefault();bootDrop.classList.remove('dragover')})});
+bootDrop.addEventListener('drop',function(e){document.getElementById('boot-file-input').files=e.dataTransfer.files;bootFileSelected()});
+
+function bootFileSelected(){
+  bootFile=document.getElementById('boot-file-input').files[0];
+  if(bootFile){
+    document.getElementById('boot-file-name').textContent=bootFile.name+' ('+( bootFile.size/1024/1024).toFixed(1)+' MB)';
+    document.getElementById('boot-file-chip').style.display='block';
+    document.getElementById('boot-drop').style.display='none';
+  }
+}
+function bootFileClear(){
+  bootFile=null;document.getElementById('boot-file-input').value='';
+  document.getElementById('boot-file-chip').style.display='none';
+  document.getElementById('boot-drop').style.display='block';
+}
+function blogLog(m){var el=document.getElementById('boot-log');el.textContent+=m+'\n';el.scrollTop=el.scrollHeight}
+function getPartition(){return document.getElementById('boot-partition').value}
+
+function bootUploadAndKexec(){
+  if(!bootFile)return alert('Select a file first');
+  var st=document.getElementById('boot-upload-status');
+  blogLog('> Kexec '+bootFile.name+' ('+bootFile.size+' bytes)');
+  var x=new XMLHttpRequest();
+  x.open('POST',BASE+'/cgi-bin/kexec');
+  x.timeout=60000;
+  x.onload=function(){blogLog(x.responseText);blogLog('Device rebooting via kexec.')};
+  x.onerror=function(){blogLog('[connection lost — kexec in progress]')};
+  x.upload.onprogress=function(e){if(e.lengthComputable)st.textContent=Math.round(e.loaded/e.total*100)+'%'};
+  x.send(bootFile);
+}
+
+function bootUploadAndFlash(){
+  if(!bootFile)return alert('Select a file first');
+  var partSel=document.getElementById('boot-partition');
+  var partName=partSel.options[partSel.selectedIndex].text;
+  if(!confirm('Flash to '+partName+'?'))return;
+  var part=partSel.value.split('/').pop();
+  var st=document.getElementById('boot-upload-status');
+  blogLog('> Flash '+bootFile.name+' -> '+partName);
+  var x=new XMLHttpRequest();
+  x.open('POST',BASE+'/cgi-bin/flash?part='+part);
+  x.timeout=300000;
+  x.onload=function(){blogLog(x.responseText)};
+  x.onerror=function(){blogLog('[error]')};
+  x.upload.onprogress=function(e){if(e.lengthComputable)st.textContent=Math.round(e.loaded/e.total*100)+'%'};
+  x.send(bootFile);
+}
+
+function bootKexecExisting(){
+  var p=document.getElementById('boot-existing').value;if(!p)return alert('Enter path');
+  blogLog('> Kexec from device: '+p);
+  api('cat "'+p+'" > /data/local/tmp/_kexec_tmp.img && /sbin/cgi-bin/kexec < /data/local/tmp/_kexec_tmp.img 2>&1; rm -f /data/local/tmp/_kexec_tmp.img',function(r){
+    blogLog(r);
+  });
+}
+
+function bootFlashExisting(){
+  var p=document.getElementById('boot-existing').value;
+  var part=document.getElementById('boot-partition').value.split('/').pop();
+  if(!p)return alert('Enter path');
+  if(!confirm('Flash '+p+' to '+part+'?'))return;
+  blogLog('> Flash '+p+' -> '+part);
+  api('cat "'+p+'" | /sbin/cgi-bin/flash 2>&1',function(r){blogLog(r)});
+}
+
+function doReboot(m){var c=m?'reboot '+m:'reboot';blogLog('> '+c);api(c,function(r){blogLog(r||'sent')})}
+
+function dumpPartition(){
+  var name=document.getElementById('dump-partition').value;
+  var st=document.getElementById('dump-status');
+  st.textContent='Downloading '+name+'...';
+  blogLog('> Dump '+name+' -> download');
+  var a=document.createElement('a');
+  a.href=BASE+'/cgi-bin/dump?part='+name;
+  a.download=name+'.img';
+  a.click();
+  st.textContent='Download started';
+}
+
+function dumpToSdcard(){
+  var name=document.getElementById('dump-partition').value;
+  var dest='/sdcard/dump_'+name+'.img';
+  var st=document.getElementById('dump-status');
+  st.textContent='Dumping '+name+' to '+dest+'...';
+  blogLog('> Dump '+name+' -> '+dest);
+  var x=new XMLHttpRequest();
+  x.open('GET',BASE+'/cgi-bin/dump?part='+name+'&save='+encodeURIComponent(dest));
+  x.onload=function(){blogLog(x.responseText);st.textContent='Saved to '+dest};
+  x.send();
+}
+
+function downloadBinary(remotePath,fileName,totalSize,cb){
+  // Download large binary files in 512KB base64 chunks
+  var CHUNK=524288;
+  var chunks=Math.ceil(totalSize/CHUNK);
+  var buffers=[];
+  var done=0;
+  var st=document.getElementById('dump-status');
+
+  function nextChunk(i){
+    if(i>=chunks){
+      var total=0;buffers.forEach(function(b){total+=b.length});
+      var merged=new Uint8Array(total);var off=0;
+      buffers.forEach(function(b){merged.set(b,off);off+=b.length});
+      var blob=new Blob([merged],{type:'application/octet-stream'});
+      var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fileName;a.click();
+      cb(true);return;
+    }
+    var skip=i*CHUNK;
+    var count=Math.min(CHUNK,totalSize-skip);
+    st.textContent='Downloading... '+Math.round((i+1)/chunks*100)+'%';
+    api('dd if="'+remotePath+'" bs=1 skip='+skip+' count='+count+' 2>/dev/null|/sbin/busybox base64',function(r){
+      try{
+        var bin=atob(r.trim());var arr=new Uint8Array(bin.length);
+        for(var j=0;j<bin.length;j++)arr[j]=bin.charCodeAt(j);
+        buffers.push(arr);nextChunk(i+1);
+      }catch(e){cb(false)}
+    });
+  }
+  nextChunk(0);
+}
+
+// === Info ===
+function loadInfo(){
+  api('uname -a;echo "|||";uptime;echo "|||";cat /proc/meminfo|head -3;echo "|||";ip addr show wlan0|grep "inet ";echo "|||";cat /sys/class/power_supply/battery/capacity 2>/dev/null||echo n/a;echo "|||";getprop init.svc.telnetd;echo "|||";getprop init.svc.remotehttpd;echo "|||";df /data /sdcard 2>/dev/null|tail -2',function(r){
+    var p=r.split('|||'),l=['Kernel','Uptime','Memory','WiFi IP','Battery %','telnetd','httpd','Storage'],h='';
+    for(var i=0;i<l.length&&i<p.length;i++)h+='<div class="label">'+l[i]+'</div><div>'+esc(p[i].trim())+'</div>';
+    document.getElementById('info-grid').innerHTML=h;
+  });
+}
+
+api('uname -r',function(r){document.getElementById('dev-name').textContent=r.trim()});
+</script>
+</body>
+</html>

@@ -43,6 +43,15 @@
 #include <linux/platform/tegra/latency_allowance.h>
 #include "isp.h"
 
+/* T124 ISP MC driver hook */
+#if defined(CONFIG_VIDEO_TEGRA_VI)
+extern int tegra_isp_t124_mc_init(struct platform_device *pdev);
+extern void tegra_isp_t124_mc_cleanup(struct platform_device *pdev);
+#else
+static inline int tegra_isp_t124_mc_init(struct platform_device *p) { return 0; }
+static inline void tegra_isp_t124_mc_cleanup(struct platform_device *p) {}
+#endif
+
 #define T12_ISP_CG_CTRL		0x74
 #define T12_CG_2ND_LEVEL_EN	1
 
@@ -386,6 +395,10 @@ static int isp_probe(struct platform_device *dev)
 	if (err)
 		goto free_isr;
 
+	/* Initialize T124 ISP MC driver (V4L2 subdev + host1x) */
+	if (dev_id == ISPA_DEV_ID || dev_id == ISPB_DEV_ID)
+		tegra_isp_t124_mc_init(dev);
+
 	return 0;
 free_isr:
 	kfree(tegra_isp->my_isr_work);
@@ -404,6 +417,9 @@ static int __exit isp_remove(struct platform_device *dev)
 	if (tegra_isp->isomgr_handle)
 		isp_isomgr_unregister(tegra_isp);
 #endif
+	if (tegra_isp->dev_id == ISPA_DEV_ID ||
+	    tegra_isp->dev_id == ISPB_DEV_ID)
+		tegra_isp_t124_mc_cleanup(dev);
 	nvhost_client_device_release(dev);
 	disable_irq(tegra_isp->irq);
 	kfree(tegra_isp->my_isr_work);
