@@ -832,6 +832,28 @@ static int do_capture(const char *dev, int width, int height,
 				frame + 1, elapsed);
 			if (read_regs)
 				dump_registers("TIMEOUT");
+			/* Try DQBUF anyway — kernel may have returned buffer with ISP data */
+			{
+				struct v4l2_buffer buf;
+				memset(&buf, 0, sizeof(buf));
+				buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				buf.memory = V4L2_MEMORY_MMAP;
+				if (xioctl(fd, VIDIOC_DQBUF, &buf) == 0 && buf.bytesused > 0) {
+					printf("Got buffer after timeout: index=%d bytesused=%u\n",
+						buf.index, buf.bytesused);
+					if (outfile) {
+						char filename[256];
+						snprintf(filename, sizeof(filename), "%s", outfile);
+						FILE *fp = fopen(filename, "wb");
+						if (fp) {
+							size_t written = fwrite(buffers[buf.index].start,
+								1, buf.bytesused, fp);
+							fclose(fp);
+							printf("Saved %zu bytes to %s\n", written, filename);
+						}
+					}
+				}
+			}
 			break;
 		}
 	}
