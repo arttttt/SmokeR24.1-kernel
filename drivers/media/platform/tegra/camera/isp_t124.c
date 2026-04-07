@@ -493,16 +493,21 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	 * process frames in time. Discovered from stock isp_trace. */
 	{
 		int clk_err;
+		struct nvhost_device_data *pd = platform_get_drvdata(isp->pdev);
 		/* ISP core clock = 384 MHz (moduleid 0xb) */
 		clk_err = nvhost_module_set_rate(isp->pdev, isp,
 			384000000, 0, NVHOST_CLOCK);
 		if (clk_err)
 			dev_warn(dev, "ISP set_rate failed: %d\n", clk_err);
+		dev_info(dev, "ISP clk[0]: %lu Hz (requested 384MHz)\n",
+			 pd->clk[0] ? clk_get_rate(pd->clk[0]) : 0);
 		/* EMC clock = 768 MHz (moduleid 0x100004b) */
 		clk_err = nvhost_module_set_rate(isp->pdev, isp,
 			768000000, 1, NVHOST_CLOCK);
 		if (clk_err)
 			dev_warn(dev, "ISP EMC set_rate failed: %d\n", clk_err);
+		dev_info(dev, "ISP clk[1] (EMC): %lu Hz (requested 768MHz)\n",
+			 pd->clk[1] ? clk_get_rate(pd->clk[1]) : 0);
 	}
 
 	/* PIO write: stock does this before first submit */
@@ -1658,11 +1663,45 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 	err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
 			isp->syncpt_memory, isp->frame_fence_memory,
 			msecs_to_jiffies(500), NULL, NULL);
-	if (err)
+	if (err) {
 		dev_err(&isp->pdev->dev,
 			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
 			err, isp->syncpt_memory, isp->frame_fence_memory);
-	else
+		/* Dump ISP HW status registers on timeout */
+		dev_err(&isp->pdev->dev,
+			"ISP HW: CTRL(0x30)=0x%08x ENABLE(0x54)=0x%08x "
+			"INTSTAT(0xf8)=0x%08x INTEN(0x14c)=0x%08x\n",
+			host1x_readl(isp->pdev, 0x30),
+			host1x_readl(isp->pdev, 0x54),
+			host1x_readl(isp->pdev, 0xf8),
+			host1x_readl(isp->pdev, 0x14c));
+		dev_err(&isp->pdev->dev,
+			"ISP PROC: 0x1400=%08x 0x1404=%08x 0x1408=%08x "
+			"0x140c=%08x 0x1410=%08x 0x1414=%08x\n",
+			host1x_readl(isp->pdev, 0x1400),
+			host1x_readl(isp->pdev, 0x1404),
+			host1x_readl(isp->pdev, 0x1408),
+			host1x_readl(isp->pdev, 0x140c),
+			host1x_readl(isp->pdev, 0x1410),
+			host1x_readl(isp->pdev, 0x1414));
+		dev_err(&isp->pdev->dev,
+			"ISP OUT: W(0x3800)=%08x H(0x3804)=%08x "
+			"FMT(0x3808)=%08x Y(0x3810)=%08x "
+			"U(0x381c)=%08x V(0x3828)=%08x\n",
+			host1x_readl(isp->pdev, 0x3800),
+			host1x_readl(isp->pdev, 0x3804),
+			host1x_readl(isp->pdev, 0x3808),
+			host1x_readl(isp->pdev, 0x3810),
+			host1x_readl(isp->pdev, 0x381c),
+			host1x_readl(isp->pdev, 0x3828));
+		dev_err(&isp->pdev->dev,
+			"ISP IN: TRIG(0x38c0)=%08x DIM(0x38c4)=%08x "
+			"FMT(0x38cc)=%08x STATS(0x400)=%08x\n",
+			host1x_readl(isp->pdev, 0x38c0),
+			host1x_readl(isp->pdev, 0x38c4),
+			host1x_readl(isp->pdev, 0x38cc),
+			host1x_readl(isp->pdev, 0x400));
+	} else
 		dev_info(&isp->pdev->dev,
 			 "ISP frame OK (sp=%u thresh=%u)\n",
 			 isp->syncpt_memory, isp->frame_fence_memory);
