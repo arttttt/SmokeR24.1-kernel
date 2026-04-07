@@ -53,10 +53,11 @@
 		vi {
 			/*
 			 * T124 VI with MC framework support
-			 * 4 channels: IMX179 (CSI-A), OV5693 (CSI-E),
-			 *             AD5823 (focuser), ISP-A (processor)
+			 * 3 channels: IMX179 (CSI-A), OV5693 (CSI-E),
+			 *             AD5823 (focuser)
+			 * ISP disabled — 24.1 submit path broken, paused
 			 */
-			num-channels = <5>;
+			num-channels = <3>;
 			status = "okay";
 
 			ports {
@@ -105,61 +106,64 @@
 				};
 
 				/*
-				 * Channel 3: ISP-A
-				 * ISP entity in MC graph for image processing
+				 * ISP channels — disabled, 24.1 submit path broken
+				 *
+				 * port@3 {
+				 *	reg = <3>;
+				 *	mocha_vi_in3: endpoint {
+				 *		remote-endpoint = <&mocha_isp_a_out0>;
+				 *	};
+				 * };
+				 *
+				 * port@4 {
+				 *	reg = <4>;
+				 *	mocha_vi_in4: endpoint {
+				 *		remote-endpoint = <&mocha_isp_b_out0>;
+				 *	};
+				 * };
 				 */
-				port@3 {
-					reg = <3>;
-					mocha_vi_in3: endpoint {
-						remote-endpoint = <&mocha_isp_a_out0>;
-					};
-				};
-
-				/*
-				 * Channel 4: ISP-B
-				 * ISP entity for front camera processing
-				 */
-				port@4 {
-					reg = <4>;
-					mocha_vi_in4: endpoint {
-						remote-endpoint = <&mocha_isp_b_out0>;
-					};
-				};
 			};
 		};
 
-		/* ISP A */
+		/*
+		 * ISP A & B — disabled, 24.1 submit path broken
+		 *
+		 * isp@54600000 {
+		 *	status = "okay";
+		 *	ports {
+		 *		#address-cells = <1>;
+		 *		#size-cells = <0>;
+		 *		port@0 {
+		 *			reg = <0>;
+		 *			mocha_isp_a_out0: endpoint {
+		 *				remote-endpoint = <&mocha_vi_in3>;
+		 *			};
+		 *		};
+		 *	};
+		 * };
+		 *
+		 * isp@54680000 {
+		 *	status = "okay";
+		 *	ports {
+		 *		#address-cells = <1>;
+		 *		#size-cells = <0>;
+		 *		port@0 {
+		 *			reg = <0>;
+		 *			mocha_isp_b_out0: endpoint {
+		 *				remote-endpoint = <&mocha_vi_in4>;
+		 *			};
+		 *		};
+		 *	};
+		 * };
+		 */
+
+		/* Override shield dtsi — force ISP disabled */
 		isp@54600000 {
-			status = "okay";
-
-			ports {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				port@0 {
-					reg = <0>;
-					mocha_isp_a_out0: endpoint {
-						remote-endpoint = <&mocha_vi_in3>;
-					};
-				};
-			};
+			status = "disabled";
 		};
 
-		/* ISP B */
 		isp@54680000 {
-			status = "okay";
-
-			ports {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				port@0 {
-					reg = <0>;
-					mocha_isp_b_out0: endpoint {
-						remote-endpoint = <&mocha_vi_in4>;
-					};
-				};
-			};
+			status = "disabled";
 		};
 	};
 
