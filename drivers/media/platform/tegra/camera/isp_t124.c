@@ -1274,38 +1274,6 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	isp->frame_fence_memory = job->sp[0].fence;
 	isp->frame_fence_stats = job->sp[1].fence;
 
-	/* Dump ISP HW regs right after submit (module still powered) */
-	if (isp->frame_count < 2) {
-		dev_info(&isp->pdev->dev,
-			"ISP HW post-submit: CTRL(0x30)=%08x ENABLE(0x54)=%08x "
-			"INTSTAT(0xf8)=%08x INTEN(0x14c)=%08x\n",
-			host1x_readl(isp->pdev, 0x30),
-			host1x_readl(isp->pdev, 0x54),
-			host1x_readl(isp->pdev, 0xf8),
-			host1x_readl(isp->pdev, 0x14c));
-		dev_info(&isp->pdev->dev,
-			"ISP PROC: %08x %08x %08x %08x %08x %08x\n",
-			host1x_readl(isp->pdev, 0x1400),
-			host1x_readl(isp->pdev, 0x1404),
-			host1x_readl(isp->pdev, 0x1408),
-			host1x_readl(isp->pdev, 0x140c),
-			host1x_readl(isp->pdev, 0x1410),
-			host1x_readl(isp->pdev, 0x1414));
-		dev_info(&isp->pdev->dev,
-			"ISP OUT: W=%08x H=%08x FMT=%08x Y=%08x U=%08x V=%08x\n",
-			host1x_readl(isp->pdev, 0x3800),
-			host1x_readl(isp->pdev, 0x3804),
-			host1x_readl(isp->pdev, 0x3808),
-			host1x_readl(isp->pdev, 0x3810),
-			host1x_readl(isp->pdev, 0x381c),
-			host1x_readl(isp->pdev, 0x3828));
-		dev_info(&isp->pdev->dev,
-			"ISP IN: TRIG=%08x DIM=%08x FMT=%08x STATS=%08x\n",
-			host1x_readl(isp->pdev, 0x38c0),
-			host1x_readl(isp->pdev, 0x38c4),
-			host1x_readl(isp->pdev, 0x38cc),
-			host1x_readl(isp->pdev, 0x400));
-	}
 	isp->frame_count++;
 
 	nvhost_job_put(job);
