@@ -488,6 +488,23 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	if (err)
 		return err;
 
+	/* Set ISP clock rate — stock uses 384 MHz for ISP, 768 MHz for EMC.
+	 * Without this, ISP may run at default (low) clock and fail to
+	 * process frames in time. Discovered from stock isp_trace. */
+	{
+		int clk_err;
+		/* ISP core clock = 384 MHz (moduleid 0xb) */
+		clk_err = nvhost_module_set_rate(isp->pdev, isp,
+			384000000, 0, NVHOST_CLOCK);
+		if (clk_err)
+			dev_warn(dev, "ISP set_rate failed: %d\n", clk_err);
+		/* EMC clock = 768 MHz (moduleid 0x100004b) */
+		clk_err = nvhost_module_set_rate(isp->pdev, isp,
+			768000000, 1, NVHOST_CLOCK);
+		if (clk_err)
+			dev_warn(dev, "ISP EMC set_rate failed: %d\n", clk_err);
+	}
+
 	/* PIO write: stock does this before first submit */
 	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
 
