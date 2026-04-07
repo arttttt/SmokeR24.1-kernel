@@ -1136,8 +1136,8 @@ skip_vi_wait:
 				"ISP wait_frame failed: %d\n", isp_err);
 	}
 
-	/* ISP output check (ISP was submitted before VI trigger) */
-	if (!err && chan->use_isp && state == VB2_BUF_STATE_DONE) {
+	/* ISP output check — copy even on timeout for diagnostics */
+	if (chan->use_isp) {
 		/* Copy ISP output to userspace V4L2 buffer */
 		void *vb2_vaddr = vb2_plane_vaddr(vb, 0);
 		size_t copy_sz = min_t(size_t,
