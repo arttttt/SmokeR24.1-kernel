@@ -282,6 +282,7 @@ static int tegra_channel_capture_setup(struct tegra_channel *chan)
 	}
 
 	if (chan->vi->pg_mode ||
+	   chan->use_isp ||
 	   (chan->fmtinfo->vf_code == TEGRA_VF_YUV422) ||
 	   (chan->fmtinfo->vf_code == TEGRA_VF_RGB888))
 		bypass_pixel_transform = 0;
