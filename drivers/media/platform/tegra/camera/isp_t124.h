@@ -63,6 +63,9 @@ struct tegra_isp_t124 {
 
 	/* debugfs */
 	struct dentry *debugfs_dir;
+
+	/* Debug */
+	u32 frame_count;
 };
 
 /* Called from legacy isp.c probe to initialize MC integration */

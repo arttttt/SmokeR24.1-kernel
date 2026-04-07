@@ -959,6 +959,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	} /* end !reprocess */
 
 	isp->streaming = true;
+	isp->frame_count = 0;
 	isp->reprocess = reprocess;
 
 	/* Stock has ~190ms gap between ISP init and first VI submit.
@@ -1272,6 +1273,40 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	/* Save fence thresholds for wait_frame and post-frame WAIT_SYNCPT */
 	isp->frame_fence_memory = job->sp[0].fence;
 	isp->frame_fence_stats = job->sp[1].fence;
+
+	/* Dump ISP HW regs right after submit (module still powered) */
+	if (isp->frame_count < 2) {
+		dev_info(&isp->pdev->dev,
+			"ISP HW post-submit: CTRL(0x30)=%08x ENABLE(0x54)=%08x "
+			"INTSTAT(0xf8)=%08x INTEN(0x14c)=%08x\n",
+			host1x_readl(isp->pdev, 0x30),
+			host1x_readl(isp->pdev, 0x54),
+			host1x_readl(isp->pdev, 0xf8),
+			host1x_readl(isp->pdev, 0x14c));
+		dev_info(&isp->pdev->dev,
+			"ISP PROC: %08x %08x %08x %08x %08x %08x\n",
+			host1x_readl(isp->pdev, 0x1400),
+			host1x_readl(isp->pdev, 0x1404),
+			host1x_readl(isp->pdev, 0x1408),
+			host1x_readl(isp->pdev, 0x140c),
+			host1x_readl(isp->pdev, 0x1410),
+			host1x_readl(isp->pdev, 0x1414));
+		dev_info(&isp->pdev->dev,
+			"ISP OUT: W=%08x H=%08x FMT=%08x Y=%08x U=%08x V=%08x\n",
+			host1x_readl(isp->pdev, 0x3800),
+			host1x_readl(isp->pdev, 0x3804),
+			host1x_readl(isp->pdev, 0x3808),
+			host1x_readl(isp->pdev, 0x3810),
+			host1x_readl(isp->pdev, 0x381c),
+			host1x_readl(isp->pdev, 0x3828));
+		dev_info(&isp->pdev->dev,
+			"ISP IN: TRIG=%08x DIM=%08x FMT=%08x STATS=%08x\n",
+			host1x_readl(isp->pdev, 0x38c0),
+			host1x_readl(isp->pdev, 0x38c4),
+			host1x_readl(isp->pdev, 0x38cc),
+			host1x_readl(isp->pdev, 0x400));
+	}
+	isp->frame_count++;
 
 	nvhost_job_put(job);
 
@@ -1667,40 +1702,8 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 		dev_err(&isp->pdev->dev,
 			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
 			err, isp->syncpt_memory, isp->frame_fence_memory);
-		/* Dump ISP HW status registers on timeout */
-		dev_err(&isp->pdev->dev,
-			"ISP HW: CTRL(0x30)=0x%08x ENABLE(0x54)=0x%08x "
-			"INTSTAT(0xf8)=0x%08x INTEN(0x14c)=0x%08x\n",
-			host1x_readl(isp->pdev, 0x30),
-			host1x_readl(isp->pdev, 0x54),
-			host1x_readl(isp->pdev, 0xf8),
-			host1x_readl(isp->pdev, 0x14c));
-		dev_err(&isp->pdev->dev,
-			"ISP PROC: 0x1400=%08x 0x1404=%08x 0x1408=%08x "
-			"0x140c=%08x 0x1410=%08x 0x1414=%08x\n",
-			host1x_readl(isp->pdev, 0x1400),
-			host1x_readl(isp->pdev, 0x1404),
-			host1x_readl(isp->pdev, 0x1408),
-			host1x_readl(isp->pdev, 0x140c),
-			host1x_readl(isp->pdev, 0x1410),
-			host1x_readl(isp->pdev, 0x1414));
-		dev_err(&isp->pdev->dev,
-			"ISP OUT: W(0x3800)=%08x H(0x3804)=%08x "
-			"FMT(0x3808)=%08x Y(0x3810)=%08x "
-			"U(0x381c)=%08x V(0x3828)=%08x\n",
-			host1x_readl(isp->pdev, 0x3800),
-			host1x_readl(isp->pdev, 0x3804),
-			host1x_readl(isp->pdev, 0x3808),
-			host1x_readl(isp->pdev, 0x3810),
-			host1x_readl(isp->pdev, 0x381c),
-			host1x_readl(isp->pdev, 0x3828));
-		dev_err(&isp->pdev->dev,
-			"ISP IN: TRIG(0x38c0)=%08x DIM(0x38c4)=%08x "
-			"FMT(0x38cc)=%08x STATS(0x400)=%08x\n",
-			host1x_readl(isp->pdev, 0x38c0),
-			host1x_readl(isp->pdev, 0x38c4),
-			host1x_readl(isp->pdev, 0x38cc),
-			host1x_readl(isp->pdev, 0x400));
+		/* Note: can't read ISP MMIO here — timeout recovery may
+		 * have already powered off the module, causing bus fault. */
 	} else
 		dev_info(&isp->pdev->dev,
 			 "ISP frame OK (sp=%u thresh=%u)\n",
