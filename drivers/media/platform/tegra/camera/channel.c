@@ -1724,6 +1724,12 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			ISP_A_CLASS_ID : ISP_B_CLASS_ID;
 		struct tegra_isp_t124 *isp = isp_t124_get_isp(isp_class);
 
+		dev_info(&chan->video.dev,
+			 "ISP setup: port[0]=%d -> %s (class=0x%02x)\n",
+			 chan->port[0],
+			 isp_class == ISP_A_CLASS_ID ? "ISP-A" : "ISP-B",
+			 isp_class);
+
 		if (isp) {
 			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
 			chan->isp_raw_size = chan->format.width *
