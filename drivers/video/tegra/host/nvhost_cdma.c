@@ -600,13 +600,29 @@ void nvhost_cdma_end(struct nvhost_cdma *cdma,
 		struct nvhost_job *job)
 {
 	bool was_idle = list_empty(&cdma->sync_queue);
+	bool is_isp = false;
 
-	add_to_sync_queue(cdma,
-			job,
-			cdma->slots_used,
-			cdma->first_get);
+	if (job->ch && job->ch->dev) {
+		struct nvhost_device_data *pdata = platform_get_drvdata(job->ch->dev);
+		if (pdata) {
+			is_isp = (pdata->class == 0x32) || (pdata->class == 0x34);
+			if (is_isp)
+				dev_dbg(&job->ch->dev->dev,
+					"cdma_end: ISP kick-first order, class=0x%x\n",
+					pdata->class);
+		}
+	}
 
-	cdma_op().kick(cdma);
+	if (is_isp) {
+		/* ISP: stock kick order — kick BEFORE sync_queue */
+		cdma_op().kick(cdma);
+		add_to_sync_queue(cdma, job,
+				cdma->slots_used, cdma->first_get);
+	} else {
+		add_to_sync_queue(cdma, job,
+				cdma->slots_used, cdma->first_get);
+		cdma_op().kick(cdma);
+	}
 
 	/* start timer on idle -> active transitions */
 	if (job->timeout && was_idle)
