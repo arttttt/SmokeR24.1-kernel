@@ -546,6 +546,7 @@ static int imx179_power_get(struct imx179 *priv)
 static int imx179_set_gain(struct imx179 *priv, s32 val);
 static int imx179_set_frame_length(struct imx179 *priv, s32 val);
 static int imx179_set_coarse_time(struct imx179 *priv, s32 val);
+static int imx179_set_group_hold(struct imx179 *priv);
 
 static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -571,33 +572,32 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 		goto exit;
 	}
 
+	/* Enable group hold for atomic exposure/gain update */
+	priv->group_hold_en = true;
+	imx179_set_group_hold(priv);
+
 	/* write list of override regs for the asking frame length,
 	 * coarse integration time, and gain. Failures are non-fatal */
 	control.id = V4L2_CID_GAIN;
 	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+	dev_info(&client->dev, "%s: gain ctrl=%d err=%d\n",
+		 __func__, control.value, err);
 	if (!err)
 		err = imx179_set_gain(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev, "%s: warning gain override failed\n",
-			__func__);
 
 	control.id = V4L2_CID_FRAME_LENGTH;
 	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+	dev_info(&client->dev, "%s: frame_length ctrl=%d err=%d\n",
+		 __func__, control.value, err);
 	if (!err)
 		err = imx179_set_frame_length(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning frame length override failed\n",
-			__func__);
 
 	control.id = V4L2_CID_COARSE_TIME;
 	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+	dev_info(&client->dev, "%s: coarse_time ctrl=%d err=%d\n",
+		 __func__, control.value, err);
 	if (!err)
 		err = imx179_set_coarse_time(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning coarse time override failed\n",
-			__func__);
 
 	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
 	control.id = V4L2_CID_EXPOSURE;
@@ -607,9 +607,17 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 			&s_data->frmfmt[s_data->mode];
 		u32 coarse = (u32)div_u64((u64)control.value * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
+		dev_info(&client->dev,
+			 "%s: exposure=%d us -> coarse=%u (line_len=%u pix_clk=%llu)\n",
+			 __func__, control.value, coarse,
+			 fmt->line_length, fmt->pix_clk_hz);
 		if (coarse > 0)
 			imx179_set_coarse_time(priv, coarse);
 	}
+
+	/* Release group hold — apply all buffered register changes */
+	priv->group_hold_en = false;
+	imx179_set_group_hold(priv);
 
 	err = imx179_write_table(priv, mode_table[IMX179_MODE_START_STREAM]);
 	if (err)
