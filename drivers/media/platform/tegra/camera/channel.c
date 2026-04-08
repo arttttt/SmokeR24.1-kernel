@@ -1092,6 +1092,34 @@ static int tegra_channel_capture_frame(struct tegra_channel *chan,
 		}
 	}
 
+	/* Wait for DMA completion (MW_ACK_DONE) after FRAME_START */
+	if (!err) {
+		for (index = 0; index < valid_ports; index++) {
+			u32 mw_thresh, mw_cond;
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+			mw_cond = (chan->port[index] == 0) ?
+				T124_MWA_ACK_DONE : T124_MWB_ACK_DONE;
+#else
+			mw_cond = T210_VI_CSI_MW_ACK_DONE(chan->port[index]);
+#endif
+			mw_thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
+						chan->syncpt[index], 1);
+			tegra_channel_write(chan,
+				TEGRA_VI_CFG_VI_INCR_SYNCPT,
+				VI_CFG_VI_INCR_SYNCPT_COND(mw_cond) |
+				chan->syncpt[index]);
+			err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
+				chan->syncpt[index], mw_thresh,
+				chan->timeout, NULL, &ts);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"MW_ACK_DONE timeout!%d\n", index);
+				state = VB2_BUF_STATE_ERROR;
+				break;
+			}
+		}
+	}
+
 skip_vi_wait:
 	if (!err && !chan->vi->pg_mode) {
 		/* Marking error frames and resume capture */
