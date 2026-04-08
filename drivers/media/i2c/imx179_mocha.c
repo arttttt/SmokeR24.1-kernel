@@ -158,6 +158,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 	},
 	{
 		.ops = &imx179_ctrl_ops,
+		.id = V4L2_CID_EXPOSURE,
+		.name = "Exposure (us)",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+		.min = 1,
+		.max = 1000000,
+		.def = 33000,
+		.step = 1,
+	},
+	{
+		.ops = &imx179_ctrl_ops,
 		.id = V4L2_CID_GROUP_HOLD,
 		.name = "Group Hold",
 		.type = V4L2_CTRL_TYPE_INTEGER_MENU,

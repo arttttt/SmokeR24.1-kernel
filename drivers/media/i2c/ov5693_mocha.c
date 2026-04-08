@@ -150,6 +150,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 	},
 	{
 		.ops = &ov5693_ctrl_ops,
+		.id = V4L2_CID_EXPOSURE,
+		.name = "Exposure (us)",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+		.min = 1,
+		.max = 1000000,
+		.def = 33000,
+		.step = 1,
+	},
+	{
+		.ops = &ov5693_ctrl_ops,
 		.id = V4L2_CID_COARSE_TIME_SHORT,
 		.name = "Coarse Time Short",
 		.type = V4L2_CTRL_TYPE_INTEGER,
