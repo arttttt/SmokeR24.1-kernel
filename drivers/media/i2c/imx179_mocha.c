@@ -73,8 +73,8 @@ static struct tegra_io_dpd csib_io = {
 	(IMX179_DEFAULT_FRAME_LENGTH - IMX179_MAX_COARSE_DIFF)
 
 #define IMX179_DEFAULT_MODE		IMX179_MODE_3280X2460
-#define IMX179_DEFAULT_WIDTH		3280
-#define IMX179_DEFAULT_HEIGHT		2460
+#define IMX179_DEFAULT_WIDTH		3264
+#define IMX179_DEFAULT_HEIGHT		2448
 #define IMX179_DEFAULT_DATAFMT		V4L2_MBUS_FMT_SRGGB10_1X10
 
 static const struct camera_common_colorfmt imx179_color_fmts[] = {
