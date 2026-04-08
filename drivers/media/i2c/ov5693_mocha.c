@@ -1314,6 +1314,7 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_FRAME_LENGTH:
 		err = ov5693_set_frame_length(priv, ctrl->val);
 		break;
+	case V4L2_CID_EXPOSURE:
 	case V4L2_CID_COARSE_TIME:
 		err = ov5693_set_coarse_time(priv, ctrl->val);
 		break;
