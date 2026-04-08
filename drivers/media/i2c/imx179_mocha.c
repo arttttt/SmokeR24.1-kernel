@@ -58,7 +58,7 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_OTP_SIZE			803
 #define IMX179_OTP_STR_SIZE		(IMX179_OTP_SIZE * 2)
 
-#define IMX179_GAIN_SHIFT		8
+#define IMX179_GAIN_SHIFT		0
 #define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)
 #define IMX179_MAX_GAIN			(16 << IMX179_GAIN_SHIFT)
 #define IMX179_MIN_FRAME_LENGTH		(0x0)
@@ -774,8 +774,8 @@ static int imx179_set_gain(struct imx179 *priv, s32 val)
 	if (!priv->group_hold_prev)
 		imx179_set_group_hold(priv);
 
-	/* IMX179 uses 8-bit gain register */
-	gain = (u16)(val & 0xFF);
+	/* IMX179 gain register 0x0205: 0=1x ... 255=~16x */
+	gain = (u16)val;
 
 	imx179_get_gain_reg(&reg_list, gain);
 	dev_dbg(&priv->i2c_client->dev,
