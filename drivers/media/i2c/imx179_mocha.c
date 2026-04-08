@@ -77,6 +77,10 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_DEFAULT_HEIGHT		2460
 #define IMX179_DEFAULT_DATAFMT		V4L2_MBUS_FMT_SRGGB10_1X10
 
+static const struct camera_common_colorfmt imx179_color_fmts[] = {
+	{ V4L2_MBUS_FMT_SRGGB10_1X10, V4L2_COLORSPACE_SRGB, V4L2_PIX_FMT_SRGGB10, },
+};
+
 struct imx179 {
 	struct camera_common_power_rail	power;
 	int				numctrls;
@@ -1226,6 +1230,8 @@ static int imx179_probe(struct i2c_client *client,
 	common_data->fmt_width		= common_data->def_width;
 	common_data->fmt_height		= common_data->def_height;
 	common_data->def_clk_freq	= IMX179_DEFAULT_CLK_FREQ;
+	common_data->color_fmts		= imx179_color_fmts;
+	common_data->num_color_fmts	= ARRAY_SIZE(imx179_color_fmts);
 
 	priv->i2c_client = client;
 	priv->s_data			= common_data;

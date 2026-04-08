@@ -70,6 +70,10 @@ static struct tegra_io_dpd csie_io = {
 #define OV5693_DEFAULT_WIDTH	2592
 #define OV5693_DEFAULT_HEIGHT	1944
 #define OV5693_DEFAULT_DATAFMT	V4L2_MBUS_FMT_SBGGR10_1X10
+
+static const struct camera_common_colorfmt ov5693_color_fmts[] = {
+	{ V4L2_MBUS_FMT_SBGGR10_1X10, V4L2_COLORSPACE_SRGB, V4L2_PIX_FMT_SBGGR10, },
+};
 #define OV5693_DEFAULT_CLK_FREQ	24000000
 
 struct ov5693 {
@@ -1597,6 +1601,8 @@ static int ov5693_probe(struct i2c_client *client,
 	common_data->fmt_width		= common_data->def_width;
 	common_data->fmt_height		= common_data->def_height;
 	common_data->def_clk_freq	= OV5693_DEFAULT_CLK_FREQ;
+	common_data->color_fmts		= ov5693_color_fmts;
+	common_data->num_color_fmts	= ARRAY_SIZE(ov5693_color_fmts);
 
 	priv->i2c_client = client;
 	priv->s_data			= common_data;
