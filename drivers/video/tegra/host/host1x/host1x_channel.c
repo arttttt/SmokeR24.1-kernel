@@ -220,7 +220,6 @@ static void submit_gathers(struct nvhost_job *job)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(job->ch->dev);
 	void *cpuva = NULL;
-	u32 class_id = 0;
 	int i;
 
 	/* push user gathers */
@@ -232,13 +231,10 @@ static void submit_gathers(struct nvhost_job *job)
 		if (pdata->resource_policy == RESOURCE_PER_DEVICE)
 			add_sync_waits(job->ch, g->pre_fence);
 
-		/* Stock: only push SET_CLASS on class transition, not every gather */
-		if (g->class_id != class_id) {
+		if (g->class_id)
 			nvhost_cdma_push(&job->ch->cdma,
 				nvhost_opcode_setclass(g->class_id, 0, 0),
 				NVHOST_OPCODE_NOOP);
-			class_id = g->class_id;
-		}
 
 		/* If register is specified, add a gather with incr/nonincr.
 		 * This allows writing large amounts of data directly from
@@ -383,10 +379,8 @@ static int host1x_channel_submit(struct nvhost_job *job)
 		nvhost_syncpt_mark_used(sp, ch->chid,
 					job->client_managed_syncpt);
 
-	/* Stock kernel: serialize BEFORE gathers (wait for previous jobs first).
-	 * 24.1 had serialize AFTER gathers — caused ISP OP_DONE to never fire. */
-	serialize(job);
 	submit_gathers(job);
+	serialize(job);
 	lock_device(job, false);
 	submit_work_done_increment(job);
 
