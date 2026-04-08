@@ -134,6 +134,8 @@ struct camera_common_frmfmt {
 	int	num_framerates;
 	bool	hdr_en;
 	int	mode;
+	u32	line_length;
+	u64	pix_clk_hz;
 };
 
 struct camera_common_colorfmt {
