@@ -286,14 +286,44 @@ static void dump_registers(const char *label)
 	printf("\n-- VI Config --\n");
 	printf("  %-25s = 0x%08X\n", "CFG_CG_CTRL", vi_read(TEGRA_VI_CFG_CG_CTRL));
 
+	printf("\n-- VI_CSI_0 (PORT_A / IMX179) --\n");
+	printf("  %-25s = 0x%08X\n", "IMAGE_DEF", vi_read(VI_CSI_0_IMAGE_DEF));
+	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE", vi_read(VI_CSI_0_IMAGE_SIZE));
+	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE_WC", vi_read(VI_CSI_0_IMAGE_SIZE_WC));
+	printf("  %-25s = 0x%08X\n", "IMAGE_DT", vi_read(VI_CSI_0_IMAGE_DT));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_LSB", vi_read(VI_CSI_0_SURFACE0_OFFSET_LSB));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_STRIDE", vi_read(VI_CSI_0_SURFACE0_STRIDE));
+	printf("  %-25s = 0x%08X\n", "ERROR_STATUS", vi_read(VI_CSI_0_ERROR_STATUS));
+
+	printf("\n-- Pixel Parser A (PP_A / IMX179) --\n");
+	printf("  %-25s = 0x%08X\n", "INPUT_STREAM_CONTROL", vi_read(PP_A_INPUT_STREAM_CONTROL));
+	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL0", vi_read(PP_A_PIXEL_STREAM_CONTROL0));
+	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL1", vi_read(PP_A_PIXEL_STREAM_CONTROL1));
+	printf("  %-25s = 0x%08X\n", "STREAM_GAP", vi_read(PP_A_PIXEL_STREAM_GAP));
+	printf("  %-25s = 0x%08X\n", "PP_COMMAND", vi_read(PP_A_PIXEL_STREAM_PP_COMMAND));
+	printf("  %-25s = 0x%08X\n", "PP_INT_MASK", vi_read(PP_A_PIXEL_STREAM_PP_INT_MASK));
+	dump_pp_status_bits("PP_A_STATUS", vi_read(PP_A_PIXEL_PARSER_STATUS));
+
+	printf("\n-- CIL A/B (brick 0, IMX179 4-lane) --\n");
+	printf("  %-25s = 0x%08X\n", "CILA_PAD_CONFIG0", vi_read(CILA_PAD_CONFIG0));
+	printf("  %-25s = 0x%08X\n", "PHY_CILA_CONTROL0", vi_read(PHY_CILA_CONTROL0));
+	dump_cil_status_bits("CIL_A_STATUS", vi_read(CSI_CIL_A_STATUS));
+	dump_cil_status_bits("CILA_STATUS", vi_read(CSI_CILA_STATUS));
+	printf("  %-25s = 0x%08X\n", "CILB_PAD_CONFIG0", vi_read(CILB_PAD_CONFIG0));
+	printf("  %-25s = 0x%08X\n", "PHY_CILB_CONTROL0", vi_read(PHY_CILB_CONTROL0));
+	dump_cil_status_bits("CIL_B_STATUS", vi_read(CSI_CIL_B_STATUS));
+	dump_cil_status_bits("CILB_STATUS", vi_read(CSI_CILB_STATUS));
+
 	printf("\n-- VI_CSI_1 (PORT_B / OV5693) --\n");
 	printf("  %-25s = 0x%08X\n", "IMAGE_DEF", vi_read(VI_CSI_1_IMAGE_DEF));
 	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE", vi_read(VI_CSI_1_IMAGE_SIZE));
 	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE_WC", vi_read(VI_CSI_1_IMAGE_SIZE_WC));
 	printf("  %-25s = 0x%08X\n", "IMAGE_DT", vi_read(VI_CSI_1_IMAGE_DT));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_LSB", vi_read(VI_CSI_1_SURFACE0_OFFSET_LSB));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_STRIDE", vi_read(VI_CSI_1_SURFACE0_STRIDE));
 	printf("  %-25s = 0x%08X\n", "ERROR_STATUS", vi_read(VI_CSI_1_ERROR_STATUS));
 
-	printf("\n-- Pixel Parser B (PP_B) --\n");
+	printf("\n-- Pixel Parser B (PP_B / OV5693) --\n");
 	printf("  %-25s = 0x%08X\n", "INPUT_STREAM_CONTROL", vi_read(PP_B_INPUT_STREAM_CONTROL));
 	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL0", vi_read(PP_B_PIXEL_STREAM_CONTROL0));
 	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL1", vi_read(PP_B_PIXEL_STREAM_CONTROL1));
@@ -301,9 +331,6 @@ static void dump_registers(const char *label)
 	printf("  %-25s = 0x%08X\n", "PP_COMMAND", vi_read(PP_B_PIXEL_STREAM_PP_COMMAND));
 	printf("  %-25s = 0x%08X\n", "PP_INT_MASK", vi_read(PP_B_PIXEL_STREAM_PP_INT_MASK));
 	dump_pp_status_bits("PP_B_STATUS", vi_read(PP_B_PIXEL_PARSER_STATUS));
-
-	printf("\n-- Pixel Parser A (PP_A, for reference) --\n");
-	dump_pp_status_bits("PP_A_STATUS", vi_read(PP_A_PIXEL_PARSER_STATUS));
 
 	printf("\n-- CSI PHY --\n");
 	printf("  %-25s = 0x%08X\n", "CIL_COMMAND", vi_read(CSI_PHY_CIL_COMMAND));
@@ -547,30 +574,22 @@ static int do_capture(const char *dev, int width, int height,
 			printf("Framerate set to %d fps\n", framerate);
 	}
 
-	/* Set format */
+	/* Get current format to preserve pixel format, then set resolution */
 	struct v4l2_format fmt;
 	memset(&fmt, 0, sizeof(fmt));
 	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	xioctl(fd, VIDIOC_G_FMT, &fmt);
+
 	fmt.fmt.pix.width = width;
 	fmt.fmt.pix.height = height;
-	fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_SBGGR10;
 	fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
-	printf("Requesting %dx%d SBGGR10...\n", width, height);
+	printf("Requesting %dx%d %s...\n", width, height,
+		fcc_to_str(fmt.fmt.pix.pixelformat, fcc));
 	if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
 		perror("VIDIOC_S_FMT");
-		/* Try without specifying format */
-		memset(&fmt, 0, sizeof(fmt));
-		fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-		fmt.fmt.pix.width = width;
-		fmt.fmt.pix.height = height;
-		fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_SRGGB10;
-		printf("Retrying with SRGGB10...\n");
-		if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
-			perror("VIDIOC_S_FMT (retry)");
-			close(fd);
-			return -1;
-		}
+		close(fd);
+		return -1;
 	}
 
 	printf("Got format: %dx%d %s bytesperline=%u sizeimage=%u\n",
@@ -645,19 +664,14 @@ static int do_capture(const char *dev, int width, int height,
 
 	/* Set exposure and gain before streaming */
 	if (exposure >= 0) {
-		struct v4l2_ext_controls ctrls;
-		struct v4l2_ext_control ctrl;
+		struct v4l2_control ctrl;
 		memset(&ctrl, 0, sizeof(ctrl));
-		memset(&ctrls, 0, sizeof(ctrls));
-		ctrl.id = V4L2_CID_COARSE_TIME;
+		ctrl.id = V4L2_CID_EXPOSURE;
 		ctrl.value = exposure;
-		ctrls.ctrl_class = V4L2_CTRL_CLASS_CAMERA;
-		ctrls.count = 1;
-		ctrls.controls = &ctrl;
-		if (ioctl(fd, VIDIOC_S_EXT_CTRLS, &ctrls) < 0)
-			perror("set exposure");
+		if (ioctl(fd, VIDIOC_S_CTRL, &ctrl) < 0)
+			perror("set exposure (V4L2_CID_EXPOSURE)");
 		else
-			printf("Exposure set to %d\n", exposure);
+			printf("Exposure set to %d us\n", exposure);
 	}
 	if (gain >= 0) {
 		struct v4l2_control ctrl;
