@@ -599,6 +599,18 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 			"%s: warning coarse time override failed\n",
 			__func__);
 
+	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
+	control.id = V4L2_CID_EXPOSURE;
+	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+	if (!err && control.value > 0) {
+		const struct camera_common_frmfmt *fmt =
+			&s_data->frmfmt[s_data->mode];
+		u32 coarse = (u32)div_u64((u64)control.value * fmt->pix_clk_hz,
+					  (u64)fmt->line_length * 1000000ULL);
+		if (coarse > 0)
+			imx179_set_coarse_time(priv, coarse);
+	}
+
 	err = imx179_write_table(priv, mode_table[IMX179_MODE_START_STREAM]);
 	if (err)
 		goto exit;
