@@ -60,9 +60,9 @@ int t124_use_isp = 0;
 module_param(t124_use_isp, int, 0644);
 MODULE_PARM_DESC(t124_use_isp, "Enable hardware ISP pipeline (default: 0=off, 1=on)");
 
-int t124_single_shot = 0;
+int t124_single_shot = 1;
 module_param(t124_single_shot, int, 0644);
-MODULE_PARM_DESC(t124_single_shot, "Force single-shot capture mode for testing (default: 0=continuous)");
+MODULE_PARM_DESC(t124_single_shot, "Single-shot capture (default: 1, no tearing)");
 #endif
 
 
@@ -564,11 +564,12 @@ int tegra_channel_enable_stream(struct tegra_channel *chan)
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE,
 		       (height << IMAGE_SIZE_HEIGHT_OFFSET) | width);
 
-		/* Enable pixel parser: continuous or single-shot */
-		tegra_channel_write(chan, pp_cmd_reg,
-		       (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
-		       (t124_single_shot ? CSI_PP_SINGLE_SHOT_ENABLE : 0) |
-		       CSI_PP_ENABLE);
+		/* Enable pixel parser for continuous mode only.
+		 * Single-shot ops manage PP per-frame themselves. */
+		if (!t124_single_shot)
+			tegra_channel_write(chan, pp_cmd_reg,
+			       (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
+			       CSI_PP_ENABLE);
 
 		dev_dbg(&chan->video.dev,
 			 "T124 %s init (post-stream): %dx%d fmt=0x%x dt=0x%x wc=%d CIL_CMD=0x%08x\n",
