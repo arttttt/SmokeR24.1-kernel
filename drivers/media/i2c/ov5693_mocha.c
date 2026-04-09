@@ -694,7 +694,7 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			"%s: warning coarse time short override failed\n",
 			__func__);
 
-	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
+	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time) */
 	control.id = V4L2_CID_EXPOSURE;
 	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
 	if (!err && control.value > 0) {
@@ -1343,12 +1343,17 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 		err = ov5693_set_frame_length(priv, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE: {
-		/* Convert microseconds to coarse_time (sensor lines) */
+		/* Convert microseconds to coarse_time.
+		 * OV5693 coarse_time is in sensor lines (NOT shifted). */
 		struct camera_common_data *s_data = priv->s_data;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
 		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
+		u32 max_coarse = OV5693_DEFAULT_FRAME_LENGTH -
+				 OV5693_MAX_COARSE_DIFF;
+		if (coarse > max_coarse)
+			coarse = max_coarse;
 		err = ov5693_set_coarse_time(priv, coarse);
 		break;
 	}
