@@ -660,10 +660,6 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		goto exit;
 	}
 
-	/* Enable group hold for atomic exposure/gain update */
-	priv->group_hold_en = true;
-	ov5693_set_group_hold(priv);
-
 	/* write list of override regs for the asking frame length,
 	 * coarse integration time, and gain. Failures to write
 	 * overrides are non-fatal */
@@ -713,10 +709,6 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		if (coarse > 0)
 			ov5693_set_coarse_time(priv, coarse);
 	}
-
-	/* Release group hold — apply all buffered changes atomically */
-	priv->group_hold_en = false;
-	ov5693_set_group_hold(priv);
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)
