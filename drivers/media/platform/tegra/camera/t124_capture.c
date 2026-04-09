@@ -239,8 +239,10 @@ static int t124_capture_start(struct tegra_channel *chan,
 		}
 	}
 
-	/* DMA started — pre-queue next surface + arm syncpt */
-	prequeue_next(chan);
+	/* DMA started — hand off to done-thread for MW_ACK.
+	 * Surface is reprogrammed AFTER MW_ACK (in capture_done),
+	 * not here — T124 VI has no shadow registers, writing
+	 * surface during DMA causes tearing. */
 
 	/* Hand off to done-thread for MW_ACK */
 	atomic_set(&chan->dma_active, 1);
@@ -281,6 +283,13 @@ static void t124_capture_done(struct tegra_channel *chan,
 			chan->capture_state = CAPTURE_ERROR;
 		}
 	}
+
+	/* Pre-queue next surface AFTER MW_ACK (DMA complete),
+	 * BEFORE buffer_done (returning to userspace).
+	 * T124 VI has no shadow registers — must only change
+	 * surface address between frames, never during DMA. */
+	if (!err)
+		prequeue_next(chan);
 
 	if (!err)
 		getrawmonotonic(&ts);
