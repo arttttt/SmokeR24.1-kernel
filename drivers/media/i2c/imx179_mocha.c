@@ -607,6 +607,10 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 			&s_data->frmfmt[s_data->mode];
 		u32 coarse = (u32)div_u64((u64)control.value * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
+		u32 max_coarse = IMX179_DEFAULT_FRAME_LENGTH -
+				 IMX179_MAX_COARSE_DIFF;
+		if (coarse > max_coarse)
+			coarse = max_coarse;
 		dev_info(&client->dev,
 			 "%s: exposure=%d us -> coarse=%u (line_len=%u pix_clk=%llu)\n",
 			 __func__, control.value, coarse,

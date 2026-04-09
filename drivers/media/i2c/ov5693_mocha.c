@@ -694,6 +694,7 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			__func__);
 
 	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
+	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
 	control.id = V4L2_CID_EXPOSURE;
 	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
 	if (!err && control.value > 0) {
@@ -701,6 +702,10 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			&s_data->frmfmt[s_data->mode];
 		u32 coarse = (u32)div_u64((u64)control.value * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
+		u32 max_coarse = OV5693_DEFAULT_FRAME_LENGTH -
+				 OV5693_MAX_COARSE_DIFF;
+		if (coarse > max_coarse)
+			coarse = max_coarse;
 		if (coarse > 0)
 			ov5693_set_coarse_time(priv, coarse);
 	}
