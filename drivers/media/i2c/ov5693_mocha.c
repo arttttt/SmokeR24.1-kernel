@@ -676,13 +676,9 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 				"%s: warning gain override failed\n",
 				__func__);
 
-		/* Use per-mode VTS; only increase for longer exposure */
-		control.id = V4L2_CID_FRAME_LENGTH;
-		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		if (!err && (u32)control.value > mode_fl)
-			frame_length = (u32)control.value;
-		else
-			frame_length = mode_fl;
+		/* Always use per-mode VTS from register tables.
+		 * Control default doesn't reset on mode change. */
+		frame_length = mode_fl;
 		err = ov5693_set_frame_length(priv, frame_length);
 		if (err)
 			dev_dbg(&client->dev,

@@ -614,16 +614,11 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
 
-		/* Use per-mode frame_length from register tables.
-		 * Only increase if V4L2_CID_FRAME_LENGTH explicitly set
-		 * higher (longer exposure needs more lines). */
+		/* Always use per-mode frame_length from register tables.
+		 * The V4L2_CID_FRAME_LENGTH control default doesn't reset
+		 * on mode change, so we can't trust it — use mode table. */
 		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
-		control.id = V4L2_CID_FRAME_LENGTH;
-		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		if (!err && (u32)control.value > mode_fl)
-			frame_length = (u32)control.value;
-		else
-			frame_length = mode_fl;
+		frame_length = mode_fl;
 
 		max_coarse = frame_length - IMX179_MAX_COARSE_DIFF;
 
