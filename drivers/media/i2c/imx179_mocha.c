@@ -822,8 +822,14 @@ static int imx179_set_gain(struct imx179 *priv, s32 val)
 	if (!priv->group_hold_prev)
 		imx179_set_group_hold(priv);
 
-	/* IMX179 gain register 0x0205: 0=1x ... 255=~16x */
-	gain = (u16)val;
+	/* IMX179 gain: real_gain = 256/(256-reg), so reg = 256 - 256/gain
+	 * V4L2 gain value is linear multiplier (1=1x, 16=16x) */
+	if (val <= 1)
+		gain = 0;
+	else if (val >= 256)
+		gain = 255;
+	else
+		gain = (u16)(256 - 256 / val);
 
 	imx179_get_gain_reg(&reg_list, gain);
 	dev_dbg(&priv->i2c_client->dev,
