@@ -564,12 +564,13 @@ int tegra_channel_enable_stream(struct tegra_channel *chan)
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE,
 		       (height << IMAGE_SIZE_HEIGHT_OFFSET) | width);
 
-		/* Enable pixel parser for continuous mode only.
-		 * Single-shot ops manage PP per-frame themselves. */
-		if (!t124_single_shot)
-			tegra_channel_write(chan, pp_cmd_reg,
-			       (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
-			       CSI_PP_ENABLE);
+		/* Enable pixel parser: continuous or single-shot.
+		 * In single-shot mode, PP waits for VI_CSI_SINGLE_SHOT
+		 * trigger per frame (no PP disable/re-enable needed). */
+		tegra_channel_write(chan, pp_cmd_reg,
+		       (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
+		       (t124_single_shot ? CSI_PP_SINGLE_SHOT_ENABLE : 0) |
+		       CSI_PP_ENABLE);
 
 		dev_dbg(&chan->video.dev,
 			 "T124 %s init (post-stream): %dx%d fmt=0x%x dt=0x%x wc=%d CIL_CMD=0x%08x\n",

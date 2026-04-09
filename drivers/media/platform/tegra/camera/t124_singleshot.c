@@ -1,13 +1,14 @@
 /*
  * t124_singleshot.c — Tegra T124 per-frame single-shot capture
  *
- * Based on NVIDIA vi2_fops.c and Antmicro TK1 kernel.
- * PP is enabled with SINGLE_SHOT flag per frame, then disabled after
- * MW_ACK — no free-running, no tearing by design.
+ * Based on vi2.c from the same kernel tree (soc_camera/tegra_camera/).
+ * PP is set to single-shot mode once at stream start. Each frame is
+ * triggered by VI_CSI_SINGLE_SHOT register write. No PP disable/re-enable
+ * per frame — PP waits for the next SINGLE_SHOT command automatically.
  *
  * 2-kthread pipeline:
- *   start-thread: surface setup → PP enable → VI SINGLE_SHOT → FRAME_START
- *   done-thread:  MW_ACK wait → PP disable → buffer_done
+ *   start-thread: surface setup → VI SINGLE_SHOT → wait FRAME_START
+ *   done-thread:  MW_ACK wait → buffer_done
  *
  * Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
  * Copyright (c) 2026, arttttt. Single-shot 2-kthread pipeline.
@@ -16,8 +17,6 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/nvhost.h>
-#include <linux/dma-mapping.h>
-#include <linux/delay.h>
 
 #include <media/videobuf2-core.h>
 #include <media/camera_common.h>
@@ -35,29 +34,6 @@ static void surface_setup(struct tegra_channel *chan,
 	csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_MSB, 0x0);
 	csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_LSB, addr);
 	csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_STRIDE, stride);
-}
-
-static u32 pp_cmd_reg(struct tegra_channel *chan, int index)
-{
-	return (chan->port[index] == 0) ?
-		T124_PP_A_PIXEL_STREAM_PP_COMMAND :
-		T124_PP_B_PIXEL_STREAM_PP_COMMAND;
-}
-
-/* Enable PP with single-shot flag — captures exactly 1 frame */
-static void pp_enable_singleshot(struct tegra_channel *chan, int index)
-{
-	tegra_channel_write(chan, pp_cmd_reg(chan, index),
-		(0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
-		CSI_PP_SINGLE_SHOT_ENABLE | CSI_PP_ENABLE);
-}
-
-/* Disable PP — stops all capture */
-static void pp_disable(struct tegra_channel *chan, int index)
-{
-	tegra_channel_write(chan, pp_cmd_reg(chan, index),
-		(0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
-		CSI_PP_DISABLE);
 }
 
 static void arm_frame_start(struct tegra_channel *chan,
@@ -120,7 +96,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	u32 thresh[TEGRA_CSI_BLOCKS] = { 0 };
 	struct timespec ts;
 
-	/* First frame: enable stream (sensor + CSI) */
+	/* First frame: enable stream */
 	if (!chan->bfirst_fstart) {
 		err = tegra_channel_enable_stream(chan);
 		if (err) {
@@ -128,7 +104,6 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
 			return err;
 		}
-
 		/* Enable DEST_MEM */
 		for (index = 0; index < chan->valid_ports; index++) {
 			u32 val = csi_read(chan, index,
@@ -139,18 +114,17 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		chan->bfirst_fstart = true;
 	}
 
-	/* Program surface address */
+	/* Program surface */
 	for (index = 0; index < chan->valid_ports; index++)
 		surface_setup(chan, index,
 			      buf->addr + chan->buffer_offset[index], bpl);
 
-	/* Enable PP single-shot + arm FRAME_START + VI SINGLE_SHOT */
-	for (index = 0; index < chan->valid_ports; index++) {
-		pp_enable_singleshot(chan, index);
+	/* Arm FRAME_START syncpt + trigger SINGLE_SHOT */
+	for (index = 0; index < chan->valid_ports; index++)
 		arm_frame_start(chan, index, &thresh[index]);
+	for (index = 0; index < chan->valid_ports; index++)
 		csi_write(chan, index, TEGRA_VI_CSI_SINGLE_SHOT,
 			  SINGLE_SHOT_CAPTURE);
-	}
 
 	/* Wait FRAME_START */
 	chan->capture_state = CAPTURE_GOOD;
@@ -159,8 +133,6 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		if (err) {
 			dev_err(&chan->video.dev,
 				"FRAME_START timeout port %d\n", index);
-			for (index = 0; index < chan->valid_ports; index++)
-				pp_disable(chan, index);
 			tegra_channel_ec_recover(chan);
 			chan->capture_state = CAPTURE_TIMEOUT;
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
@@ -168,7 +140,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		}
 	}
 
-	/* DMA started — hand off to done-thread */
+	/* DMA started — hand off to done-thread for MW_ACK */
 	spin_lock(&chan->done_lock);
 	list_add_tail(&buf->queue, &chan->done);
 	spin_unlock(&chan->done_lock);
@@ -195,12 +167,6 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 			break;
 		}
 	}
-
-	/* Disable PP — no more captures until next explicit enable.
-	 * This is the key anti-tearing mechanism: VI cannot write to
-	 * this buffer after PP is disabled. */
-	for (index = 0; index < chan->valid_ports; index++)
-		pp_disable(chan, index);
 
 	if (!err) {
 		err = tegra_channel_error_status(chan);
@@ -273,17 +239,12 @@ static int t124_ss_start_streaming(struct tegra_channel *chan)
 static void t124_ss_stop_streaming(struct tegra_channel *chan)
 {
 	struct tegra_channel_buffer *buf;
-	int index;
 
 	if (chan->kthread_capture_done) {
 		kthread_stop(chan->kthread_capture_done);
 		wait_for_completion(&chan->capture_done_comp);
 		chan->kthread_capture_done = NULL;
 	}
-
-	/* Ensure PP is disabled */
-	for (index = 0; index < chan->valid_ports; index++)
-		pp_disable(chan, index);
 
 	spin_lock(&chan->done_lock);
 	while (!list_empty(&chan->done)) {
