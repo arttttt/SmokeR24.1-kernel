@@ -194,6 +194,8 @@ struct tegra_channel {
 	void *dummy_buf_cpu;
 	dma_addr_t dummy_buf_dma;
 	struct tegra_channel_buffer *next_buf;	/* pre-queued for shadow reg */
+	u32 next_thresh[TEGRA_CSI_BLOCKS];	/* armed syncpt thresholds */
+	bool next_armed;			/* true = syncpt armed for next */
 
 	/* ISP pipeline integration */
 	bool use_isp;			/* true = VI→ISP pipeline active */
