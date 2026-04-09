@@ -1,12 +1,15 @@
 /*
  * t124_capture.c — Tegra T124 continuous capture implementation
  *
- * PP continuous mode (no SINGLE_SHOT), 2-kthread pipeline:
- *   start-thread: FRAME_START syncpt (syncpt[])
- *   done-thread:  MW_ACK_DONE syncpt (syncpt_mw[])
+ * Pre-queue pipeline: after each FRAME_START, the next surface is
+ * immediately programmed (shadow register), so VI always has a valid
+ * DMA target. This prevents tearing and enables pipeline overlap.
+ *
+ *   start-thread: FRAME_START syncpt + pre-queue next surface
+ *   done-thread:  MW_ACK_DONE syncpt + buffer completion
  *
  * Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2026, arttttt. Continuous mode + pipeline.
+ * Copyright (c) 2026, arttttt. Pre-queue pipeline.
  */
 
 #include <linux/kthread.h>
@@ -84,6 +87,38 @@ static void buffer_done(struct tegra_channel *chan, struct vb2_buffer *vb,
 	vb2_buffer_done(vb, state);
 }
 
+/* Program next surface into shadow register.
+ * Try to dequeue from capture list; fall back to dummy_buf. */
+static void prequeue_next_surface(struct tegra_channel *chan)
+{
+	struct tegra_channel_buffer *next = NULL;
+	int bpl = tegra_channel_get_bytesperline(chan);
+	int index;
+
+	spin_lock(&chan->start_lock);
+	if (!list_empty(&chan->capture)) {
+		next = list_entry(chan->capture.next,
+				  struct tegra_channel_buffer, queue);
+		list_del_init(&next->queue);
+	}
+	spin_unlock(&chan->start_lock);
+
+	if (next) {
+		for (index = 0; index < chan->valid_ports; index++)
+			surface_setup(chan, index,
+				      next->addr + chan->buffer_offset[index],
+				      bpl);
+		chan->next_buf = next;
+	} else {
+		/* No buffer available — redirect to dummy */
+		if (chan->dummy_buf_dma)
+			for (index = 0; index < chan->valid_ports; index++)
+				surface_setup(chan, index,
+					      chan->dummy_buf_dma, bpl);
+		chan->next_buf = NULL;
+	}
+}
+
 /* ---- start phase (start-thread) ---- */
 
 static int warmup(struct tegra_channel *chan, struct tegra_channel_buffer *buf)
@@ -138,6 +173,13 @@ static int t124_capture_start(struct tegra_channel *chan,
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
 			return err;
 		}
+
+		/* Program first surface before warmup */
+		for (index = 0; index < chan->valid_ports; index++)
+			surface_setup(chan, index,
+				      buf->addr + chan->buffer_offset[index],
+				      bpl);
+
 		err = warmup(chan, buf);
 		if (err) {
 			chan->capture_state = CAPTURE_ERROR;
@@ -145,14 +187,24 @@ static int t124_capture_start(struct tegra_channel *chan,
 			return err;
 		}
 		chan->bfirst_fstart = true;
+	} else {
+		/* Subsequent frames: surface already in shadow register
+		 * (pre-programmed by previous capture_start iteration).
+		 * Only program if we came from a dummy_buf fallback
+		 * where next_buf was NULL. */
+		if (!chan->next_buf) {
+			/* We're recovering from a dummy fallback —
+			 * need to program this buffer's surface */
+			for (index = 0; index < chan->valid_ports; index++)
+				surface_setup(chan, index,
+					      buf->addr +
+					      chan->buffer_offset[index], bpl);
+		}
 	}
 
-	/* Program buffer + arm FRAME_START */
-	for (index = 0; index < chan->valid_ports; index++) {
-		surface_setup(chan, index,
-			      buf->addr + chan->buffer_offset[index], bpl);
+	/* Arm FRAME_START */
+	for (index = 0; index < chan->valid_ports; index++)
 		arm_frame_start(chan, index, &thresh[index]);
-	}
 
 	if (t124_single_shot) {
 		for (index = 0; index < chan->valid_ports; index++)
@@ -160,7 +212,7 @@ static int t124_capture_start(struct tegra_channel *chan,
 				  SINGLE_SHOT_CAPTURE);
 	}
 
-	/* Wait FRAME_START */
+	/* Wait FRAME_START — DMA to buf starts after this */
 	chan->capture_state = CAPTURE_GOOD;
 	for (index = 0; index < chan->valid_ports; index++) {
 		err = wait_syncpt(chan, index, thresh[index], &ts);
@@ -174,7 +226,12 @@ static int t124_capture_start(struct tegra_channel *chan,
 		}
 	}
 
-	/* DMA started — hand off to done-thread */
+	/* DMA started — immediately pre-queue next surface into shadow.
+	 * This is the key to preventing tearing: the shadow register
+	 * always has a valid address before the next FRAME_START. */
+	prequeue_next_surface(chan);
+
+	/* Hand off to done-thread for MW_ACK */
 	atomic_set(&chan->dma_active, 1);
 	spin_lock(&chan->done_lock);
 	list_add_tail(&buf->queue, &chan->done);
@@ -272,6 +329,8 @@ static int t124_start_streaming(struct tegra_channel *chan)
 		dev_warn(&chan->video.dev,
 			 "dummy buf alloc failed (%zu)\n", sz);
 
+	chan->next_buf = NULL;
+
 	chan->kthread_capture_done = kthread_run(kthread_done, chan,
 						"%s-done", chan->video.name);
 	if (IS_ERR(chan->kthread_capture_done)) {
@@ -290,6 +349,12 @@ static void t124_stop_streaming(struct tegra_channel *chan)
 		kthread_stop(chan->kthread_capture_done);
 		wait_for_completion(&chan->capture_done_comp);
 		chan->kthread_capture_done = NULL;
+	}
+
+	/* Return pre-queued buffer if any */
+	if (chan->next_buf) {
+		vb2_buffer_done(&chan->next_buf->buf, VB2_BUF_STATE_ERROR);
+		chan->next_buf = NULL;
 	}
 
 	spin_lock(&chan->done_lock);

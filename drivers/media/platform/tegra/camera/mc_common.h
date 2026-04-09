@@ -193,6 +193,7 @@ struct tegra_channel {
 	wait_queue_head_t dma_wait;	/* start-thread waits here for DMA completion */
 	void *dummy_buf_cpu;
 	dma_addr_t dummy_buf_dma;
+	struct tegra_channel_buffer *next_buf;	/* pre-queued for shadow reg */
 
 	/* ISP pipeline integration */
 	bool use_isp;			/* true = VI→ISP pipeline active */

@@ -737,21 +737,28 @@ static int tegra_channel_kthread_capture_start(void *data)
 
 		try_to_freeze();
 
-		wait_event_interruptible(chan->start_wait,
-					 !list_empty(&chan->capture) ||
-					 kthread_should_stop());
+		/* Use pre-queued buffer if available (from prequeue_next_surface),
+		 * otherwise wait for userspace to QBUF */
+		if (chan->next_buf) {
+			buf = chan->next_buf;
+			chan->next_buf = NULL;
+		} else {
+			wait_event_interruptible(chan->start_wait,
+						 !list_empty(&chan->capture) ||
+						 kthread_should_stop());
 
-		if (kthread_should_stop()) {
-			complete(&chan->capture_comp);
-			break;
+			if (kthread_should_stop()) {
+				complete(&chan->capture_comp);
+				break;
+			}
+
+			if (err)
+				continue;
+
+			buf = dequeue_buffer_simple(chan);
+			if (!buf)
+				continue;
 		}
-
-		if (err)
-			continue;
-
-		buf = dequeue_buffer_simple(chan);
-		if (!buf)
-			continue;
 
 		err = chan->capture_ops->capture_start(chan, buf);
 	}
