@@ -433,13 +433,12 @@ static const ov5693_reg mode_2592x1944[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 30fps: HTS=2688(0x0A80), fast MIPI (0x4837=0x05)
-	 * 160M/(2688*1984)=30.0fps */
+	 * HTS=5376(0x1500) — original mocha, bandwidth-limited
+	 * 160M/(5376*1984)=15fps */
 	{0x3011, 0x11},
-	{0x3015, 0x08},
-	{0x380c, 0x0a},
-	{0x380d, 0x80},
-	{0x4837, 0x05},
+	{0x3015, 0x28},
+	{0x380c, 0x15},
+	{0x380d, 0x00},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -699,13 +698,12 @@ static const ov5693_reg mode_2592x1458[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 30fps: HTS=2688(0x0A80), fast MIPI (0x4837=0x05)
-	 * 160M/(2688*1984)=30.0fps */
+	 * HTS=5376(0x1500), VTS=1984 → 160M/(5376*1984)=15fps
+	 * Full-res on 1 lane: bandwidth-limited, can't reach 30fps */
 	{0x3011, 0x11},
-	{0x3015, 0x08},
-	{0x380c, 0x0a},
-	{0x380d, 0x80},
-	{0x4837, 0x05},
+	{0x3015, 0x28},
+	{0x380c, 0x15},
+	{0x380d, 0x00},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -954,13 +952,14 @@ static const ov5693_reg mode_1920x1080[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 30fps: HTS=2688(0x0A80), fast MIPI (0x4837=0x05)
-	 * 160M/(2688*1984)=30.0fps */
+	 * 30fps: HTS=4032(0x0FC0), VTS=1323(0x052B)
+	 * 160M/(4032*1323)=30.0fps */
 	{0x3011, 0x11},
-	{0x3015, 0x08},
-	{0x380c, 0x0a},
-	{0x380d, 0x80},
-	{0x4837, 0x05},
+	{0x3015, 0x28},
+	{0x380c, 0x0f},
+	{0x380d, 0xc0},
+	{0x380e, 0x05},
+	{0x380f, 0x2b},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -1477,13 +1476,12 @@ static const ov5693_reg mode_1280x720_90fps[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 90fps: HTS=2339(0x0923), VTS=760(0x02F8), fast MIPI
-	 * 160M/(2339*760)=90.0fps */
+	 * HTS=3584(0x0E00), VTS=760 → 160M/(3584*760)=58.7fps
+	 * Named "90fps" but limited by 1-lane bandwidth */
 	{0x3011, 0x11},
-	{0x3015, 0x08},
-	{0x380c, 0x09},
-	{0x380d, 0x23},
-	{0x4837, 0x05},
+	{0x3015, 0x28},
+	{0x380c, 0x0e},
+	{0x380d, 0x00},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -1749,13 +1747,11 @@ static const ov5693_reg mode_1280x720_120fps[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 120fps: HTS=1754(0x06DA), VTS=760(0x02F8), fast MIPI
-	 * 160M/(1754*760)=120.0fps */
+	 * HTS=2688(0x0A80), VTS=760 → 160M/(2688*760)=78.3fps
+	 * Named "120fps" but limited by 1-lane bandwidth */
 	{0x3011, 0x11},
-	{0x3015, 0x08},
-	{0x380c, 0x06},
-	{0x380d, 0xda},
-	{0x4837, 0x05},
+	{0x380c, 0x0a},
+	{0x380d, 0x80},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -2019,13 +2015,12 @@ static const ov5693_reg mode_1280x720_120fps_safe[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 120fps safe: HTS=1754(0x06DA), VTS=760(0x02F8), fast MIPI
-	 * 160M/(1754*760)=120.0fps */
+	 * HTS=2688(0x0A80), VTS=760 → 160M/(2688*760)=78.3fps
+	 * Named "120fps safe" but limited by 1-lane bandwidth */
 	{0x3011, 0x11},
-	{0x3015, 0x08},
-	{0x380c, 0x06},
-	{0x380d, 0xda},
-	{0x4837, 0x05},
+	{0x3015, 0x28},
+	{0x380c, 0x0a},
+	{0x380d, 0x80},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -2829,7 +2824,7 @@ static const int ov5693_120fps[] = {
 static const u32 ov5693_mode_frame_length[] = {
 	[OV5693_MODE_2592X1944]            = 0x07C0,  /* 1984 — 30fps */
 	[OV5693_MODE_2592X1458]            = 0x07C0,  /* 1984 — 30fps */
-	[OV5693_MODE_1920X1080]            = 0x07C0,  /* 1984 — 30fps */
+	[OV5693_MODE_1920X1080]            = 0x052B,  /* 1323 — 30fps */
 	[OV5693_MODE_1280X720_60FPS]       = 0x03E0,  /* 992  — 60fps */
 	[OV5693_MODE_1280X720_90FPS]       = 0x02F8,  /* 760  — 90fps */
 	[OV5693_MODE_1280X720_120FPS]      = 0x02F8,  /* 760  — 120fps */
