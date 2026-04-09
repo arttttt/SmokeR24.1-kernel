@@ -337,8 +337,8 @@ static const imx179_reg mode_1280x720_120fps[] = {
 	{0x0100, 0x00},
 	{IMX179_TABLE_WAIT_MS, 3},
 	{0x0101, 0x00},
-	{0x0202, 0x03},	/* coarse_time = 796 (FL-4) */
-	{0x0203, 0x1C},
+	{0x0202, 0x02},	/* coarse_time = 746 (FL-4) */
+	{0x0203, 0xEA},
 	{0x0301, 0x05},
 	{0x0303, 0x01},
 	{0x0305, 0x06},
@@ -346,10 +346,10 @@ static const imx179_reg mode_1280x720_120fps[] = {
 	{0x030B, 0x01},
 	{0x030C, 0x00},
 	{0x030D, 0xA2},
-	{0x0340, 0x03},	/* frame_length = 800 (0x0320) */
-	{0x0341, 0x20},
-	{0x0342, 0x0A},	/* line_length = 2700 (0x0A8C) */
-	{0x0343, 0x8C},
+	{0x0340, 0x02},	/* frame_length = 750 (0x02EE) */
+	{0x0341, 0xEE},
+	{0x0342, 0x0B},	/* line_length = 2880 (0x0B40) */
+	{0x0343, 0x40},
 	{0x0344, 0x01},	/* same crop as 720p@90fps */
 	{0x0345, 0x68},
 	{0x0346, 0x02},
@@ -425,7 +425,7 @@ static const u32 imx179_mode_frame_length[] = {
 	[IMX179_MODE_1920X1080]       = 0x09CE,  /* 2510 — 30fps */
 	[IMX179_MODE_1280X720_90FPS]  = 0x0345,  /* 837  — 90fps */
 	[IMX179_MODE_1920X1080_60FPS] = 0x04E8,  /* 1256 — 60fps */
-	[IMX179_MODE_1280X720_120FPS] = 0x0320,  /* 800  — 120fps */
+	[IMX179_MODE_1280X720_120FPS] = 0x02EE,  /* 750  — 120fps */
 };
 
 /* Frame format settings for camera_common */
@@ -438,7 +438,7 @@ static const int imx179_120fps[] = {120};
 #define IMX179_LINE_LENGTH	3440
 #define IMX179_PIX_CLK_HZ	259200000ULL
 
-#define IMX179_LINE_LENGTH_720P_120	2700
+#define IMX179_LINE_LENGTH_720P_120	2880
 
 static const struct camera_common_frmfmt imx179_frmfmt[] = {
 	{{3264, 2448},	imx179_30fps,	1, 0,	IMX179_MODE_3280X2460,		IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},

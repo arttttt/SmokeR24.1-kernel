@@ -66,7 +66,7 @@ MODULE_PARM_DESC(t124_single_shot, "Force single-shot capture mode for testing (
 #endif
 
 
-#define FRAMERATE	30
+#define FRAMERATE	120
 #define BPP_MEM		2
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
