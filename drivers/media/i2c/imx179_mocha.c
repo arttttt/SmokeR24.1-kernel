@@ -371,18 +371,22 @@ static int imx179_power_on(struct camera_common_data *s_data)
 	/* Step 6: settling time */
 	usleep_range(1, 2);
 
-	/* Step 7: CAM_AF_PWDN=1, CAM_RSTN=0 */
+	/* Step 7: CAM_AF_PWDN=1, CAM1_PWDN=0, CAM_RSTN=0 */
 	if (pw->af_gpio)
 		imx179_gpio_set(priv, pw->af_gpio, 1);
+	if (pw->pwdn_gpio)
+		imx179_gpio_set(priv, pw->pwdn_gpio, 0);
 	if (pw->reset_gpio)
 		imx179_gpio_set(priv, pw->reset_gpio, 0);
 
 	/* Step 8: settling time */
 	usleep_range(10, 20);
 
-	/* Step 9: CAM_RSTN=1 */
+	/* Step 9: CAM_RSTN=1, CAM1_PWDN=1 */
 	if (pw->reset_gpio)
 		imx179_gpio_set(priv, pw->reset_gpio, 1);
+	if (pw->pwdn_gpio)
+		imx179_gpio_set(priv, pw->pwdn_gpio, 1);
 
 	/* Step 10: post-reset settling */
 	usleep_range(300, 310);
@@ -434,9 +438,11 @@ static int imx179_power_off(struct camera_common_data *s_data)
 		return err;
 	}
 
-	/* Step 1: reset and af GPIOs low */
+	/* Step 1: reset, pwdn, and af GPIOs low */
 	if (pw->reset_gpio)
 		imx179_gpio_set(priv, pw->reset_gpio, 0);
+	if (pw->pwdn_gpio)
+		imx179_gpio_set(priv, pw->pwdn_gpio, 0);
 	if (pw->af_gpio)
 		imx179_gpio_set(priv, pw->af_gpio, 0);
 
@@ -540,6 +546,7 @@ static int imx179_power_get(struct imx179 *priv)
 
 	if (!err) {
 		pw->reset_gpio = pdata->reset_gpio;
+		pw->pwdn_gpio = pdata->pwdn_gpio;
 		pw->af_gpio = pdata->af_gpio;
 	}
 
@@ -1148,6 +1155,14 @@ static struct camera_common_pdata *imx179_parse_dt(struct i2c_client *client)
 		goto error;
 	}
 	board_priv_pdata->reset_gpio = (unsigned int)gpio;
+
+	/* Mocha: CAM1_PWDN GPIO (power down, active high) */
+	gpio = of_get_named_gpio(node, "pwdn-gpios", 0);
+	if (gpio < 0) {
+		dev_dbg(&client->dev, "pwdn gpios not in DT\n");
+		gpio = 0;
+	}
+	board_priv_pdata->pwdn_gpio = (unsigned int)gpio;
 
 	/* Mocha: AF enable GPIO */
 	gpio = of_get_named_gpio(node, "af-gpios", 0);

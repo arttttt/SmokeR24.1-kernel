@@ -632,6 +632,7 @@ static int ov5693_set_gain(struct ov5693 *priv, s32 val);
 static int ov5693_set_frame_length(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time_short(struct ov5693 *priv, s32 val);
+static int ov5693_set_group_hold(struct ov5693 *priv);
 
 static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -658,6 +659,10 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			__func__, s_data->mode, err);
 		goto exit;
 	}
+
+	/* Enable group hold for atomic exposure/gain update */
+	priv->group_hold_en = true;
+	ov5693_set_group_hold(priv);
 
 	/* write list of override regs for the asking frame length,
 	 * coarse integration time, and gain. Failures to write
@@ -694,7 +699,6 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			__func__);
 
 	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
-	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
 	control.id = V4L2_CID_EXPOSURE;
 	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
 	if (!err && control.value > 0) {
@@ -709,6 +713,10 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		if (coarse > 0)
 			ov5693_set_coarse_time(priv, coarse);
 	}
+
+	/* Release group hold — apply all buffered changes atomically */
+	priv->group_hold_en = false;
+	ov5693_set_group_hold(priv);
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)

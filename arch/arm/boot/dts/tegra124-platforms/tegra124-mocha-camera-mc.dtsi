@@ -218,8 +218,9 @@
 			vdd_cam_1v2-supply = <&vdd_cam_1v2>;
 			vdd_cam_1v8-supply = <&vdd_cam_1v8>;
 
-			/* GPIOs: CAM_RSTN=219(PBB3), CAM_AF_PWDN=223(PBB7) */
+			/* GPIOs: CAM_RSTN=219(PBB3), CAM1_PWDN=221(PBB5), CAM_AF_PWDN=223(PBB7) */
 			reset-gpios = <&gpio TEGRA_GPIO(BB, 3) GPIO_ACTIVE_HIGH>;
+			pwdn-gpios = <&gpio TEGRA_GPIO(BB, 5) GPIO_ACTIVE_HIGH>;
 			af-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_HIGH>;
 
 			mode0 { /* 8MP 30fps */
