@@ -2,8 +2,8 @@
  * vi_capture.h — Tegra VI capture ops abstraction
  *
  * Implementations:
- *   t124_capture.c  — T124 continuous mode, 2-kthread pipeline
- *   singleshot_capture.c — legacy single-shot, ring buffer (TPG, ISP, T210)
+ *   t124_capture.c      — T124 continuous mode, 2-kthread pipeline
+ *   t124_singleshot.c   — T124 per-frame single-shot, 2-kthread (no tearing)
  */
 
 #ifndef __VI_CAPTURE_H__
@@ -20,7 +20,7 @@ struct tegra_vi_capture_ops {
 };
 
 extern const struct tegra_vi_capture_ops tegra_vi_t124_capture_ops;
-extern const struct tegra_vi_capture_ops tegra_vi_singleshot_capture_ops;
+extern const struct tegra_vi_capture_ops tegra_vi_t124_singleshot_ops;
 
 /* Shared helpers (channel.c) */
 u32 tegra_channel_read(struct tegra_channel *chan, unsigned int addr);

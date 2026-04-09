@@ -1278,11 +1278,14 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 	/* Select capture ops — AFTER ISP setup so use_isp is known */
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC)
 	if (!t124_csi_tpg && !chan->vi->pg_mode &&
-	    !chan->use_isp && !chan->bypass)
-		chan->capture_ops = &tegra_vi_t124_capture_ops;
-	else
+	    !chan->use_isp && !chan->bypass) {
+		if (t124_single_shot)
+			chan->capture_ops = &tegra_vi_t124_singleshot_ops;
+		else
+			chan->capture_ops = &tegra_vi_t124_capture_ops;
+	} else
 #endif
-		chan->capture_ops = &tegra_vi_singleshot_capture_ops;
+		chan->capture_ops = &tegra_vi_t124_singleshot_ops;
 
 	ret = chan->capture_ops->start_streaming(chan);
 	if (ret < 0)
