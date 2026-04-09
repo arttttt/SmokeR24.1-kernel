@@ -41,6 +41,7 @@
 
 static const imx179_reg imx179_start[] = {
 	{0x0100, 0x01},
+	{IMX179_TABLE_WAIT_MS, 3},
 	{IMX179_TABLE_END, 0x00}
 };
 
@@ -117,8 +118,8 @@ static const imx179_reg mode_3280x2460[] = {
 	{0x4108, 0x01},
 	{0x4109, 0x7C},
 
-	{0x0100, 0x01},
-	{IMX179_TABLE_WAIT_MS, 3},
+	/* Stream start moved to IMX179_MODE_START_STREAM —
+	 * allow exposure/gain overrides before streaming */
 	{IMX179_TABLE_END, 0x00}
 };
 
@@ -190,8 +191,6 @@ static const imx179_reg mode_1920x1080[] = {
 	{0x4108, 0x01},
 	{0x4109, 0x7C},
 
-	{0x0100, 0x01},
-	{IMX179_TABLE_WAIT_MS, 3},
 	{IMX179_TABLE_END, 0x00}
 };
 
@@ -263,8 +262,6 @@ static const imx179_reg mode_1280x720_90fps[] = {
 	{0x4108, 0x01},
 	{0x4109, 0x7C},
 
-	{0x0100, 0x01},
-	{IMX179_TABLE_WAIT_MS, 3},
 	{IMX179_TABLE_END, 0x00}
 };
 
