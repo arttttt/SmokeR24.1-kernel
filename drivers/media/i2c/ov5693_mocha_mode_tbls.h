@@ -952,14 +952,12 @@ static const ov5693_reg mode_1920x1080[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 30fps: HTS=4032(0x0FC0), VTS=1323(0x052B)
-	 * 160M/(4032*1323)=30.0fps */
+	 * HTS=4032(0x0FC0), VTS=1984 → 160M/(4032*1984)=20fps
+	 * 1080p on 1 lane: bandwidth-limited */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0f},
 	{0x380d, 0xc0},
-	{0x380e, 0x05},
-	{0x380f, 0x2b},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -1476,14 +1474,12 @@ static const ov5693_reg mode_1280x720_90fps[] = {
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
 	/* Mocha 1-lane CSI-E overrides
-	 * 90fps: PLL boost 0x30b3=0x78(120) → PIX_CLK≈184.6MHz
-	 * HTS=2688(0x0A80), VTS=760 → 184.6M/(2688*760)=90.3fps
-	 * MIPI rate: 879 Mbps/lane (within 1 Gbps D-PHY limit) */
+	 * HTS=3584(0x0E00), VTS=760 → 160M/(3584*760)=58.7fps
+	 * 1-lane bandwidth-limited */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
-	{0x30b3, 0x78},
-	{0x380c, 0x0a},
-	{0x380d, 0x80},
+	{0x380c, 0x0e},
+	{0x380d, 0x00},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -2826,7 +2822,7 @@ static const int ov5693_120fps[] = {
 static const u32 ov5693_mode_frame_length[] = {
 	[OV5693_MODE_2592X1944]            = 0x07C0,  /* 1984 — 30fps */
 	[OV5693_MODE_2592X1458]            = 0x07C0,  /* 1984 — 30fps */
-	[OV5693_MODE_1920X1080]            = 0x052B,  /* 1323 — 30fps */
+	[OV5693_MODE_1920X1080]            = 0x07C0,  /* 1984 — 20fps */
 	[OV5693_MODE_1280X720_60FPS]       = 0x03E0,  /* 992  — 60fps */
 	[OV5693_MODE_1280X720_90FPS]       = 0x02F8,  /* 760  — 90fps */
 	[OV5693_MODE_1280X720_120FPS]      = 0x02F8,  /* 760  — 120fps */
@@ -2836,7 +2832,6 @@ static const u32 ov5693_mode_frame_length[] = {
 };
 
 #define OV5693_PIX_CLK_HZ		160000000ULL
-#define OV5693_PIX_CLK_HZ_90FPS	184615384ULL  /* PLL boost: 0x30b3=0x78 */
 #define OV5693_LINE_LENGTH_FULL		2688
 #define OV5693_LINE_LENGTH_720P		1752
 
@@ -2845,7 +2840,7 @@ static const struct camera_common_frmfmt ov5693_frmfmt[] = {
 	{{2592, 1458},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1458,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 	{{1920, 1080},	ov5693_30fps,	1, 0,	OV5693_MODE_1920X1080,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 	{{1280, 720},	ov5693_60fps,	1, 0,	OV5693_MODE_1280X720_60FPS,	OV5693_LINE_LENGTH_720P, OV5693_PIX_CLK_HZ},
-	{{1280, 720},	ov5693_90fps,	1, 0,	OV5693_MODE_1280X720_90FPS,	OV5693_LINE_LENGTH_720P, OV5693_PIX_CLK_HZ_90FPS},
+	{{1280, 720},	ov5693_90fps,	1, 0,	OV5693_MODE_1280X720_90FPS,	OV5693_LINE_LENGTH_720P, OV5693_PIX_CLK_HZ},
 	{{1280, 720},	ov5693_120fps,	1, 0,	OV5693_MODE_1280X720_120FPS,	OV5693_LINE_LENGTH_720P, OV5693_PIX_CLK_HZ},
 	{{2592, 1944},	ov5693_24fps,	1, 1,	OV5693_MODE_2592X1944_HDR,	OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 	{{1920, 1080},	ov5693_30fps,	1, 1,	OV5693_MODE_1920X1080_HDR,	OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
