@@ -739,6 +739,105 @@ struct nvmap_handle *nvmap_handle_get_from_dmabuf_fd(
 	return handle;
 }
 
+/*
+ * Import a foreign (non-nvmap) dmabuf into nvmap by creating a wrapper handle.
+ * The foreign dmabuf's pages are referenced but not copied — zero-copy.
+ * The wrapper handle can be exported as nvmap fd for Vulkan OPAQUE_FD import.
+ */
+struct nvmap_handle_ref *nvmap_create_handle_from_dmabuf(
+		struct nvmap_client *client, int fd)
+{
+	struct dma_buf *dmabuf;
+	struct dma_buf_attachment *att;
+	struct sg_table *sgt;
+	struct nvmap_handle *h;
+	struct nvmap_handle_ref *ref;
+	struct scatterlist *sg;
+	int nr_pages, i, pg_idx;
+
+	if (!client)
+		return ERR_PTR(-EINVAL);
+
+	dmabuf = dma_buf_get(fd);
+	if (IS_ERR(dmabuf))
+		return ERR_CAST(dmabuf);
+
+	/* If it's already nvmap, use existing path */
+	if (dmabuf_is_nvmap(dmabuf)) {
+		struct nvmap_handle_info *info = dmabuf->priv;
+		struct nvmap_handle *existing = info->handle;
+		dma_buf_put(dmabuf);
+		if (!nvmap_handle_get(existing))
+			return ERR_PTR(-EINVAL);
+		ref = nvmap_duplicate_handle(client, existing, 1);
+		nvmap_handle_put(existing);
+		return ref;
+	}
+
+	/* Attach and map the foreign dmabuf */
+	att = dma_buf_attach(dmabuf, nvmap_dev->dev_user.parent);
+	if (IS_ERR(att)) {
+		dma_buf_put(dmabuf);
+		return ERR_CAST(att);
+	}
+
+	sgt = dma_buf_map_attachment(att, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		dma_buf_detach(dmabuf, att);
+		dma_buf_put(dmabuf);
+		return ERR_CAST(sgt);
+	}
+
+	/* Count pages from scatter-gather table */
+	nr_pages = PAGE_ALIGN(dmabuf->size) >> PAGE_SHIFT;
+
+	/* Create nvmap handle via standard path (allocates handle + its own dmabuf) */
+	ref = nvmap_create_handle(client, dmabuf->size);
+	if (IS_ERR(ref)) {
+		dma_buf_unmap_attachment(att, sgt, DMA_BIDIRECTIONAL);
+		dma_buf_detach(dmabuf, att);
+		dma_buf_put(dmabuf);
+		return ref;
+	}
+
+	h = ref->handle;
+
+	/* Allocate page array and fill from sg_table */
+	h->pgalloc.pages = nvmap_altalloc(nr_pages * sizeof(struct page *));
+	if (!h->pgalloc.pages) {
+		/* cleanup */
+		dma_buf_unmap_attachment(att, sgt, DMA_BIDIRECTIONAL);
+		dma_buf_detach(dmabuf, att);
+		dma_buf_put(dmabuf);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	pg_idx = 0;
+	for_each_sg(sgt->sgl, sg, sgt->nents, i) {
+		struct page *page = sg_page(sg);
+		int j, npages = PAGE_ALIGN(sg->length) >> PAGE_SHIFT;
+		for (j = 0; j < npages && pg_idx < nr_pages; j++)
+			h->pgalloc.pages[pg_idx++] = page + j;
+	}
+
+	/* Mark as foreign — don't free pages on handle destroy */
+	h->heap_pgalloc = true;
+	h->alloc = true;
+	h->foreign_dmabuf = true;
+	h->foreign_buf = dmabuf;	/* keep ref alive */
+	h->foreign_att = att;
+	h->foreign_sgt = sgt;
+	h->size = dmabuf->size;
+	h->orig_size = dmabuf->size;
+	h->flags = NVMAP_HANDLE_CACHEABLE;
+	h->heap_type = NVMAP_HEAP_IOVMM;
+
+	pr_debug("nvmap: imported foreign dmabuf fd=%d size=%zu pages=%d\n",
+		 fd, dmabuf->size, nr_pages);
+
+	return ref;
+}
+
 int nvmap_ioctl_share_dmabuf(struct file *filp, void __user *arg)
 {
 	struct nvmap_create_handle op;

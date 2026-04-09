@@ -208,8 +208,13 @@ struct nvmap_handle_ref *nvmap_create_handle_from_fd(
 	BUG_ON(!client);
 
 	handle = nvmap_handle_get_from_dmabuf_fd(client, fd);
-	if (IS_ERR(handle))
-		return ERR_CAST(handle);
+	if (IS_ERR(handle)) {
+		/* Not an nvmap dmabuf — try foreign import */
+		ref = nvmap_create_handle_from_dmabuf(client, fd);
+		if (!IS_ERR(ref))
+			pr_info("nvmap: imported foreign dmabuf fd=%d\n", fd);
+		return ref;
+	}
 	ref = nvmap_duplicate_handle(client, handle, 1);
 	nvmap_handle_put(handle);
 	return ref;
