@@ -84,28 +84,8 @@ static void buffer_done(struct tegra_channel *chan, struct vb2_buffer *vb,
 	vb2_buffer_done(vb, state);
 }
 
-/* Wait for CSI to become idle (between frames).
- * Polls READONLY_STATUS — 0 means no active transfer.
- * This confirms we're in vertical blanking, safe to change surface. */
-static void csi_pending(struct tegra_channel *chan, int port)
-{
-	int timeout = 1000;
-	u32 port_mask = (chan->port[port] == 0) ? 0x1 : 0x2;
-
-	while (--timeout) {
-		if (!(tegra_channel_read(chan, T124_CSI_READONLY_STATUS)
-		      & port_mask))
-			break;
-		usleep_range(1, 2);
-	}
-	if (!timeout)
-		dev_warn(&chan->video.dev, "csi_pending timeout port %d\n",
-			 port);
-}
-
 /* Pre-queue: program next surface + arm FRAME_START syncpt.
- * Called after MW_ACK + csi_pending — we're in vertical blanking,
- * safe to change surface address. */
+ * Called after MW_ACK, between frames. */
 static void prequeue_next(struct tegra_channel *chan)
 {
 	struct tegra_channel_buffer *next = NULL;
@@ -303,19 +283,20 @@ static void t124_capture_done(struct tegra_channel *chan,
 		}
 	}
 
-	/* Wait for CSI idle + pre-queue next surface.
-	 * csi_pending confirms we're in vertical blanking.
-	 * Then safe to change surface address + return buffer. */
-	if (!err) {
-		int idx;
-		for (idx = 0; idx < chan->valid_ports; idx++)
-			csi_pending(chan, idx);
+	/* Pre-queue next surface after MW_ACK (between frames). */
+	if (!err)
 		prequeue_next(chan);
-	}
 
 	if (!err)
 		getrawmonotonic(&ts);
-	buffer_done(chan, &buf->buf, &ts, state);
+
+	/* Delayed return: hold current buffer, return PREVIOUS one.
+	 * By the time prev is returned, surface already points to
+	 * next (via prequeue) — prev is guaranteed safe from VI. */
+	if (chan->prev_buf) {
+		buffer_done(chan, &chan->prev_buf->buf, &ts, state);
+	}
+	chan->prev_buf = buf;
 }
 
 static int kthread_done(void *data)
@@ -373,6 +354,7 @@ static int t124_start_streaming(struct tegra_channel *chan)
 
 	chan->next_buf = NULL;
 	chan->next_armed = false;
+	chan->prev_buf = NULL;
 
 	chan->kthread_capture_done = kthread_run(kthread_done, chan,
 						"%s-done", chan->video.name);
@@ -394,6 +376,10 @@ static void t124_stop_streaming(struct tegra_channel *chan)
 		chan->kthread_capture_done = NULL;
 	}
 
+	if (chan->prev_buf) {
+		vb2_buffer_done(&chan->prev_buf->buf, VB2_BUF_STATE_ERROR);
+		chan->prev_buf = NULL;
+	}
 	if (chan->next_buf) {
 		vb2_buffer_done(&chan->next_buf->buf, VB2_BUF_STATE_ERROR);
 		chan->next_buf = NULL;
