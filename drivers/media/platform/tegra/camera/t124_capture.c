@@ -84,9 +84,28 @@ static void buffer_done(struct tegra_channel *chan, struct vb2_buffer *vb,
 	vb2_buffer_done(vb, state);
 }
 
+/* Wait for CSI to become idle (between frames).
+ * Polls READONLY_STATUS — 0 means no active transfer.
+ * This confirms we're in vertical blanking, safe to change surface. */
+static void csi_pending(struct tegra_channel *chan, int port)
+{
+	int timeout = 1000;
+	u32 port_mask = (chan->port[port] == 0) ? 0x1 : 0x2;
+
+	while (--timeout) {
+		if (!(tegra_channel_read(chan, T124_CSI_READONLY_STATUS)
+		      & port_mask))
+			break;
+		usleep_range(1, 2);
+	}
+	if (!timeout)
+		dev_warn(&chan->video.dev, "csi_pending timeout port %d\n",
+			 port);
+}
+
 /* Pre-queue: program next surface + arm FRAME_START syncpt.
- * Called right after current FRAME_START — we have until the
- * next FRAME_START to get this done (one full frame period). */
+ * Called after MW_ACK + csi_pending — we're in vertical blanking,
+ * safe to change surface address. */
 static void prequeue_next(struct tegra_channel *chan)
 {
 	struct tegra_channel_buffer *next = NULL;
@@ -284,12 +303,15 @@ static void t124_capture_done(struct tegra_channel *chan,
 		}
 	}
 
-	/* Pre-queue next surface AFTER MW_ACK (DMA complete),
-	 * BEFORE buffer_done (returning to userspace).
-	 * T124 VI has no shadow registers — must only change
-	 * surface address between frames, never during DMA. */
-	if (!err)
+	/* Wait for CSI idle + pre-queue next surface.
+	 * csi_pending confirms we're in vertical blanking.
+	 * Then safe to change surface address + return buffer. */
+	if (!err) {
+		int idx;
+		for (idx = 0; idx < chan->valid_ports; idx++)
+			csi_pending(chan, idx);
 		prequeue_next(chan);
+	}
 
 	if (!err)
 		getrawmonotonic(&ts);
