@@ -33,6 +33,7 @@
 #include "csi/csi.h"
 
 struct tegra_isp_t124;
+struct tegra_vi_capture_ops;
 
 #define MAX_FORMAT_NUM	64
 #define	MAX_SUBDEVICES	4
@@ -131,6 +132,7 @@ struct tegra_channel {
 
 	unsigned char port[TEGRA_CSI_BLOCKS];
 	unsigned int syncpt[TEGRA_CSI_BLOCKS];
+	unsigned int syncpt_mw[TEGRA_CSI_BLOCKS]; /* MW_ACK_DONE (done-thread) */
 	unsigned int syncpoint_fifo[TEGRA_CSI_BLOCKS];
 	unsigned int buffer_offset[TEGRA_CSI_BLOCKS];
 	unsigned int buffer_state[QUEUED_BUFFERS];
@@ -170,6 +172,7 @@ struct tegra_channel {
 	atomic_t power_on_refcnt;
 	struct v4l2_fh *fh;
 	bool bypass;
+	const struct tegra_vi_capture_ops *capture_ops;
 	bool bfirst_fstart;
 	enum channel_capture_state capture_state;
 	atomic_t is_streaming;
@@ -179,6 +182,17 @@ struct tegra_channel {
 	bool is_lens_channel;	/* true = focuser/lens, no CSI capture */
 	bool is_isp_channel;	/* true = ISP entity, no video device */
 	struct tegra_channel *lens_chan; /* capture chan -> associated lens */
+
+	/* Continuous capture pipeline */
+	struct task_struct *kthread_capture_done;
+	wait_queue_head_t done_wait;
+	struct list_head done;
+	spinlock_t done_lock;
+	struct completion capture_done_comp;
+	atomic_t dma_active;		/* 1 = DMA in progress, 0 = safe to reprogram */
+	wait_queue_head_t dma_wait;	/* start-thread waits here for DMA completion */
+	void *dummy_buf_cpu;
+	dma_addr_t dummy_buf_dma;
 
 	/* ISP pipeline integration */
 	bool use_isp;			/* true = VI→ISP pipeline active */
