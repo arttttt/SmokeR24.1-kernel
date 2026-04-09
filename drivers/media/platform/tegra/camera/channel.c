@@ -1228,7 +1228,6 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 	int bytes_per_line = chan->format.bytesperline;
 	u32 val, mw_ack_done;
 	u32 thresh[TEGRA_CSI_BLOCKS] = { 0 };
-	u32 mw_thresh[TEGRA_CSI_BLOCKS] = { 0 };
 	struct tegra_channel_buffer *buf;
 	int valid_ports = chan->valid_ports;
 	int state = VB2_BUF_STATE_DONE;
@@ -1239,8 +1238,6 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 		return;
 
 	for (index = 0; index < valid_ports; index++) {
-		u32 frame_start;
-
 		/* Program buffer address by using surface 0 */
 		csi_write(chan, index, TEGRA_VI_CSI_SURFACE0_OFFSET_MSB, 0x0);
 		csi_write(chan, index,
@@ -1249,22 +1246,8 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 		csi_write(chan, index,
 			TEGRA_VI_CSI_SURFACE0_STRIDE, bytes_per_line);
 
-		/* Arm FRAME_START syncpt */
+		/* Arm MW_ACK_DONE syncpt (vi2 style: no FRAME_START arm) */
 		thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
-					chan->syncpt[index], 1);
-#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
-		frame_start = (chan->port[index] == 0) ?
-			T124_PPA_FRAME_START : T124_PPB_FRAME_START;
-#else
-		frame_start = T210_VI_CSI_PP_FRAME_START(chan->port[index]);
-#endif
-		val = VI_CFG_VI_INCR_SYNCPT_COND(frame_start) |
-				chan->syncpt[index];
-		tegra_channel_write(chan,
-				TEGRA_VI_CFG_VI_INCR_SYNCPT, val);
-
-		/* Arm MW_ACK_DONE syncpt */
-		mw_thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
 					chan->syncpt[index], 1);
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 		mw_ack_done = (chan->port[index] == 0) ?
@@ -1282,28 +1265,13 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 			TEGRA_VI_CSI_SINGLE_SHOT, SINGLE_SHOT_CAPTURE);
 	}
 
-	/* Wait for FRAME_START */
-	for (index = 0; index < chan->valid_ports; index++) {
-		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
-			chan->syncpt[index], thresh[index],
-			chan->timeout, NULL, &ts);
-		if (err) {
-			dev_err(&chan->video.dev,
-				"FRAME_START syncpoint time out!%d\n", index);
-			state = VB2_BUF_STATE_ERROR;
-			tegra_channel_ec_recover(chan);
-			chan->capture_state = CAPTURE_TIMEOUT;
-			goto done;
-		}
-	}
-
 	/* Wait for MW_ACK_DONE (DMA completion) */
 	for (index = 0; index < chan->valid_ports; index++) {
 		if (chan->use_isp && !isp_reprocess) {
 			break;
 		}
 		err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
-			chan->syncpt[index], mw_thresh[index],
+			chan->syncpt[index], thresh[index],
 			chan->timeout, NULL, &ts);
 		if (err) {
 			dev_err(&chan->video.dev,
@@ -1314,8 +1282,6 @@ static void tegra_channel_capture_done(struct tegra_channel *chan)
 			break;
 		}
 	}
-
-done:
 	/* Mark capture state to IDLE as capture is finished */
 	chan->capture_state = CAPTURE_IDLE;
 
