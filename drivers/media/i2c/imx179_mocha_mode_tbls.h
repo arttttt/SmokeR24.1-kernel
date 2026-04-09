@@ -294,7 +294,7 @@ static const int imx179_90fps[] = {90};
 
 #define IMX179_DEFAULT_CLK_FREQ		24000000
 #define IMX179_LINE_LENGTH	3440
-#define IMX179_PIX_CLK_HZ	200000000ULL
+#define IMX179_PIX_CLK_HZ	259200000ULL
 
 static const struct camera_common_frmfmt imx179_frmfmt[] = {
 	{{3264, 2448},	imx179_30fps,	1, 0,	IMX179_MODE_3280X2460,		IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
