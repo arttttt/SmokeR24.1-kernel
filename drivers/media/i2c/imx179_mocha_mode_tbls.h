@@ -332,7 +332,7 @@ static const imx179_reg mode_1920x1080_60fps[] = {
 	{IMX179_TABLE_END, 0x00}
 };
 
-/* Mode 4: 1280x720 @ 120fps — 2x2 binning, reduced line_length */
+#if 0 /* 720p@120fps disabled — LL<3440 causes FRAME_START timeout */
 static const imx179_reg mode_1280x720_120fps[] = {
 	{0x0100, 0x00},
 	{IMX179_TABLE_WAIT_MS, 3},
@@ -398,13 +398,13 @@ static const imx179_reg mode_1280x720_120fps[] = {
 	{0x4109, 0x7C},
 	{IMX179_TABLE_END, 0x00}
 };
+#endif /* disabled 720p@120fps */
 
 enum {
 	IMX179_MODE_3280X2460,
 	IMX179_MODE_1920X1080,
 	IMX179_MODE_1280X720_90FPS,
 	IMX179_MODE_1920X1080_60FPS,
-	IMX179_MODE_1280X720_120FPS,
 	IMX179_MODE_START_STREAM,
 	IMX179_MODE_STOP_STREAM,
 };
@@ -414,7 +414,6 @@ static const imx179_reg *mode_table[] = {
 	[IMX179_MODE_1920X1080] = mode_1920x1080,
 	[IMX179_MODE_1280X720_90FPS] = mode_1280x720_90fps,
 	[IMX179_MODE_1920X1080_60FPS] = mode_1920x1080_60fps,
-	[IMX179_MODE_1280X720_120FPS] = mode_1280x720_120fps,
 	[IMX179_MODE_START_STREAM] = imx179_start,
 	[IMX179_MODE_STOP_STREAM] = imx179_stop,
 };
@@ -425,27 +424,22 @@ static const u32 imx179_mode_frame_length[] = {
 	[IMX179_MODE_1920X1080]       = 0x09CE,  /* 2510 — 30fps */
 	[IMX179_MODE_1280X720_90FPS]  = 0x0345,  /* 837  — 90fps */
 	[IMX179_MODE_1920X1080_60FPS] = 0x04E8,  /* 1256 — 60fps */
-	[IMX179_MODE_1280X720_120FPS] = 0x02EE,  /* 750  — 120fps */
 };
 
 /* Frame format settings for camera_common */
 static const int imx179_30fps[] = {30};
 static const int imx179_60fps[] = {60};
 static const int imx179_90fps[] = {90};
-static const int imx179_120fps[] = {120};
 
 #define IMX179_DEFAULT_CLK_FREQ		24000000
 #define IMX179_LINE_LENGTH	3440
 #define IMX179_PIX_CLK_HZ	259200000ULL
-
-#define IMX179_LINE_LENGTH_720P_120	2880
 
 static const struct camera_common_frmfmt imx179_frmfmt[] = {
 	{{3264, 2448},	imx179_30fps,	1, 0,	IMX179_MODE_3280X2460,		IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
 	{{1920, 1080},	imx179_30fps,	1, 0,	IMX179_MODE_1920X1080,		IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
 	{{1920, 1080},	imx179_60fps,	1, 0,	IMX179_MODE_1920X1080_60FPS,	IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
 	{{1280, 720},	imx179_90fps,	1, 0,	IMX179_MODE_1280X720_90FPS,	IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
-	{{1280, 720},	imx179_120fps,	1, 0,	IMX179_MODE_1280X720_120FPS,	IMX179_LINE_LENGTH_720P_120, IMX179_PIX_CLK_HZ},
 };
 
 #endif /* __IMX179_MOCHA_TABLES__ */
