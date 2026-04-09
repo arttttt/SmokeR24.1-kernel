@@ -96,6 +96,8 @@ struct ov5693 {
 	/* Mocha-specific: afvdd not in camera_common_power_rail */
 	struct regulator		*afvdd;
 
+	u32				cur_frame_length;
+
 	struct v4l2_ctrl		*ctrls[];
 };
 
@@ -660,54 +662,71 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		goto exit;
 	}
 
-	/* write list of override regs for the asking frame length,
-	 * coarse integration time, and gain. Failures to write
-	 * overrides are non-fatal */
-	control.id = V4L2_CID_GAIN;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_gain(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev, "%s: warning gain override failed\n",
-			__func__);
+	/* Override gain, frame_length, coarse_time after mode table.
+	 * Use per-mode frame_length — never go below mode default. */
+	{
+		u32 mode_fl = ov5693_mode_frame_length[s_data->mode];
+		u32 frame_length, max_coarse;
 
-	control.id = V4L2_CID_FRAME_LENGTH;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_frame_length(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning frame length override failed\n",
-			__func__);
+		control.id = V4L2_CID_GAIN;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err |= ov5693_set_gain(priv, control.value);
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning gain override failed\n",
+				__func__);
 
-	control.id = V4L2_CID_COARSE_TIME;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_coarse_time(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning coarse time override failed\n",
-			__func__);
+		/* Use per-mode VTS; only increase for longer exposure */
+		control.id = V4L2_CID_FRAME_LENGTH;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		if (!err && (u32)control.value > mode_fl)
+			frame_length = (u32)control.value;
+		else
+			frame_length = mode_fl;
+		err = ov5693_set_frame_length(priv, frame_length);
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning frame length override failed\n",
+				__func__);
 
-	control.id = V4L2_CID_COARSE_TIME_SHORT;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_coarse_time_short(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning coarse time short override failed\n",
-			__func__);
+		max_coarse = frame_length - OV5693_MAX_COARSE_DIFF;
 
-	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time) */
-	control.id = V4L2_CID_EXPOSURE;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	if (!err && control.value > 0) {
-		const struct camera_common_frmfmt *fmt =
-			&s_data->frmfmt[s_data->mode];
-		u32 coarse = (u32)div_u64((u64)control.value * fmt->pix_clk_hz,
-					  (u64)fmt->line_length * 1000000ULL);
-		u32 max_coarse = OV5693_DEFAULT_FRAME_LENGTH -
-				 OV5693_MAX_COARSE_DIFF;
-		if (coarse > max_coarse)
-			coarse = max_coarse;
-		if (coarse > 0)
-			ov5693_set_coarse_time(priv, coarse);
+		control.id = V4L2_CID_COARSE_TIME;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err |= ov5693_set_coarse_time(priv,
+			min((u32)control.value, max_coarse));
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning coarse time override failed\n",
+				__func__);
+
+		control.id = V4L2_CID_COARSE_TIME_SHORT;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err |= ov5693_set_coarse_time_short(priv,
+			min((u32)control.value, max_coarse));
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning coarse time short override "
+				"failed\n", __func__);
+
+		/* V4L2_CID_EXPOSURE (µs → coarse_time) */
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		if (!err && control.value > 0) {
+			const struct camera_common_frmfmt *fmt =
+				&s_data->frmfmt[s_data->mode];
+			u32 coarse = (u32)div_u64(
+				(u64)control.value * fmt->pix_clk_hz,
+				(u64)fmt->line_length * 1000000ULL);
+			if (coarse > max_coarse)
+				coarse = max_coarse;
+			if (coarse > 0)
+				ov5693_set_coarse_time(priv, coarse);
+		}
+
+		dev_info(&client->dev,
+			 "%s: mode=%d frame_len=%u (mode_default=%u)\n",
+			 __func__, s_data->mode, frame_length, mode_fl);
 	}
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
@@ -982,6 +1001,7 @@ static int ov5693_set_frame_length(struct ov5693 *priv, s32 val)
 			goto fail;
 	}
 
+	priv->cur_frame_length = frame_length;
 	ov5693_update_ctrl_range(priv, val);
 	return 0;
 
@@ -1348,10 +1368,11 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 		struct camera_common_data *s_data = priv->s_data;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
+		u32 fl = priv->cur_frame_length ?
+			 priv->cur_frame_length : OV5693_DEFAULT_FRAME_LENGTH;
 		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
-		u32 max_coarse = OV5693_DEFAULT_FRAME_LENGTH -
-				 OV5693_MAX_COARSE_DIFF;
+		u32 max_coarse = fl - OV5693_MAX_COARSE_DIFF;
 		if (coarse > max_coarse)
 			coarse = max_coarse;
 		err = ov5693_set_coarse_time(priv, coarse);

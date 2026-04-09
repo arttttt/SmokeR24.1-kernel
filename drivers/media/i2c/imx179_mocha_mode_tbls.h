@@ -281,6 +281,13 @@ static const imx179_reg *mode_table[] = {
 	[IMX179_MODE_STOP_STREAM] = imx179_stop,
 };
 
+/* Per-mode frame_length from register tables (0x0340:0x0341) */
+static const u32 imx179_mode_frame_length[] = {
+	[IMX179_MODE_3280X2460]       = 0x09CE,  /* 2510 — 30fps */
+	[IMX179_MODE_1920X1080]       = 0x09CE,  /* 2510 — 30fps */
+	[IMX179_MODE_1280X720_90FPS]  = 0x0345,  /* 837  — 90fps */
+};
+
 /* Frame format settings for camera_common */
 static const int imx179_30fps[] = {30};
 static const int imx179_90fps[] = {90};

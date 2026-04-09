@@ -106,6 +106,8 @@ struct imx179 {
 	struct regulator		*ext_reg2;
 	struct regulator		*ext_reg3;
 
+	u32				cur_frame_length;
+
 	struct v4l2_ctrl		*ctrls[];
 };
 
@@ -608,25 +610,32 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 	 * so they take effect BEFORE stream starts */
 	{
 		imx179_reg overrides[5]; /* 2 frame_length + 2 coarse + 1 gain */
-		u32 frame_length, coarse_time, gain;
+		u32 frame_length, coarse_time, gain, max_coarse;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
 
-		/* Read cached ctrl values */
+		/* Use per-mode frame_length from register tables.
+		 * Only increase if V4L2_CID_FRAME_LENGTH explicitly set
+		 * higher (longer exposure needs more lines). */
+		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
 		control.id = V4L2_CID_FRAME_LENGTH;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		frame_length = err ? IMX179_DEFAULT_FRAME_LENGTH : control.value;
+		if (!err && (u32)control.value > mode_fl)
+			frame_length = (u32)control.value;
+		else
+			frame_length = mode_fl;
+
+		max_coarse = frame_length - IMX179_MAX_COARSE_DIFF;
 
 		control.id = V4L2_CID_COARSE_TIME;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		coarse_time = err ? (frame_length - IMX179_MAX_COARSE_DIFF) :
-				    control.value;
+		coarse_time = err ? max_coarse : min((u32)control.value,
+						     max_coarse);
 
 		/* V4L2_CID_EXPOSURE overrides COARSE_TIME if set */
 		control.id = V4L2_CID_EXPOSURE;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
 		if (!err && control.value > 0) {
-			u32 max_coarse = frame_length - IMX179_MAX_COARSE_DIFF;
 			coarse_time = (u32)div_u64(
 				(u64)control.value * fmt->pix_clk_hz,
 				(u64)fmt->line_length * 1000000ULL);
@@ -639,8 +648,9 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 		gain = err ? IMX179_DEFAULT_GAIN : control.value;
 
 		dev_info(&client->dev,
-			 "%s: mode=%d frame_len=%u coarse=%u gain=%u\n",
-			 __func__, s_data->mode, frame_length,
+			 "%s: mode=%d frame_len=%u (mode_default=%u) "
+			 "coarse=%u gain=%u\n",
+			 __func__, s_data->mode, frame_length, mode_fl,
 			 coarse_time, gain);
 
 		/* Build override register list */
@@ -870,6 +880,7 @@ static int imx179_set_frame_length(struct imx179 *priv, s32 val)
 			goto fail;
 	}
 
+	priv->cur_frame_length = frame_length;
 	return 0;
 
 fail:
@@ -948,8 +959,13 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 		struct camera_common_data *s_data = priv->s_data;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
+		u32 fl = priv->cur_frame_length ?
+			 priv->cur_frame_length : IMX179_DEFAULT_FRAME_LENGTH;
+		u32 max_coarse = fl - IMX179_MAX_COARSE_DIFF;
 		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
+		if (coarse > max_coarse)
+			coarse = max_coarse;
 		err = imx179_set_coarse_time(priv, coarse);
 		break;
 	}

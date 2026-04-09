@@ -2806,6 +2806,19 @@ static const int ov5693_120fps[] = {
 	120,
 };
 
+/* Per-mode VTS from register tables (0x380e:0x380f) */
+static const u32 ov5693_mode_frame_length[] = {
+	[OV5693_MODE_2592X1944]            = 0x07C0,  /* 1984 — 30fps */
+	[OV5693_MODE_2592X1458]            = 0x07C0,  /* 1984 — 30fps */
+	[OV5693_MODE_1920X1080]            = 0x07C0,  /* 1984 — 30fps */
+	[OV5693_MODE_1280X720_60FPS]       = 0x02F8,  /* 760  — 60fps */
+	[OV5693_MODE_1280X720_90FPS]       = 0x02F8,  /* 760  — 90fps */
+	[OV5693_MODE_1280X720_120FPS]      = 0x02F8,  /* 760  — 120fps */
+	[OV5693_MODE_1280X720_120FPS_SAFE] = 0x02F8,  /* 760  — 120fps safe */
+	[OV5693_MODE_2592X1944_HDR]        = 0x07C0,  /* 1984 — 24fps HDR */
+	[OV5693_MODE_1920X1080_HDR]        = 0x073A,  /* 1850 — 30fps HDR */
+};
+
 #define OV5693_PIX_CLK_HZ		160000000ULL
 #define OV5693_LINE_LENGTH_FULL		2688
 #define OV5693_LINE_LENGTH_720P		1752
