@@ -257,6 +257,38 @@ static int imx179_write_table(struct imx179 *priv,
 					 IMX179_TABLE_END);
 }
 
+static int imx179_write_table_with_overrides(struct imx179 *priv,
+			const imx179_reg table[],
+			const imx179_reg overrides[],
+			int num_overrides)
+{
+	const imx179_reg *next;
+	int err, i;
+
+	for (next = table; next->addr != IMX179_TABLE_END; next++) {
+		if (next->addr == IMX179_TABLE_WAIT_MS) {
+			msleep(next->val);
+			continue;
+		}
+
+		u8 val = next->val;
+
+		if (overrides) {
+			for (i = 0; i < num_overrides; i++) {
+				if (next->addr == overrides[i].addr) {
+					val = overrides[i].val;
+					break;
+				}
+			}
+		}
+
+		err = imx179_write_reg(priv->s_data, next->addr, val);
+		if (err)
+			return err;
+	}
+	return 0;
+}
+
 static void imx179_gpio_set(struct imx179 *priv,
 			    unsigned int gpio, int val)
 {
@@ -564,64 +596,61 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 			mode_table[IMX179_MODE_STOP_STREAM]);
 	}
 
-	err = imx179_write_table(priv, mode_table[s_data->mode]);
-	if (err) {
-		dev_err(&client->dev,
-			"%s: write_table mode %d failed: %d\n",
-			__func__, s_data->mode, err);
-		goto exit;
-	}
-
-	/* Enable group hold for atomic exposure/gain update */
-	priv->group_hold_en = true;
-	imx179_set_group_hold(priv);
-
-	/* write list of override regs for the asking frame length,
-	 * coarse integration time, and gain. Failures are non-fatal */
-	control.id = V4L2_CID_GAIN;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	dev_info(&client->dev, "%s: gain ctrl=%d err=%d\n",
-		 __func__, control.value, err);
-	if (!err)
-		err = imx179_set_gain(priv, control.value);
-
-	control.id = V4L2_CID_FRAME_LENGTH;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	dev_info(&client->dev, "%s: frame_length ctrl=%d err=%d\n",
-		 __func__, control.value, err);
-	if (!err)
-		err = imx179_set_frame_length(priv, control.value);
-
-	control.id = V4L2_CID_COARSE_TIME;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	dev_info(&client->dev, "%s: coarse_time ctrl=%d err=%d\n",
-		 __func__, control.value, err);
-	if (!err)
-		err = imx179_set_coarse_time(priv, control.value);
-
-	/* Apply cached V4L2_CID_EXPOSURE (µs → coarse_time conversion) */
-	control.id = V4L2_CID_EXPOSURE;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	if (!err && control.value > 0) {
+	/* Build override list for exposure/gain/frame_length —
+	 * stock driver replaces these registers during mode table write
+	 * so they take effect BEFORE stream starts */
+	{
+		imx179_reg overrides[5]; /* 2 frame_length + 2 coarse + 1 gain */
+		u32 frame_length, coarse_time, gain;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
-		u32 coarse = (u32)div_u64((u64)control.value * fmt->pix_clk_hz,
-					  (u64)fmt->line_length * 1000000ULL);
-		u32 max_coarse = IMX179_DEFAULT_FRAME_LENGTH -
-				 IMX179_MAX_COARSE_DIFF;
-		if (coarse > max_coarse)
-			coarse = max_coarse;
-		dev_info(&client->dev,
-			 "%s: exposure=%d us -> coarse=%u (line_len=%u pix_clk=%llu)\n",
-			 __func__, control.value, coarse,
-			 fmt->line_length, fmt->pix_clk_hz);
-		if (coarse > 0)
-			imx179_set_coarse_time(priv, coarse);
-	}
 
-	/* Release group hold — apply all buffered register changes */
-	priv->group_hold_en = false;
-	imx179_set_group_hold(priv);
+		/* Read cached ctrl values */
+		control.id = V4L2_CID_FRAME_LENGTH;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		frame_length = err ? IMX179_DEFAULT_FRAME_LENGTH : control.value;
+
+		control.id = V4L2_CID_COARSE_TIME;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		coarse_time = err ? (frame_length - IMX179_MAX_COARSE_DIFF) :
+				    control.value;
+
+		/* V4L2_CID_EXPOSURE overrides COARSE_TIME if set */
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		if (!err && control.value > 0) {
+			u32 max_coarse = frame_length - IMX179_MAX_COARSE_DIFF;
+			coarse_time = (u32)div_u64(
+				(u64)control.value * fmt->pix_clk_hz,
+				(u64)fmt->line_length * 1000000ULL);
+			if (coarse_time > max_coarse)
+				coarse_time = max_coarse;
+		}
+
+		control.id = V4L2_CID_GAIN;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		gain = err ? IMX179_DEFAULT_GAIN : control.value;
+
+		dev_info(&client->dev,
+			 "%s: mode=%d frame_len=%u coarse=%u gain=%u\n",
+			 __func__, s_data->mode, frame_length,
+			 coarse_time, gain);
+
+		/* Build override register list */
+		imx179_get_frame_length_regs(overrides, frame_length);
+		imx179_get_coarse_time_regs(overrides + 2, coarse_time);
+		imx179_get_gain_reg(overrides + 4, gain);
+
+		/* Write mode table with overrides (like stock driver) */
+		err = imx179_write_table_with_overrides(priv,
+			mode_table[s_data->mode], overrides, 5);
+		if (err) {
+			dev_err(&client->dev,
+				"%s: write_table mode %d failed: %d\n",
+				__func__, s_data->mode, err);
+			goto exit;
+		}
+	}
 
 	err = imx179_write_table(priv, mode_table[IMX179_MODE_START_STREAM]);
 	if (err)
