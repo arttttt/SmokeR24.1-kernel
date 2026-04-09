@@ -223,7 +223,9 @@ static int kthread_done(void *data)
 {
 	struct tegra_channel *chan = data;
 	struct tegra_channel_buffer *buf;
+	struct sched_param param = { .sched_priority = 2 };
 
+	sched_setscheduler(current, SCHED_FIFO, &param);
 	set_freezable();
 
 	while (1) {

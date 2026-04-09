@@ -727,8 +727,10 @@ static int tegra_channel_kthread_capture_start(void *data)
 {
 	struct tegra_channel *chan = data;
 	struct tegra_channel_buffer *buf;
+	struct sched_param param = { .sched_priority = 1 };
 	int err = 0;
 
+	sched_setscheduler(current, SCHED_FIFO, &param);
 	set_freezable();
 
 	while (1) {
