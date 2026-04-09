@@ -1220,6 +1220,7 @@ static const ov5693_reg mode_1280x720_60fps[] = {
 	{OV5693_TABLE_END, 0x0000}
 };
 
+#if 0 /* 90fps/120fps modes disabled — don't work on mocha 1-lane CSI */
 /*
  * 1280x720 @ 90fps (experimental)
  *
@@ -2023,6 +2024,7 @@ static const ov5693_reg mode_1280x720_120fps_safe[] = {
 	{0x380d, 0x80},
 	{OV5693_TABLE_END, 0x0000}
 };
+#endif /* disabled 90fps/120fps modes */
 
 static const ov5693_reg mode_2592x1944_HDR_24fps[] = {
 	{0x0100, 0x00},/* Including sw reset */
@@ -2773,9 +2775,6 @@ enum {
 	OV5693_MODE_2592X1458,
 	OV5693_MODE_1920X1080,
 	OV5693_MODE_1280X720_60FPS,
-	OV5693_MODE_1280X720_90FPS,
-	OV5693_MODE_1280X720_120FPS,
-	OV5693_MODE_1280X720_120FPS_SAFE,
 	OV5693_MODE_2592X1944_HDR,
 	OV5693_MODE_1920X1080_HDR,
 
@@ -2789,9 +2788,6 @@ static const ov5693_reg *mode_table[] = {
 	[OV5693_MODE_2592X1458]			= mode_2592x1458,
 	[OV5693_MODE_1920X1080]			= mode_1920x1080,
 	[OV5693_MODE_1280X720_60FPS]		= mode_1280x720_60fps,
-	[OV5693_MODE_1280X720_90FPS]		= mode_1280x720_90fps,
-	[OV5693_MODE_1280X720_120FPS]		= mode_1280x720_120fps,
-	[OV5693_MODE_1280X720_120FPS_SAFE]	= mode_1280x720_120fps_safe,
 	[OV5693_MODE_2592X1944_HDR]		= mode_2592x1944_HDR_24fps,
 	[OV5693_MODE_1920X1080_HDR]		= mode_1920x1080_HDR_30fps,
 
@@ -2826,9 +2822,6 @@ static const u32 ov5693_mode_frame_length[] = {
 	[OV5693_MODE_2592X1458]            = 0x07C0,  /* 1984 — 30fps */
 	[OV5693_MODE_1920X1080]            = 0x0676,  /* 1654 — 24fps */
 	[OV5693_MODE_1280X720_60FPS]       = 0x03E0,  /* 992  — 60fps */
-	[OV5693_MODE_1280X720_90FPS]       = 0x02F8,  /* 760  — 90fps */
-	[OV5693_MODE_1280X720_120FPS]      = 0x02F8,  /* 760  — 120fps */
-	[OV5693_MODE_1280X720_120FPS_SAFE] = 0x02F8,  /* 760  — 120fps safe */
 	[OV5693_MODE_2592X1944_HDR]        = 0x07C0,  /* 1984 — 24fps HDR */
 	[OV5693_MODE_1920X1080_HDR]        = 0x073A,  /* 1850 — 30fps HDR */
 };
