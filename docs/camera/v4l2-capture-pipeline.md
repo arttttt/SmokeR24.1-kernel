@@ -115,9 +115,25 @@ tools/camera/
 └── v4l2_diag.c               — diagnostic/benchmark tool
 ```
 
+## GPU ISP Performance (1920x1080)
+
+| Backend | upload | GPU | readback | total | FPS |
+|---------|--------|-----|----------|-------|-----|
+| Vulkan nvmap zero-copy | 0ms | 20ms | 8ms | **28ms** | **~35** |
+| GLES gralloc+glFlush | 32ms | async | 0ms | **34ms** | **~29** |
+| CPU single-pass | — | — | — | 700ms | ~1.4 |
+
+### nvmap foreign dmabuf (kernel patch)
+V4L2 dmabuf → nvmap import → Vulkan OPAQUE_FD. Zero-copy GPU access.
+NVIDIA never implemented this — custom kernel patch in nvmap_dmabuf.c.
+
+### VK_NV_glsl_shader
+SPIR-V compiler crashes on K1. GLSL compiled at runtime via VK_NV_glsl_shader extension.
+
 ## Known Limitations
 
-- Full res IMX179 capped at ~5fps (DMA bandwidth, not sensor)
+- Full res IMX179 capped at ~5.5fps (DMA bandwidth, VI at 600MHz)
 - OV5693 limited by 1-lane CSI-E (~20fps max at 1080p)
 - High FPS modes (60/90/120) don't reach target — mode table switching TBD
-- No ISP — CPU Bayer demosaic in HAL
+- HW ISP syncpoint broken — soft ISP used instead
+- IMX179 slight green tint — possible Bayer pattern mismatch
