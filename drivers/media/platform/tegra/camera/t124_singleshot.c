@@ -74,64 +74,20 @@ static int vi_submit_isp_config(struct tegra_channel *chan)
 		return -ENOMEM;
 	}
 
-	/* Build stock VI ISP init cmdbuf */
+	/* Minimal VI ISP config — only routing, don't touch CSI/PP.
+	 * MMIO in enable_stream already configured CSI/PP correctly.
+	 * We only need host1x methods for ISP routing (IMAGE_DEF + ISPINTF). */
 	cmd[n++] = nvhost_opcode_setclass(VI_CLASS_ID, 0, 0);
 
-	/* VI_CFG_CG_CTRL (0x03c) = 0x10100010 */
-	cmd[n++] = nvhost_opcode_incr(0x03c, 1);
-	cmd[n++] = 0x10100010;
-
-	/* CSI_IMAGE_DT (0x042/0x082) */
-	if (port == 0) {
-		cmd[n++] = nvhost_opcode_incr(0x042, 1);
-		cmd[n++] = 0x00000001;
-		/* CSI_PP_CONFIG (0x043, 6 words) */
-		cmd[n++] = nvhost_opcode_incr(0x043, 6);
-	} else {
-		cmd[n++] = nvhost_opcode_incr(0x082, 1);
-		cmd[n++] = 0x00000001;
-		/* CSI_PP_CONFIG (0x083, 6 words) */
-		cmd[n++] = nvhost_opcode_incr(0x083, 6);
-	}
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x001c984c;  /* PP config from stock trace */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-
-	/* CSI_OUTPUT_CFG (0x29a/0x2a7, 9 words) = all zeros */
-	cmd[n++] = nvhost_opcode_incr(
-		(port == 0) ? 0x29a : 0x2a7, 9);
-	{ int i; for (i = 0; i < 9; i++) cmd[n++] = 0; }
-
-	/* CSI_ISPINTF_CONFIG (0x059/0x099) = 0x3 */
+	/* CSI_ISPINTF_CONFIG (0x059/0x099) = 0x3 (enable ISP interface) */
 	cmd[n++] = nvhost_opcode_incr(
 		(port == 0) ? 0x059 : 0x099, 1);
 	cmd[n++] = 0x00000003;
-
-	/* CSI_CAPTURE_CFG (0x20e/0x21b, 6 words) — from stock */
-	cmd[n++] = nvhost_opcode_incr(
-		(port == 0) ? 0x20e : 0x21b, 6);
-	cmd[n++] = 0x007f0014;
-	cmd[n++] = 0x080301f0;  /* may need adjustment for sensor */
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00140000;
-	cmd[n++] = 0x0000f005;
-	cmd[n++] = 0x00000000;
 
 	/* CSI_IMAGE_DEF (0x242/0x282) = ISP dest */
 	cmd[n++] = nvhost_opcode_incr(
 		(port == 0) ? 0x242 : 0x282, 1);
 	cmd[n++] = isp_dest;
-
-	/* CSI_SURFACE (0x24b, 3 words) = zeros */
-	cmd[n++] = nvhost_opcode_incr(0x24b, 3);
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-
-	/* CSI_SURFACE2 (0x258, 3 words) = zeros */
-	cmd[n++] = nvhost_opcode_incr(0x258, 3);
-	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
 
 	/* Immediate syncpt (cond=0) */
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(0, syncpt_id);
