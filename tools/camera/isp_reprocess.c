@@ -419,20 +419,21 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
-    /* Output surfaces — stock strides */
+    /* Output surfaces — ISP writes luma to 0xE07 (confirmed by test).
+     * Swap Y and U: put Y buffer at 0xE07, U at 0xE04 */
     cmd[n++] = OP_INCR(0xE04, 3);
-    y_reloc = n;
-    cmd[n++] = out_y_iova;                /* Y IOVA (reloc) */
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000A40;                /* Y stride = 2624 */
-    cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
-    cmd[n++] = out_u_iova;                /* U IOVA (reloc) */
+    cmd[n++] = out_u_iova;                /* U at 0xE04 */
     cmd[n++] = 0x00000000;
     cmd[n++] = 0x00000540;                /* UV stride = 1344 */
+    cmd[n++] = OP_INCR(0xE07, 3);
+    y_reloc = n;
+    cmd[n++] = out_y_iova;                /* Y at 0xE07 (where ISP writes luma) */
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000A40;                /* Y stride = 2624 */
     cmd[n++] = OP_INCR(0xE0A, 3);
     v_reloc = n;
-    cmd[n++] = out_v_iova;                /* V IOVA (reloc) */
+    cmd[n++] = out_v_iova;                /* V at 0xE0A */
     cmd[n++] = 0x00000000;
     cmd[n++] = 0x00000540;                /* UV stride = 1344 */
 
