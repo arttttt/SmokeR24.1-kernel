@@ -26,6 +26,8 @@
 #include "camera/t124_registers.h"
 #include "vi_capture.h"
 
+extern int isp_reprocess;
+
 /* ---- helpers ---- */
 
 static void surface_setup(struct tegra_channel *chan,
@@ -96,7 +98,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	u32 thresh[TEGRA_CSI_BLOCKS] = { 0 };
 	struct timespec ts;
 
-	/* First frame: enable stream */
+	/* First frame: enable stream + set destination */
 	if (!chan->bfirst_fstart) {
 		err = tegra_channel_enable_stream(chan);
 		if (err) {
@@ -104,20 +106,45 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
 			return err;
 		}
-		/* Enable DEST_MEM */
 		for (index = 0; index < chan->valid_ports; index++) {
 			u32 val = csi_read(chan, index,
 					   TEGRA_VI_CSI_IMAGE_DEF);
-			csi_write(chan, index, TEGRA_VI_CSI_IMAGE_DEF,
-				  val | IMAGE_DEF_DEST_MEM);
+			if (chan->use_isp && !isp_reprocess)
+				/* ISP streaming: VI → ISP directly */
+				csi_write(chan, index,
+					  TEGRA_VI_CSI_IMAGE_DEF,
+					  val | ((chan->port[0] == 0) ?
+					  IMAGE_DEF_DEST_ISP_A :
+					  IMAGE_DEF_DEST_ISP_B));
+			else
+				/* Normal or ISP reprocess: VI → memory */
+				csi_write(chan, index,
+					  TEGRA_VI_CSI_IMAGE_DEF,
+					  val | IMAGE_DEF_DEST_MEM);
 		}
 		chan->bfirst_fstart = true;
 	}
 
-	/* Program surface */
-	for (index = 0; index < chan->valid_ports; index++)
-		surface_setup(chan, index,
-			      buf->addr + chan->buffer_offset[index], bpl);
+	/* Program surface address based on ISP mode */
+	for (index = 0; index < chan->valid_ports; index++) {
+		dma_addr_t addr;
+		int stride;
+
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming: no memory write from VI */
+			addr = 0;
+			stride = 0;
+		} else if (chan->use_isp) {
+			/* ISP reprocess: VI writes raw to isp_raw_dma */
+			addr = chan->isp_raw_dma;
+			stride = chan->format.width * 2;
+		} else {
+			/* Normal: VI writes to V4L2 buffer */
+			addr = buf->addr + chan->buffer_offset[index];
+			stride = bpl;
+		}
+		surface_setup(chan, index, addr, stride);
+	}
 
 	/* Re-arm PP single-shot per frame (vi2.c does this every frame) */
 	for (index = 0; index < chan->valid_ports; index++) {
