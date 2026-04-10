@@ -516,17 +516,10 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Cleanup — force-increment stuck syncpts before close */
+    /* Cleanup — just wait for kernel timeout to clean stuck jobs */
     printf("\n[cleanup]\n");
-    printf("  Unsticking syncpts...\n");
-#define NVHOST_IOCTL_CTRL_SYNCPT_INCR _IOW('H', 2, struct { uint32_t id; })
-    for (int i = 0; i < 20; i++) {
-        struct { uint32_t id; } si;
-        si.id = sp_memory; ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-        si.id = sp_stats;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-        si.id = sp_loadv;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-    }
-    usleep(200000);
+    printf("  Waiting for ISP jobs to drain...\n");
+    usleep(500000);
     pHwDestroy(hw_settings);
     pIspClose(isp_handle);
     close(ctrl_fd);
