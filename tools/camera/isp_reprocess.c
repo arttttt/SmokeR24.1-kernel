@@ -146,14 +146,22 @@ static uint32_t nvmap_pin(uint32_t handle) {
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <raw_bayer_file>\n", argv[0]);
+        printf("Usage: %s <raw_bayer_file> [num_frames]\n", argv[0]);
         return 1;
     }
     const char *raw_path = argv[1];
+    int num_frames = (argc > 2) ? atoi(argv[2]) : 1;
 
     printf("=== ISP Reprocess Test ===\n");
-    printf("Input: %s (%dx%d BG10)\n", raw_path, W, H);
-    printf("Output: YUV %dx%d (Y=%d UV=%d total=%d)\n", W, H, Y_SIZE, UV_SIZE, OUT_SIZE);
+    printf("Input: %s (%dx%d BG10), frames=%d\n", raw_path, W, H, num_frames);
+    printf("Output: 32bpp %dx%d (total=%d)\n", W, H, OUT_SIZE);
+
+    /* Open nvmap once before loop */
+    nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
+    if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
+
+  for (int frame = 0; frame < num_frames; frame++) {
+    printf("\n======= Frame %d/%d =======\n", frame+1, num_frames);
 
     /* ---- Step 1: Init ISP via MIUI blobs ---- */
     printf("\n[1] Init ISP blob...\n");
@@ -227,27 +235,6 @@ int main(int argc, char **argv)
     /* syncpts from ctx: ctx[4] has base, but we need to query them */
     printf("\n[2] Setup for reprocess (using blob's channel)...\n");
 
-    /* Use the SAME nvmap fd that the blob opened.
-     * From strace: blob opens /dev/nvmap early as fd ~5.
-     * We can find it by scanning /proc/self/fd for nvmap. */
-    {
-        char link[256];
-        for (int fd = 3; fd < 20; fd++) {
-            char path[64];
-            snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
-            int len = readlink(path, link, sizeof(link)-1);
-            if (len > 0) {
-                link[len] = 0;
-                if (strstr(link, "nvmap")) {
-                    nvmap_fd = fd;
-                    break;
-                }
-            }
-        }
-    }
-    if (nvmap_fd < 0) {
-        nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
-    }
     printf("  nvmap_fd=%d\n", nvmap_fd);
 
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
@@ -516,14 +503,19 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Cleanup — just wait for kernel timeout to clean stuck jobs */
+    /* Cleanup — close ISP to reset state for next frame */
     printf("\n[cleanup]\n");
-    printf("  Waiting for ISP jobs to drain...\n");
-    usleep(500000);
     pHwDestroy(hw_settings);
     pIspClose(isp_handle);
+    isp_handle = NULL;
+    hw_settings = NULL;
     close(ctrl_fd);
+    /* Keep nvmap_fd open for next iteration */
+    printf("  Frame %d done\n", frame+1);
+
+  } /* end frame loop */
+
     close(nvmap_fd);
-    printf("=== Done ===\n");
+    printf("\n=== All %d frames done ===\n", num_frames);
     return 0;
 }
