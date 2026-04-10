@@ -31,12 +31,11 @@ extern int isp_reprocess;
 extern int t124_csi_tpg;
 
 /* Include host1x internals for opcode macros and job API */
-#include "dev.h"
-#include "nvhost_job.h"
-#include "nvhost_acm.h"
-
-/* host1x opcode helpers */
-#include "host1x/host1x02_hardware.h"
+#include "../../../../video/tegra/host/dev.h"
+#include "../../../../video/tegra/host/nvhost_job.h"
+#include "../../../../video/tegra/host/nvhost_acm.h"
+#include "../../../../video/tegra/host/host1x/host1x02_hardware.h"
+#include "../../../../video/tegra/host/host1x/hw_host1x01_uclass.h"
 
 #define VI_CLASS_ID 0x30
 
