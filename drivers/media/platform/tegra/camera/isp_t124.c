@@ -1535,18 +1535,44 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
 			err, isp->syncpt_memory, isp->frame_fence_memory);
 		/* Dump ISP status registers for debugging */
-		base = ioremap(phys, 0x100);
+		/* ISP reg space = 256KB. No module_busy — may hang after timeout.
+		 * method * 4 = MMIO byte offset. */
+		base = ioremap(phys, 0x4000);
 		if (base) {
 			int i;
+			u32 id = readl(base + 0x020);
 			dev_err(&isp->pdev->dev,
-				"ISP MMIO @ 0x%08x:\n", phys);
-			for (i = 0; i < 0x100; i += 16) {
-				u32 a=readl(base+i), b=readl(base+i+4),
-				    c=readl(base+i+8), d=readl(base+i+12);
-				if (a||b||c||d)
-					dev_err(&isp->pdev->dev,
-						"  [%03x] %08x %08x %08x %08x\n",
-						i, a, b, c, d);
+				"ISP MMIO @ 0x%08x id=0x%08x:\n", phys, id);
+			if (id) {
+				/* Control: methods 0x000-0x07F */
+				for (i = 0; i < 0x200; i += 16) {
+					u32 a=readl(base+i), b=readl(base+i+4),
+					    c=readl(base+i+8), d=readl(base+i+12);
+					if (a||b||c||d)
+						dev_err(&isp->pdev->dev,
+							"  [%03x] %08x %08x %08x %08x\n",
+							i, a, b, c, d);
+				}
+				/* Processing: methods 0x500-0x51F */
+				for (i = 0x1400; i < 0x1480; i += 16) {
+					u32 a=readl(base+i), b=readl(base+i+4),
+					    c=readl(base+i+8), d=readl(base+i+12);
+					if (a||b||c||d)
+						dev_err(&isp->pdev->dev,
+							"  [%03x] %08x %08x %08x %08x\n",
+							i, a, b, c, d);
+				}
+				/* Output: methods 0xE00-0xE3F */
+				for (i = 0x3800; i < 0x3900; i += 16) {
+					u32 a=readl(base+i), b=readl(base+i+4),
+					    c=readl(base+i+8), d=readl(base+i+12);
+					if (a||b||c||d)
+						dev_err(&isp->pdev->dev,
+							"  [%03x] %08x %08x %08x %08x\n",
+							i, a, b, c, d);
+				}
+			} else {
+				dev_err(&isp->pdev->dev, "ISP off (id=0)\n");
 			}
 			iounmap(base);
 		}
