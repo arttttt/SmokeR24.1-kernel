@@ -1671,10 +1671,19 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			err, isp->syncpt_memory, isp->frame_fence_memory);
 		/* Note: can't read ISP MMIO here — timeout recovery may
 		 * have already powered off the module, causing bus fault. */
-	} else
+	} else {
+		u32 *stats = (u32 *)isp->stats_buf.cpu;
+		u32 *work = (u32 *)isp->work_buf.cpu;
+		int si, stats_used = 0, work_used = 0;
+		for (si = 0; si < (int)(isp->stats_buf.size / 4) && si < 1024; si++)
+			if (stats[si]) stats_used++;
+		for (si = 0; si < (int)(isp->work_buf.size / 4) && si < 1024; si++)
+			if (work[si]) work_used++;
 		dev_info(&isp->pdev->dev,
-			 "ISP frame OK (sp=%u thresh=%u)\n",
-			 isp->syncpt_memory, isp->frame_fence_memory);
+			 "ISP frame OK (sp=%u thresh=%u) stats=%d/1024 work=%d/1024\n",
+			 isp->syncpt_memory, isp->frame_fence_memory,
+			 stats_used, work_used);
+	}
 
 	if (!isp->reprocess)
 		nvhost_module_idle(isp->pdev);
