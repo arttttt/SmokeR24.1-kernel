@@ -44,7 +44,11 @@ int main(int argc, char **argv)
     typedef NvError (*HwCreate_t)(void *, void **);
     typedef NvError (*HwApply_t)(void *);
     typedef NvError (*HwDestroy_t)(void *);
-    typedef NvError (*ProcessFrame_t)(void *handle, ...);
+    /* Fixed args: handle, surf0, surf1, surf2, settings, arg6, arg7, arg8, arg9 */
+    typedef NvError (*ProcessFrame_t)(void *handle,
+        uint32_t surf0, uint32_t surf1, uint32_t surf2,
+        void *settings, uint32_t arg6,
+        uint32_t arg7, uint32_t arg8, uint32_t *arg9);
     typedef NvError (*Flush_t)(void *);
     typedef NvError (*MemCreate_t)(void *, void **, NvU32);
     typedef NvError (*MemAlloc_t)(void *, void *, NvU32, NvU32, NvU32, NvU32);
