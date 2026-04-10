@@ -332,11 +332,16 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0x015, 1);
     cmd[n++] = 0x04040007;  /* streaming+stats mode (from stock) */
 
-    /* Input block (reprocess): raw Bayer from memory
-     * Note: 0xE33 (input format) NOT used by MIUI libnvisp_v3.so —
-     * format comes from calibration/pipeline config */
+    /* Input block (reprocess): raw Bayer 10-bit from memory
+     * 0xE33 IS needed — without it, output is all zeros.
+     * Format code: try VI IMAGE_DEF style encoding.
+     * VI IMAGE_DEF for RAW10: 0x00200004 (bits=10, format=RAW)
+     * CSI DT for RAW10: 0x2B
+     * Try several encodings to find the right one */
     cmd[n++] = OP_INCR(0xE31, 1);
     cmd[n++] = (W & 0x7FFF) | (H << 16);  /* input dimensions */
+    cmd[n++] = OP_INCR(0xE33, 1);
+    cmd[n++] = 0x00200004;  /* VI IMAGE_DEF for RAW10 BGGR */
     cmd[n++] = OP_INCR(0xE34, 3);         /* input plane 0 */
     in_reloc = n; cmd[n++] = in_iova; cmd[n++] = 0; cmd[n++] = W * BPP;
     cmd[n++] = OP_INCR(0xE32, 1);
