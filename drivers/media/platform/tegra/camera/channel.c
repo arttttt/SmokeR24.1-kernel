@@ -538,18 +538,24 @@ int tegra_channel_enable_stream(struct tegra_channel *chan)
 		}
 
 		/* VI CSI image config — port specific base */
-		if (chan->use_isp && !isp_reprocess) {
-			/* ISP streaming: skip MMIO IMAGE_DEF and ISPINTF.
-			 * These are set via host1x methods in vi_submit_isp_config()
-			 * to properly route pixels through ISP hardware pipeline. */
-		} else {
+		{
+			u32 dest;
+			if (chan->use_isp && !isp_reprocess)
+				dest = (chan->port[0] == 0) ?
+					IMAGE_DEF_DEST_ISP_A :
+					IMAGE_DEF_DEST_ISP_B;
+			else
+				dest = IMAGE_DEF_DEST_MEM;
 			tegra_channel_write(chan,
 				vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF,
-				(t124_csi_tpg ? 0 :
-					(1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
-				(format << IMAGE_DEF_FORMAT_OFFSET) |
-				IMAGE_DEF_DEST_MEM);
+				((t124_csi_tpg || (chan->use_isp && !isp_reprocess))
+					? 0 : (1 << BYPASS_PXL_TRANSFORM_OFFSET)) |
+				(format << IMAGE_DEF_FORMAT_OFFSET) | dest);
 		}
+		if (chan->use_isp && !isp_reprocess)
+			tegra_channel_write(chan,
+				vi_csi_base + TEGRA_VI_CSI_ISPINTF_CONFIG,
+				ISPINTF_CONFIG_ENABLE);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_DT,
 		       data_type);
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE_WC,

@@ -209,32 +209,19 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
 			return err;
 		}
-		if (chan->use_isp && !isp_reprocess) {
-			/* ISP streaming: configure VI→ISP via host1x cmdbuf
-			 * (stock uses methods, not MMIO for ISP routing) */
-			err = vi_submit_isp_config(chan);
-			if (err) {
-				dev_err(&chan->video.dev,
-					"VI ISP config failed: %d\n", err);
-				chan->capture_state = CAPTURE_ERROR;
-				buffer_done(chan, &buf->buf, &ts,
-					    VB2_BUF_STATE_ERROR);
-				return err;
-			}
-		} else {
-			for (index = 0; index < chan->valid_ports; index++) {
-				u32 val = csi_read(chan, index,
-						   TEGRA_VI_CSI_IMAGE_DEF);
-				if (chan->use_isp)
-					/* ISP reprocess: VI → memory */
-					csi_write(chan, index,
-						  TEGRA_VI_CSI_IMAGE_DEF,
-						  val | IMAGE_DEF_DEST_MEM);
-				else
-					csi_write(chan, index,
-						  TEGRA_VI_CSI_IMAGE_DEF,
-						  val | IMAGE_DEF_DEST_MEM);
-			}
+		for (index = 0; index < chan->valid_ports; index++) {
+			u32 val = csi_read(chan, index,
+					   TEGRA_VI_CSI_IMAGE_DEF);
+			if (chan->use_isp && !isp_reprocess)
+				csi_write(chan, index,
+					  TEGRA_VI_CSI_IMAGE_DEF,
+					  val | ((chan->port[0] == 0) ?
+					  IMAGE_DEF_DEST_ISP_A :
+					  IMAGE_DEF_DEST_ISP_B));
+			else
+				csi_write(chan, index,
+					  TEGRA_VI_CSI_IMAGE_DEF,
+					  val | IMAGE_DEF_DEST_MEM);
 		}
 		chan->bfirst_fstart = true;
 	}
