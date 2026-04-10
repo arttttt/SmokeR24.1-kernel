@@ -28,6 +28,156 @@
 #include "isp_t124.h"
 
 extern int isp_reprocess;
+extern int t124_csi_tpg;
+
+/* Include host1x internals for opcode macros and job API */
+#include "dev.h"
+#include "nvhost_job.h"
+#include "nvhost_acm.h"
+
+/* host1x opcode helpers */
+#include "host1x/host1x02_hardware.h"
+
+#define VI_CLASS_ID 0x30
+
+/* Submit VI ISP config via host1x cmdbuf (matches stock VI init).
+ * Stock configures VI for ISP routing via host1x methods, not MMIO. */
+static int vi_submit_isp_config(struct tegra_channel *chan)
+{
+	struct nvhost_device_data *pdata;
+	struct nvhost_channel *ch = NULL;
+	struct nvhost_job *job;
+	u32 *cmd;
+	dma_addr_t cmd_phys;
+	struct platform_device *host1x_pdev;
+	struct device *host1x_dev;
+	int n = 0, err;
+	u32 syncpt_id, thresh;
+	int port = chan->port[0];
+	/* ISP-A=0x201, ISP-B=0x202 for IMAGE_DEF */
+	u32 isp_dest = (port == 0) ? 0x201 : 0x202;
+
+	pdata = platform_get_drvdata(chan->vi->ndev);
+
+	err = nvhost_channel_map(pdata, &ch, chan);
+	if (err) {
+		dev_err(&chan->video.dev, "VI host1x channel map failed: %d\n", err);
+		return err;
+	}
+
+	/* Get a syncpt for this submit */
+	syncpt_id = chan->syncpt[0];
+
+	/* Allocate cmdbuf via host1x parent */
+	host1x_pdev = nvhost_get_parent(chan->vi->ndev);
+	host1x_dev = host1x_pdev ? &host1x_pdev->dev : &chan->vi->ndev->dev;
+	cmd = dma_alloc_coherent(host1x_dev, PAGE_SIZE, &cmd_phys, GFP_KERNEL);
+	if (!cmd) {
+		return -ENOMEM;
+	}
+
+	/* Build stock VI ISP init cmdbuf */
+	cmd[n++] = nvhost_opcode_setclass(VI_CLASS_ID, 0, 0);
+
+	/* VI_CFG_CG_CTRL (0x03c) = 0x10100010 */
+	cmd[n++] = nvhost_opcode_incr(0x03c, 1);
+	cmd[n++] = 0x10100010;
+
+	/* CSI_IMAGE_DT (0x042/0x082) */
+	if (port == 0) {
+		cmd[n++] = nvhost_opcode_incr(0x042, 1);
+		cmd[n++] = 0x00000001;
+		/* CSI_PP_CONFIG (0x043, 6 words) */
+		cmd[n++] = nvhost_opcode_incr(0x043, 6);
+	} else {
+		cmd[n++] = nvhost_opcode_incr(0x082, 1);
+		cmd[n++] = 0x00000001;
+		/* CSI_PP_CONFIG (0x083, 6 words) */
+		cmd[n++] = nvhost_opcode_incr(0x083, 6);
+	}
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x001c984c;  /* PP config from stock trace */
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00000000;
+
+	/* CSI_OUTPUT_CFG (0x29a/0x2a7, 9 words) = all zeros */
+	cmd[n++] = nvhost_opcode_incr(
+		(port == 0) ? 0x29a : 0x2a7, 9);
+	{ int i; for (i = 0; i < 9; i++) cmd[n++] = 0; }
+
+	/* CSI_ISPINTF_CONFIG (0x059/0x099) = 0x3 */
+	cmd[n++] = nvhost_opcode_incr(
+		(port == 0) ? 0x059 : 0x099, 1);
+	cmd[n++] = 0x00000003;
+
+	/* CSI_CAPTURE_CFG (0x20e/0x21b, 6 words) — from stock */
+	cmd[n++] = nvhost_opcode_incr(
+		(port == 0) ? 0x20e : 0x21b, 6);
+	cmd[n++] = 0x007f0014;
+	cmd[n++] = 0x080301f0;  /* may need adjustment for sensor */
+	cmd[n++] = 0x00000000;
+	cmd[n++] = 0x00140000;
+	cmd[n++] = 0x0000f005;
+	cmd[n++] = 0x00000000;
+
+	/* CSI_IMAGE_DEF (0x242/0x282) = ISP dest */
+	cmd[n++] = nvhost_opcode_incr(
+		(port == 0) ? 0x242 : 0x282, 1);
+	cmd[n++] = isp_dest;
+
+	/* CSI_SURFACE (0x24b, 3 words) = zeros */
+	cmd[n++] = nvhost_opcode_incr(0x24b, 3);
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+
+	/* CSI_SURFACE2 (0x258, 3 words) = zeros */
+	cmd[n++] = nvhost_opcode_incr(0x258, 3);
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+
+	/* Immediate syncpt */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
+		syncpt_id);
+	cmd[n++] = NVHOST_OPCODE_NOOP;
+
+	/* Submit */
+	thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev, syncpt_id, 1);
+
+	job = nvhost_job_alloc(ch, 1, 0, 0, 1);
+	if (!job) {
+		dma_free_coherent(host1x_dev, PAGE_SIZE, cmd, cmd_phys);
+		return -ENOMEM;
+	}
+	job->sp[0].id = syncpt_id;
+	job->sp[0].incrs = 1;
+	job->num_syncpts = 1;
+
+	nvhost_job_add_gather(job, 0, n, 0, VI_CLASS_ID, 0);
+	job->gathers[0].mem_base = cmd_phys;
+
+	err = nvhost_channel_submit(job);
+	if (err) {
+		dev_err(&chan->video.dev,
+			"VI ISP config submit failed: %d\n", err);
+		nvhost_job_put(job);
+		dma_free_coherent(host1x_dev, PAGE_SIZE, cmd, cmd_phys);
+		return err;
+	}
+
+	err = nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
+		syncpt_id, thresh, msecs_to_jiffies(200), NULL, NULL);
+	if (err)
+		dev_err(&chan->video.dev,
+			"VI ISP config syncpt timeout: %d\n", err);
+	else
+		dev_info(&chan->video.dev,
+			"VI ISP config submitted OK (%d words)\n", n);
+
+	nvhost_job_put(job);
+	dma_free_coherent(host1x_dev, PAGE_SIZE, cmd, cmd_phys);
+	return err;
+}
 
 /* ---- helpers ---- */
 
@@ -107,21 +257,32 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
 			return err;
 		}
-		for (index = 0; index < chan->valid_ports; index++) {
-			u32 val = csi_read(chan, index,
-					   TEGRA_VI_CSI_IMAGE_DEF);
-			if (chan->use_isp && !isp_reprocess)
-				/* ISP streaming: VI → ISP directly */
-				csi_write(chan, index,
-					  TEGRA_VI_CSI_IMAGE_DEF,
-					  val | ((chan->port[0] == 0) ?
-					  IMAGE_DEF_DEST_ISP_A :
-					  IMAGE_DEF_DEST_ISP_B));
-			else
-				/* Normal or ISP reprocess: VI → memory */
-				csi_write(chan, index,
-					  TEGRA_VI_CSI_IMAGE_DEF,
-					  val | IMAGE_DEF_DEST_MEM);
+		if (chan->use_isp && !isp_reprocess) {
+			/* ISP streaming: configure VI→ISP via host1x cmdbuf
+			 * (stock uses methods, not MMIO for ISP routing) */
+			err = vi_submit_isp_config(chan);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"VI ISP config failed: %d\n", err);
+				chan->capture_state = CAPTURE_ERROR;
+				buffer_done(chan, &buf->buf, &ts,
+					    VB2_BUF_STATE_ERROR);
+				return err;
+			}
+		} else {
+			for (index = 0; index < chan->valid_ports; index++) {
+				u32 val = csi_read(chan, index,
+						   TEGRA_VI_CSI_IMAGE_DEF);
+				if (chan->use_isp)
+					/* ISP reprocess: VI → memory */
+					csi_write(chan, index,
+						  TEGRA_VI_CSI_IMAGE_DEF,
+						  val | IMAGE_DEF_DEST_MEM);
+				else
+					csi_write(chan, index,
+						  TEGRA_VI_CSI_IMAGE_DEF,
+						  val | IMAGE_DEF_DEST_MEM);
+			}
 		}
 		chan->bfirst_fstart = true;
 	}
