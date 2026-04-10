@@ -425,7 +425,7 @@ static int t124_channel_init_gather_filter(struct nvhost_channel *ch)
 	/* Skip gather filter for ISP — ISP methods require SET_CLASS
 	 * inside gathers for proper method dispatch. Stock kernel
 	 * had gather filter disabled globally. */
-	if (pdata->class == 0x32 || pdata->class == 0x34) {
+	if (pdata->class == 0x30 || pdata->class == 0x32 || pdata->class == 0x34) {
 		u32 val;
 		err = nvhost_module_busy(nvhost_get_parent(pdev));
 		if (err) {
@@ -438,7 +438,7 @@ static int t124_channel_init_gather_filter(struct nvhost_channel *ch)
 		host1x_channel_writel(ch, host1x_channel_channelctrl_r(), val);
 		nvhost_module_idle(nvhost_get_parent(pdev));
 		dev_info(&pdev->dev,
-			 "gather filter DISABLED for ISP class 0x%x\n",
+			 "gather filter DISABLED for class 0x%x\n",
 			 pdata->class);
 		return 0;
 	}
