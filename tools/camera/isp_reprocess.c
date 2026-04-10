@@ -246,13 +246,16 @@ int main(int argc, char **argv)
 
     uint32_t in_h = nvmap_create(IN_SIZE);
     uint32_t out_h = nvmap_create(OUT_SIZE);
+    uint32_t stats_h = nvmap_create(262144);  /* 256KB stats buffer */
     uint32_t cmd_h = nvmap_create(16384);
-    if (!in_h || !out_h || !cmd_h) return 1;
-    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(cmd_h);
+    if (!in_h || !out_h || !stats_h || !cmd_h) return 1;
+    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(stats_h); nvmap_alloc(cmd_h);
 
     uint32_t in_iova = nvmap_pin(in_h);
     uint32_t out_iova = nvmap_pin(out_h);
-    printf("  in_iova=0x%08x out_iova=0x%08x\n", in_iova, out_iova);
+    uint32_t stats_iova = nvmap_pin(stats_h);
+    printf("  in_iova=0x%08x out_iova=0x%08x stats_iova=0x%08x\n",
+           in_iova, out_iova, stats_iova);
 
     /* ---- Step 4: Load raw frame ---- */
     printf("\n[4] Loading %s...\n", raw_path);
@@ -317,6 +320,11 @@ int main(int argc, char **argv)
     cmd[n++] = 0; cmd[n++] = 0;
     cmd[n++] = (H << 16) | W;
 
+    /* Stats buffer (method 0x100) — required for STATS_DONE syncpt */
+    cmd[n++] = OP_INCR(0x100, 4);
+    int stats_reloc = n;
+    cmd[n++] = stats_iova; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+
     /* Input block (reprocess) */
     cmd[n++] = OP_INCR(0xE31, 1);
     cmd[n++] = (W & 0x7FFF) | (H << 16);  /* input dimensions */
@@ -353,8 +361,8 @@ int main(int argc, char **argv)
     nvmap_write(cmd_h, 0, cmd, n * 4);
 
     /* Build relocs */
-    struct nvhost_reloc relocs[4];
-    struct nvhost_reloc_shift shifts[4];
+    struct nvhost_reloc relocs[8];
+    struct nvhost_reloc_shift shifts[8];
     int nr = 0;
 
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
@@ -364,6 +372,8 @@ int main(int argc, char **argv)
     relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
+    shifts[nr++].shift = 0;
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, stats_reloc*4, stats_h, 0 };
     shifts[nr++].shift = 0;
 
     /* ---- Step 6: Submit ---- */
@@ -412,18 +422,25 @@ int main(int argc, char **argv)
     /* ---- Step 7: Read output ---- */
     printf("\n[7] Reading output...\n");
     {
+        /* Check multiple regions of output */
         uint8_t check[4096];
-        nvmap_read(out_h, 0, check, 4096);
-        int nonzero = 0;
-        for (int i = 0; i < 4096; i++)
-            if (check[i] != 0) nonzero++;
-        printf("  First 4KB: %d/4096 non-zero bytes\n", nonzero);
-        printf("  hex: ");
-        for (int i = 0; i < 32; i++) printf("%02x ", check[i]);
-        printf("\n");
+        int offsets[] = { 0, Y_SIZE/2, Y_SIZE-4096, Y_SIZE, Y_SIZE+UV_SIZE };
+        const char *names[] = { "Y start", "Y mid", "Y end", "U start", "V start" };
+        for (int r = 0; r < 5; r++) {
+            nvmap_read(out_h, offsets[r], check, 4096);
+            int nonzero = 0;
+            for (int i = 0; i < 4096; i++)
+                if (check[i] != 0) nonzero++;
+            printf("  %s (off=%d): %d/4096 non-zero", names[r], offsets[r], nonzero);
+            if (nonzero) {
+                printf(" → ");
+                for (int i = 0; i < 16; i++) printf("%02x ", check[i]);
+            }
+            printf("\n");
+        }
 
-        if (nonzero > 0) {
-            /* Dump Y plane to file */
+        {
+            /* Always dump Y plane to file */
             const char *outpath = "/data/local/tmp/isp_reprocess_out.raw";
             FILE *fp = fopen(outpath, "wb");
             if (fp) {
