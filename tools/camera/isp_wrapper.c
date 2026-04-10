@@ -22,7 +22,7 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <pthread.h>
-#include <dlfcn.h>
+#include <sys/syscall.h>
 #include <linux/ioctl.h>
 
 /* ---- nvhost ioctl structures (from kernel include/linux/nvhost_ioctl.h) ---- */
@@ -159,10 +159,20 @@ static struct {
 } mmaps[MAX_MMAPS];
 static int num_mmaps;
 
-/* original functions */
-static int (*real_open)(const char *, int, ...);
-static int (*real_ioctl)(int, int, ...);
-static void *(*real_mmap)(void *, size_t, int, int, int, off_t);
+/* direct syscall wrappers — avoid dlsym/LD_PRELOAD recursion issues */
+static inline int raw_open(const char *path, int flags, mode_t mode) {
+	return syscall(__NR_open, path, flags, mode);
+}
+
+static inline int raw_ioctl(int fd, int request, void *arg) {
+	return syscall(__NR_ioctl, fd, request, arg);
+}
+
+static inline void *raw_mmap(void *addr, size_t len, int prot,
+			     int flags, int fd, off_t offset) {
+	return (void *)syscall(__NR_mmap2, addr, len, prot, flags, fd,
+			      (unsigned long)(offset >> 12));
+}
 
 static void trace_init(void) __attribute__((constructor));
 static void trace_fini(void) __attribute__((destructor));
@@ -315,16 +325,13 @@ int open(const char *path, int flags, ...) {
 	mode_t mode = 0;
 	int fd;
 
-	if (!real_open)
-		real_open = dlsym(RTLD_NEXT, "open");
-
 	if (flags & O_CREAT) {
 		va_start(ap, flags);
 		mode = va_arg(ap, int);
 		va_end(ap);
 	}
 
-	fd = real_open(path, flags, mode);
+	fd = raw_open(path, flags, mode);
 
 	if (fd >= 0 && (strstr(path, "nvhost") || strstr(path, "nvmap"))) {
 		track_fd(fd, path);
@@ -340,15 +347,16 @@ int ioctl(int fd, int request, ...) {
 	int ret;
 	unsigned int nr, type;
 
-	if (!real_ioctl)
-		real_ioctl = dlsym(RTLD_NEXT, "ioctl");
-
 	va_start(ap, request);
 	arg = va_arg(ap, void *);
 	va_end(ap);
 
 	nr = _IOC_NR(request);
 	type = _IOC_TYPE(request);
+
+	/* Fast path: skip non-nvhost/nvmap ioctls */
+	if (type != NVHOST_IOCTL_MAGIC && type != NVMAP_IOC_MAGIC)
+		return raw_ioctl(fd, request, arg);
 
 	/* Pre-call logging */
 	if (type == NVHOST_IOCTL_MAGIC && is_isp_fd(fd)) {
@@ -361,7 +369,7 @@ int ioctl(int fd, int request, ...) {
 		}
 	}
 
-	ret = real_ioctl(fd, request, arg);
+	ret = raw_ioctl(fd, request, arg);
 
 	/* Post-call logging */
 	if (!is_tracked(fd))
@@ -427,10 +435,7 @@ out:
 }
 
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
-	if (!real_mmap)
-		real_mmap = dlsym(RTLD_NEXT, "mmap");
-
-	void *ret = real_mmap(addr, len, prot, flags, fd, offset);
+	void *ret = raw_mmap(addr, len, prot, flags, fd, offset);
 
 	if (ret != MAP_FAILED && is_nvmap_fd(fd) && num_mmaps < MAX_MMAPS) {
 		/* Store for cmdbuf readback — use offset as pseudo-handle */
@@ -446,10 +451,6 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
 }
 
 static void trace_init(void) {
-	real_open = dlsym(RTLD_NEXT, "open");
-	real_ioctl = dlsym(RTLD_NEXT, "ioctl");
-	real_mmap = dlsym(RTLD_NEXT, "mmap");
-
 	logfp = fopen("/data/local/tmp/isp_trace.log", "w");
 	if (logfp)
 		tlog("[INIT] isp_wrapper loaded, pid=%d\n", getpid());
