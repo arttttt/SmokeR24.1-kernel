@@ -1028,7 +1028,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = (in_h << 16) | in_w;
 	}
 
-	/* NO ISP_ENABLE here — stock sets it once in S5 init, not per-frame */
+	/* ISP_ENABLE = 0x04040007 (stats/streaming mode) — stock writes
+	 * this in every per-frame submit, between 0x500 and 0x100. */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmd[n++] = 0x04040007;
 
 	/* Stats buffer INCR(0x100,4): [IOVA, 0, 0, 0] */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
