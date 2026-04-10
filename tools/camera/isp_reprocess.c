@@ -273,15 +273,24 @@ int main(int argc, char **argv)
         /* Read max from channel to see if stuck */
         printf("  syncpt %u: current=%u\n", sp, rd.value);
     }
-    /* Force-increment all ISP syncpts to unstick */
+    /* Force-increment all ISP syncpts to unstick streaming gather.
+     * Need enough incrs to satisfy all pending waits from HwSettingsApply. */
     printf("  Force-incrementing stuck syncpts...\n");
-    for (int i = 0; i < 10; i++) {
-        struct { uint32_t id; } si;
-        si.id = sp_memory; ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-        si.id = sp_stats;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-        si.id = sp_loadv;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+    for (int round = 0; round < 3; round++) {
+        for (int i = 0; i < 20; i++) {
+            struct { uint32_t id; } si;
+            si.id = sp_memory; ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+            si.id = sp_stats;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+            si.id = sp_loadv;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+        }
+        usleep(100000); /* 100ms between rounds */
     }
-    usleep(50000); /* let CDMA process */
+    /* Check syncpt state after increments */
+    for (int sp = sp_memory; sp <= sp_loadv; sp++) {
+        struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp, .thresh = 0, .timeout = 0 };
+        ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
+        printf("  syncpt %u after incr: current=%u\n", sp, rd.value);
+    }
 
     /* ---- Step 3: Allocate buffers ---- */
     printf("\n[3] Allocate buffers...\n");
