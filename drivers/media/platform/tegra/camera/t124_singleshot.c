@@ -201,7 +201,25 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	u32 thresh[TEGRA_CSI_BLOCKS] = { 0 };
 	struct timespec ts;
 
-	/* First frame: enable stream + set destination */
+	/* First frame: enable stream + set destination
+	 *
+	 * EXPERIMENT LOG (2026-04-10):
+	 * VI→ISP pixel routing problem — sensor pixels don't reach ISP.
+	 * TPG works (pixels generated inside VI, bypass CSI).
+	 * Sensor works without ISP (raw to memory OK).
+	 *
+	 * Tried:
+	 * 1. MMIO IMAGE_DEF with ISP_B dest: ISP OP_DONE OK, output black
+	 * 2. Host1x method IMAGE_DEF (0x242/0x282): FRAME_START timeout
+	 * 3. Host1x full stock VI cmdbuf (PP, DT, capture cfg): green garbage
+	 * 4. Host1x minimal (ISPINTF + IMAGE_DEF only): FRAME_START timeout
+	 * 5. BYPASS_PXL_TRANSFORM=0 for ISP: no effect
+	 * 6. Both MMIO + host1x: conflicts
+	 *
+	 * Conclusion: MMIO sets register bits but doesn't activate HW pixel
+	 * routing to ISP. Host1x methods activate routing but break FRAME_START.
+	 * vi_submit_isp_config() kept for future use (__maybe_unused).
+	 */
 	if (!chan->bfirst_fstart) {
 		err = tegra_channel_enable_stream(chan);
 		if (err) {
