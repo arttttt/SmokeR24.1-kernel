@@ -119,6 +119,16 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		surface_setup(chan, index,
 			      buf->addr + chan->buffer_offset[index], bpl);
 
+	/* Re-arm PP single-shot per frame (vi2.c does this every frame) */
+	for (index = 0; index < chan->valid_ports; index++) {
+		u32 pp_reg = (chan->port[index] == 0) ?
+			T124_PP_A_PIXEL_STREAM_PP_COMMAND :
+			T124_PP_B_PIXEL_STREAM_PP_COMMAND;
+		tegra_channel_write(chan, pp_reg,
+			(0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
+			CSI_PP_SINGLE_SHOT_ENABLE | CSI_PP_ENABLE);
+	}
+
 	/* Arm FRAME_START syncpt + trigger SINGLE_SHOT */
 	for (index = 0; index < chan->valid_ports; index++)
 		arm_frame_start(chan, index, &thresh[index]);
