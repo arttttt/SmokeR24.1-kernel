@@ -440,20 +440,34 @@ int main(int argc, char **argv)
         }
 
         {
-            /* Always dump Y plane to file */
-            const char *outpath = "/data/local/tmp/isp_reprocess_out.raw";
+            /* Dump FULL output buffer (Y+U+V) */
+            const char *outpath = "/data/local/tmp/isp_reprocess_out.yuv";
             FILE *fp = fopen(outpath, "wb");
             if (fp) {
-                uint8_t *buf = malloc(65536);
-                for (int off = 0; off < Y_SIZE; off += 65536) {
-                    int sz = (Y_SIZE - off < 65536) ? Y_SIZE - off : 65536;
+                int chunk = 65536;
+                uint8_t *buf = malloc(chunk);
+                for (int off = 0; off < OUT_SIZE; off += chunk) {
+                    int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
                     nvmap_read(out_h, off, buf, sz);
                     fwrite(buf, 1, sz, fp);
                 }
                 free(buf);
                 fclose(fp);
-                printf("  Y plane saved to %s (%d bytes)\n", outpath, Y_SIZE);
+                printf("  Full output saved to %s (%d bytes)\n", outpath, OUT_SIZE);
             }
+
+            /* Also scan for first non-zero byte in Y plane */
+            uint8_t scan[256];
+            int first_nz = -1;
+            for (int off = 0; off < Y_SIZE && first_nz < 0; off += 256) {
+                nvmap_read(out_h, off, scan, 256);
+                for (int i = 0; i < 256; i++) {
+                    if (scan[i] != 0) { first_nz = off + i; break; }
+                }
+            }
+            printf("  First non-zero byte in Y plane: %s\n",
+                   first_nz >= 0 ? "" : "NONE (all zeros)");
+            if (first_nz >= 0) printf("    offset=%d (0x%x)\n", first_nz, first_nz);
         }
     }
 
