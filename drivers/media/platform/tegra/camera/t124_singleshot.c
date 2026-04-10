@@ -133,10 +133,8 @@ static int vi_submit_isp_config(struct tegra_channel *chan)
 	cmd[n++] = nvhost_opcode_incr(0x258, 3);
 	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
 
-	/* Immediate syncpt */
-	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_immediate_v(),
-		syncpt_id);
+	/* Immediate syncpt (cond=0) */
+	cmd[n++] = nvhost_opcode_imm_incr_syncpt(0, syncpt_id);
 	cmd[n++] = NVHOST_OPCODE_NOOP;
 
 	/* Submit */
