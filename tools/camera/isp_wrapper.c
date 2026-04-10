@@ -314,6 +314,9 @@ int open(const char *path, int flags, ...) {
 	mode_t mode = 0;
 	int fd;
 
+	if (!real_open)
+		real_open = dlsym(RTLD_NEXT, "open");
+
 	if (flags & O_CREAT) {
 		va_start(ap, flags);
 		mode = va_arg(ap, int);
@@ -334,12 +337,17 @@ int ioctl(int fd, int request, ...) {
 	va_list ap;
 	void *arg;
 	int ret;
-	unsigned int nr = _IOC_NR(request);
-	unsigned int type = _IOC_TYPE(request);
+	unsigned int nr, type;
+
+	if (!real_ioctl)
+		real_ioctl = dlsym(RTLD_NEXT, "ioctl");
 
 	va_start(ap, request);
 	arg = va_arg(ap, void *);
 	va_end(ap);
+
+	nr = _IOC_NR(request);
+	type = _IOC_TYPE(request);
 
 	/* Pre-call logging */
 	if (type == NVHOST_IOCTL_MAGIC && is_isp_fd(fd)) {
@@ -418,6 +426,9 @@ out:
 }
 
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
+	if (!real_mmap)
+		real_mmap = dlsym(RTLD_NEXT, "mmap");
+
 	void *ret = real_mmap(addr, len, prot, flags, fd, offset);
 
 	if (ret != MAP_FAILED && is_nvmap_fd(fd) && num_mmaps < MAX_MMAPS) {
