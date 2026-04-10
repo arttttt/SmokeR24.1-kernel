@@ -160,7 +160,7 @@ static int num_mmaps;
 
 /* original functions */
 static int (*real_open)(const char *, int, ...);
-static int (*real_ioctl)(int, unsigned long, ...);
+static int (*real_ioctl)(int, int, ...);
 static void *(*real_mmap)(void *, size_t, int, int, int, off_t);
 
 static void trace_init(void) __attribute__((constructor));
@@ -330,7 +330,7 @@ int open(const char *path, int flags, ...) {
 	return fd;
 }
 
-int ioctl(int fd, unsigned long request, ...) {
+int ioctl(int fd, int request, ...) {
 	va_list ap;
 	void *arg;
 	int ret;
