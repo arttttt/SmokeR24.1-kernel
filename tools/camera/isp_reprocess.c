@@ -193,9 +193,21 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
-    err = pHwApply(hw_settings);
-    printf("  HwSettingsApply: err=0x%x\n", err);
-    if (err) { printf("  Apply failed!\n"); return 1; }
+    /* Use NvIspSetConfiguration with mode=2 (reprocess) instead of
+     * NvIspHwSettingsApply which uses mode=1 (streaming) */
+    typedef NvError (*SetConfig_t)(void *handle, uint32_t mode, void *settings, void *arg4);
+    SetConfig_t pSetConfig = dlsym(lib_isp, "NvIspSetConfiguration");
+    printf("  NvIspSetConfiguration=%p\n", pSetConfig);
+    if (pSetConfig) {
+        err = pSetConfig(isp_handle, 2, hw_settings, NULL);  /* mode 2 = reprocess */
+        printf("  NvIspSetConfiguration(mode=2): err=0x%x\n", err);
+    }
+    if (err) {
+        /* Fallback: try mode 1 */
+        printf("  Trying mode=1...\n");
+        err = pSetConfig(isp_handle, 1, hw_settings, NULL);
+        printf("  NvIspSetConfiguration(mode=1): err=0x%x\n", err);
+    }
 
     /* Extract ISP channel fd and syncpt from handle struct */
     uint32_t *ctx = (uint32_t *)isp_handle;
