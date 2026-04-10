@@ -274,16 +274,27 @@ int ioctl(int fd, int request, ...) {
                         }
                     }
 
-                    /* NONINCR(0x000, 1) + conditional syncpt incr → NOP
-                     * Conditional incrs have cond in bits 15:8 (cond > 0) */
+                    /* NONINCR(0x000, 1) + conditional syncpt incr → NOP */
                     if (opcode == 2 && method == 0x000 && count == 1) {
                         uint32_t val = pb[i+1];
                         uint32_t cond = (val >> 8) & 0xFF;
-                        if (cond >= 4 && cond <= 6) { /* OP_DONE, STATS, RD_DONE */
-                            fprintf(stderr, "nvrm_shim: NOP conditional syncpt cond=%u at pb[%u]\n",
+                        if (cond >= 4 && cond <= 6) {
+                            fprintf(stderr, "nvrm_shim: NOP NONINCR syncpt cond=%u at pb[%u]\n",
                                     cond, i);
                             pb[i] = 0x20000000;
                             pb[i+1] = 0x20000000;
+                        }
+                    }
+
+                    /* IMM(0x000, val) = INCR_SYNCPT immediate
+                     * opcode=4, method=0, value=(cond<<8)|syncpt_id
+                     * Cond 4=OP_DONE, 5=STATS, 6=RD_DONE */
+                    if (opcode == 4 && method == 0x000) {
+                        uint32_t cond = (count >> 8) & 0xFF; /* IMM: count field = value */
+                        if (cond >= 4 && cond <= 6) {
+                            fprintf(stderr, "nvrm_shim: NOP IMM syncpt cond=%u id=%u at pb[%u]\n",
+                                    cond, count & 0xFF, i);
+                            pb[i] = 0x20000000; /* NOP */
                         }
                     }
                 }
