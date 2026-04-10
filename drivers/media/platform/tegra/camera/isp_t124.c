@@ -1528,11 +1528,28 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			isp->syncpt_memory, isp->frame_fence_memory,
 			msecs_to_jiffies(500), NULL, NULL);
 	if (err) {
+		void __iomem *base;
+		u32 phys = (isp->class_id == ISP_A_CLASS_ID) ?
+			   0x54600000 : 0x54680000;
 		dev_err(&isp->pdev->dev,
 			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
 			err, isp->syncpt_memory, isp->frame_fence_memory);
-		/* Note: can't read ISP MMIO here — timeout recovery may
-		 * have already powered off the module, causing bus fault. */
+		/* Dump ISP status registers for debugging */
+		base = ioremap(phys, 0x1000);
+		if (base) {
+			int i;
+			dev_err(&isp->pdev->dev,
+				"ISP MMIO dump @ 0x%08x:\n", phys);
+			for (i = 0; i < 0x100; i += 16)
+				dev_err(&isp->pdev->dev,
+					"  [%03x] %08x %08x %08x %08x\n",
+					i,
+					readl(base + i),
+					readl(base + i + 4),
+					readl(base + i + 8),
+					readl(base + i + 12));
+			iounmap(base);
+		}
 	} else {
 		u32 *stats = (u32 *)isp->stats_buf.cpu;
 		u32 *work = (u32 *)isp->work_buf.cpu;
