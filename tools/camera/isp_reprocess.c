@@ -402,85 +402,88 @@ int main(int argc, char **argv)
     int n = 0;
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1, stats_reloc = -1;
 
-    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+    /*
+     * Replicate exact stock ISP-B per-frame gather from
+     * docs/camera/unverified/stock-isp-b-cmdbuf-dump.txt
+     * Only changes: IOVAs (relocs), trigger 0x0B (reprocess) instead of 0x05,
+     * and added input block (0xE30-0xE34) for reprocess mode.
+     */
 
-    /* Output surfaces — must set per-frame (not in calibration) */
+    /* Output config — exactly as stock */
     cmd[n++] = OP_INCR(0xE00, 1);
-    cmd[n++] = ((W - 1) & 0x3FFF) << 16;
+    cmd[n++] = 0x0A1F0000;                /* width = 2592 */
     cmd[n++] = OP_INCR(0xE01, 1);
-    cmd[n++] = ((H - 1) & 0x3FFF) << 16;
+    cmd[n++] = 0x07970000;                /* height = 1944 */
     cmd[n++] = OP_INCR(0xE02, 1);
-    /* Output format — configurable via env ISP_FMT=0xNNNNNNNN */
-    uint32_t out_fmt = 0x010000C9;
-    {
-        const char *fmt_env = getenv("ISP_FMT");
-        if (fmt_env) out_fmt = strtoul(fmt_env, NULL, 0);
-    }
-    printf("  Output format: 0x%08x\n", out_fmt);
-    cmd[n++] = out_fmt;
+    cmd[n++] = 0x04FE00E6;                /* stock output format */
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
-    /* Output Y/U/V planes — original order */
+    /* Output surfaces — stock strides */
     cmd[n++] = OP_INCR(0xE04, 3);
-    uint32_t out_stride = W * 4; /* default 32bpp */
-    {
-        const char *s = getenv("ISP_STRIDE");
-        if (s) out_stride = strtoul(s, NULL, 0);
-    }
-    printf("  Output stride: %u\n", out_stride);
-    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = out_stride;
-    cmd[n++] = OP_INCR(0xE07, 3);
-    u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
-    cmd[n++] = OP_INCR(0xE0A, 3);
-    v_reloc = n; cmd[n++] = out_v_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
-
-    /* Processing block — passthrough (no scaling) */
-    cmd[n++] = OP_INCR(0x500, 6);
-    cmd[n++] = 0x00000000;  /* flags */
-    cmd[n++] = 0x00000000;  /* h_scale */
-    cmd[n++] = 0x00000000;  /* v_scale */
-    cmd[n++] = 0x00000000;  /* v_ratio */
+    y_reloc = n;
+    cmd[n++] = out_y_iova;                /* Y IOVA (reloc) */
     cmd[n++] = 0x00000000;
-    cmd[n++] = (H << 16) | W;
+    cmd[n++] = 0x00000A40;                /* Y stride = 2624 */
+    cmd[n++] = OP_INCR(0xE07, 3);
+    u_reloc = n;
+    cmd[n++] = out_u_iova;                /* U IOVA (reloc) */
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000540;                /* UV stride = 1344 */
+    cmd[n++] = OP_INCR(0xE0A, 3);
+    v_reloc = n;
+    cmd[n++] = out_v_iova;                /* V IOVA (reloc) */
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000540;                /* UV stride = 1344 */
 
-    /* Stats buffer */
+    /* Processing block — stock values */
+    cmd[n++] = OP_INCR(0x500, 6);
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x07980A20;                /* (H << 16) | W = stock value */
+
+    /* SET_CLASS + Stats buffer — stock has SET_CLASS before stats */
+    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
     cmd[n++] = OP_INCR(0x100, 4);
     stats_reloc = n;
-    cmd[n++] = stats_iova; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = stats_iova;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
 
-    /* ISP_ENABLE = full pipeline */
-    cmd[n++] = OP_INCR(0x015, 1);
-    cmd[n++] = 7;  /* full pipeline (not 0x04040007 which is stats-only!) */
-
-    /* Input block (reprocess): raw Bayer 10-bit from memory
-     * 0xE33 IS needed — without it, output is all zeros.
-     * Format code: try VI IMAGE_DEF style encoding.
-     * VI IMAGE_DEF for RAW10: 0x00200004 (bits=10, format=RAW)
-     * CSI DT for RAW10: 0x2B
-     * Try several encodings to find the right one */
+    /* Input block (reprocess) — not in stock streaming, added for reprocess */
     cmd[n++] = OP_INCR(0xE31, 1);
-    cmd[n++] = (W & 0x7FFF) | (H << 16);  /* input dimensions */
+    cmd[n++] = 0x07980A20;                /* input dims = (H << 16) | W */
     cmd[n++] = OP_INCR(0xE33, 1);
-    cmd[n++] = 0x10200024;  /* gives data in U plane at least */
-    cmd[n++] = OP_INCR(0xE34, 3);         /* input plane 0 */
-    in_reloc = n; cmd[n++] = in_iova; cmd[n++] = 0; cmd[n++] = W * BPP;
+    cmd[n++] = 0x10200024;                /* input format from calibration */
+    cmd[n++] = OP_INCR(0xE34, 3);
+    in_reloc = n;
+    cmd[n++] = in_iova;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = W * BPP;                   /* input stride = 5184 */
     cmd[n++] = OP_INCR(0xE32, 1);
-    cmd[n++] = (W & 0x3FFF);              /* strip width = full frame */
-
-    /* Input trigger */
+    cmd[n++] = (W & 0x3FFF);              /* strip width = full */
     cmd[n++] = OP_INCR(0xE30, 1);
-    cmd[n++] = 1;
+    cmd[n++] = 1;                          /* input trigger */
 
-    /* Conditional syncpt incrs */
-    cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (4 << 8) | sp_memory;
-    cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (5 << 8) | sp_stats;
-    cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (6 << 8) | sp_loadv;
+    /* ISP_ENABLE — stock uses 7 for full pipeline */
+    cmd[n++] = OP_INCR(0x015, 1);
+    cmd[n++] = 7;
 
-    /* ISP_CONTROL = reprocess trigger */
+    /* Syncpt conditional incrs — stock format */
+    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+    cmd[n++] = OP_NONINCR(0x000, 1);
+    cmd[n++] = (4 << 8) | sp_memory;      /* cond 4: OP_DONE */
+    cmd[n++] = OP_NONINCR(0x000, 1);
+    cmd[n++] = (5 << 8) | sp_stats;       /* cond 5: STATS_DONE */
+    cmd[n++] = OP_NONINCR(0x000, 1);
+    cmd[n++] = (6 << 8) | sp_loadv;       /* cond 6: RD_DONE */
+
+    /* ISP_CONTROL trigger — 0x0B for reprocess (stock uses 0x05 for streaming) */
+    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
