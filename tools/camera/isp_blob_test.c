@@ -181,6 +181,13 @@ int main(int argc, char **argv)
 
     /* ---- Step 0: Load dependencies ---- */
     printf("[0] Loading libraries...\n");
+
+    /* Load shim FIRST with RTLD_GLOBAL so it overrides NvRmChannelOpen
+     * before libnvrm_graphics.so binds it */
+    void *lib_shim = load_lib("nvrm_shim.so");
+    if (lib_shim)
+        printf("  (shim active — module ID translation enabled)\n");
+
     void *lib_nvos = load_lib("libnvos.so");
     void *lib_nvrm = load_lib("libnvrm.so");
     void *lib_nvrm_gfx = load_lib("libnvrm_graphics.so");
