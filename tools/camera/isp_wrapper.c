@@ -22,6 +22,7 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <dlfcn.h>
 #include <linux/ioctl.h>
 
 /* ---- nvhost ioctl structures (from kernel include/linux/nvhost_ioctl.h) ---- */
@@ -443,9 +444,6 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
 
 	return ret;
 }
-
-/* On Android, use dlopen/dlsym from bionic (no libdl.so.2) */
-#include <dlfcn.h>
 
 static void trace_init(void) {
 	real_open = dlsym(RTLD_NEXT, "open");
