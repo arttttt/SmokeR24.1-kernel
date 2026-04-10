@@ -44,11 +44,18 @@ int main(int argc, char **argv)
     typedef NvError (*HwCreate_t)(void *, void **);
     typedef NvError (*HwApply_t)(void *);
     typedef NvError (*HwDestroy_t)(void *);
-    /* Fixed args: handle, surf0, surf1, surf2, settings, arg6, arg7, arg8, arg9 */
+    /* 13 args! stack frame analysis:
+     * r5=sp+0x58=original_sp+0x10=arg9, sl=arg10, r9=arg11, fp=arg12, arg13
+     * r0=handle, r1-r3=args2-4, sp+0..sp+0x10=args5-9 */
     typedef NvError (*ProcessFrame_t)(void *handle,
-        uint32_t surf0, uint32_t surf1, uint32_t surf2,
-        void *settings, uint32_t arg6,
-        uint32_t arg7, uint32_t arg8, uint32_t *arg9);
+        uint32_t a2, uint32_t a3, uint32_t a4,
+        uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8,
+        void *settings,   /* arg9 = r5 in func */
+        uint32_t a10,     /* arg10 = sl */
+        uint32_t a11,     /* arg11 = r9 (optional: input?) */
+        uint32_t a12,     /* arg12 = fp (needed if a11!=0) */
+        uint32_t *frame_count /* arg13 */
+        );
     typedef NvError (*Flush_t)(void *);
     typedef NvError (*MemCreate_t)(void *, void **, NvU32);
     typedef NvError (*MemAlloc_t)(void *, void *, NvU32, NvU32, NvU32, NvU32);
@@ -151,16 +158,22 @@ int main(int argc, char **argv)
 
     uint32_t frame_count = 0;
 
-    /* Try: (handle, out_handle, 0, 0, settings, out_handle, in_handle, fsize, &frame_count) */
+    /* 13 args. a2-a4 + a5-a8 likely surface descriptors (4 outputs?).
+     * a9=settings, a10=something required, a11=input (optional),
+     * a12=input param, a13=frame count out */
     err = pProcess(isp,
-                   out_h,       /* r1: output surface */
-                   0,           /* r2: output surface 2 (0=none) */
-                   0,           /* r3: output surface 3 (0=none) */
-                   settings,    /* arg5: hw_settings */
-                   out_h,       /* arg6: output dest? */
-                   in_h,        /* arg7: input buffer (reprocess) */
-                   fsize,       /* arg8: input size/format */
-                   &frame_count /* arg9: frame count output */
+                   out_h,       /* a2: output surface 0 */
+                   0,           /* a3: output surface 1 */
+                   0,           /* a4: output surface 2 */
+                   0,           /* a5 */
+                   0,           /* a6 */
+                   0,           /* a7 */
+                   0,           /* a8 */
+                   settings,    /* a9 = r5: hw_settings (REQUIRED) */
+                   1,           /* a10 = sl: trigger/mode? (REQUIRED, try 1) */
+                   in_h,        /* a11 = r9: input buffer (0=streaming) */
+                   fsize,       /* a12 = fp: input size */
+                   &frame_count /* a13: frame count output */
                    );
     printf("  NvIspProcessFrame: err=0x%x frame_count=%u\n", err, frame_count);
     fflush(stdout);
