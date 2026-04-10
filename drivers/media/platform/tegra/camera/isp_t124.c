@@ -873,11 +873,12 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Conditional syncpt incrs (cond=4, 5, 6) */
+	/* Conditional syncpt incrs (cond=1, 5, 6)
+	 * cond=1 = host1x OP_DONE (was cond=4 ISP-specific) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
+	cmd[n++] = (host1x_uclass_incr_syncpt_cond_op_done_v() << 8) | isp->syncpt_memory;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | isp->syncpt_stats;
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
