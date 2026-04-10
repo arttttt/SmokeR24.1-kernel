@@ -222,12 +222,28 @@ int main(int argc, char **argv)
     /* syncpts from ctx: ctx[4] has base, but we need to query them */
     printf("\n[2] Setup for reprocess (using blob's channel)...\n");
 
-    nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
-    if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
-
-    /* Set our nvmap fd on the blob's ISP channel */
-    struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
-    ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &snf);
+    /* Use the SAME nvmap fd that the blob opened.
+     * From strace: blob opens /dev/nvmap early as fd ~5.
+     * We can find it by scanning /proc/self/fd for nvmap. */
+    {
+        char link[256];
+        for (int fd = 3; fd < 20; fd++) {
+            char path[64];
+            snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+            int len = readlink(path, link, sizeof(link)-1);
+            if (len > 0) {
+                link[len] = 0;
+                if (strstr(link, "nvmap")) {
+                    nvmap_fd = fd;
+                    break;
+                }
+            }
+        }
+    }
+    if (nvmap_fd < 0) {
+        nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
+    }
+    printf("  nvmap_fd=%d\n", nvmap_fd);
 
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
 
@@ -320,13 +336,11 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
-    /* Output Y/U/V planes
-     * ISP writes luma to 0xE07 (U register!) based on test.
-     * Try swapping: put Y buffer at 0xE07 and U at 0xE04 */
+    /* Output Y/U/V planes — original order */
     cmd[n++] = OP_INCR(0xE04, 3);
-    u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
-    cmd[n++] = OP_INCR(0xE07, 3);
     y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
+    cmd[n++] = OP_INCR(0xE07, 3);
+    u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
     cmd[n++] = OP_INCR(0xE0A, 3);
     v_reloc = n; cmd[n++] = out_v_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
 
