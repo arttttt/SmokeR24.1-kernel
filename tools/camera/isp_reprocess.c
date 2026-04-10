@@ -110,11 +110,12 @@ struct nvhost32_submit_args {
 #define UV_STRIDE (((W/2) + 63) & ~63)    /* 1344 */
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
-#define Y_STRIDE ((W + 63) & ~63)         /* 2624 */
-#define UV_STRIDE (((W/2) + 63) & ~63)    /* 1344 */
+#define OUT_SIZE (W * 4 * H)  /* 32bpp */
+/* Also keep YUV defines for diagnostics */
+#define Y_STRIDE ((W + 63) & ~63)
+#define UV_STRIDE (((W/2) + 63) & ~63)
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
-#define OUT_SIZE (Y_SIZE + UV_SIZE * 2)
 
 static int nvmap_fd = -1;
 
@@ -409,13 +410,13 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x04FE00E6;  /* YUV planar (stock per-frame format) */
+    cmd[n++] = 0x010000C9;  /* 32bpp single channel (works for reprocess) */
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
     /* Output Y/U/V planes — original order */
     cmd[n++] = OP_INCR(0xE04, 3);
-    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
+    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = W * 4; /* 32bpp */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
     cmd[n++] = OP_INCR(0xE0A, 3);
