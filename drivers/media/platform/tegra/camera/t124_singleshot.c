@@ -198,10 +198,10 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 	int state = VB2_BUF_STATE_DONE;
 
 	if (chan->use_isp && !isp_reprocess) {
-		/* ISP streaming: VI→ISP directly, no memory write from VI.
-		 * Submit ISP job + wait for ISP OP_DONE. */
+		/* ISP streaming: VI→ISP directly, output to V4L2 buffer.
+		 * Use buf->addr so ISP writes directly where app reads. */
 		err = isp_t124_process_frame(chan->isp,
-				chan->isp_out_dma, 0);
+				buf->addr, 0);
 		if (err) {
 			dev_err(&chan->video.dev,
 				"ISP process_frame failed: %d\n", err);
