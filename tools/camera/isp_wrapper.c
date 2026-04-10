@@ -63,11 +63,12 @@ struct nvhost_submit_args {
 	uint32_t num_relocs;
 	uint32_t num_waitchks;
 	uint32_t timeout;
-	uint32_t flags;
+	uint32_t syncpt_incrs;
 	uint32_t fence;
-	uint64_t syncpt_incrs;
 	uint64_t cmdbuf_exts;
-	uint64_t pad[3];
+	uint32_t flags;
+	uint32_t reserved;
+	uint64_t pad[2];
 	uint64_t cmdbufs;
 	uint64_t relocs;
 	uint64_t reloc_shifts;
