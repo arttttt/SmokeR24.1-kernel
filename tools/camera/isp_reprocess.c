@@ -225,6 +225,10 @@ int main(int argc, char **argv)
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
     if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
+    /* Set our nvmap fd on the blob's ISP channel */
+    struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
+    ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &snf);
+
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
 
     /* Get syncpoints from the ISP channel */
@@ -363,7 +367,10 @@ int main(int argc, char **argv)
     shifts[nr++].shift = 0;
 
     /* ---- Step 6: Submit ---- */
-    printf("\n[6] Submit...\n");
+    /* Read current syncpt value first */
+    struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp_memory, .thresh = 0, .timeout = 0 };
+    ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
+    printf("\n[6] Submit (syncpt %u current=%u)...\n", sp_memory, rd.value);
 
     struct nvhost_cmdbuf cb = { .mem = cmd_h, .offset = 0, .words = n };
     struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 3 };
