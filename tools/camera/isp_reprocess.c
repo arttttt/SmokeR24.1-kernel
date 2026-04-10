@@ -426,7 +426,7 @@ int main(int argc, char **argv)
     y_reloc = n;
     cmd[n++] = out_y_iova;                /* plane 1 */
     cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000A40;                /* Y stride = 2624 */
+    cmd[n++] = W * 4;                     /* 32bpp stride = 10368 */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
     cmd[n++] = out_u_iova;                /* plane 2 — ISP writes luma here in reprocess */
