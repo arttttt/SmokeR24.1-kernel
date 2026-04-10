@@ -286,15 +286,22 @@ int main(int argc, char **argv)
                 printf("  Channel closed\n");
             }
 
-            /* Also try VIC (module 0x12) as sanity check */
-            NvU32 vic_mod = 0x1200;
-            hCh = NULL;
-            printf("  NvRmChannelOpen(hRm=%p, mod=0x%04x VIC)...\n", hRm, vic_mod);
+            /* Brute-force: try all module IDs 0..31 in both encodings */
+            printf("  Brute-force module ID scan:\n");
             fflush(stdout);
-            err = p_NvRmChannelOpen(hRm, &hCh, 1, &vic_mod);
-            printf("  NvRmChannelOpen VIC: err=0x%x (%s) hCh=%p\n",
-                   err, nverr_str(err), hCh);
-            if (hCh && p_NvRmChannelClose) p_NvRmChannelClose(hCh);
+            for (NvU32 mid = 0; mid <= 31; mid++) {
+                /* Try both encodings: raw and shifted */
+                NvU32 variants[] = { mid, mid << 8, (mid << 8) | 0, mid | (0 << 8) };
+                for (int v = 0; v < 2; v++) {
+                    hCh = NULL;
+                    err = p_NvRmChannelOpen(hRm, &hCh, 1, &variants[v]);
+                    if (err == NvSuccess && hCh) {
+                        printf("    *** mod=0x%04x (%d) → OK! hCh=%p\n",
+                               variants[v], variants[v], hCh);
+                        if (p_NvRmChannelClose) p_NvRmChannelClose(hCh);
+                    }
+                }
+            }
             fflush(stdout);
         }
     }
