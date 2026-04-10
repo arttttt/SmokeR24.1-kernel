@@ -193,21 +193,15 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
-    /* Use NvIspSetConfiguration with mode=2 (reprocess) instead of
-     * NvIspHwSettingsApply which uses mode=1 (streaming) */
-    typedef NvError (*SetConfig_t)(void *handle, uint32_t mode, void *settings, void *arg4);
-    SetConfig_t pSetConfig = dlsym(lib_isp, "NvIspSetConfiguration");
-    printf("  NvIspSetConfiguration=%p\n", pSetConfig);
-    if (pSetConfig) {
-        err = pSetConfig(isp_handle, 2, hw_settings, NULL);  /* mode 2 = reprocess */
-        printf("  NvIspSetConfiguration(mode=2): err=0x%x\n", err);
-    }
-    if (err) {
-        /* Fallback: try mode 1 */
-        printf("  Trying mode=1...\n");
-        err = pSetConfig(isp_handle, 1, hw_settings, NULL);
-        printf("  NvIspSetConfiguration(mode=1): err=0x%x\n", err);
-    }
+    err = pHwApply(hw_settings);
+    printf("  HwSettingsApply: err=0x%x\n", err);
+
+    /* HwSettingsApply submits calibration + streaming setup.
+     * ISP starts waiting for VI pixels → stuck syncpts.
+     * We need to wait for calibration to complete, then
+     * CPU-increment the stuck syncpts to unblock CDMA. */
+    printf("  Waiting for calibration to settle...\n");
+    usleep(100000); /* 100ms for calibration gather to execute */
 
     /* Extract ISP channel fd and syncpt from handle struct */
     uint32_t *ctx = (uint32_t *)isp_handle;
@@ -268,6 +262,26 @@ int main(int argc, char **argv)
     gsp.param = 2; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp);
     uint32_t sp_loadv = gsp.value;
     printf("  syncpts: memory=%u stats=%u loadv=%u\n", sp_memory, sp_stats, sp_loadv);
+
+    /* CPU-increment any stuck syncpts from HwSettingsApply's streaming setup.
+     * This unblocks CDMA so our reprocess gather can execute. */
+#define NVHOST_IOCTL_CTRL_SYNCPT_INCR _IOW('H', 2, struct { uint32_t id; })
+    for (int sp = sp_memory; sp <= sp_loadv; sp++) {
+        struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp, .thresh = 0, .timeout = 0 };
+        ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
+
+        /* Read max from channel to see if stuck */
+        printf("  syncpt %u: current=%u\n", sp, rd.value);
+    }
+    /* Force-increment all ISP syncpts to unstick */
+    printf("  Force-incrementing stuck syncpts...\n");
+    for (int i = 0; i < 10; i++) {
+        struct { uint32_t id; } si;
+        si.id = sp_memory; ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+        si.id = sp_stats;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+        si.id = sp_loadv;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
+    }
+    usleep(50000); /* let CDMA process */
 
     /* ---- Step 3: Allocate buffers ---- */
     printf("\n[3] Allocate buffers...\n");
