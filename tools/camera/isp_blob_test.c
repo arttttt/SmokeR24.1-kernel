@@ -175,10 +175,10 @@ int main(int argc, char **argv)
     printf("=== ISP Blob Test v2 ===\n");
     printf("ISP select: %s\n\n", use_isp_b ? "ISP-B (0x34)" : "ISP-A (0x32)");
 
-    /* Install crash handlers */
-    signal(SIGSEGV, sig_handler);
-    signal(SIGBUS, sig_handler);
-    signal(SIGABRT, sig_handler);
+    /* Don't install crash handlers — let debuggerd generate tombstone */
+    /* signal(SIGSEGV, sig_handler); */
+    /* signal(SIGBUS, sig_handler); */
+    /* signal(SIGABRT, sig_handler); */
 
     /* ---- Step 0: Load dependencies ---- */
     printf("[0] Loading libraries...\n");
