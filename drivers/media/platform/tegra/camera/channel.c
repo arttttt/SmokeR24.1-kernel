@@ -566,6 +566,29 @@ int tegra_channel_enable_stream(struct tegra_channel *chan)
 		tegra_channel_write(chan, vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE,
 		       (height << IMAGE_SIZE_HEIGHT_OFFSET) | width);
 
+		/* Debug dump VI CSI registers when ISP active */
+		if (chan->use_isp) {
+			u32 img_def = tegra_channel_read(chan,
+				vi_csi_base + TEGRA_VI_CSI_IMAGE_DEF);
+			u32 img_dt = tegra_channel_read(chan,
+				vi_csi_base + TEGRA_VI_CSI_IMAGE_DT);
+			u32 img_wc = tegra_channel_read(chan,
+				vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE_WC);
+			u32 img_sz = tegra_channel_read(chan,
+				vi_csi_base + TEGRA_VI_CSI_IMAGE_SIZE);
+			u32 ispintf = tegra_channel_read(chan,
+				vi_csi_base + TEGRA_VI_CSI_ISPINTF_CONFIG);
+			u32 err_st = tegra_channel_read(chan,
+				vi_csi_base + TEGRA_VI_CSI_ERROR_STATUS);
+			dev_info(&chan->video.dev,
+				"VI CSI ISP debug: base=0x%x IMAGE_DEF=0x%08x "
+				"DT=0x%x WC=%u SIZE=0x%08x ISPINTF=0x%08x "
+				"ERR=0x%08x port=%d dest=%s\n",
+				vi_csi_base, img_def, img_dt, img_wc, img_sz,
+				ispintf, err_st, chan->port[0],
+				isp_reprocess ? "MEM" : "ISP");
+		}
+
 		/* Enable pixel parser: continuous or single-shot.
 		 * In single-shot mode, PP waits for VI_CSI_SINGLE_SHOT
 		 * trigger per frame (no PP disable/re-enable needed). */
