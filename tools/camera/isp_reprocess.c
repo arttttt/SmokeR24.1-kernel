@@ -110,7 +110,7 @@ struct nvhost32_submit_args {
 #define UV_STRIDE (((W/2) + 63) & ~63)    /* 1344 */
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
-#define OUT_STRIDE (W * 2)        /* 16bpp: 2 bytes per pixel */
+#define OUT_STRIDE (W * 4)        /* 32bpp: 4 bytes per pixel */
 #define OUT_SIZE (OUT_STRIDE * H)
 
 static int nvmap_fd = -1;
