@@ -198,10 +198,18 @@ int main(int argc, char **argv)
     if (err) { printf("  Apply failed!\n"); return 1; }
 
     /* Extract ISP channel fd and syncpt from handle struct */
-    /* From handle dump: offset 0x0C = channel handle ptr, offset 0x10 = syncpt base */
     uint32_t *ctx = (uint32_t *)isp_handle;
     printf("  ctx[0]=0x%x ctx[1]=0x%x ctx[2]=0x%x ctx[3]=0x%x ctx[4]=0x%x\n",
            ctx[0], ctx[1], ctx[2], ctx[3], ctx[4]);
+
+    /* Close ISP blob — release exclusive channel so we can open it ourselves.
+     * Calibration was already submitted to HW via HwSettingsApply. */
+    printf("  Closing ISP blob (release channel)...\n");
+    pHwDestroy(hw_settings);
+    hw_settings = NULL;
+    pIspClose(isp_handle);
+    isp_handle = NULL;
+    printf("  ISP blob closed\n");
 
     /* ---- Step 2: Open nvmap and ISP channel directly for reprocess ---- */
     printf("\n[2] Setup nvmap + ISP channel...\n");
@@ -425,8 +433,6 @@ int main(int argc, char **argv)
 
     /* Cleanup */
     printf("\n[cleanup]\n");
-    pHwDestroy(hw_settings);
-    pIspClose(isp_handle);
     close(isp_fd);
     close(ctrl_fd);
     close(nvmap_fd);
