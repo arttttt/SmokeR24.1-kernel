@@ -51,10 +51,13 @@ typedef uint32_t NvBool;
 typedef void *NvRmDeviceHandle;
 typedef void *NvIspHandle;
 
-/* NvIspIspSelect — which ISP (from binary strings + RE) */
+/* NvIspIspSelect — which ISP
+ * MIUI (4.4): 1=ISP-A, 2=ISP-B (from disasm of NvIspCtrlInitialize)
+ * Foster (7.x): 0=ISP-A, 1=ISP-B (different encoding!)
+ */
 typedef enum {
-    NvIspIspSelect_A = 0,   /* ISP-A, class 0x32 */
-    NvIspIspSelect_B = 1,   /* ISP-B, class 0x34 */
+    NvIspIspSelect_A = 1,   /* ISP-A, class 0x32 */
+    NvIspIspSelect_B = 2,   /* ISP-B, class 0x34 */
 } NvIspIspSelect;
 
 /* NvError codes (common subset from nverror.h) */
@@ -393,7 +396,7 @@ int main(int argc, char **argv)
         if (test_ctx) {
             /* Store hRm at ctx[0] like NvIspOpen does */
             *(void **)test_ctx = hRm;
-            NvU32 isp_sel_val = use_isp_b ? 1 : 0;
+            NvU32 isp_sel_val = use_isp_b ? NvIspIspSelect_B : NvIspIspSelect_A;
             printf("  Testing NvIspCtrlInitialize(ctx, %u) standalone...\n", isp_sel_val);
             fflush(stdout);
             err = p_NvIspCtrlInitialize(test_ctx, isp_sel_val);
@@ -404,7 +407,7 @@ int main(int argc, char **argv)
     }
 
     NvIspHandle handle = NULL;
-    NvU32 isp_sel = use_isp_b ? 1 : 0;
+    NvU32 isp_sel = use_isp_b ? NvIspIspSelect_B : NvIspIspSelect_A;
     printf("  Calling NvIspOpen(hRm=%p, isp_sel=%u, &handle)...\n", hRm, isp_sel);
     fflush(stdout);
     err = p_NvIspOpen(hRm, isp_sel, &handle);
