@@ -403,11 +403,18 @@ static void *hmap_find(uint32_t handle) {
 
 static void hex_dump(const char *tag, const uint32_t *data, int words) {
 	int i;
+	char line[256];
+	int pos;
 	tlog("  [HEX %s] %d words:\n", tag, words);
 	for (i = 0; i < words; i++) {
-		if ((i % 8) == 0) tlog("    [%04x]", i * 4);
-		tlog(" %08x", data[i]);
-		if ((i % 8) == 7 || i == words - 1) tlog("\n");
+		if ((i % 8) == 0)
+			pos = snprintf(line, sizeof(line), "    [%04x]", i * 4);
+		pos += snprintf(line + pos, sizeof(line) - pos,
+				" %08x", data[i]);
+		if ((i % 8) == 7 || i == words - 1) {
+			tlog("%s\n", line);
+			pos = 0;
+		}
 	}
 }
 
