@@ -40,7 +40,7 @@ extern int t124_csi_tpg;
 
 /* Submit VI ISP config via host1x cmdbuf (matches stock VI init).
  * Stock configures VI for ISP routing via host1x methods, not MMIO. */
-static int vi_submit_isp_config(struct tegra_channel *chan)
+static int __maybe_unused vi_submit_isp_config(struct tegra_channel *chan)
 {
 	struct nvhost_device_data *pdata;
 	struct nvhost_channel *ch = NULL;
