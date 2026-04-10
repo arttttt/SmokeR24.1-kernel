@@ -294,13 +294,14 @@ int ioctl(int fd, int request, ...) {
 
                     /* IMM(0x000, val) = INCR_SYNCPT immediate
                      * opcode=4, method=0, value=(cond<<8)|syncpt_id
-                     * Cond 4=OP_DONE, 5=STATS, 6=RD_DONE */
+                     * Cond 0=immediate, 1=op_done, 4=OP_DONE, 5=STATS, 6=RD_DONE
+                     * NOP any conditional (cond >= 1) to prevent ISP from waiting */
                     if (opcode == 4 && method == 0x000) {
-                        uint32_t cond = (count >> 8) & 0xFF; /* IMM: count field = value */
-                        if (cond >= 4 && cond <= 6) {
-                            fprintf(stderr, "nvrm_shim: NOP IMM syncpt cond=%u id=%u at pb[%u]\n",
-                                    cond, count & 0xFF, i);
-                            pb[i] = 0x20000000; /* NOP */
+                        uint32_t cond = (count >> 8) & 0xFF;
+                        if (cond >= 1) {
+                            fprintf(stderr, "nvrm_shim: NOP IMM syncpt cond=%u id=%u at pb[%u] (op=%08x)\n",
+                                    cond, count & 0xFF, i, op);
+                            pb[i] = 0x20000000;
                         }
                     }
                 }
