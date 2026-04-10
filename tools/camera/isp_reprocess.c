@@ -415,7 +415,7 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = 0x07970000;                /* height = 1944 */
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x04FE00E6;                /* stock output format */
+    cmd[n++] = 0x010000C9;                /* 8bpp format — ISP writes to plane 1 */
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
