@@ -320,11 +320,13 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
-    /* Output Y/U/V planes */
+    /* Output Y/U/V planes
+     * ISP writes luma to 0xE07 (U register!) based on test.
+     * Try swapping: put Y buffer at 0xE07 and U at 0xE04 */
     cmd[n++] = OP_INCR(0xE04, 3);
-    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
-    cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
+    cmd[n++] = OP_INCR(0xE07, 3);
+    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
     cmd[n++] = OP_INCR(0xE0A, 3);
     v_reloc = n; cmd[n++] = out_v_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
 
