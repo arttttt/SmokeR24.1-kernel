@@ -486,6 +486,22 @@ int main(int argc, char **argv)
         }
     }
 
+    /* ---- Step 7b: NvIspHwSettingsApply ---- */
+    if (hw_settings && p_NvIspHwSettingsApply) {
+        printf("\n[7b] NvIspHwSettingsApply...\n"); fflush(stdout);
+        err = p_NvIspHwSettingsApply(handle, hw_settings);
+        printf("  err=0x%x (%s)\n", err, nverr_str(err));
+        fflush(stdout);
+    }
+
+    /* ---- Step 7c: NvIspFlush — submit pending commands to HW ---- */
+    if (p_NvIspFlush) {
+        printf("\n[7c] NvIspFlush...\n"); fflush(stdout);
+        err = p_NvIspFlush(handle);
+        printf("  err=0x%x (%s)\n", err, nverr_str(err));
+        fflush(stdout);
+    }
+
     /* ---- Step 8: Handle dump (full) ---- */
     printf("\n[8] Full handle dump (256 bytes):\n");
     for (int row = 0; row < 256; row += 32) {
