@@ -108,14 +108,6 @@ import init.remote.rc' "$init_rc"
         echo "[*] Added import to $init_rc"
     fi
 
-    # Inject LD_PRELOAD for ISP wrapper into mediaserver service
-    if grep -q '^service media /system/bin/mediaserver' init.rc 2>/dev/null; then
-        sed -i.tmp 's|^service media /system/bin/mediaserver$|&\
-    setenv LD_PRELOAD /system/lib/isp_wrapper.so|' init.rc
-        rm -f init.rc.tmp
-        echo "[*] Injected LD_PRELOAD into mediaserver service"
-    fi
-
     # Build file list: original + new files (auto-detected)
     local new_files
     new_files=$(cd "$workdir" && find . -mindepth 1 | sed 's|^\./||' | sort | comm -23 - <(sort "$workdir/_orig_cpio_list.txt"))
