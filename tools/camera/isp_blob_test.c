@@ -106,7 +106,8 @@ typedef NvError (*NvRmOpen_t)(NvRmDeviceHandle *pHandle, NvU32 DeviceId);
 typedef void    (*NvRmClose_t)(NvRmDeviceHandle hDevice);
 
 /* NvIsp lifecycle */
-typedef NvError (*NvIspOpen_t)(NvIspHandle *handle);
+/* NvIspOpen: 3 args! (from disasm: r0=hRm, r1=isp_select, r2=&handle_out) */
+typedef NvError (*NvIspOpen_t)(NvRmDeviceHandle hRm, NvU32 isp_select, NvIspHandle *handle);
 typedef void    (*NvIspClose_t)(NvIspHandle handle);
 typedef NvError (*NvIspCtrlInitialize_t)(void *ctx, NvU32 isp_select);
 typedef void    (*NvIspCtrlCleanup_t)(void *ctx);
@@ -356,7 +357,10 @@ int main(int argc, char **argv)
     printf("\n[3] NvIspOpen...\n"); fflush(stdout);
 
     NvIspHandle handle = NULL;
-    err = p_NvIspOpen(&handle);
+    NvU32 isp_sel = use_isp_b ? 1 : 0;
+    printf("  Calling NvIspOpen(hRm=%p, isp_sel=%u, &handle)...\n", hRm, isp_sel);
+    fflush(stdout);
+    err = p_NvIspOpen(hRm, isp_sel, &handle);
     printf("  NvIspOpen: err=0x%x (%s) handle=%p\n", err, nverr_str(err), handle);
     fflush(stdout);
 
