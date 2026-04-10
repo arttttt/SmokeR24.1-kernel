@@ -339,7 +339,7 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x04FE00E6;  /* YUV output format */
+    cmd[n++] = 0x010000C9;  /* Y-only output (stock warmup format) */
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
