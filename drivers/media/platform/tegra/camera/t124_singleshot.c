@@ -25,6 +25,7 @@
 #include "camera/registers.h"
 #include "camera/t124_registers.h"
 #include "vi_capture.h"
+#include "isp_t124.h"
 
 extern int isp_reprocess;
 
@@ -195,13 +196,67 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 	int err = 0, index;
 	int state = VB2_BUF_STATE_DONE;
 
-	for (index = 0; index < chan->valid_ports; index++) {
-		err = arm_wait_mw_ack(chan, index, &ts);
+	if (chan->use_isp && !isp_reprocess) {
+		/* ISP streaming: VI→ISP directly, no memory write from VI.
+		 * Submit ISP job + wait for ISP OP_DONE. */
+		err = isp_t124_process_frame(chan->isp,
+				chan->isp_out_dma, 0);
 		if (err) {
 			dev_err(&chan->video.dev,
-				"MW_ACK_DONE timeout port %d\n", index);
+				"ISP process_frame failed: %d\n", err);
 			state = VB2_BUF_STATE_ERROR;
-			break;
+		}
+		if (!err) {
+			err = isp_t124_wait_frame(chan->isp);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"ISP wait_frame timeout\n");
+				state = VB2_BUF_STATE_ERROR;
+			}
+		}
+	} else if (chan->use_isp && isp_reprocess) {
+		/* ISP reprocess: VI→memory→ISP.
+		 * First wait MW_ACK (VI write to isp_raw_dma),
+		 * then submit ISP reprocess job. */
+		for (index = 0; index < chan->valid_ports; index++) {
+			err = arm_wait_mw_ack(chan, index, &ts);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"MW_ACK_DONE timeout port %d\n",
+					index);
+				state = VB2_BUF_STATE_ERROR;
+				break;
+			}
+		}
+		if (!err) {
+			err = isp_t124_process_frame_reprocess(chan->isp,
+					chan->isp_raw_dma,
+					chan->isp_out_dma, 0);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"ISP reprocess failed: %d\n", err);
+				state = VB2_BUF_STATE_ERROR;
+			}
+		}
+		if (!err) {
+			err = isp_t124_wait_frame(chan->isp);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"ISP wait_frame timeout\n");
+				state = VB2_BUF_STATE_ERROR;
+			}
+		}
+	} else {
+		/* Normal: VI→memory, wait MW_ACK */
+		for (index = 0; index < chan->valid_ports; index++) {
+			err = arm_wait_mw_ack(chan, index, &ts);
+			if (err) {
+				dev_err(&chan->video.dev,
+					"MW_ACK_DONE timeout port %d\n",
+					index);
+				state = VB2_BUF_STATE_ERROR;
+				break;
+			}
 		}
 	}
 
