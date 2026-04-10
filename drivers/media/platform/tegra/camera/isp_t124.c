@@ -111,9 +111,9 @@ static void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
 	memset(buf, 0, sizeof(*buf));
 }
 
-/* Fallback: standard DMA coherent (for cmdbuf which host1x manages) */
-static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
-			     size_t size)
+/* Standard DMA coherent — kept for potential fallback */
+static int __maybe_unused
+isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf, size_t size)
 {
 	buf->size = PAGE_ALIGN(size);
 	buf->cpu = dma_alloc_coherent(dev, buf->size, &buf->dma, GFP_KERNEL);
@@ -123,7 +123,8 @@ static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
 	return 0;
 }
 
-static void isp_dma_buf_free(struct device *dev, struct isp_dma_buf *buf)
+static void __maybe_unused
+isp_dma_buf_free(struct device *dev, struct isp_dma_buf *buf)
 {
 	if (!buf->cpu)
 		return;
