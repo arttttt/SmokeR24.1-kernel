@@ -280,17 +280,7 @@ int ioctl(int fd, int request, ...) {
                         }
                     }
 
-                    /* NONINCR(0x000, 1) + conditional syncpt incr → NOP */
-                    if (opcode == 2 && method == 0x000 && count == 1) {
-                        uint32_t val = pb[i+1];
-                        uint32_t cond = (val >> 8) & 0xFF;
-                        if (cond >= 4 && cond <= 6) {
-                            fprintf(stderr, "nvrm_shim: NOP NONINCR syncpt cond=%u at pb[%u]\n",
-                                    cond, i);
-                            pb[i] = 0x20000000;
-                            pb[i+1] = 0x20000000;
-                        }
-                    }
+                    /* Keep syncpt incrs — ISP needs them to complete jobs */
 
                     /* Don't NOP syncpt incrs — kernel needs them for job tracking.
                      * Only NOP the trigger (0x00C) to prevent ISP from starting
