@@ -110,7 +110,8 @@ struct nvhost32_submit_args {
 #define UV_STRIDE (((W/2) + 63) & ~63)    /* 1344 */
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
-#define OUT_SIZE (W * 4 * H)  /* 32bpp output */
+#define OUT_STRIDE (W * 2)        /* 16bpp: 2 bytes per pixel */
+#define OUT_SIZE (OUT_STRIDE * H)
 
 static int nvmap_fd = -1;
 
@@ -411,7 +412,7 @@ int main(int argc, char **argv)
 
     /* Output Y/U/V planes — original order */
     cmd[n++] = OP_INCR(0xE04, 3);
-    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = W * 4; /* 32bpp stride */
+    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = OUT_STRIDE; /* 16bpp stride */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
     cmd[n++] = OP_INCR(0xE0A, 3);
