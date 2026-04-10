@@ -292,68 +292,71 @@ int main(int argc, char **argv)
 
     uint32_t cmd[512];
     int n = 0;
+    int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1, stats_reloc = -1;
 
-    /* Output block */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+
+    /* Output surfaces — must set per-frame (not in calibration) */
     cmd[n++] = OP_INCR(0xE00, 1);
     cmd[n++] = ((W - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x04FE00E6;  /* YUV output format from stock */
+    cmd[n++] = 0x04FE00E6;  /* YUV output format */
     cmd[n++] = OP_INCR(0xE03, 1);
-    cmd[n++] = 0x00000000;  /* no digital gain/crop */
+    cmd[n++] = 0x00000000;
 
-    /* Output Y plane */
+    /* Output Y/U/V planes */
     cmd[n++] = OP_INCR(0xE04, 3);
-    int y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
-    /* Output U plane */
+    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = Y_STRIDE;
     cmd[n++] = OP_INCR(0xE07, 3);
-    int u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
-    /* Output V plane */
+    u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
     cmd[n++] = OP_INCR(0xE0A, 3);
-    int v_reloc = n; cmd[n++] = out_v_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
+    v_reloc = n; cmd[n++] = out_v_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
 
-    /* Processing block */
+    /* Processing block — passthrough (no scaling) */
     cmd[n++] = OP_INCR(0x500, 6);
-    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0x00000000;  /* flags */
+    cmd[n++] = 0x00000000;  /* h_scale */
+    cmd[n++] = 0x00000000;  /* v_scale */
+    cmd[n++] = 0x00000000;  /* v_ratio */
+    cmd[n++] = 0x00000000;
     cmd[n++] = (H << 16) | W;
 
-    /* Stats buffer (method 0x100) — required for STATS_DONE syncpt */
+    /* Stats buffer */
     cmd[n++] = OP_INCR(0x100, 4);
-    int stats_reloc = n;
+    stats_reloc = n;
     cmd[n++] = stats_iova; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
 
-    /* Input block (reprocess) */
+    /* ISP_ENABLE = full pipeline */
+    cmd[n++] = OP_INCR(0x015, 1);
+    cmd[n++] = 0x04040007;  /* streaming+stats mode (from stock) */
+
+    /* Input block (reprocess): raw Bayer from memory
+     * Note: 0xE33 (input format) NOT used by MIUI libnvisp_v3.so —
+     * format comes from calibration/pipeline config */
     cmd[n++] = OP_INCR(0xE31, 1);
     cmd[n++] = (W & 0x7FFF) | (H << 16);  /* input dimensions */
-    cmd[n++] = OP_INCR(0xE33, 1);
-    cmd[n++] = 0x10200024;  /* input format: 10-bit Bayer BGGR (from stock traces) */
-    cmd[n++] = OP_INCR(0xE34, 3);
-    int in_reloc = n; cmd[n++] = in_iova; cmd[n++] = 0; cmd[n++] = W * BPP;  /* stride */
+    cmd[n++] = OP_INCR(0xE34, 3);         /* input plane 0 */
+    in_reloc = n; cmd[n++] = in_iova; cmd[n++] = 0; cmd[n++] = W * BPP;
     cmd[n++] = OP_INCR(0xE32, 1);
-    cmd[n++] = (W & 0x3FFF) | (0 << 16);  /* strip config: full width, no overlap */
+    cmd[n++] = (W & 0x3FFF);              /* strip width = full frame */
 
-    /* ISP_ENABLE */
-    cmd[n++] = OP_INCR(0x015, 1);
-    cmd[n++] = 7;  /* full pipeline */
-
-    /* Input trigger — fires ISP processing */
+    /* Input trigger */
     cmd[n++] = OP_INCR(0xE30, 1);
     cmd[n++] = 1;
 
-    /* Syncpt incrs */
+    /* Conditional syncpt incrs */
     cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (4 << 8) | sp_memory;   /* cond 4: OP_DONE */
+    cmd[n++] = (4 << 8) | sp_memory;
     cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (5 << 8) | sp_stats;    /* cond 5: STATS */
+    cmd[n++] = (5 << 8) | sp_stats;
     cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (6 << 8) | sp_loadv;    /* cond 6: RD_DONE */
+    cmd[n++] = (6 << 8) | sp_loadv;
 
-    /* ISP_CONTROL trigger */
+    /* ISP_CONTROL = reprocess trigger */
     cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x0B;  /* reprocess trigger (0x09 or 0x0B from RE) */
+    cmd[n++] = 0x0B;
 
     printf("  cmdbuf: %d words\n", n);
 
