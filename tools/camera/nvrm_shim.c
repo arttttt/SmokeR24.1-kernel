@@ -69,6 +69,9 @@ struct nvmap_handle_param {
 #define NVMAP_IOC_PARAM _IOWR(NVMAP_IOC_MAGIC, 8, struct nvmap_handle_param)
 #define NVMAP_HANDLE_PARAM_SIZE 1
 
+/* Strip streaming commands from ISP gathers (set via env NVRM_SHIM_STRIP=1) */
+static int strip_streaming = -1; /* -1 = not checked yet */
+
 /* Track dmabuf fds so we can close them later */
 #define MAX_MAPPED 64
 static struct {
@@ -213,6 +216,9 @@ int ioctl(int fd, int request, ...) {
 
     init_real_ioctl();
 
+    if (strip_streaming < 0)
+        strip_streaming = getenv("NVRM_SHIM_STRIP") ? 1 : 0;
+
     unsigned int nr = _IOC_NR(request);
     unsigned int type = _IOC_TYPE(request);
 
@@ -225,6 +231,69 @@ int ioctl(int fd, int request, ...) {
     /* Intercept NVMAP_IOC_MMAP */
     if (type == NVMAP_IOC_MAGIC && nr == 5) {
         return shim_nvmap_mmap(fd, (struct nvmap_map_caller *)arg);
+    }
+
+    /* Intercept nvhost SUBMIT (NR=15, 32-bit version) on ISP channel.
+     * Scan gather for streaming trigger and conditional syncpt incrs,
+     * NOP them out so ISP doesn't start waiting for VI pixels.
+     * This turns a streaming calibration gather into calibration-only. */
+    #define NVHOST_MAGIC 'H'
+    if (type == NVHOST_MAGIC && nr == 15 && strip_streaming) {
+        /* 32-bit submit: cmdbufs at offset 28 in struct */
+        struct {
+            uint32_t submit_version, num_syncpt_incrs, num_cmdbufs;
+            uint32_t num_relocs, num_waitchks, timeout;
+            uint32_t syncpt_incrs, cmdbufs;
+            /* ... rest doesn't matter */
+        } *sa = arg;
+
+        struct { uint32_t mem; uint32_t offset; uint32_t words; } *cbs =
+            (void *)(uintptr_t)sa->cmdbufs;
+
+        for (uint32_t g = 0; g < sa->num_cmdbufs; g++) {
+            /* Find the gather in our mapped push buffers */
+            for (int m = 0; m < num_mapped; m++) {
+                if (mapped[m].dmabuf_fd < 0) continue;
+                /* Push buffer is mapped at mapped[m].addr */
+                uint32_t *pb = (uint32_t *)mapped[m].addr;
+                uint32_t pb_words = mapped[m].length / 4;
+
+                /* Scan for ISP streaming commands */
+                for (uint32_t i = 0; i < pb_words - 1; i++) {
+                    uint32_t op = pb[i];
+                    uint32_t opcode = op >> 28;
+                    uint32_t method = (op >> 16) & 0xFFF;
+                    uint32_t count = op & 0xFFFF;
+
+                    /* NONINCR(0x00C, 1) + trigger 0x05 → NOP */
+                    if (opcode == 2 && method == 0x00C && count == 1) {
+                        if (pb[i+1] == 0x05 || pb[i+1] == 0x0F) {
+                            fprintf(stderr, "nvrm_shim: NOP streaming trigger 0x%02x at pb[%u]\n",
+                                    pb[i+1], i);
+                            pb[i] = 0x20000000;   /* NONINCR(0, 0) = NOP */
+                            pb[i+1] = 0x20000000;
+                        }
+                    }
+
+                    /* NONINCR(0x000, 1) + conditional syncpt incr → NOP
+                     * Conditional incrs have cond in bits 15:8 (cond > 0) */
+                    if (opcode == 2 && method == 0x000 && count == 1) {
+                        uint32_t val = pb[i+1];
+                        uint32_t cond = (val >> 8) & 0xFF;
+                        if (cond >= 4 && cond <= 6) { /* OP_DONE, STATS, RD_DONE */
+                            fprintf(stderr, "nvrm_shim: NOP conditional syncpt cond=%u at pb[%u]\n",
+                                    cond, i);
+                            pb[i] = 0x20000000;
+                            pb[i+1] = 0x20000000;
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Also zero out syncpt incrs count to prevent kernel
+         * from waiting for incrs that will never happen */
+        sa->num_syncpt_incrs = 0;
     }
 
     return real_ioctl(fd, request, arg);

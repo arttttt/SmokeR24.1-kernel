@@ -193,15 +193,14 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
-    err = pHwApply(hw_settings);
-    printf("  HwSettingsApply: err=0x%x\n", err);
+    /* Enable streaming stripping in shim — removes trigger + conditional syncpts */
+    setenv("NVRM_SHIM_STRIP", "1", 1);
 
-    /* HwSettingsApply submits calibration + streaming setup.
-     * ISP starts waiting for VI pixels → stuck syncpts.
-     * We need to wait for calibration to complete, then
-     * CPU-increment the stuck syncpts to unblock CDMA. */
-    printf("  Waiting for calibration to settle...\n");
-    usleep(100000); /* 100ms for calibration gather to execute */
+    err = pHwApply(hw_settings);
+    printf("  HwSettingsApply: err=0x%x (streaming stripped by shim)\n", err);
+
+    /* Disable stripping for our own reprocess gather */
+    unsetenv("NVRM_SHIM_STRIP");
 
     /* Extract ISP channel fd and syncpt from handle struct */
     uint32_t *ctx = (uint32_t *)isp_handle;
@@ -263,34 +262,7 @@ int main(int argc, char **argv)
     uint32_t sp_loadv = gsp.value;
     printf("  syncpts: memory=%u stats=%u loadv=%u\n", sp_memory, sp_stats, sp_loadv);
 
-    /* CPU-increment any stuck syncpts from HwSettingsApply's streaming setup.
-     * This unblocks CDMA so our reprocess gather can execute. */
-#define NVHOST_IOCTL_CTRL_SYNCPT_INCR _IOW('H', 2, struct { uint32_t id; })
-    for (int sp = sp_memory; sp <= sp_loadv; sp++) {
-        struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp, .thresh = 0, .timeout = 0 };
-        ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
-
-        /* Read max from channel to see if stuck */
-        printf("  syncpt %u: current=%u\n", sp, rd.value);
-    }
-    /* Force-increment all ISP syncpts to unstick streaming gather.
-     * Need enough incrs to satisfy all pending waits from HwSettingsApply. */
-    printf("  Force-incrementing stuck syncpts...\n");
-    for (int round = 0; round < 3; round++) {
-        for (int i = 0; i < 20; i++) {
-            struct { uint32_t id; } si;
-            si.id = sp_memory; ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-            si.id = sp_stats;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-            si.id = sp_loadv;  ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_INCR, &si);
-        }
-        usleep(100000); /* 100ms between rounds */
-    }
-    /* Check syncpt state after increments */
-    for (int sp = sp_memory; sp <= sp_loadv; sp++) {
-        struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp, .thresh = 0, .timeout = 0 };
-        ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
-        printf("  syncpt %u after incr: current=%u\n", sp, rd.value);
-    }
+    /* No force-increment needed — shim strips streaming from HwSettingsApply */
 
     /* ---- Step 3: Allocate buffers ---- */
     printf("\n[3] Allocate buffers...\n");
