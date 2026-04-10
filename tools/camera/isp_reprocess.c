@@ -202,30 +202,32 @@ int main(int argc, char **argv)
     printf("  ctx[0]=0x%x ctx[1]=0x%x ctx[2]=0x%x ctx[3]=0x%x ctx[4]=0x%x\n",
            ctx[0], ctx[1], ctx[2], ctx[3], ctx[4]);
 
-    /* Close ISP blob — release exclusive channel so we can open it ourselves.
-     * Calibration was already submitted to HW via HwSettingsApply. */
-    printf("  Closing ISP blob (release channel)...\n");
-    pHwDestroy(hw_settings);
-    hw_settings = NULL;
-    pIspClose(isp_handle);
-    isp_handle = NULL;
-    printf("  ISP blob closed\n");
+    /* DON'T close ISP blob — keep channel open to maintain power/clocks.
+     * Extract ISP channel fd from blob's internal context. */
+    printf("  Extracting ISP fd from blob context...\n");
 
-    /* ---- Step 2: Open nvmap and ISP channel directly for reprocess ---- */
-    printf("\n[2] Setup nvmap + ISP channel...\n");
+    /* ctx layout (from handle dump):
+     *   ctx[0]  = hRm (0x1)
+     *   ctx[1]  = module_id (0x0b)
+     *   ctx[2]  = class_id (0x32)
+     *   ctx[3]  = NvRmChannel* ptr
+     *   ctx[4]  = syncpt_id_base (0x22 = 34)
+     * NvRmChannel layout (from jxd source):
+     *   channel[0] = fd
+     */
+    void *nvrm_channel = (void *)(uintptr_t)ctx[3];
+    int isp_fd = *(int *)nvrm_channel;
+    printf("  NvRmChannel=%p isp_fd=%d\n", nvrm_channel, isp_fd);
+
+    /* syncpts from ctx: ctx[4] has base, but we need to query them */
+    printf("\n[2] Setup for reprocess (using blob's channel)...\n");
 
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
     if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
-    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
-    if (isp_fd < 0) { perror("open isp"); return 1; }
-
-    struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
-    ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &snf);
-
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
 
-    /* Get syncpoints */
+    /* Get syncpoints from the ISP channel */
     struct nvhost_get_param_arg gsp;
     gsp.param = 0; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp);
     uint32_t sp_memory = gsp.value;
@@ -315,7 +317,7 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE31, 1);
     cmd[n++] = (W & 0x7FFF) | (H << 16);  /* input dimensions */
     cmd[n++] = OP_INCR(0xE33, 1);
-    cmd[n++] = 0x04FE00E6;  /* input format — TODO: should be Bayer format */
+    cmd[n++] = 0x10200024;  /* input format: 10-bit Bayer BGGR (from stock traces) */
     cmd[n++] = OP_INCR(0xE34, 3);
     int in_reloc = n; cmd[n++] = in_iova; cmd[n++] = 0; cmd[n++] = W * BPP;  /* stride */
     cmd[n++] = OP_INCR(0xE32, 1);
@@ -431,9 +433,10 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Cleanup */
+    /* Cleanup — close blob AFTER reprocess (keeps ISP powered) */
     printf("\n[cleanup]\n");
-    close(isp_fd);
+    pHwDestroy(hw_settings);
+    pIspClose(isp_handle);
     close(ctrl_fd);
     close(nvmap_fd);
     printf("=== Done ===\n");
