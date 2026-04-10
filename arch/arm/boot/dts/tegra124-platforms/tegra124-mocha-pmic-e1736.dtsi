@@ -861,6 +861,8 @@
 		compatible = "power-supply-extcon";
 		power-supply,extcon-dev = "tegra-udc";
 		power-supply,y-cable-extcon-dev = "tegra-otg";
+		extcon-cables = <&extcon_cable_xlate 0>;
+		extcon-cable-names = "usb-charger";
 	};
 
 	extcon {

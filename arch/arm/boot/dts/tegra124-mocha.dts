@@ -352,7 +352,7 @@
 		nvidia,i2s-param-hifi = <0 0 2 16 2 48000>;
 	};
 
-	udc@7d000000 {
+	udc: udc@7d000000 {
 		status = "okay";
 		nvidia,id-detection-type = <0x1>;
 		nvidia,enable-pmu-vbus-detection;
@@ -364,7 +364,7 @@
 		#extcon-cells = <0x1>;
 	};
 	
-	otg@7d000000 {
+	otg: otg@7d000000 {
 		status = "okay";
 		nvidia,enable-pmu-vbus-detection;
 		nvidia,id-detection-type = <0x1>;
