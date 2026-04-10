@@ -35,6 +35,9 @@
 #include "dev.h"
 #include "nvhost_job.h"
 #include "nvhost_acm.h"
+
+/* nvmap kernel API for ISP buffer allocation */
+#include "../../../../video/tegra/nvmap/nvmap_priv.h"
 #include "host1x/host1x01_hardware.h"
 #include "class_ids.h"
 
@@ -42,6 +45,73 @@
  * DMA buffer helpers
  * ---------------------------------------------------------------- */
 
+/* Allocate buffer via nvmap (same path as stock camera HAL) */
+static int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
+			       struct isp_dma_buf *buf, size_t size)
+{
+	struct nvmap_handle_ref *ref;
+	phys_addr_t phys;
+	int err;
+
+	if (!isp->nvmap)
+		return -ENODEV;
+
+	buf->size = PAGE_ALIGN(size);
+
+	/* Create handle (like NVMAP_IOC_CREATE) */
+	ref = nvmap_create_handle(isp->nvmap, buf->size);
+	if (IS_ERR(ref))
+		return PTR_ERR(ref);
+
+	/* Allocate backing memory (like NVMAP_IOC_ALLOC)
+	 * heap=0x1 (carveout), flags=0x1 (WRITE_COMBINE), align=32 */
+	err = nvmap_alloc_handle(isp->nvmap, ref->handle,
+				 0x1, /* heap_mask — stock uses 0x1 */
+				 32,  /* align */
+				 0,   /* kind */
+				 NVMAP_HANDLE_WRITE_COMBINE,
+				 NVMAP_IVM_INVALID_PEER);
+	if (err) {
+		nvmap_free_handle(isp->nvmap, ref->handle);
+		return err;
+	}
+
+	/* Pin to get IOVA (like NVMAP_IOC_PIN) */
+	err = __nvmap_pin(ref, &phys);
+	if (err) {
+		nvmap_free_handle(isp->nvmap, ref->handle);
+		return err;
+	}
+
+	buf->dma = phys;
+	buf->nvmap_ref = ref;
+
+	/* mmap for CPU access (kernel virtual address) */
+	buf->cpu = dma_buf_vmap(ref->handle->dmabuf);
+	if (!buf->cpu) {
+		__nvmap_unpin(ref);
+		nvmap_free_handle(isp->nvmap, ref->handle);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
+			       struct isp_dma_buf *buf)
+{
+	if (!buf->nvmap_ref)
+		return;
+	if (buf->cpu) {
+		dma_buf_vunmap(buf->nvmap_ref->handle->dmabuf, buf->cpu);
+		buf->cpu = NULL;
+	}
+	__nvmap_unpin(buf->nvmap_ref);
+	nvmap_free_handle(isp->nvmap, buf->nvmap_ref->handle);
+	memset(buf, 0, sizeof(*buf));
+}
+
+/* Fallback: standard DMA coherent (for cmdbuf which host1x manages) */
 static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
 			     size_t size)
 {
@@ -49,7 +119,7 @@ static int isp_dma_buf_alloc(struct device *dev, struct isp_dma_buf *buf,
 	buf->cpu = dma_alloc_coherent(dev, buf->size, &buf->dma, GFP_KERNEL);
 	if (!buf->cpu)
 		return -ENOMEM;
-	buf->page = NULL;
+	buf->nvmap_ref = NULL;
 	return 0;
 }
 
@@ -492,8 +562,18 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	/* PIO write: stock does this before first submit */
 	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
 
-	/* Allocate working buffer */
-	err = isp_dma_buf_alloc(dev, &isp->work_buf, ISP_WORK_BUF_SIZE);
+	/* Create nvmap client (stock HAL uses nvmap for all ISP buffers) */
+	if (!isp->nvmap) {
+		isp->nvmap = __nvmap_create_client(nvmap_dev, "isp_t124");
+		if (!isp->nvmap) {
+			dev_err(dev, "nvmap client creation failed\n");
+			err = -ENOMEM;
+			goto idle;
+		}
+	}
+
+	/* Allocate working buffer via nvmap */
+	err = isp_nvmap_buf_alloc(isp, &isp->work_buf, ISP_WORK_BUF_SIZE);
 	if (err) {
 		dev_err(dev, "ISP work buf alloc failed: %d\n", err);
 		goto idle;
@@ -501,11 +581,11 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	dev_info(dev, "work_buf: iova=0x%pad size=%zu\n",
 		 &isp->work_buf.dma, isp->work_buf.size);
 
-	/* Allocate separate stats buffer (stock uses distinct IOVA for 0x800/0x820) */
-	err = isp_dma_buf_alloc(dev, &isp->stats_buf, 256 * 1024);
+	/* Allocate separate stats buffer via nvmap */
+	err = isp_nvmap_buf_alloc(isp, &isp->stats_buf, 256 * 1024);
 	if (err) {
 		dev_err(dev, "ISP stats buf alloc failed: %d\n", err);
-		isp_dma_buf_free(dev, &isp->work_buf);
+		isp_nvmap_buf_free(isp, &isp->work_buf);
 		goto idle;
 	}
 	dev_info(dev, "stats_buf: iova=0x%pad size=%zu\n",
@@ -840,8 +920,8 @@ free_cmdbuf:
 		isp->cmdbuf = NULL;
 	}
 free_work:
-	isp_dma_buf_free(dev, &isp->stats_buf);
-	isp_dma_buf_free(dev, &isp->work_buf);
+	isp_nvmap_buf_free(isp, &isp->stats_buf);
+	isp_nvmap_buf_free(isp, &isp->work_buf);
 idle:
 	nvhost_module_idle(isp->pdev);
 	return err;
@@ -868,8 +948,8 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp)
 		isp->cmdbuf = NULL;
 	}
 
-	isp_dma_buf_free(dev, &isp->stats_buf);
-	isp_dma_buf_free(dev, &isp->work_buf);
+	isp_nvmap_buf_free(isp, &isp->stats_buf);
+	isp_nvmap_buf_free(isp, &isp->work_buf);
 
 	if (isp->reprocess)
 		nvhost_module_idle(isp->pdev);
