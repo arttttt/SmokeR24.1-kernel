@@ -266,6 +266,20 @@ int main(int argc, char **argv)
     fclose(f);
     printf("  Read %d bytes\n", nread);
 
+    /* Option: use test pattern instead of real data */
+    int use_pattern = (argc > 2 && !strcmp(argv[2], "--pattern"));
+
+    if (use_pattern) {
+        printf("  Using TEST PATTERN (gradient) instead of raw data\n");
+        /* Generate 10-bit gradient in 16-bit LE containers */
+        uint16_t *pat = (uint16_t *)raw_buf;
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                pat[y * W + x] = ((x + y) & 0x3FF); /* 10-bit gradient */
+            }
+        }
+    }
+
     /* Upload to nvmap in chunks */
     int chunk = 65536;
     for (int off = 0; off < IN_SIZE; off += chunk) {
