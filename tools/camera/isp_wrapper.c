@@ -116,9 +116,9 @@ struct nvmap_alloc_handle {
 };
 
 struct nvmap_pin_handle {
+	uint32_t *handles;
+	unsigned long *addr;
 	uint32_t count;
-	uint64_t handles;
-	uint64_t addr;
 };
 
 /* ---- ioctl numbers ---- */
@@ -413,12 +413,7 @@ int ioctl(int fd, int request, ...) {
 			     a->handle, a->heap_mask, a->flags, a->align, ret);
 		} else if (nr == NVMAP_PIN_NR) {
 			struct nvmap_pin_handle *a = arg;
-			uint32_t *handles = (uint32_t *)(uintptr_t)a->handles;
-			uint32_t *addrs = (uint32_t *)(uintptr_t)a->addr;
-			int i;
-			for (i = 0; i < (int)a->count && i < 16; i++)
-				tlog("[NVMAP_PIN] handle=%u → addr=0x%08x ret=%d\n",
-				     handles[i], addrs ? addrs[i] : 0, ret);
+			tlog("[NVMAP_PIN] count=%u ret=%d\n", a->count, ret);
 		} else if (nr == NVMAP_GET_FD_NR) {
 			struct nvmap_create_handle *a = arg;
 			tlog("[NVMAP_GET_FD] handle=%u → fd=%d ret=%d\n",
