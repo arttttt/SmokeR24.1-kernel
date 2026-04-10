@@ -43,7 +43,8 @@ struct tegra_isp_t124 {
 	int cal_words;
 
 	/* Runtime state (allocated during stream_init) */
-	struct isp_dma_buf work_buf;    /* 256KB ISP working buffer */
+	struct isp_dma_buf work_buf;    /* 512KB ISP working buffer */
+	struct isp_dma_buf stats_buf;   /* 256KB stats output (0x800/0x820) */
 	u32 *cmdbuf;                    /* DMA-coherent command buffer */
 	dma_addr_t cmdbuf_phys;
 	bool streaming;                 /* stream_init called */

@@ -501,6 +501,16 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	dev_info(dev, "work_buf: iova=0x%pad size=%zu\n",
 		 &isp->work_buf.dma, isp->work_buf.size);
 
+	/* Allocate separate stats buffer (stock uses distinct IOVA for 0x800/0x820) */
+	err = isp_dma_buf_alloc(dev, &isp->stats_buf, 256 * 1024);
+	if (err) {
+		dev_err(dev, "ISP stats buf alloc failed: %d\n", err);
+		isp_dma_buf_free(dev, &isp->work_buf);
+		goto idle;
+	}
+	dev_info(dev, "stats_buf: iova=0x%pad size=%zu\n",
+		 &isp->stats_buf.dma, isp->stats_buf.size);
+
 	/* Command buffer — 16KB total for all submits */
 	host1x_pdev = nvhost_get_parent(isp->pdev);
 	host1x_dev = host1x_pdev ? &host1x_pdev->dev : dev;
@@ -601,17 +611,17 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	cmd[n++] = 0x00020000;
 	cmd[n++] = 0x00000000;
 
-	/* 0x800: stats buffer A */
+	/* 0x800: stats buffer A (stock uses separate buffer, not work_buf) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_A, 3);
-	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = (u32)isp->stats_buf.dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* 0x820: stats buffer B */
+	/* 0x820: stats buffer B (same separate buffer as A) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_RT_BUF_B, 3);
-	cmd[n++] = (u32)isp->work_buf.dma;
+	cmd[n++] = (u32)isp->stats_buf.dma;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
@@ -971,6 +981,7 @@ free_cmdbuf:
 		isp->cmdbuf = NULL;
 	}
 free_work:
+	isp_dma_buf_free(dev, &isp->stats_buf);
 	isp_dma_buf_free(dev, &isp->work_buf);
 idle:
 	nvhost_module_idle(isp->pdev);
@@ -998,6 +1009,7 @@ void isp_t124_stream_stop(struct tegra_isp_t124 *isp)
 		isp->cmdbuf = NULL;
 	}
 
+	isp_dma_buf_free(dev, &isp->stats_buf);
 	isp_dma_buf_free(dev, &isp->work_buf);
 
 	if (isp->reprocess)
