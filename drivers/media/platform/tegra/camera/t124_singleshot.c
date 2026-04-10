@@ -148,6 +148,20 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		surface_setup(chan, index, addr, stride);
 	}
 
+	/* ISP streaming: submit ISP per-frame BEFORE VI trigger.
+	 * ISP needs output surfaces configured before receiving pixels.
+	 * Stock does: ISP submit → VI trigger → ISP wait. */
+	if (chan->use_isp && !isp_reprocess) {
+		err = isp_t124_process_frame(chan->isp, buf->addr, 0);
+		if (err) {
+			dev_err(&chan->video.dev,
+				"ISP pre-frame submit failed: %d\n", err);
+			chan->capture_state = CAPTURE_ERROR;
+			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
+			return err;
+		}
+	}
+
 	/* Re-arm PP single-shot per frame (vi2.c does this every frame) */
 	for (index = 0; index < chan->valid_ports; index++) {
 		u32 pp_reg = (chan->port[index] == 0) ?
@@ -198,22 +212,13 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 	int state = VB2_BUF_STATE_DONE;
 
 	if (chan->use_isp && !isp_reprocess) {
-		/* ISP streaming: VI→ISP directly, output to V4L2 buffer.
-		 * Use buf->addr so ISP writes directly where app reads. */
-		err = isp_t124_process_frame(chan->isp,
-				buf->addr, 0);
+		/* ISP streaming: process_frame already submitted in
+		 * capture_start (before VI trigger). Just wait OP_DONE. */
+		err = isp_t124_wait_frame(chan->isp);
 		if (err) {
 			dev_err(&chan->video.dev,
-				"ISP process_frame failed: %d\n", err);
+				"ISP wait_frame timeout\n");
 			state = VB2_BUF_STATE_ERROR;
-		}
-		if (!err) {
-			err = isp_t124_wait_frame(chan->isp);
-			if (err) {
-				dev_err(&chan->video.dev,
-					"ISP wait_frame timeout\n");
-				state = VB2_BUF_STATE_ERROR;
-			}
 		}
 	} else if (chan->use_isp && isp_reprocess) {
 		/* ISP reprocess: VI→memory→ISP.
