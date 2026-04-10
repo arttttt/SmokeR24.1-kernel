@@ -128,7 +128,7 @@ typedef NvError (*NvIspHwGetCapabilities_t)(void *caps);
 /* NvIsp HW settings */
 typedef NvError (*NvIspHwSettingsCreate_t)(void *handle, void **settings);
 typedef NvError (*NvIspHwSettingsDestroy_t)(void *settings);
-typedef NvError (*NvIspHwSettingsApply_t)(void *handle, void *settings);
+typedef NvError (*NvIspHwSettingsApply_t)(void *settings); /* 1 arg! */
 typedef NvError (*NvIspHwSettingsSetAttribute_t)(void *settings, NvU32 attr, void *val);
 typedef NvError (*NvIspHwSettingsClone_t)(void *src, void **dst);
 
@@ -487,9 +487,11 @@ int main(int argc, char **argv)
     }
 
     /* ---- Step 7b: NvIspHwSettingsApply ---- */
+    /* NvIspHwSettingsApply takes 1 arg: settings struct (NOT handle+settings) */
+    /* settings[0] already contains ISP context pointer from NvIspHwSettingsCreate */
     if (hw_settings && p_NvIspHwSettingsApply) {
-        printf("\n[7b] NvIspHwSettingsApply...\n"); fflush(stdout);
-        err = p_NvIspHwSettingsApply(handle, hw_settings);
+        printf("\n[7b] NvIspHwSettingsApply(settings)...\n"); fflush(stdout);
+        err = p_NvIspHwSettingsApply(hw_settings);
         printf("  err=0x%x (%s)\n", err, nverr_str(err));
         fflush(stdout);
     }
