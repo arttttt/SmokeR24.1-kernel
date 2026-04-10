@@ -1222,17 +1222,6 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 					PAGE_ALIGN(chan->isp_raw_size),
 					&chan->isp_raw_dma, GFP_KERNEL);
 			if (chan->isp_raw_cpu) {
-				/* Map into VI SMMU domain for VI write access */
-				chan->vi_raw_dma = dma_map_single(
-					chan->vi->dev, chan->isp_raw_cpu,
-					PAGE_ALIGN(chan->isp_raw_size),
-					DMA_FROM_DEVICE);
-				if (dma_mapping_error(chan->vi->dev,
-						      chan->vi_raw_dma)) {
-					dev_warn(&chan->video.dev,
-						 "VI raw SMMU map failed\n");
-					chan->vi_raw_dma = 0;
-				}
 				ret = isp_t124_stream_init(isp,
 						chan->format.width,
 						chan->format.height,
@@ -1377,12 +1366,6 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 		chan->isp_out_cpu = NULL;
 	}
 	if (chan->isp_raw_cpu && chan->isp) {
-		if (chan->vi_raw_dma) {
-			dma_unmap_single(chan->vi->dev, chan->vi_raw_dma,
-					 PAGE_ALIGN(chan->isp_raw_size),
-					 DMA_FROM_DEVICE);
-			chan->vi_raw_dma = 0;
-		}
 		dma_free_coherent(&chan->isp->pdev->dev,
 				  PAGE_ALIGN(chan->isp_raw_size),
 				  chan->isp_raw_cpu, chan->isp_raw_dma);
