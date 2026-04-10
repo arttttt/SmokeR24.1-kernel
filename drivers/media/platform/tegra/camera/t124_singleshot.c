@@ -35,7 +35,6 @@ extern int t124_csi_tpg;
 #include "../../../../video/tegra/host/nvhost_job.h"
 #include "../../../../video/tegra/host/nvhost_acm.h"
 #include "../../../../video/tegra/host/host1x/host1x02_hardware.h"
-#include "../../../../video/tegra/host/host1x/hw_host1x01_uclass.h"
 
 #define VI_CLASS_ID 0x30
 
