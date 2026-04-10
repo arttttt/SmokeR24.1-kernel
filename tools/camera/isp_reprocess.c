@@ -258,6 +258,29 @@ int main(int argc, char **argv)
                                 printf("    Found 0x015 ISP_ENABLE = 0x%08x at pb+%u\n",
                                        pb[j+1], j);
                             }
+                            /* INCR(0xE32, 1) = strip config */
+                            if (op == 0x1E320001) {
+                                printf("    Found 0xE32 strip config = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                            /* INCR(0x500, 6) = processing block */
+                            if (op == 0x15000006) {
+                                printf("    Found 0x500 processing = %08x %08x %08x %08x %08x %08x\n",
+                                       pb[j+1], pb[j+2], pb[j+3], pb[j+4], pb[j+5], pb[j+6]);
+                            }
+                            /* INCR(0xE04, 3) = Y output surface */
+                            if (op == 0x1E040003) {
+                                printf("    Found 0xE04 Y surface = [%08x, %08x, stride=%u]\n",
+                                       pb[j+1], pb[j+2], pb[j+3]);
+                            }
+                            /* INCR(0xE30, 1) = input trigger */
+                            if (op == 0x1E300001) {
+                                printf("    Found 0xE30 input trigger = %u\n", pb[j+1]);
+                            }
+                            /* NONINCR(0x00C, 1) = ISP control */
+                            if (op == 0x200C0001) {
+                                printf("    Found 0x00C ISP_CONTROL = 0x%02x\n", pb[j+1]);
+                            }
                         }
                     }
                 }
