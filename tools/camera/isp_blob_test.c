@@ -389,23 +389,6 @@ int main(int argc, char **argv)
      */
     printf("\n[3] NvIspOpen...\n"); fflush(stdout);
 
-    /* First test NvIspCtrlInitialize standalone to catch the error */
-    if (p_NvIspCtrlInitialize) {
-        /* Allocate context manually like NvIspOpen does (0x1330 bytes) */
-        void *test_ctx = calloc(1, 0x1330);
-        if (test_ctx) {
-            /* Store hRm at ctx[0] like NvIspOpen does */
-            *(void **)test_ctx = hRm;
-            NvU32 isp_sel_val = use_isp_b ? NvIspIspSelect_B : NvIspIspSelect_A;
-            printf("  Testing NvIspCtrlInitialize(ctx, %u) standalone...\n", isp_sel_val);
-            fflush(stdout);
-            err = p_NvIspCtrlInitialize(test_ctx, isp_sel_val);
-            printf("  NvIspCtrlInitialize: err=0x%x (%s)\n", err, nverr_str(err));
-            fflush(stdout);
-            free(test_ctx);
-        }
-    }
-
     NvIspHandle handle = NULL;
     NvU32 isp_sel = use_isp_b ? NvIspIspSelect_B : NvIspIspSelect_A;
     printf("  Calling NvIspOpen(hRm=%p, isp_sel=%u, &handle)...\n", hRm, isp_sel);
