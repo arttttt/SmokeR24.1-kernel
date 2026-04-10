@@ -202,7 +202,8 @@ struct tegra_channel {
 	bool use_isp;			/* true = VI→ISP pipeline active */
 	struct tegra_isp_t124 *isp;	/* ISP instance (A or B) */
 	void *isp_raw_cpu;		/* internal raw buffer for VI output */
-	dma_addr_t isp_raw_dma;
+	dma_addr_t isp_raw_dma;		/* ISP-side IOVA (for ISP read) */
+	dma_addr_t vi_raw_dma;		/* VI-side IOVA (for VI write) */
 	size_t isp_raw_size;
 	void *isp_out_cpu;		/* ISP output buffer (ISP device IOVA) */
 	dma_addr_t isp_out_dma;

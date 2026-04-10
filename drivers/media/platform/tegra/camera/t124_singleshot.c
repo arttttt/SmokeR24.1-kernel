@@ -136,8 +136,9 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			addr = 0;
 			stride = 0;
 		} else if (chan->use_isp) {
-			/* ISP reprocess: VI writes raw to isp_raw_dma */
-			addr = chan->isp_raw_dma;
+			/* ISP reprocess: VI writes raw — use VI-side IOVA */
+			addr = chan->vi_raw_dma ? chan->vi_raw_dma :
+						  chan->isp_raw_dma;
 			stride = chan->format.width * 2;
 		} else {
 			/* Normal: VI writes to V4L2 buffer */
