@@ -359,7 +359,11 @@ static int isp_build_zero_init(u32 *buf)
 	ZI(0x900, 2); ZI(0x902, 1); ZN(0x903, 64);
 	ZI(0x904, 2); ZI(0x906, 1); ZN(0x907, 36);
 	ZI(0x908, 1); ZI(0x920, 10); ZI(0x909, 7);
-	ZI(0x910, 9); ZI(0x919, 1); ZN(0x91a, 9);
+	ZI(0x910, 9); ZI(0x919, 1);
+	/* 0x91a: stock has word[8]=0x200 (not all zeros) */
+	buf[n++] = nvhost_opcode_nonincr(0x91a, 9);
+	memset(&buf[n], 0, 8 * 4); n += 8;
+	buf[n++] = 0x00000200;
 	ZI(0x91b, 1); ZN(0x91c, 9);
 	ZI(0x91d, 1); ZN(0x91e, 9);
 	buf[n++] = nvhost_opcode_incr(0x91f, 1);
@@ -399,16 +403,13 @@ static int isp_append_zero_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 	return n;
 }
 
-/* Append real calibration + trigger. Returns new n. */
+/* Append real calibration data (no trigger — stock S5 has none). */
 static int isp_append_cal_block(struct tegra_isp_t124 *isp, u32 *buf, int n)
 {
 	memcpy(&buf[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
-	/* Cal data ends with INCR(0x053, 2) + [val, val].
-	 * Stock keeps 0x053=0, 0x054=0 in S2/S4 cal blocks.
-	 * 0x053=1 only in S5. Do not patch here. */
-	buf[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	buf[n++] = ISP_TRIGGER_POST_APPLY;
+	/* Cal data ends with INCR(0x053, 2) + [0x053_val, 0x054_val].
+	 * Stock S5: 0x053=1, 0x054=0 (no trigger after cal in S5). */
 	return n;
 }
 
@@ -527,6 +528,13 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000400;
 	cmd[n++] = 0x00000000; cmd[n++] = 0x00000200;
 	cmd[n++] = 0x00000002;
+	/* Stock writes 3 extra registers between tail1 and zero_block2 */
+	cmd[n++] = nvhost_opcode_incr(0x01e, 1);
+	cmd[n++] = 0x00000000;
+	cmd[n++] = nvhost_opcode_incr(0x01f, 1);
+	cmd[n++] = 0x00000001;
+	cmd[n++] = nvhost_opcode_incr(0x05f, 1);
+	cmd[n++] = 0x00000010;
 	n = isp_append_zero_block(isp, cmd, n);
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(0x018, 5);
@@ -553,7 +561,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	n = 0;
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_op_done_v(),
+		host1x_uclass_incr_syncpt_cond_immediate_v(),
 		isp->syncpt_stream);
 	cmd[n++] = NVHOST_OPCODE_NOOP;
 
@@ -778,12 +786,8 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	cmd[n++] = nvhost_opcode_incr(0x651, 1);
 	cmd[n++] = 0x00000000;
 
-	/* ISP_ENABLE = 0x04040007 (stats/streaming mode)
-	 * Ghidra RE: stock writes this on first output submit via cached check.
-	 * Without it, ISP_ENABLE=0 from zero_init → ISP disabled. */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(0x015, 1);
-	cmd[n++] = 0x04040007;
+	/* 0x015 (ISP_ENABLE=0x04040007) NOT written in S5 — stock
+	 * writes it only in S7 warmup frame. Writing here is premature. */
 
 	} /* end is_b scope */
 
@@ -1061,9 +1065,9 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cal_off = n;
 	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
 	n += isp->cal_words;
-	/* Patch 0x053=1, 0x054=work_buf (last 2 data words of cal) */
+	/* Patch 0x053=1, 0x054=0 (stock always writes 0 here) */
 	cmd[n - 2] = 0x00000001;
-	cmd[n - 1] = (u32)isp->work_buf.dma;
+	cmd[n - 1] = 0x00000000;
 	/* NO trigger — stock per-frame cal has no trigger 0x0F */
 	cal_words = n - cal_off;
 
