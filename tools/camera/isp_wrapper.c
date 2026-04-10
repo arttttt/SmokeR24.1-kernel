@@ -512,53 +512,51 @@ static void dump_submit32(int fd, struct nvhost32_submit_args *s) {
  * Sensor ioctl parser (imx179 / ov5693)
  * ================================================================ */
 
+/*
+ * NVIDIA sensor ioctls pass scalar values directly in arg (not via pointer):
+ *   ioctl(fd, SET_FRAME_LEN, 1234)  →  arg = (void*)1234
+ * Only struct-type ioctls (SET_MODE, GROUP_HOLD) use arg as a pointer.
+ */
 static void log_sensor_ioctl(int fd, int nr, void *arg, int ret) {
 	const char *name = fd_has(fd, "imx179") ? "IMX179" : "OV5693";
 	int is_imx = fd_has(fd, "imx179");
+	uint32_t val = (uint32_t)(uintptr_t)arg;
 
 	switch (nr) {
 	case SENSOR_SET_MODE_NR: {
-		struct ov5693_mode *m = arg; /* same layout for both */
+		struct ov5693_mode *m = arg; /* arg IS a pointer here */
 		tlog("[%s SET_MODE] %dx%d frame_len=%u coarse=%u gain=%u ret=%d\n",
 		     name, m->xres, m->yres, m->frame_length,
 		     m->coarse_time, m->gain, ret);
 		break;
 	}
 	case 2:
-		if (!is_imx) /* ov5693 SET_FRAME_LENGTH */
-			tlog("[%s SET_FRAME_LEN] %u ret=%d\n",
-			     name, *(uint32_t *)arg, ret);
-		else /* imx179 GET_STATUS */
-			tlog("[%s GET_STATUS] %u ret=%d\n",
-			     name, *(uint8_t *)arg, ret);
+		if (!is_imx)
+			tlog("[OV5693 SET_FRAME_LEN] %u ret=%d\n", val, ret);
+		else
+			tlog("[IMX179 GET_STATUS] ret=%d\n", ret);
 		break;
 	case 3:
 		if (is_imx)
-			tlog("[IMX179 SET_FRAME_LEN] %u ret=%d\n",
-			     *(uint32_t *)arg, ret);
+			tlog("[IMX179 SET_FRAME_LEN] %u ret=%d\n", val, ret);
 		else
-			tlog("[OV5693 SET_COARSE_TIME] %u ret=%d\n",
-			     *(uint32_t *)arg, ret);
+			tlog("[OV5693 SET_COARSE_TIME] %u ret=%d\n", val, ret);
 		break;
 	case 4:
 		if (is_imx)
-			tlog("[IMX179 SET_COARSE_TIME] %u ret=%d\n",
-			     *(uint32_t *)arg, ret);
+			tlog("[IMX179 SET_COARSE_TIME] %u ret=%d\n", val, ret);
 		else
-			tlog("[OV5693 SET_GAIN] %u ret=%d\n",
-			     *(uint16_t *)arg, ret);
+			tlog("[OV5693 SET_GAIN] %u ret=%d\n", val & 0xFFFF, ret);
 		break;
 	case 5:
 		if (is_imx)
-			tlog("[IMX179 SET_GAIN] %u ret=%d\n",
-			     *(uint16_t *)arg, ret);
+			tlog("[IMX179 SET_GAIN] %u ret=%d\n", val & 0xFFFF, ret);
 		else
-			tlog("[OV5693 GET_STATUS] %u ret=%d\n",
-			     *(uint8_t *)arg, ret);
+			tlog("[OV5693 GET_STATUS] ret=%d\n", ret);
 		break;
 	case 7:
 		if (is_imx) {
-			struct sensor_ae *ae = arg;
+			struct sensor_ae *ae = arg; /* pointer */
 			tlog("[IMX179 GROUP_HOLD] fl=%u ct=%u gain=%u ret=%d\n",
 			     ae->frame_length, ae->coarse_time,
 			     ae->gain, ret);
@@ -566,26 +564,23 @@ static void log_sensor_ioctl(int fd, int nr, void *arg, int ret) {
 		break;
 	case 8:
 		if (!is_imx) {
-			struct sensor_ae *ae = arg;
+			struct sensor_ae *ae = arg; /* pointer */
 			tlog("[OV5693 GROUP_HOLD] fl=%u ct=%u gain=%u ret=%d\n",
 			     ae->frame_length, ae->coarse_time,
 			     ae->gain, ret);
 		}
 		break;
 	case SENSOR_SET_POWER_NR:
-		tlog("[%s SET_POWER] %u ret=%d\n", name,
-		     *(uint32_t *)arg, ret);
+		tlog("[%s SET_POWER] %u ret=%d\n", name, val, ret);
 		break;
 	case NVC_PWR_WR_NR:
-		tlog("[%s PWR_WR] %d ret=%d\n", name,
-		     *(int *)arg, ret);
+		tlog("[%s PWR_WR] %d ret=%d\n", name, (int)val, ret);
 		break;
 	case NVC_PWR_RD_NR:
-		tlog("[%s PWR_RD] %d ret=%d\n", name,
-		     *(int *)arg, ret);
+		tlog("[%s PWR_RD] %d ret=%d\n", name, (int)val, ret);
 		break;
 	default:
-		tlog("[%s IOCTL] nr=%u ret=%d\n", name, nr, ret);
+		tlog("[%s IOCTL] nr=%u arg=0x%x ret=%d\n", name, nr, val, ret);
 		break;
 	}
 }
@@ -595,6 +590,7 @@ static void log_sensor_ioctl(int fd, int nr, void *arg, int ret) {
  * ================================================================ */
 
 static void log_pcl_ioctl(int fd, int nr, void *arg, int ret) {
+	uint32_t val = (uint32_t)(uintptr_t)arg;
 	switch (nr) {
 	case PCL_CHIP_REG_NR:
 		tlog("[PCL CHIP_REG] ret=%d\n", ret);
@@ -603,10 +599,10 @@ static void log_pcl_ioctl(int fd, int nr, void *arg, int ret) {
 		tlog("[PCL DEV_REG] ret=%d\n", ret);
 		break;
 	case PCL_PWR_WR_NR:
-		tlog("[PCL PWR_WR] %d ret=%d\n", *(int *)arg, ret);
+		tlog("[PCL PWR_WR] %d ret=%d\n", (int)val, ret);
 		break;
 	case PCL_PWR_RD_NR:
-		tlog("[PCL PWR_RD] %d ret=%d\n", *(int *)arg, ret);
+		tlog("[PCL PWR_RD] %d ret=%d\n", (int)val, ret);
 		break;
 	case PCL_SEQ_WR_NR:
 		tlog("[PCL SEQ_WR] ret=%d\n", ret);
@@ -643,9 +639,10 @@ static void log_pcl_ioctl(int fd, int nr, void *arg, int ret) {
  * ================================================================ */
 
 static void log_focuser_ioctl(int fd, int nr, void *arg, int ret) {
+	uint32_t val = (uint32_t)(uintptr_t)arg;
 	switch (nr) {
 	case NVC_PWR_WR_NR:
-		tlog("[FOCUS PWR_WR] %d ret=%d\n", *(int *)arg, ret);
+		tlog("[FOCUS PWR_WR] %d ret=%d\n", (int)val, ret);
 		break;
 	case NVC_PARAM_WR_NR:
 		tlog("[FOCUS PARAM_WR] ret=%d\n", ret);
