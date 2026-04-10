@@ -292,18 +292,9 @@ int ioctl(int fd, int request, ...) {
                         }
                     }
 
-                    /* IMM(0x000, val) = INCR_SYNCPT immediate
-                     * opcode=4, method=0, value=(cond<<8)|syncpt_id
-                     * Cond 0=immediate, 1=op_done, 4=OP_DONE, 5=STATS, 6=RD_DONE
-                     * NOP any conditional (cond >= 1) to prevent ISP from waiting */
-                    if (opcode == 4 && method == 0x000) {
-                        uint32_t cond = (count >> 8) & 0xFF;
-                        if (cond >= 1) {
-                            fprintf(stderr, "nvrm_shim: NOP IMM syncpt cond=%u id=%u at pb[%u] (op=%08x)\n",
-                                    cond, count & 0xFF, i, op);
-                            pb[i] = 0x20000000;
-                        }
-                    }
+                    /* Don't NOP syncpt incrs — kernel needs them for job tracking.
+                     * Only NOP the trigger (0x00C) to prevent ISP from starting
+                     * streaming mode. ISP will still execute register writes. */
                 }
             }
         }
