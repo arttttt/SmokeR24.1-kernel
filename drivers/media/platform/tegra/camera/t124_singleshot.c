@@ -198,8 +198,6 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 	int state = VB2_BUF_STATE_DONE;
 
 	if (chan->use_isp && !isp_reprocess) {
-#if 0 /* disabled: stock does NO per-frame ISP submits in streaming mode.
-       * ISP processes frames via HW pipeline after S1-S5 init. */
 		/* ISP streaming: VI→ISP directly, no memory write from VI.
 		 * Submit ISP job + wait for ISP OP_DONE. */
 		err = isp_t124_process_frame(chan->isp,
@@ -217,7 +215,6 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 				state = VB2_BUF_STATE_ERROR;
 			}
 		}
-#endif
 	} else if (chan->use_isp && isp_reprocess) {
 		/* ISP reprocess: VI→memory→ISP.
 		 * First wait MW_ACK (VI write to isp_raw_dma),
