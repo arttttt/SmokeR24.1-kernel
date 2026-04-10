@@ -519,16 +519,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	if (isp->streaming)
 		return -EBUSY;
 
-	/* ISP output = sensor resolution (stock behavior).
-	 * ISP does NOT downscale — it processes at full sensor res.
-	 * Downscale to user-requested resolution happens later (GPU/scaler). */
-	if (isp->class_id == ISP_A_CLASS_ID) {
-		isp->width = 3280;
-		isp->height = 2460;
-	} else {
-		isp->width = 2592;
-		isp->height = 1944;
-	}
+	/* Use actual capture resolution, not hardcoded sensor max.
+	 * ISP input/output dims must match what VI sends. */
+	isp->width = width;
+	isp->height = height;
 	isp->y_stride = (isp->width + 63) & ~63;
 	isp->uv_stride = ((isp->width / 2) + 63) & ~63;
 	isp->in_stride = width * 2;  /* RAW10 packed to 16-bit = 2 bytes/pixel */
@@ -1090,16 +1084,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = uv_stride;
 
-	/* Processing INCR(0x500,6): stock = [0, 0, 0, 0, 0, (H<<16)|W]
-	 * Stock uses INPUT (sensor) resolution here, not output!
-	 * IMX179 (ISP-A) = 3280x2460, OV5693 (ISP-B) = 2592x1944 */
+	/* Processing INCR(0x500,6): [0, 0, 0, 0, 0, (H<<16)|W]
+	 * Input resolution = actual capture dims from stream_init */
 	{
-	u32 in_w, in_h;
-	if (isp->class_id == ISP_A_CLASS_ID) {
-		in_w = 3280; in_h = 2460;
-	} else {
-		in_w = 2592; in_h = 1944;
-	}
+	u32 in_w = isp->width, in_h = isp->height;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
