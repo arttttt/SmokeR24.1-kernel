@@ -1535,51 +1535,21 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
 			err, isp->syncpt_memory, isp->frame_fence_memory);
 		/* Dump ISP status registers for debugging */
-		/* ISP reg space is 256KB (DTS: 0x40000). Read key ranges.
-		 * Method offset * 4 = MMIO byte offset. */
-		nvhost_module_busy(isp->pdev);
-		base = ioremap(phys, 0x4000);
+		base = ioremap(phys, 0x100);
 		if (base) {
 			int i;
-			/* Sanity: read ID register first */
-			u32 id = readl(base + 0x020);
 			dev_err(&isp->pdev->dev,
-				"ISP MMIO @ 0x%08x (id=0x%08x):\n", phys, id);
-			if (id != 0) {
-				/* Control 0x000-0x1FF (methods 0x000-0x07F) */
-				for (i = 0; i < 0x200; i += 16) {
-					u32 a=readl(base+i), b=readl(base+i+4),
-					    c=readl(base+i+8), d=readl(base+i+12);
-					if (a||b||c||d)
-						dev_err(&isp->pdev->dev,
-							"  C[%03x] %08x %08x %08x %08x\n",
-							i/4, a, b, c, d);
-				}
-				/* Processing 0x1400-0x15FF (methods 0x500-0x57F) */
-				for (i = 0x1400; i < 0x1600; i += 16) {
-					u32 a=readl(base+i), b=readl(base+i+4),
-					    c=readl(base+i+8), d=readl(base+i+12);
-					if (a||b||c||d)
-						dev_err(&isp->pdev->dev,
-							"  P[%03x] %08x %08x %08x %08x\n",
-							i/4, a, b, c, d);
-				}
-				/* Output 0x3800-0x3BFF (methods 0xE00-0xEFF) */
-				for (i = 0x3800; i < 0x3C00; i += 16) {
-					u32 a=readl(base+i), b=readl(base+i+4),
-					    c=readl(base+i+8), d=readl(base+i+12);
-					if (a||b||c||d)
-						dev_err(&isp->pdev->dev,
-							"  O[%03x] %08x %08x %08x %08x\n",
-							i/4, a, b, c, d);
-				}
-			} else {
-				dev_err(&isp->pdev->dev,
-					"ISP powered off (id=0), skip dump\n");
+				"ISP MMIO @ 0x%08x:\n", phys);
+			for (i = 0; i < 0x100; i += 16) {
+				u32 a=readl(base+i), b=readl(base+i+4),
+				    c=readl(base+i+8), d=readl(base+i+12);
+				if (a||b||c||d)
+					dev_err(&isp->pdev->dev,
+						"  [%03x] %08x %08x %08x %08x\n",
+						i, a, b, c, d);
 			}
 			iounmap(base);
 		}
-		nvhost_module_idle(isp->pdev);
 	} else {
 		u32 *stats = (u32 *)isp->stats_buf.cpu;
 		u32 *work = (u32 *)isp->work_buf.cpu;
