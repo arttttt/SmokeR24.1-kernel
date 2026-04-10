@@ -1535,48 +1535,20 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp)
 			"ISP frame timeout: %d (sp=%u thresh=%u)\n",
 			err, isp->syncpt_memory, isp->frame_fence_memory);
 		/* Dump ISP status registers for debugging */
-		base = ioremap(phys, 0x10000);
+		base = ioremap(phys, 0x200);
 		if (base) {
 			int i;
-			/* Full ISP register space — find what's configured */
-			static const struct { u32 off; const char *name; } ranges[] = {
-				{0x000, "CTRL"},     /* 0x000-0x0FF: control */
-				{0x100, "STATS"},    /* 0x100-0x1FF */
-				{0x500, "PROC"},     /* 0x500-0x5FF: processing */
-				{0x600, "GPP"},      /* 0x600-0x6FF */
-				{0x700, "CH_A"},     /* 0x700-0x7FF */
-				{0x800, "RT_A"},     /* 0x800-0x8FF */
-				{0x900, "STATS2"},   /* 0x900-0x9FF */
-				{0xC00, "EXTRA"},    /* 0xC00-0xCFF */
-				{0xD00, "LENS"},     /* 0xD00-0xDFF */
-				{0xE00, "OUTPUT"},   /* 0xE00-0xEFF: output surfaces */
-			};
 			dev_err(&isp->pdev->dev,
-				"ISP MMIO dump @ 0x%08x:\n", phys);
-			for (i = 0; i < ARRAY_SIZE(ranges); i++) {
-				int j, any = 0;
-				u32 off = ranges[i].off * 4; /* method to byte offset */
-				/* check if any non-zero in range */
-				for (j = 0; j < 64 && !any; j++)
-					if (readl(base + off + j * 4)) any = 1;
-				if (!any) {
+				"ISP MMIO dump @ 0x%08x (first 0x200):\n", phys);
+			for (i = 0; i < 0x200; i += 16) {
+				u32 a = readl(base + i);
+				u32 b = readl(base + i + 4);
+				u32 c = readl(base + i + 8);
+				u32 d = readl(base + i + 12);
+				if (a || b || c || d)
 					dev_err(&isp->pdev->dev,
-						"  %s [%03x]: all zeros\n",
-						ranges[i].name, ranges[i].off);
-					continue;
-				}
-				for (j = 0; j < 64; j += 4) {
-					u32 a = readl(base + off + j*4);
-					u32 b = readl(base + off + j*4+4);
-					u32 c = readl(base + off + j*4+8);
-					u32 d = readl(base + off + j*4+12);
-					if (a || b || c || d)
-						dev_err(&isp->pdev->dev,
-							"  %s [%03x+%02x] %08x %08x %08x %08x\n",
-							ranges[i].name,
-							ranges[i].off, j*4,
-							a, b, c, d);
-				}
+						"  [%03x] %08x %08x %08x %08x\n",
+						i, a, b, c, d);
 			}
 			iounmap(base);
 		}
