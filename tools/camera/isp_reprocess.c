@@ -330,7 +330,7 @@ int main(int argc, char **argv)
 
     /* ISP_ENABLE = full pipeline */
     cmd[n++] = OP_INCR(0x015, 1);
-    cmd[n++] = 0x04040007;  /* streaming+stats mode (from stock) */
+    cmd[n++] = 7;  /* full pipeline (not 0x04040007 which is stats-only!) */
 
     /* Input block (reprocess): raw Bayer 10-bit from memory
      * 0xE33 IS needed — without it, output is all zeros.
@@ -341,7 +341,7 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE31, 1);
     cmd[n++] = (W & 0x7FFF) | (H << 16);  /* input dimensions */
     cmd[n++] = OP_INCR(0xE33, 1);
-    cmd[n++] = 0x00200004;  /* VI IMAGE_DEF for RAW10 BGGR */
+    cmd[n++] = 0x10200024;  /* gives data in U plane at least */
     cmd[n++] = OP_INCR(0xE34, 3);         /* input plane 0 */
     in_reloc = n; cmd[n++] = in_iova; cmd[n++] = 0; cmd[n++] = W * BPP;
     cmd[n++] = OP_INCR(0xE32, 1);
