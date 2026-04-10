@@ -238,6 +238,36 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* ---- Step 1a: Force nvmap init by calling NvRmMemHandleCreate ---- */
+    /*
+     * NvRmOpenNew returns hRm=0x1 (stub) and does NOT open /dev/nvmap.
+     * NvIspOpen needs nvmap for buffer allocation. Force-init nvmap by
+     * calling a mem function that triggers lazy-open of /dev/nvmap.
+     */
+    if (lib_nvrm) {
+        typedef NvError (*NvRmMemHandleAlloc_t)(void *hRm, void *heap,
+                        NvU32 size, NvU32 align, void **phMem);
+        typedef NvError (*NvRmMemHandleCreate_t)(void *hRm, void **phMem, NvU32 size);
+        typedef void (*NvRmMemHandleFree_t)(void *hMem);
+
+        RESOLVE(lib_nvrm, NvRmMemHandleCreate_t, NvRmMemHandleCreate);
+        RESOLVE(lib_nvrm, NvRmMemHandleAlloc_t, NvRmMemHandleAlloc);
+        RESOLVE(lib_nvrm, NvRmMemHandleFree_t, NvRmMemHandleFree);
+        fflush(stdout);
+
+        if (p_NvRmMemHandleCreate) {
+            void *hMem = NULL;
+            printf("  Triggering nvmap init via NvRmMemHandleCreate...\n");
+            fflush(stdout);
+            err = p_NvRmMemHandleCreate(hRm, &hMem, 4096);
+            printf("  NvRmMemHandleCreate: err=0x%x (%s) hMem=%p\n",
+                   err, nverr_str(err), hMem);
+            if (hMem && p_NvRmMemHandleFree)
+                p_NvRmMemHandleFree(hMem);
+            fflush(stdout);
+        }
+    }
+
     /* ---- Step 1b: Test NvRmChannelOpen directly ---- */
     /*
      * NvRmChannelOpen(NvRmDeviceHandle hDevice, NvRmChannelHandle *phChannel,
