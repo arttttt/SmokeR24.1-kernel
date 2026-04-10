@@ -210,6 +210,62 @@ int main(int argc, char **argv)
     /* Disable stripping for our own reprocess gather */
     unsetenv("NVRM_SHIM_STRIP");
 
+    /* Scan push buffer for output format (method 0xE02) set by calibration.
+     * Push buffers are mmap'd by our shim — scan /proc/self/maps for them */
+    printf("  Scanning calibration gather for output format (0xE02)...\n");
+    {
+        /* The blob's push buffer is at the shim mmap'd address.
+         * Shim maps 16KB push buffers via dmabuf. Scan for INCR(0xE02,1) opcode. */
+        FILE *maps = fopen("/proc/self/maps", "r");
+        if (maps) {
+            char line[256];
+            while (fgets(line, sizeof(line), maps)) {
+                unsigned long start, end;
+                if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
+                    unsigned long size = end - start;
+                    if (size == 16384 || size == 32768) { /* push buffer size */
+                        uint32_t *pb = (uint32_t *)start;
+                        uint32_t words = size / 4;
+                        for (uint32_t j = 0; j < words - 1; j++) {
+                            uint32_t op = pb[j];
+                            /* INCR(0xE02, 1) = 0x1E020001 */
+                            if (op == 0x1E020001) {
+                                printf("    Found 0xE02 output format = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                            /* INCR(0xE00, 1) = output width */
+                            if (op == 0x1E000001) {
+                                printf("    Found 0xE00 output width = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                            /* INCR(0xE01, 1) = output height */
+                            if (op == 0x1E010001) {
+                                printf("    Found 0xE01 output height = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                            /* INCR(0xE31, 1) = input dims */
+                            if (op == 0x1E310001) {
+                                printf("    Found 0xE31 input dims = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                            /* INCR(0xE33, 1) = input format */
+                            if (op == 0x1E330001) {
+                                printf("    Found 0xE33 input format = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                            /* INCR(0x015, 1) = ISP_ENABLE */
+                            if (op == 0x10150001) {
+                                printf("    Found 0x015 ISP_ENABLE = 0x%08x at pb+%u\n",
+                                       pb[j+1], j);
+                            }
+                        }
+                    }
+                }
+            }
+            fclose(maps);
+        }
+    }
+
     /* Extract ISP channel fd and syncpt from handle struct */
     uint32_t *ctx = (uint32_t *)isp_handle;
     printf("  ctx[0]=0x%x ctx[1]=0x%x ctx[2]=0x%x ctx[3]=0x%x ctx[4]=0x%x\n",
