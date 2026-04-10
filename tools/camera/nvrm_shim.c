@@ -216,8 +216,7 @@ int ioctl(int fd, int request, ...) {
 
     init_real_ioctl();
 
-    if (strip_streaming < 0)
-        strip_streaming = getenv("NVRM_SHIM_STRIP") ? 1 : 0;
+    strip_streaming = getenv("NVRM_SHIM_STRIP") ? 1 : 0;
 
     unsigned int nr = _IOC_NR(request);
     unsigned int type = _IOC_TYPE(request);
@@ -291,9 +290,8 @@ int ioctl(int fd, int request, ...) {
             }
         }
 
-        /* Also zero out syncpt incrs count to prevent kernel
-         * from waiting for incrs that will never happen */
-        sa->num_syncpt_incrs = 0;
+        /* Don't zero num_syncpt_incrs — kernel needs them for job tracking.
+         * NOP'd conditional incrs won't fire but immediate ones still will. */
     }
 
     return real_ioctl(fd, request, arg);
