@@ -427,16 +427,17 @@ int main(int argc, char **argv)
     cmd[n++] = out_y_iova;                /* plane 1 */
     cmd[n++] = 0x00000000;
     cmd[n++] = W * 4;                     /* 32bpp stride = 10368 */
+    /* Planes 2,3: point to end of buffer (dummy, no useful data expected) */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
-    cmd[n++] = out_u_iova;                /* plane 2 — ISP writes luma here in reprocess */
+    cmd[n++] = out_iova + OUT_SIZE - 4096; /* safe offset near end */
     cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000A40;                /* use Y stride for luma data */
+    cmd[n++] = W * 4;                      /* same stride */
     cmd[n++] = OP_INCR(0xE0A, 3);
     v_reloc = n;
-    cmd[n++] = out_v_iova;                /* plane 3 */
+    cmd[n++] = out_iova + OUT_SIZE - 4096;
     cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000540;                /* UV stride = 1344 */
+    cmd[n++] = W * 4;
 
     /* Processing block — stock values */
     cmd[n++] = OP_INCR(0x500, 6);
@@ -501,9 +502,9 @@ int main(int argc, char **argv)
 
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, Y_SIZE };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, OUT_SIZE - 4096 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, OUT_SIZE - 4096 };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
     shifts[nr++].shift = 0;
