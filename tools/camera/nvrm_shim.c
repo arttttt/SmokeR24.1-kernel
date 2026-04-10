@@ -126,8 +126,8 @@ static int shim_nvmap_mmap(int fd, struct nvmap_map_caller *mc) {
     fprintf(stderr, "nvrm_shim: GET_FD handle=%u → dmabuf_fd=%d\n",
             mc->handle, dmabuf_fd);
 
-    /* Step 2: Unmap old VMA if addr was pre-mapped */
-    if (mc->addr) {
+    /* Step 2: Unmap old VMA if addr was pre-mapped (not MAP_FAILED) */
+    if (mc->addr && mc->addr != (unsigned long)MAP_FAILED) {
         munmap((void *)mc->addr, mc->length);
     }
 
@@ -163,6 +163,46 @@ static int shim_nvmap_mmap(int fd, struct nvmap_map_caller *mc) {
     return 0;
 }
 
+/*
+ * Intercept mmap on /dev/nvmap.
+ *
+ * Old kernel allowed mmap on /dev/nvmap fd to create a VMA, then
+ * NVMAP_IOC_MMAP bound that VMA to a handle's pages.
+ * New kernel rejects mmap on /dev/nvmap entirely.
+ *
+ * We intercept mmap and if it's on an nvmap-like fd (detected by
+ * MAP_SHARED + the fd matching our tracked nvmap fd), we let it
+ * return a dummy page that will be replaced by the MMAP ioctl shim.
+ *
+ * Actually simpler: just allocate anonymous memory as placeholder.
+ * The MMAP ioctl shim will munmap it and remap via dmabuf.
+ */
+static int nvmap_fd_cached = -1;
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+    static void *(*real_mmap)(void *, size_t, int, int, int, off_t) = NULL;
+    if (!real_mmap)
+        real_mmap = dlsym(RTLD_NEXT, "mmap");
+
+    void *result = real_mmap(addr, length, prot, flags, fd, offset);
+
+    /* If mmap failed on what looks like /dev/nvmap, provide anonymous memory */
+    if (result == MAP_FAILED && fd >= 0 && (flags & MAP_SHARED)) {
+        /* Check if this is an nvmap fd by trying a harmless nvmap ioctl */
+        /* Actually, track the nvmap fd from the first successful nvmap ioctl */
+        if (fd == nvmap_fd_cached) {
+            result = real_mmap(NULL, length, prot,
+                               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (result != MAP_FAILED) {
+                fprintf(stderr, "nvrm_shim: mmap fallback for nvmap fd=%d → %p (len=%zu)\n",
+                        fd, result, length);
+            }
+        }
+    }
+
+    return result;
+}
+
 /* Intercepted ioctl */
 int ioctl(int fd, int request, ...) {
     void *arg;
@@ -173,12 +213,17 @@ int ioctl(int fd, int request, ...) {
 
     init_real_ioctl();
 
-    /* Intercept NVMAP_IOC_MMAP */
     unsigned int nr = _IOC_NR(request);
     unsigned int type = _IOC_TYPE(request);
 
+    /* Track nvmap fd for mmap interception */
+    if (type == NVMAP_IOC_MAGIC && nvmap_fd_cached < 0) {
+        nvmap_fd_cached = fd;
+        fprintf(stderr, "nvrm_shim: detected nvmap fd=%d\n", fd);
+    }
+
+    /* Intercept NVMAP_IOC_MMAP */
     if (type == NVMAP_IOC_MAGIC && nr == 5) {
-        /* This is NVMAP_IOC_MMAP — translate it */
         return shim_nvmap_mmap(fd, (struct nvmap_map_caller *)arg);
     }
 
