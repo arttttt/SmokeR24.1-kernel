@@ -264,12 +264,18 @@ int ioctl(int fd, int request, ...) {
                     uint32_t method = (op >> 16) & 0xFFF;
                     uint32_t count = op & 0xFFFF;
 
-                    /* NONINCR(0x00C, 1) + trigger 0x05 → NOP */
+                    /* NONINCR(0x00C, 1) + trigger 0x05/0x0F → NOP */
                     if (opcode == 2 && method == 0x00C && count == 1) {
                         if (pb[i+1] == 0x05 || pb[i+1] == 0x0F) {
-                            fprintf(stderr, "nvrm_shim: NOP streaming trigger 0x%02x at pb[%u]\n",
+                            fprintf(stderr, "nvrm_shim: NOP trigger 0x%02x at pb[%u]\n",
                                     pb[i+1], i);
-                            pb[i] = 0x20000000;   /* NONINCR(0, 0) = NOP */
+                            /* Dump 5 words before trigger to see syncpt format */
+                            fprintf(stderr, "nvrm_shim: context pb[%u..%u]:",
+                                    i > 5 ? i-5 : 0, i+1);
+                            for (int j = (i > 5 ? i-5 : 0); j <= i+1; j++)
+                                fprintf(stderr, " %08x", pb[j]);
+                            fprintf(stderr, "\n");
+                            pb[i] = 0x20000000;
                             pb[i+1] = 0x20000000;
                         }
                     }
