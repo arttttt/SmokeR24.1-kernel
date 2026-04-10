@@ -410,13 +410,26 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x010000C9;  /* 32bpp single channel (works for reprocess) */
+    /* Output format — configurable via env ISP_FMT=0xNNNNNNNN */
+    uint32_t out_fmt = 0x010000C9;
+    {
+        const char *fmt_env = getenv("ISP_FMT");
+        if (fmt_env) out_fmt = strtoul(fmt_env, NULL, 0);
+    }
+    printf("  Output format: 0x%08x\n", out_fmt);
+    cmd[n++] = out_fmt;
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;
 
     /* Output Y/U/V planes — original order */
     cmd[n++] = OP_INCR(0xE04, 3);
-    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = W * 4; /* 32bpp */
+    uint32_t out_stride = W * 4; /* default 32bpp */
+    {
+        const char *s = getenv("ISP_STRIDE");
+        if (s) out_stride = strtoul(s, NULL, 0);
+    }
+    printf("  Output stride: %u\n", out_stride);
+    y_reloc = n; cmd[n++] = out_y_iova; cmd[n++] = 0; cmd[n++] = out_stride;
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n; cmd[n++] = out_u_iova; cmd[n++] = 0; cmd[n++] = UV_STRIDE;
     cmd[n++] = OP_INCR(0xE0A, 3);
