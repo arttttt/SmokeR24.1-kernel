@@ -525,8 +525,9 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	cmd = isp->cmdbuf;
 	cmd_phys = isp->cmdbuf_phys;
 
-	dev_info(dev, "stream_init: %ux%u cmdbuf=0x%pad work=0x%pad\n",
-		 width, height, &cmd_phys, &isp->work_buf.dma);
+	dev_info(dev, "stream_init: %ux%u cmdbuf=0x%pad work=0x%pad stats=0x%pad\n",
+		 width, height, &cmd_phys, &isp->work_buf.dma,
+		 &isp->stats_buf.dma);
 
 	/* S1 (stock 3654w): zero_block×2 + 0x018 tails + syncpt
 	 * Stock structure: SETCLASS + zero_init + SETCLASS + trigger +
