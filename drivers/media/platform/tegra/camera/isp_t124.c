@@ -1471,39 +1471,39 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 
-	/* Output */
+	/* Output — R8G8B8A8 (ISP code 0x43, verified working in userspace test) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
+	cmd[n++] = 0x43; /* R8G8B8A8 — fixes W/2 compression */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0x00000000;
 
+	/* Output surfaces — all point to same buffer with 32bpp stride
+	 * to avoid MC decode errors (ISP writes all 3 even for RGBA) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
-	cmd[n++] = (u32)out_y;
+	cmd[n++] = (u32)out_dma;
 	cmd[n++] = 0x00000000;
-	cmd[n++] = y_stride;
+	cmd[n++] = W * 4;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
-	cmd[n++] = (u32)out_u;
+	cmd[n++] = (u32)out_dma;
 	cmd[n++] = 0x00000000;
-	cmd[n++] = uv_stride;
+	cmd[n++] = W * 4;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
-	cmd[n++] = (u32)out_v;
+	cmd[n++] = (u32)out_dma;
 	cmd[n++] = 0x00000000;
-	cmd[n++] = uv_stride;
+	cmd[n++] = W * 4;
 
-	/* Processing — flags=3 (enable processing pipeline) */
+	/* Processing — flags=0 (verified working) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000003;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
-	cmd[n++] = (in_h << 16) | in_w;
-
-	/* Output (same as streaming — already written above) */
+	cmd[n++] = 0x00000000;
+	cmd[n++] = (H << 16) | W;
 
 	/* Stats buffer */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
@@ -1513,22 +1513,12 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = 0x00000000;
 	cmd[n++] = 0x00000000;
 
-	/* Syncpt incrs (cond=4,5,6) — before input to arm conditions */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | isp->syncpt_stats;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
-
-	/* Input — stock order: dims → format → surface → strip → enable → trigger */
+	/* Input — 10-bit Bayer BGGR (0x10200024, verified working) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
 	cmd[n++] = (H << 16) | W;
 
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = 0x11000020;
+	cmd[n++] = 0x10200024; /* 10-bit Bayer BGGR */
 
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
 	cmd[n++] = (u32)raw_dma;
@@ -1538,18 +1528,26 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
 	cmd[n++] = W & 0x3FFF;
 
-	/* ISP_ENABLE = 0x07 (reprocess mode — stock RE confirmed) */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = ISP_ENABLE_FULL_PIPELINE;
-
-	/* Input trigger = 1 — FIRES ISP to read from memory */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
 	cmd[n++] = 0x00000001;
 
-	/* Runtime trigger — NvRmStreamEnd adds this automatically in stock */
+	/* ISP_ENABLE */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
+	cmd[n++] = ISP_ENABLE_FULL_PIPELINE;
+
+	/* Syncpt conditional incrs */
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | isp->syncpt_stats;
+	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
+	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
+
+	/* Reprocess trigger 0x0B (NOT 0x05 which waits for VI streaming) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
+	cmd[n++] = 0x0B;
 
 	g1_words = n - g1_off;
 
