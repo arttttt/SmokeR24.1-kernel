@@ -412,9 +412,9 @@ int main(int argc, char **argv)
         int n = 0;
         int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1, stats_reloc = -1;
 
-        /* Output config — strip dimensions, full-row stride */
+        /* Output config — full width (ISP always halves, producing W/2 pixels) */
         cmd[n++] = OP_INCR(0xE00, 1);
-        cmd[n++] = ((STRIP_W - 1) & 0x3FFF) << 16;  /* output width = strip */
+        cmd[n++] = ((W - 1) & 0x3FFF) << 16;  /* full width — ISP outputs W/2 = 1296 */
         cmd[n++] = OP_INCR(0xE01, 1);
         cmd[n++] = ((H - 1) & 0x3FFF) << 16;
         cmd[n++] = OP_INCR(0xE02, 1);
@@ -440,14 +440,14 @@ int main(int argc, char **argv)
         cmd[n++] = 0x00000000;
         cmd[n++] = 0x00000540;
 
-        /* Processing block — strip dimensions */
+        /* Processing block — full dimensions */
         cmd[n++] = OP_INCR(0x500, 6);
         cmd[n++] = 0x00000000;
         cmd[n++] = 0x00000000;
         cmd[n++] = 0x00000000;
         cmd[n++] = 0x00000000;
         cmd[n++] = 0x00000000;
-        cmd[n++] = (H << 16) | STRIP_W;
+        cmd[n++] = (H << 16) | W;
 
         /* Stats buffer */
         cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
@@ -469,7 +469,7 @@ int main(int argc, char **argv)
         cmd[n++] = 0x00000000;
         cmd[n++] = W * BPP;              /* full row stride */
         cmd[n++] = OP_INCR(0xE32, 1);
-        cmd[n++] = (STRIP_W & 0x3FFF) | (STRIP_OVERLAP << 16);
+        cmd[n++] = (W & 0x3FFF) | (STRIP_OVERLAP << 16);  /* full width */
         cmd[n++] = OP_INCR(0xE30, 1);
         cmd[n++] = 1;                     /* trigger */
 
