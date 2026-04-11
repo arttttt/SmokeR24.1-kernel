@@ -232,60 +232,32 @@ int main(int argc, char **argv)
                     if (size == 16384 || size == 32768) { /* push buffer size */
                         uint32_t *pb = (uint32_t *)start;
                         uint32_t words = size / 4;
-                        for (uint32_t j = 0; j < words - 1; j++) {
+                        for (uint32_t j = 0; j < words; j++) {
                             uint32_t op = pb[j];
-                            /* INCR(0xE02, 1) = 0x1E020001 */
-                            if (op == 0x1E020001) {
-                                printf("    Found 0xE02 output format = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
+                            uint32_t opcode = op >> 28;
+                            uint32_t method = (op >> 16) & 0xFFF;
+                            uint32_t count = op & 0xFFFF;
+
+                            /* Dump all INCR/NONINCR opcodes with method and data */
+                            if ((opcode == 1 || opcode == 2) && count > 0 && count < 256) {
+                                const char *type = (opcode == 1) ? "INCR" : "NONINCR";
+                                printf("    [%4u] %s(0x%03x, %u):", j, type, method, count);
+                                for (uint32_t k = 0; k < count && j+1+k < words; k++) {
+                                    if (k < 8) printf(" %08x", pb[j+1+k]);
+                                }
+                                if (count > 8) printf(" ...");
+                                printf("\n");
+                                j += count; /* skip data words */
                             }
-                            /* INCR(0xE00, 1) = output width */
-                            if (op == 0x1E000001) {
-                                printf("    Found 0xE00 output width = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
+                            /* IMM opcode */
+                            else if (opcode == 4) {
+                                uint32_t val = op & 0xFFFF;
+                                printf("    [%4u] IMM(0x%03x) = 0x%04x\n", j, method, val);
                             }
-                            /* INCR(0xE01, 1) = output height */
-                            if (op == 0x1E010001) {
-                                printf("    Found 0xE01 output height = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0xE31, 1) = input dims */
-                            if (op == 0x1E310001) {
-                                printf("    Found 0xE31 input dims = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0xE33, 1) = input format */
-                            if (op == 0x1E330001) {
-                                printf("    Found 0xE33 input format = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0x015, 1) = ISP_ENABLE */
-                            if (op == 0x10150001) {
-                                printf("    Found 0x015 ISP_ENABLE = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0xE32, 1) = strip config */
-                            if (op == 0x1E320001) {
-                                printf("    Found 0xE32 strip config = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0x500, 6) = processing block */
-                            if (op == 0x15000006) {
-                                printf("    Found 0x500 processing = %08x %08x %08x %08x %08x %08x\n",
-                                       pb[j+1], pb[j+2], pb[j+3], pb[j+4], pb[j+5], pb[j+6]);
-                            }
-                            /* INCR(0xE04, 3) = Y output surface */
-                            if (op == 0x1E040003) {
-                                printf("    Found 0xE04 Y surface = [%08x, %08x, stride=%u]\n",
-                                       pb[j+1], pb[j+2], pb[j+3]);
-                            }
-                            /* INCR(0xE30, 1) = input trigger */
-                            if (op == 0x1E300001) {
-                                printf("    Found 0xE30 input trigger = %u\n", pb[j+1]);
-                            }
-                            /* NONINCR(0x00C, 1) = ISP control */
-                            if (op == 0x200C0001) {
-                                printf("    Found 0x00C ISP_CONTROL = 0x%02x\n", pb[j+1]);
+                            /* SETCLASS */
+                            else if (opcode == 0) {
+                                uint32_t cls = (op >> 6) & 0x3FF;
+                                printf("    [%4u] SETCLASS(0x%02x)\n", j, cls);
                             }
                         }
                     }
