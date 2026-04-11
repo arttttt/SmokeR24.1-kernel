@@ -186,10 +186,12 @@ int main(int argc, char **argv)
      * arg11: NvRmSurface* input (non-zero = reprocess)
      * arg12: input param (required if arg11!=0) */
     err = pProcess(isp,
-                   (uint32_t)(uintptr_t)out_surf,  /* a2: output surface 0 */
-                   0,                               /* a3: output surface 1 */
-                   0,                               /* a4: output surface 2 */
-                   0, 0, 0, 0,                      /* a5-a8: unused */
+                   2,                               /* a2: mode (2=init stream path in SETUP) */
+                   0,                               /* a3 */
+                   0,                               /* a4 */
+                   0, 0,                             /* a5-a6 */
+                   (uint32_t)(uintptr_t)out_surf,   /* a7: output surface (SETUP checks [5]!=0) */
+                   0,                                /* a8 */
                    config,                           /* a9: config */
                    1,                                /* a10: mode */
                    (uint32_t)(uintptr_t)in_surf,    /* a11: input surface */
