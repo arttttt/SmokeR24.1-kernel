@@ -198,7 +198,7 @@ int main(int argc, char **argv)
                    config,                           /* a9: config */
                    1,                                /* a10: mode */
                    (uint32_t)(uintptr_t)in_surf,    /* a11: input surface */
-                   (uint32_t)fsize,                  /* a12: input param */
+                   (uint32_t)(uintptr_t)in_surf,      /* a12: input param (ptr, dereferenced!) */
                    &frame_count                      /* a13: frame count */
                    );
     printf("  NvIspProcessFrame: err=0x%x frame_count=%u\n", err, frame_count);
