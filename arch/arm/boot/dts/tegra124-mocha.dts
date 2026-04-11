@@ -25,7 +25,7 @@
 #include "tegra124-platforms/tegra124-mocha-keys-e1780.dtsi"
 #include "tegra124-platforms/tegra124-mocha-pinmux-e1780.dtsi"
 #include "tegra124-platforms/tegra124-mocha-sysedp.dtsi"
-#include "tegra124-platforms/tegra124-mocha-camera-mc.dtsi"
+#include "tegra124-platforms/tegra124-mocha-camera.dtsi"
 #include "tegra124-platforms/tegra124-mocha-power-tree.dtsi"
 #include "tegra124-platforms/tegra124-mocha-sdhci.dtsi"
 #include "tegra124-platforms/tegra124-mocha-wireless.dtsi"
