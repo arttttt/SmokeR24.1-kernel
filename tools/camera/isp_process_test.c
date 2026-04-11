@@ -177,6 +177,11 @@ int main(int argc, char **argv)
     ((uint32_t *)config)[1] = H;               /* output height */
     ((uint32_t *)config)[2] = 0x10168811;       /* output format */
     ((uint32_t *)config)[3] = 1;               /* num_planes/type (VALIDATE requires 1 or 3) */
+    /* Crop rect at offsets 0x94-0xA0 — full frame */
+    ((uint32_t *)config)[0x94/4] = 0;          /* crop_top */
+    ((uint32_t *)config)[0x98/4] = 0;          /* crop_left */
+    ((uint32_t *)config)[0x9C/4] = H;          /* crop_bottom */
+    ((uint32_t *)config)[0xA0/4] = W;          /* crop_right */
 
     printf("\n[4] Calling NvIspProcessFrame...\n");
     fflush(stdout);
