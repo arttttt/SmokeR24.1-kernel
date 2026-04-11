@@ -270,9 +270,11 @@ int ioctl(int fd, int request, ...) {
                     uint32_t method = (op >> 16) & 0xFFF;
                     uint32_t count = op & 0xFFFF;
 
-                    /* NONINCR(0x00C, 1) + trigger 0x05/0x0F → NOP */
+                    /* NONINCR(0x00C, 1) + trigger 0x05 → NOP
+                     * 0x05 = streaming runtime (strip — no VI data)
+                     * 0x0F = calibration apply (KEEP — ISP needs it!) */
                     if (opcode == 2 && method == 0x00C && count == 1) {
-                        if (pb[i+1] == 0x05 || pb[i+1] == 0x0F) {
+                        if (pb[i+1] == 0x05) {
                             fprintf(stderr, "nvrm_shim: NOP trigger 0x%02x at pb[%u]\n",
                                     pb[i+1], i);
                             /* Dump 5 words before trigger to see syncpt format */
@@ -293,13 +295,10 @@ int ioctl(int fd, int request, ...) {
             }
         }
 
-        /* If we stripped a trigger, set huge timeout so kernel doesn't
-         * reset the channel before our reprocess gather completes.
-         * The conditional syncpt incrs won't fire (no trigger), but
-         * we need calibration registers to stay applied. */
+        /* If we stripped 0x05 but not 0x0F, calibration applies normally.
+         * Conditional syncpt incrs should fire after 0x0F completes. */
         if (found_trigger) {
-            fprintf(stderr, "nvrm_shim: timeout %u → 3600000 (1hr)\n", sa->timeout);
-            sa->timeout = 3600000;
+            fprintf(stderr, "nvrm_shim: stripped %d streaming triggers\n", found_trigger);
         }
     }
 
