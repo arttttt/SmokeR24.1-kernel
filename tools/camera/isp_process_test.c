@@ -142,20 +142,23 @@ int main(int argc, char **argv)
      * NvRmSurface layout: Width, Height, ColorFormat, Layout, Pitch,
      *                     hMem, Offset, pBase, Kind, BlockHeightLog2 */
     printf("\n[3] Building surface descriptors...\n");
-    uint32_t out_surf[10];
+    /* Large surface struct — SETUP reads up to offset 0x90+ */
+    uint32_t out_surf[64];  /* 256 bytes */
     memset(out_surf, 0, sizeof(out_surf));
-    out_surf[0] = W;               /* Width */
-    out_surf[1] = H;               /* Height */
-    out_surf[2] = 0x10168811;      /* ColorFormat: try YUV from supported list */
-    out_surf[3] = 0;               /* Layout: pitch linear */
-    out_surf[4] = W * 2;           /* Pitch: stride in bytes (16bpp) */
-    out_surf[5] = out_h;           /* hMem: nvmap handle */
-    out_surf[6] = 0;               /* Offset */
+    out_surf[0] = W;               /* [0x00] Width */
+    out_surf[1] = H;               /* [0x04] Height */
+    out_surf[2] = 0x10168811;      /* [0x08] ColorFormat */
+    out_surf[3] = 0;               /* [0x0C] Layout: pitch linear */
+    out_surf[4] = W * 2;           /* [0x10] Pitch */
+    out_surf[5] = out_h;           /* [0x14] hMem */
+    out_surf[6] = 0;               /* [0x18] Offset */
+    /* [0x90] = offset 36 in uint32 — SETUP reads this */
+    out_surf[36] = 0;              /* unknown, try 0 */
     printf("  out_surf: %ux%u fmt=0x%x pitch=%u hmem=%u\n",
            out_surf[0], out_surf[1], out_surf[2], out_surf[4], out_surf[5]);
 
-    /* Build NvRmSurface for input (arg11) */
-    uint32_t in_surf[10];
+    /* Build input surface (arg11) — also large */
+    uint32_t in_surf[64];
     memset(in_surf, 0, sizeof(in_surf));
     in_surf[0] = W;                /* Width */
     in_surf[1] = H;                /* Height */
