@@ -255,7 +255,21 @@ int main(int argc, char **argv)
     memset(in_surf, 0, sizeof(in_surf));
     in_surf[0x00/4] = W;                 /* Width */
     in_surf[0x04/4] = H;                 /* Height */
-    in_surf[0x08/4] = 0x10A9200E;        /* X6Bayer10BGGR (10-bit in 16-bit container, BGGR) */
+    /* Try multiple input formats to find one SETUP accepts */
+    uint32_t in_fmts[] = {
+        0x10a92087,  /* BayerS16BGGR */
+        0x10A9200E,  /* X6Bayer10BGGR */
+        0x08A92004,  /* Bayer8BGGR */
+        0x10992087,  /* BayerS16RGGB */
+        0x10200024,  /* raw ISP value (legacy) */
+    };
+    const char *in_fmt_names[] = {
+        "BayerS16BGGR", "X6Bayer10BGGR", "Bayer8BGGR", "BayerS16RGGB", "legacy-0x10200024",
+    };
+    int in_fmt_idx = 0;  /* default: BayerS16BGGR */
+    if (argc >= 3) in_fmt_idx = atoi(argv[2]) % (int)(sizeof(in_fmts)/sizeof(in_fmts[0]));
+    in_surf[0x08/4] = in_fmts[in_fmt_idx];
+    printf("  Using input format[%d]: %s (0x%08x)\n", in_fmt_idx, in_fmt_names[in_fmt_idx], in_fmts[in_fmt_idx]);
     in_surf[0x0C/4] = 1;                 /* Layout: pitch linear */
     in_surf[0x10/4] = W * 2;             /* Pitch: 5184 bytes */
     in_surf[0x14/4] = in_h;              /* hMem: nvmap handle */
@@ -264,39 +278,75 @@ int main(int argc, char **argv)
     printf("  in_surf: %ux%u fmt=0x%x layout=%u pitch=%u hmem=%u\n",
            in_surf[0], in_surf[1], in_surf[2], in_surf[3], in_surf[4], in_surf[5]);
 
-    /* Status variable for SUBMIT two-pass protocol */
+    /* Probe: try each input format to find which passes VALIDATE+SETUP */
+    printf("\n[4] Probing input formats...\n");
+    fflush(stdout);
+    int working_fmt = -1;
+    for (int fi = 0; fi < (int)(sizeof(in_fmts)/sizeof(in_fmts[0])); fi++) {
+        in_surf[0x08/4] = in_fmts[fi];
+        uint32_t probe_status = 0;
+        uint32_t probe_fc = 0;
+        NvError pe = pProcess(isp,
+            1, 0, 0, 0, 0,
+            (uint32_t)(uintptr_t)in_surf, 0,
+            config, 0, 0,
+            (uint32_t)(uintptr_t)&probe_status, &probe_fc);
+        printf("  fmt[%d] %s (0x%08x): err=0x%x status=%u\n",
+               fi, in_fmt_names[fi], in_fmts[fi], pe, probe_status);
+        if ((pe == 0 || pe == 0xa) && working_fmt < 0) working_fmt = fi;
+    }
+    fflush(stdout);
+
+    if (working_fmt < 0) {
+        printf("  FATAL: no input format passed VALIDATE+SETUP\n");
+        goto cleanup;
+    }
+
+    /* Use the working format */
+    in_surf[0x08/4] = in_fmts[working_fmt];
+    printf("  → Using: %s (0x%08x)\n", in_fmt_names[working_fmt], in_fmts[working_fmt]);
+
+    /* Now do the real two-pass ProcessFrame */
     uint32_t status = 0;
     uint32_t frame_count = 0;
 
-    printf("\n[4] NvIspProcessFrame (two-pass protocol)...\n");
+    /* Need fresh ISP context — close and reopen to clear probe state */
+    pHwDestroy(settings);
+    pIspClose(isp);
+    isp = NULL;
+    err = pIspOpen(hRm, 1, &isp);
+    if (err) { printf("  Reopen failed: 0x%x\n", err); return 1; }
+    pHwCreate(isp, &settings);
+    pHwApply(settings);
+    sc2_mode = 1; sc2_size = 4;
+    pSetConfig(isp, 2, &sc2_mode, &sc2_size);
+    memset(fmt_cfg, 0, sizeof(fmt_cfg));
+    fmt_cfg[0] = combos[best >= 0 ? best : 0].st;
+    fmt_cfg[1] = combos[best >= 0 ? best : 0].ip;
+    fmt_cfg[2] = combos[best >= 0 ? best : 0].op;
+    fmt_cfg[3] = combos[best >= 0 ? best : 0].cs;
+    sc1_size = 0x40;
+    pSetConfig(isp, 1, fmt_cfg, &sc1_size);
+    printf("  ISP reopened + reconfigured\n");
+
+    printf("\n[5] NvIspProcessFrame (two-pass)...\n");
     fflush(stdout);
 
-    /*
-     * Pass 1: VALIDATE+SETUP+RUNTIME execute, SUBMIT sees *status==0 → sets *status=1, returns 0xa
-     *
-     * array[0]=1 (reprocess mode):
-     *   VALIDATE: type=1 → reads *array[5] for output dims (in_surf.W=2592 < 6000 → OK)
-     *   SETUP: mode=1 → surface config path (writes input regs 0xE3x from array[5])
-     *   SUBMIT: mode=1 → would fire 0x09+0x0B (but first-pass just sets status)
-     */
     err = pProcess(isp,
         1,                                    /* a2/array[0]: 1=reprocess */
-        0, 0, 0, 0,                          /* a3-a6/array[1-4]: output crop=0 (skip dim check) */
-        (uint32_t)(uintptr_t)in_surf,        /* a7/array[5]: INPUT surface ptr */
-        0,                                    /* a8/array[6]: 0 */
-        config,                               /* a9: OUTPUT surface config */
-        0,                                    /* a10: flush_fence_out=NULL */
-        0,                                    /* a11: fence_out=NULL (blocking) */
-        (uint32_t)(uintptr_t)&status,        /* a12: status ptr (starts at 0) */
+        0, 0, 0, 0,                          /* a3-a6: output crop=0 */
+        (uint32_t)(uintptr_t)in_surf,        /* a7/array[5]: INPUT surface */
+        0,                                    /* a8: 0 */
+        config,                               /* a9: OUTPUT config */
+        0,                                    /* a10: flush_fence=NULL */
+        0,                                    /* a11: fence_out=NULL */
+        (uint32_t)(uintptr_t)&status,        /* a12: status ptr */
         &frame_count);
     printf("  Pass 1: err=0x%x status=%u frame=%u\n", err, status, frame_count);
     fflush(stdout);
 
     if (err != 0 && err != 0xa) {
-        printf("  FATAL: unexpected error on pass 1 (expected 0 or 0xa)\n");
-        printf("  err=0x2: format not supported by VALIDATE\n");
-        printf("  err=0x4: null/alignment/format error in VALIDATE or SETUP\n");
-        printf("  err=0xa: dimension check (VALIDATE) or first-pass (SUBMIT)\n");
+        printf("  FATAL: unexpected error on pass 1\n");
         goto cleanup;
     }
 
@@ -340,7 +390,7 @@ int main(int argc, char **argv)
     }
 
     /* Read output */
-    printf("\n[5] Reading output...\n");
+    printf("\n[6] Reading output...\n");
     uint8_t check[4096];
     memset(check, 0, sizeof(check));
     rw = (typeof(rw)){ (unsigned long)check, out_h, 0, 4096, 4096, 4096, 1 };
