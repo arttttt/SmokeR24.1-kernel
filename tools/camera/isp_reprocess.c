@@ -426,7 +426,7 @@ int main(int argc, char **argv)
         cmd[n++] = OP_INCR(0xE01, 1);
         cmd[n++] = ((H - 1) & 0x3FFF) << 16;
         cmd[n++] = OP_INCR(0xE02, 1);
-        cmd[n++] = 0x010000C9;
+        cmd[n++] = 0x43;                  /* R8G8B8A8 (ISP code 0x43) */
         cmd[n++] = OP_INCR(0xE03, 1);
         cmd[n++] = 0x00000000;
 
