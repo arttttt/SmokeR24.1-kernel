@@ -264,6 +264,39 @@ int main(int argc, char **argv)
         err = pValidate(isp, array, config);
         printf("  VALIDATE: err=0x%x\n", err);
         fflush(stdout);
+
+        /* Now test SETUP directly */
+        printf("  Calling SETUP directly...\n");
+        fflush(stdout);
+        typedef NvError (*SetupFn)(void *, void *, void *, void *);
+        SetupFn pSetup = (SetupFn)(uintptr_t)isp_u32[0x1308/4];
+        uint32_t seq_out = 0;
+        err = pSetup(isp, array, config, &seq_out);
+        printf("  SETUP: err=0x%x seq=%u\n", err, seq_out);
+        fflush(stdout);
+
+        if (err == 0) {
+            /* Test RUNTIME */
+            printf("  Calling RUNTIME directly...\n");
+            fflush(stdout);
+            typedef NvError (*RuntimeFn)(void *, void *, uint32_t, uint32_t);
+            RuntimeFn pRuntime = (RuntimeFn)(uintptr_t)isp_u32[0x12D4/4];
+            err = pRuntime(isp, config, 1, seq_out);
+            printf("  RUNTIME: err=0x%x\n", err);
+            fflush(stdout);
+        }
+
+        if (err == 0) {
+            /* Test SUBMIT */
+            printf("  Calling SUBMIT directly...\n");
+            fflush(stdout);
+            typedef NvError (*SubmitFn)(void *, uint32_t, uint32_t, uint32_t, uint32_t);
+            SubmitFn pSubmit = (SubmitFn)(uintptr_t)isp_u32[0x1304/4];
+            /* SUBMIT(handle, array[0], arg10, arg11, arg12) */
+            err = pSubmit(isp, 1, 1, 0, (uint32_t)(uintptr_t)&status);
+            printf("  SUBMIT: err=0x%x status=%u\n", err, status);
+            fflush(stdout);
+        }
     }
 
     /* Test: also try ProcessFrame's mutex area */
