@@ -110,7 +110,8 @@ struct nvhost32_submit_args {
 #define UV_STRIDE (((W/2) + 63) & ~63)    /* 1344 */
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
-#define OUT_SIZE (W * 4 * H)  /* 32bpp */
+#define OUT_STRIDE ((W * 2 + 63) & ~63)   /* 16bpp, 64-aligned = 5248 */
+#define OUT_SIZE (OUT_STRIDE * H)         /* 16bpp */
 
 static int nvmap_fd = -1;
 
@@ -411,7 +412,7 @@ int main(int argc, char **argv)
     for (int strip = 0; strip < NUM_STRIPS; strip++) {
         int strip_x = strip * STRIP_W;
         int in_off = strip_x * BPP;       /* input byte offset per row */
-        int out_off = strip_x * 4;        /* output byte offset per row (32bpp) */
+        int out_off = strip_x * 2;        /* output byte offset per row (16bpp) */
 
         printf("\n  --- Strip %d (x=%d w=%d in_off=%d out_off=%d) ---\n",
                strip, strip_x, STRIP_W, in_off, out_off);
@@ -435,7 +436,7 @@ int main(int argc, char **argv)
         y_reloc = n;
         cmd[n++] = 0;                     /* patched by reloc → out_iova + out_off */
         cmd[n++] = 0x00000000;
-        cmd[n++] = W * 4;                 /* full row stride for interleaved output */
+        cmd[n++] = OUT_STRIDE;             /* 16bpp stride */
         /* U/V planes (unused for 32bpp but keep for HW) */
         cmd[n++] = OP_INCR(0xE07, 3);
         u_reloc = n;
