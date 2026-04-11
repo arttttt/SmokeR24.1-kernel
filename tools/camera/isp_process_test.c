@@ -117,46 +117,15 @@ int main(int argc, char **argv)
      *   [0x08] out_pix_fmt: 2=16bpp 4:4:4:4, 10=32bpp 8:8:8:8
      *   [0x0C] color_space: 0=Bayer/default
      *   [0x10-0x3C] stage repeats (mirror primary for now) */
-    /* Try multiple format combinations — find one that works */
+    /* Single SetConfig type=1: reprocess, bayer8→8888 */
     uint32_t fmt_cfg[16];
-    uint32_t sc1_size;
-
-    /* Combo table: {surface_type, in_pix, out_pix, colorspace, description} */
-    struct { uint32_t st, ip, op, cs; const char *desc; } combos[] = {
-        {2, 0, 10, 0, "reprocess bayer8→8888"},
-        {2, 7, 10, 0, "reprocess bayer10→8888"},
-        {2, 0,  2, 0, "reprocess bayer8→4444"},
-        {2, 7,  2, 0, "reprocess bayer10→4444"},
-        {2, 0,  0, 0, "reprocess all-default"},
-        {2, 0,  5, 0, "reprocess bayer8→yuv422"},
-        {1, 0, 10, 0, "streaming bayer8→8888"},
-        {0, 0, 10, 0, "input bayer8→8888"},
-    };
-    int best = -1;
-    for (int i = 0; i < (int)(sizeof(combos)/sizeof(combos[0])); i++) {
-        memset(fmt_cfg, 0, sizeof(fmt_cfg));
-        fmt_cfg[0] = combos[i].st;
-        fmt_cfg[1] = combos[i].ip;
-        fmt_cfg[2] = combos[i].op;
-        fmt_cfg[3] = combos[i].cs;
-        sc1_size = 0x40;
-        err = pSetConfig(isp, 1, fmt_cfg, &sc1_size);
-        printf("  SetConfig(type=1, %s): err=0x%x\n", combos[i].desc, err);
-        if (err == 0 && best < 0) best = i;
-    }
-    if (best >= 0) {
-        /* Re-apply the working combo */
-        memset(fmt_cfg, 0, sizeof(fmt_cfg));
-        fmt_cfg[0] = combos[best].st;
-        fmt_cfg[1] = combos[best].ip;
-        fmt_cfg[2] = combos[best].op;
-        fmt_cfg[3] = combos[best].cs;
-        sc1_size = 0x40;
-        pSetConfig(isp, 1, fmt_cfg, &sc1_size);
-        printf("  → Using: %s\n", combos[best].desc);
-    } else {
-        printf("  WARNING: no SetConfig combo worked, proceeding anyway\n");
-    }
+    memset(fmt_cfg, 0, sizeof(fmt_cfg));
+    fmt_cfg[0] = 2;    /* surface_type: reprocess */
+    fmt_cfg[1] = 0;    /* in: bayer8 */
+    fmt_cfg[2] = 10;   /* out: 8:8:8:8 */
+    uint32_t sc1_size = 0x40;
+    err = pSetConfig(isp, 1, fmt_cfg, &sc1_size);
+    printf("  SetConfig(type=1, reprocess bayer8→8888): err=0x%x\n", err);
 
     /* Load raw file */
     printf("\n[2] Loading %s...\n", argv[1]);
@@ -219,8 +188,8 @@ int main(int argc, char **argv)
      */
     printf("\n[3] Building descriptors...\n");
 
-    uint8_t config[256];
-    memset(config, 0, sizeof(config));
+    /* Heap-allocate to guarantee alignment (stack uint8_t may cause Bus error) */
+    uint8_t *config = calloc(1, 256);
     uint32_t *cfg = (uint32_t *)config;
 
     /* Output surface plane 0 (NvRmSurface at offset 0x00) */
@@ -251,25 +220,10 @@ int main(int argc, char **argv)
      * Input surface (arg7/array[5]) — NvRmSurface for raw Bayer input
      * SETUP reads this and writes to ISP input registers 0xE30-0xE3C
      */
-    uint32_t in_surf[48];  /* 0x30*3 + extra = 192 bytes (struct may need up to 0x90+) */
-    memset(in_surf, 0, sizeof(in_surf));
+    uint32_t *in_surf = calloc(48, sizeof(uint32_t));  /* heap for alignment */
     in_surf[0x00/4] = W;                 /* Width */
     in_surf[0x04/4] = H;                 /* Height */
-    /* Try multiple input formats to find one SETUP accepts */
-    uint32_t in_fmts[] = {
-        0x10a92087,  /* BayerS16BGGR */
-        0x10A9200E,  /* X6Bayer10BGGR */
-        0x08A92004,  /* Bayer8BGGR */
-        0x10992087,  /* BayerS16RGGB */
-        0x10200024,  /* raw ISP value (legacy) */
-    };
-    const char *in_fmt_names[] = {
-        "BayerS16BGGR", "X6Bayer10BGGR", "Bayer8BGGR", "BayerS16RGGB", "legacy-0x10200024",
-    };
-    int in_fmt_idx = 0;  /* default: BayerS16BGGR */
-    if (argc >= 3) in_fmt_idx = atoi(argv[2]) % (int)(sizeof(in_fmts)/sizeof(in_fmts[0]));
-    in_surf[0x08/4] = in_fmts[in_fmt_idx];
-    printf("  Using input format[%d]: %s (0x%08x)\n", in_fmt_idx, in_fmt_names[in_fmt_idx], in_fmts[in_fmt_idx]);
+    in_surf[0x08/4] = 0x10a92087;        /* BayerS16BGGR */
     in_surf[0x0C/4] = 1;                 /* Layout: pitch linear */
     in_surf[0x10/4] = W * 2;             /* Pitch: 5184 bytes */
     in_surf[0x14/4] = in_h;              /* hMem: nvmap handle */
