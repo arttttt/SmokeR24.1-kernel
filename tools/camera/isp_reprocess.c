@@ -538,13 +538,15 @@ int main(int argc, char **argv)
             perror("submit");
             printf("    Strip %d FAILED\n", strip);
         } else {
-            printf("    fence=%u\n", fence.value);
+            /* Kernel returns fence in sa.fence (scalar), not fences array */
+            uint32_t thresh = sa.fence;
+            printf("    fence=%u\n", thresh);
             struct nvhost_ctrl_syncpt_waitex_args wa = {
-                .id = sp_memory, .thresh = fence.value, .timeout = 5000
+                .id = sp_memory, .thresh = thresh, .timeout = 5000
             };
             if (ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa) < 0)
                 printf("    TIMEOUT strip %d (syncpt %u thresh %u)\n",
-                       strip, sp_memory, fence.value);
+                       strip, sp_memory, thresh);
             else
                 printf("    Strip %d done (syncpt=%u val=%u)\n",
                        strip, sp_memory, wa.value);
