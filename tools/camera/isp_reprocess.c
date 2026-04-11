@@ -110,8 +110,7 @@ struct nvhost32_submit_args {
 #define UV_STRIDE (((W/2) + 63) & ~63)    /* 1344 */
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
-#define OUT_STRIDE ((W * 2 + 63) & ~63)   /* 16bpp, 64-aligned = 5248 */
-#define OUT_SIZE (OUT_STRIDE * H)         /* 16bpp */
+#define OUT_SIZE (W * 4 * H)  /* 32bpp */
 
 static int nvmap_fd = -1;
 
@@ -204,6 +203,27 @@ int main(int argc, char **argv)
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
+    /* Configure ISP for reprocess BEFORE HwSettingsApply */
+    printf("  Calling NvIspSetConfiguration...\n");
+    {
+        /* type=2: enable output surface */
+        uint32_t enable = 1;
+        uint32_t sz2 = 4;
+        err = pSetConfig(isp_handle, 2, &enable, &sz2);
+        printf("    SetConfig(type=2, enable): err=0x%x\n", err);
+
+        /* type=1: pixel format config for reprocess */
+        uint8_t fmt_config[0x40];
+        memset(fmt_config, 0, sizeof(fmt_config));
+        *(uint32_t *)(fmt_config + 0x00) = 2;   /* surface_type = reprocess */
+        *(uint32_t *)(fmt_config + 0x04) = 7;   /* in_pix_fmt = Bayer10 */
+        *(uint32_t *)(fmt_config + 0x08) = 10;  /* out_pix_fmt = 8:8:8:8 */
+        *(uint32_t *)(fmt_config + 0x0C) = 0;   /* color_space = Bayer */
+        uint32_t sz1 = 0x40;
+        err = pSetConfig(isp_handle, 1, fmt_config, &sz1);
+        printf("    SetConfig(type=1, reprocess 8888): err=0x%x\n", err);
+    }
+
     void *hw_settings = NULL;
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
@@ -216,8 +236,6 @@ int main(int argc, char **argv)
 
     /* Disable stripping for our own reprocess gather */
     unsetenv("NVRM_SHIM_STRIP");
-
-    /* TODO: NvIspSetConfiguration needs proper args, skipping for now */
 
     /* Scan push buffer for output format (method 0xE02) set by calibration.
      * Push buffers are mmap'd by our shim — scan /proc/self/maps for them */
@@ -412,7 +430,7 @@ int main(int argc, char **argv)
     for (int strip = 0; strip < NUM_STRIPS; strip++) {
         int strip_x = strip * STRIP_W;
         int in_off = strip_x * BPP;       /* input byte offset per row */
-        int out_off = strip_x * 2;        /* output byte offset per row (16bpp) */
+        int out_off = strip_x * 4;        /* output byte offset per row (32bpp) */
 
         printf("\n  --- Strip %d (x=%d w=%d in_off=%d out_off=%d) ---\n",
                strip, strip_x, STRIP_W, in_off, out_off);
@@ -436,7 +454,7 @@ int main(int argc, char **argv)
         y_reloc = n;
         cmd[n++] = 0;                     /* patched by reloc → out_iova + out_off */
         cmd[n++] = 0x00000000;
-        cmd[n++] = OUT_STRIDE;             /* 16bpp stride */
+        cmd[n++] = W * 4;                 /* 32bpp stride */
         /* U/V planes (unused for 32bpp but keep for HW) */
         cmd[n++] = OP_INCR(0xE07, 3);
         u_reloc = n;
