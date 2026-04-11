@@ -70,6 +70,10 @@ static struct tegra_io_dpd csie_io = {
 #define OV5693_DEFAULT_WIDTH	2592
 #define OV5693_DEFAULT_HEIGHT	1944
 #define OV5693_DEFAULT_DATAFMT	V4L2_MBUS_FMT_SBGGR10_1X10
+
+static const struct camera_common_colorfmt ov5693_color_fmts[] = {
+	{ V4L2_MBUS_FMT_SBGGR10_1X10, V4L2_COLORSPACE_SRGB, V4L2_PIX_FMT_SBGGR10, },
+};
 #define OV5693_DEFAULT_CLK_FREQ	24000000
 
 struct ov5693 {
@@ -91,6 +95,8 @@ struct ov5693 {
 
 	/* Mocha-specific: afvdd not in camera_common_power_rail */
 	struct regulator		*afvdd;
+
+	u32				cur_frame_length;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -142,6 +148,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 		.min = OV5693_MIN_EXPOSURE_COARSE,
 		.max = OV5693_MAX_EXPOSURE_COARSE,
 		.def = OV5693_DEFAULT_EXPOSURE_COARSE,
+		.step = 1,
+	},
+	{
+		.ops = &ov5693_ctrl_ops,
+		.id = V4L2_CID_EXPOSURE,
+		.name = "Exposure (us)",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+		.min = 1,
+		.max = 1000000,
+		.def = 33000,
 		.step = 1,
 	},
 	{
@@ -617,6 +634,7 @@ static int ov5693_set_gain(struct ov5693 *priv, s32 val);
 static int ov5693_set_frame_length(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time_short(struct ov5693 *priv, s32 val);
+static int ov5693_set_group_hold(struct ov5693 *priv);
 
 static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -644,39 +662,68 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		goto exit;
 	}
 
-	/* write list of override regs for the asking frame length,
-	 * coarse integration time, and gain. Failures to write
-	 * overrides are non-fatal */
-	control.id = V4L2_CID_GAIN;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_gain(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev, "%s: warning gain override failed\n",
-			__func__);
+	/* Override gain, frame_length, coarse_time after mode table.
+	 * Use per-mode frame_length — never go below mode default. */
+	{
+		u32 mode_fl = ov5693_mode_frame_length[s_data->mode];
+		u32 frame_length, max_coarse;
 
-	control.id = V4L2_CID_FRAME_LENGTH;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_frame_length(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning frame length override failed\n",
-			__func__);
+		control.id = V4L2_CID_GAIN;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err |= ov5693_set_gain(priv, control.value);
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning gain override failed\n",
+				__func__);
 
-	control.id = V4L2_CID_COARSE_TIME;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_coarse_time(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning coarse time override failed\n",
-			__func__);
+		/* Always use per-mode VTS from register tables.
+		 * Control default doesn't reset on mode change. */
+		frame_length = mode_fl;
+		err = ov5693_set_frame_length(priv, frame_length);
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning frame length override failed\n",
+				__func__);
 
-	control.id = V4L2_CID_COARSE_TIME_SHORT;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	err |= ov5693_set_coarse_time_short(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning coarse time short override failed\n",
-			__func__);
+		max_coarse = frame_length - OV5693_MAX_COARSE_DIFF;
+
+		control.id = V4L2_CID_COARSE_TIME;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err |= ov5693_set_coarse_time(priv,
+			min((u32)control.value, max_coarse));
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning coarse time override failed\n",
+				__func__);
+
+		control.id = V4L2_CID_COARSE_TIME_SHORT;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err |= ov5693_set_coarse_time_short(priv,
+			min((u32)control.value, max_coarse));
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning coarse time short override "
+				"failed\n", __func__);
+
+		/* V4L2_CID_EXPOSURE (µs → coarse_time) */
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		if (!err && control.value > 0) {
+			const struct camera_common_frmfmt *fmt =
+				&s_data->frmfmt[s_data->mode];
+			u32 coarse = (u32)div_u64(
+				(u64)control.value * fmt->pix_clk_hz,
+				(u64)fmt->line_length * 1000000ULL);
+			if (coarse > max_coarse)
+				coarse = max_coarse;
+			if (coarse > 0)
+				ov5693_set_coarse_time(priv, coarse);
+		}
+
+		dev_info(&client->dev,
+			 "%s: mode=%d frame_len=%u (mode_default=%u)\n",
+			 __func__, s_data->mode, frame_length, mode_fl);
+	}
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
 	if (err)
@@ -950,6 +997,7 @@ static int ov5693_set_frame_length(struct ov5693 *priv, s32 val)
 			goto fail;
 	}
 
+	priv->cur_frame_length = frame_length;
 	ov5693_update_ctrl_range(priv, val);
 	return 0;
 
@@ -1310,6 +1358,22 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_FRAME_LENGTH:
 		err = ov5693_set_frame_length(priv, ctrl->val);
 		break;
+	case V4L2_CID_EXPOSURE: {
+		/* Convert microseconds to coarse_time.
+		 * OV5693 coarse_time is in sensor lines (NOT shifted). */
+		struct camera_common_data *s_data = priv->s_data;
+		const struct camera_common_frmfmt *fmt =
+			&s_data->frmfmt[s_data->mode];
+		u32 fl = priv->cur_frame_length ?
+			 priv->cur_frame_length : OV5693_DEFAULT_FRAME_LENGTH;
+		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
+					  (u64)fmt->line_length * 1000000ULL);
+		u32 max_coarse = fl - OV5693_MAX_COARSE_DIFF;
+		if (coarse > max_coarse)
+			coarse = max_coarse;
+		err = ov5693_set_coarse_time(priv, coarse);
+		break;
+	}
 	case V4L2_CID_COARSE_TIME:
 		err = ov5693_set_coarse_time(priv, ctrl->val);
 		break;
@@ -1597,6 +1661,8 @@ static int ov5693_probe(struct i2c_client *client,
 	common_data->fmt_width		= common_data->def_width;
 	common_data->fmt_height		= common_data->def_height;
 	common_data->def_clk_freq	= OV5693_DEFAULT_CLK_FREQ;
+	common_data->color_fmts		= ov5693_color_fmts;
+	common_data->num_color_fmts	= ARRAY_SIZE(ov5693_color_fmts);
 
 	priv->i2c_client = client;
 	priv->s_data			= common_data;

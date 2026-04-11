@@ -137,6 +137,10 @@ struct nvmap_handle {
 	};
 	bool heap_pgalloc;	/* handle is page allocated (sysmem / iovmm) */
 	bool alloc;		/* handle has memory allocated */
+	bool foreign_dmabuf;	/* wrapping non-nvmap dmabuf — don't free pages */
+	struct dma_buf *foreign_buf;		/* ref to foreign dmabuf */
+	struct dma_buf_attachment *foreign_att;	/* attachment for sg_table */
+	struct sg_table *foreign_sgt;		/* mapped sg_table */
 	u32 heap_type;		/* handle heap is allocated from */
 	u32 userflags;		/* flags passed from userspace */
 	void *vaddr;		/* mapping used inside kernel */
@@ -378,6 +382,8 @@ struct nvmap_handle_ref *nvmap_create_handle(struct nvmap_client *client,
 struct nvmap_handle_ref *nvmap_duplicate_handle(struct nvmap_client *client,
 					struct nvmap_handle *h, bool skip_val);
 
+struct nvmap_handle_ref *nvmap_create_handle_from_dmabuf(
+			struct nvmap_client *client, int fd);
 struct nvmap_handle_ref *nvmap_create_handle_from_fd(
 			struct nvmap_client *client, int fd);
 

@@ -459,10 +459,27 @@ int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 			__func__, mf->width, mf->height);
 	}
 
-	if (mf->code != V4L2_MBUS_FMT_SRGGB8_1X8 &&
-		mf->code != V4L2_MBUS_FMT_SRGGB10_1X10) {
-		mf->code = V4L2_MBUS_FMT_SRGGB10_1X10;
-		err = -EINVAL;
+	/* Validate mbus code against sensor's supported formats */
+	{
+		const struct camera_common_colorfmt *cfmts = s_data->color_fmts;
+		int ncfmts = s_data->num_color_fmts;
+		bool code_valid = false;
+		int j;
+
+		if (!cfmts || ncfmts < 1) {
+			cfmts = camera_common_color_fmts;
+			ncfmts = ARRAY_SIZE(camera_common_color_fmts);
+		}
+		for (j = 0; j < ncfmts; j++) {
+			if (cfmts[j].code == mf->code) {
+				code_valid = true;
+				break;
+			}
+		}
+		if (!code_valid) {
+			mf->code = cfmts[0].code;
+			err = -EINVAL;
+		}
 	}
 
 	mf->field = V4L2_FIELD_NONE;

@@ -29,7 +29,7 @@
 #include <linux/media.h>
 #include <getopt.h>
 
-#define MAX_BUFFERS 4
+#define MAX_BUFFERS 8
 #define VI_BASE     0x54080000
 #define VI_SIZE     0x40000
 
@@ -286,14 +286,44 @@ static void dump_registers(const char *label)
 	printf("\n-- VI Config --\n");
 	printf("  %-25s = 0x%08X\n", "CFG_CG_CTRL", vi_read(TEGRA_VI_CFG_CG_CTRL));
 
+	printf("\n-- VI_CSI_0 (PORT_A / IMX179) --\n");
+	printf("  %-25s = 0x%08X\n", "IMAGE_DEF", vi_read(VI_CSI_0_IMAGE_DEF));
+	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE", vi_read(VI_CSI_0_IMAGE_SIZE));
+	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE_WC", vi_read(VI_CSI_0_IMAGE_SIZE_WC));
+	printf("  %-25s = 0x%08X\n", "IMAGE_DT", vi_read(VI_CSI_0_IMAGE_DT));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_LSB", vi_read(VI_CSI_0_SURFACE0_OFFSET_LSB));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_STRIDE", vi_read(VI_CSI_0_SURFACE0_STRIDE));
+	printf("  %-25s = 0x%08X\n", "ERROR_STATUS", vi_read(VI_CSI_0_ERROR_STATUS));
+
+	printf("\n-- Pixel Parser A (PP_A / IMX179) --\n");
+	printf("  %-25s = 0x%08X\n", "INPUT_STREAM_CONTROL", vi_read(PP_A_INPUT_STREAM_CONTROL));
+	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL0", vi_read(PP_A_PIXEL_STREAM_CONTROL0));
+	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL1", vi_read(PP_A_PIXEL_STREAM_CONTROL1));
+	printf("  %-25s = 0x%08X\n", "STREAM_GAP", vi_read(PP_A_PIXEL_STREAM_GAP));
+	printf("  %-25s = 0x%08X\n", "PP_COMMAND", vi_read(PP_A_PIXEL_STREAM_PP_COMMAND));
+	printf("  %-25s = 0x%08X\n", "PP_INT_MASK", vi_read(PP_A_PIXEL_STREAM_PP_INT_MASK));
+	dump_pp_status_bits("PP_A_STATUS", vi_read(PP_A_PIXEL_PARSER_STATUS));
+
+	printf("\n-- CIL A/B (brick 0, IMX179 4-lane) --\n");
+	printf("  %-25s = 0x%08X\n", "CILA_PAD_CONFIG0", vi_read(CILA_PAD_CONFIG0));
+	printf("  %-25s = 0x%08X\n", "PHY_CILA_CONTROL0", vi_read(PHY_CILA_CONTROL0));
+	dump_cil_status_bits("CIL_A_STATUS", vi_read(CSI_CIL_A_STATUS));
+	dump_cil_status_bits("CILA_STATUS", vi_read(CSI_CILA_STATUS));
+	printf("  %-25s = 0x%08X\n", "CILB_PAD_CONFIG0", vi_read(CILB_PAD_CONFIG0));
+	printf("  %-25s = 0x%08X\n", "PHY_CILB_CONTROL0", vi_read(PHY_CILB_CONTROL0));
+	dump_cil_status_bits("CIL_B_STATUS", vi_read(CSI_CIL_B_STATUS));
+	dump_cil_status_bits("CILB_STATUS", vi_read(CSI_CILB_STATUS));
+
 	printf("\n-- VI_CSI_1 (PORT_B / OV5693) --\n");
 	printf("  %-25s = 0x%08X\n", "IMAGE_DEF", vi_read(VI_CSI_1_IMAGE_DEF));
 	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE", vi_read(VI_CSI_1_IMAGE_SIZE));
 	printf("  %-25s = 0x%08X\n", "IMAGE_SIZE_WC", vi_read(VI_CSI_1_IMAGE_SIZE_WC));
 	printf("  %-25s = 0x%08X\n", "IMAGE_DT", vi_read(VI_CSI_1_IMAGE_DT));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_LSB", vi_read(VI_CSI_1_SURFACE0_OFFSET_LSB));
+	printf("  %-25s = 0x%08X\n", "SURFACE0_STRIDE", vi_read(VI_CSI_1_SURFACE0_STRIDE));
 	printf("  %-25s = 0x%08X\n", "ERROR_STATUS", vi_read(VI_CSI_1_ERROR_STATUS));
 
-	printf("\n-- Pixel Parser B (PP_B) --\n");
+	printf("\n-- Pixel Parser B (PP_B / OV5693) --\n");
 	printf("  %-25s = 0x%08X\n", "INPUT_STREAM_CONTROL", vi_read(PP_B_INPUT_STREAM_CONTROL));
 	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL0", vi_read(PP_B_PIXEL_STREAM_CONTROL0));
 	printf("  %-25s = 0x%08X\n", "STREAM_CONTROL1", vi_read(PP_B_PIXEL_STREAM_CONTROL1));
@@ -301,9 +331,6 @@ static void dump_registers(const char *label)
 	printf("  %-25s = 0x%08X\n", "PP_COMMAND", vi_read(PP_B_PIXEL_STREAM_PP_COMMAND));
 	printf("  %-25s = 0x%08X\n", "PP_INT_MASK", vi_read(PP_B_PIXEL_STREAM_PP_INT_MASK));
 	dump_pp_status_bits("PP_B_STATUS", vi_read(PP_B_PIXEL_PARSER_STATUS));
-
-	printf("\n-- Pixel Parser A (PP_A, for reference) --\n");
-	dump_pp_status_bits("PP_A_STATUS", vi_read(PP_A_PIXEL_PARSER_STATUS));
 
 	printf("\n-- CSI PHY --\n");
 	printf("  %-25s = 0x%08X\n", "CIL_COMMAND", vi_read(CSI_PHY_CIL_COMMAND));
@@ -547,30 +574,22 @@ static int do_capture(const char *dev, int width, int height,
 			printf("Framerate set to %d fps\n", framerate);
 	}
 
-	/* Set format */
+	/* Get current format to preserve pixel format, then set resolution */
 	struct v4l2_format fmt;
 	memset(&fmt, 0, sizeof(fmt));
 	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	xioctl(fd, VIDIOC_G_FMT, &fmt);
+
 	fmt.fmt.pix.width = width;
 	fmt.fmt.pix.height = height;
-	fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_SBGGR10;
 	fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
-	printf("Requesting %dx%d SBGGR10...\n", width, height);
+	printf("Requesting %dx%d %s...\n", width, height,
+		fcc_to_str(fmt.fmt.pix.pixelformat, fcc));
 	if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
 		perror("VIDIOC_S_FMT");
-		/* Try without specifying format */
-		memset(&fmt, 0, sizeof(fmt));
-		fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-		fmt.fmt.pix.width = width;
-		fmt.fmt.pix.height = height;
-		fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_SRGGB10;
-		printf("Retrying with SRGGB10...\n");
-		if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
-			perror("VIDIOC_S_FMT (retry)");
-			close(fd);
-			return -1;
-		}
+		close(fd);
+		return -1;
 	}
 
 	printf("Got format: %dx%d %s bytesperline=%u sizeimage=%u\n",
@@ -645,19 +664,14 @@ static int do_capture(const char *dev, int width, int height,
 
 	/* Set exposure and gain before streaming */
 	if (exposure >= 0) {
-		struct v4l2_ext_controls ctrls;
-		struct v4l2_ext_control ctrl;
+		struct v4l2_control ctrl;
 		memset(&ctrl, 0, sizeof(ctrl));
-		memset(&ctrls, 0, sizeof(ctrls));
-		ctrl.id = V4L2_CID_COARSE_TIME;
+		ctrl.id = V4L2_CID_EXPOSURE;
 		ctrl.value = exposure;
-		ctrls.ctrl_class = V4L2_CTRL_CLASS_CAMERA;
-		ctrls.count = 1;
-		ctrls.controls = &ctrl;
-		if (ioctl(fd, VIDIOC_S_EXT_CTRLS, &ctrls) < 0)
-			perror("set exposure");
+		if (ioctl(fd, VIDIOC_S_CTRL, &ctrl) < 0)
+			perror("set exposure (V4L2_CID_EXPOSURE)");
 		else
-			printf("Exposure set to %d\n", exposure);
+			printf("Exposure set to %d us\n", exposure);
 	}
 	if (gain >= 0) {
 		struct v4l2_control ctrl;
@@ -711,15 +725,15 @@ static int do_capture(const char *dev, int width, int height,
 	if (read_regs)
 		dump_registers("AFTER STREAMON");
 
-	/* Capture frames */
+	/* Capture frames — stream first, save later */
 	int captured = 0;
-	for (int frame = 0; frame < nframes; frame++) {
-		printf("\nWaiting for frame %d/%d...\n", frame + 1, nframes);
+	int *frame_index = calloc(nframes, sizeof(int));
+	unsigned int *frame_bytesused = calloc(nframes, sizeof(unsigned int));
+	long long *frame_ts = calloc(nframes, sizeof(long long));
 
+	for (int frame = 0; frame < nframes; frame++) {
 		fd_set fds;
 		struct timeval tv;
-
-		/* If poll_regs, check registers while waiting */
 		int got_frame = 0;
 		long long deadline = now_ms() + timeout_ms;
 
@@ -739,7 +753,6 @@ static int do_capture(const char *dev, int width, int height,
 				break;
 			}
 			if (ret == 0) {
-				/* Timeout on this iteration */
 				if (poll_regs && vi_map) {
 					long long elapsed = now_ms() - t_streamon;
 					printf("[%lld ms] PP_B=0x%08X CIL_E=0x%08X CILE=0x%08X\n",
@@ -751,7 +764,6 @@ static int do_capture(const char *dev, int width, int height,
 				continue;
 			}
 
-			/* Frame ready */
 			struct v4l2_buffer buf;
 			memset(&buf, 0, sizeof(buf));
 			buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -763,99 +775,36 @@ static int do_capture(const char *dev, int width, int height,
 			}
 
 			long long t_frame = now_ms();
-			printf("Frame %d captured: index=%d bytesused=%u (took %lld ms)\n",
-				frame + 1, buf.index, buf.bytesused,
-				t_frame - t_streamon);
+			frame_index[frame] = buf.index;
+			frame_bytesused[frame] = buf.bytesused;
+			frame_ts[frame] = t_frame;
 
-			/* Check how much DMA actually wrote */
-			{
-				unsigned int *p = (unsigned int *)buffers[buf.index].start;
-				size_t total = buf.bytesused / 4;
-				size_t deadbeef = 0, zeros = 0, other = 0;
-				size_t j;
-				for (j = 0; j < total; j++) {
-					if (p[j] == 0xDEADBEEF) deadbeef++;
-					else if (p[j] == 0) zeros++;
-					else other++;
-				}
-				printf("DMA check: deadbeef=%zu zeros=%zu other=%zu total=%zu\n",
-					deadbeef, zeros, other, total);
-				if (other > 0) {
-					printf("  First non-marker: @%zu = 0x%08x\n",
-						0UL, p[0]);
-					for (j = 0; j < total; j++) {
-						if (p[j] != 0xDEADBEEF && p[j] != 0) {
-							printf("  First other: @%zu = 0x%08x\n",
-								j, p[j]);
-							break;
-						}
-					}
-				}
+			/* QBUF first — return buffer to kernel ASAP */
+			if (!single_shot) {
+				if (xioctl(fd, VIDIOC_QBUF, &buf) < 0)
+					perror("VIDIOC_QBUF (requeue)");
 			}
 
 			if (read_regs)
 				dump_registers("AFTER FRAME");
-
-			/* Save frame */
-			if (outfile && buf.bytesused > 0) {
-				char filename[256];
-				if (nframes == 1) {
-					snprintf(filename, sizeof(filename), "%s", outfile);
-				} else {
-					snprintf(filename, sizeof(filename), "%s.%03d", outfile, frame);
-				}
-				int ofd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				if (ofd >= 0) {
-					size_t written = write(ofd, buffers[buf.index].start,
-							       buf.bytesused);
-					close(ofd);
-					printf("Saved %zu bytes to %s\n", written, filename);
-				} else {
-					perror("open output file");
-				}
-			}
-
-			/* Re-queue buffer (skip in single-shot mode) */
-			if (!single_shot) {
-				if (xioctl(fd, VIDIOC_QBUF, &buf) < 0) {
-					perror("VIDIOC_QBUF (requeue)");
-				}
-			}
 
 			captured++;
 			got_frame = 1;
 		}
 
 		if (!got_frame) {
-			long long elapsed = now_ms() - t_streamon;
-			printf("TIMEOUT waiting for frame %d after %lld ms!\n",
-				frame + 1, elapsed);
-			if (read_regs)
-				dump_registers("TIMEOUT");
-			/* Try DQBUF anyway — kernel may have returned buffer with ISP data */
-			{
-				struct v4l2_buffer buf;
-				memset(&buf, 0, sizeof(buf));
-				buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-				buf.memory = V4L2_MEMORY_MMAP;
-				if (xioctl(fd, VIDIOC_DQBUF, &buf) == 0 && buf.bytesused > 0) {
-					printf("Got buffer after timeout: index=%d bytesused=%u\n",
-						buf.index, buf.bytesused);
-					if (outfile) {
-						char filename[256];
-						snprintf(filename, sizeof(filename), "%s", outfile);
-						FILE *fp = fopen(filename, "wb");
-						if (fp) {
-							size_t written = fwrite(buffers[buf.index].start,
-								1, buf.bytesused, fp);
-							fclose(fp);
-							printf("Saved %zu bytes to %s\n", written, filename);
-						}
-					}
-				}
-			}
+			printf("TIMEOUT frame %d after %lld ms!\n",
+				frame + 1, now_ms() - t_streamon);
 			break;
 		}
+	}
+
+	/* Print frame timestamps after streaming (no I/O in hot path) */
+	for (i = 0; i < captured; i++) {
+		printf("Frame %d: index=%d %lld ms (+%lld ms)\n",
+			i + 1, frame_index[i],
+			frame_ts[i] - t_streamon,
+			i > 0 ? frame_ts[i] - frame_ts[i - 1] : 0LL);
 	}
 
 	/* Stop streaming */
@@ -864,9 +813,55 @@ static int do_capture(const char *dev, int width, int height,
 	}
 
 	long long t_end = now_ms();
-	printf("\nTotal: %d/%d frames in %lld ms\n", captured, nframes, t_end - t_start);
+	if (captured > 1) {
+		long long stream_time = frame_ts[captured - 1] - frame_ts[0];
+		printf("\nStreaming: %d frames in %lld ms (%.1f fps)\n",
+			captured, stream_time,
+			stream_time > 0 ? captured * 1000.0 / stream_time : 0);
+	}
+	printf("Total (incl. setup): %d/%d frames in %lld ms\n",
+		captured, nframes, t_end - t_start);
+
+	/* Batch save after streaming — no I/O during capture.
+	 * Only the last min(captured, nbuf) frames are in memory
+	 * since buffers are requeued during streaming. */
+	if (outfile) {
+		int save_start = captured > nbuf ? captured - nbuf : 0;
+		int save_count = captured - save_start;
+		printf("\nSaving %d frames (of %d captured)...\n",
+			save_count, captured);
+		for (i = save_start; i < captured; i++) {
+			unsigned int *p = (unsigned int *)buffers[frame_index[i]].start;
+			size_t total = frame_bytesused[i] / 4;
+			size_t deadbeef = 0, other = 0;
+			size_t j;
+			for (j = 0; j < total; j++) {
+				if (p[j] == 0xDEADBEEF) deadbeef++;
+				else other++;
+			}
+			printf("  [%d] deadbeef=%zu other=%zu", i, deadbeef, other);
+
+			char filename[256];
+			if (nframes == 1)
+				snprintf(filename, sizeof(filename), "%s", outfile);
+			else
+				snprintf(filename, sizeof(filename), "%s.%03d", outfile, i);
+			int ofd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if (ofd >= 0) {
+				write(ofd, buffers[frame_index[i]].start,
+				      frame_bytesused[i]);
+				close(ofd);
+				printf(" -> %s\n", filename);
+			} else {
+				printf(" SAVE FAILED\n");
+			}
+		}
+	}
 
 	/* Cleanup */
+	free(frame_index);
+	free(frame_bytesused);
+	free(frame_ts);
 	for (i = 0; i < nbuf; i++)
 		munmap(buffers[i].start, buffers[i].length);
 	close(fd);
@@ -875,24 +870,38 @@ static int do_capture(const char *dev, int width, int height,
 
 static void usage(const char *prog)
 {
-	printf("Usage: %s [options]\n", prog);
+	printf("v4l2_diag - Tegra124 camera diagnostic tool\n\n");
+	printf("Usage: %s [options]\n\n", prog);
+	printf("Capture:\n");
 	printf("  -d <dev>    Video device (default: /dev/video0)\n");
 	printf("  -w <width>  Frame width (default: 1280)\n");
 	printf("  -h <height> Frame height (default: 720)\n");
-	printf("  -o <file>   Output file (default: /sdcard/Pictures/frame.raw)\n");
 	printf("  -n <count>  Number of frames (default: 1)\n");
-	printf("  -t <ms>     Timeout in ms (default: 2000)\n");
-	printf("  -i          Info only (no capture)\n");
+	printf("  -e <us>     Exposure in microseconds\n");
+	printf("  -g <gain>   Analog gain (1-256)\n");
+	printf("  -f <fps>    Set framerate\n");
+	printf("  -F <pos>    Focus position (0-1023)\n");
+	printf("  -D <dev>    Focus device (default: same as -d)\n");
+	printf("\nOutput:\n");
+	printf("  -o <file>   Output file prefix (default: /data/local/tmp/frame.raw)\n");
+	printf("  -N          No save — stream only, measure FPS\n");
+	printf("\nDiagnostics:\n");
+	printf("  -i          Info only (QUERYCAP + ENUM_FMT, no capture)\n");
 	printf("  -r          Read CSI/VI registers via /dev/mem\n");
 	printf("  -R          Poll registers while waiting for frame\n");
-	printf("  -S          Single-shot mode (1 buffer, no requeue)\n");
-	printf("  -f <fps>    Set framerate (e.g. 30, 60, 90, 120)\n");
+	printf("  -S          Single-shot V4L2 mode (1 buffer, no requeue)\n");
+	printf("  -t <ms>     Timeout in ms (default: 2000)\n");
+	printf("\nExamples:\n");
+	printf("  %s -n 30 -N                    # 30 frames, FPS only\n", prog);
+	printf("  %s -w 3264 -h 2448 -e 33000    # full res, 33ms exposure\n", prog);
+	printf("  %s -n 10 -o /tmp/cap.raw       # 10 frames, batch save\n", prog);
 }
 
 int main(int argc, char *argv[])
 {
 	const char *dev = "/dev/video0";
 	const char *outfile = "/sdcard/Pictures/frame.raw";
+	int no_save = 0;
 	int width = 1280, height = 720;
 	int nframes = 1;
 	int timeout_ms = 2000;
@@ -907,7 +916,7 @@ int main(int argc, char *argv[])
 	const char *focus_dev = NULL;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRSf:e:g:F:D:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:w:h:o:n:t:irRSNf:e:g:F:D:")) != -1) {
 		switch (opt) {
 		case 'd': dev = optarg; break;
 		case 'w': width = atoi(optarg); break;
@@ -919,6 +928,7 @@ int main(int argc, char *argv[])
 		case 'r': read_regs = 1; break;
 		case 'R': poll_regs = 1; read_regs = 1; break;
 		case 'S': single_shot = 1; nframes = 1; break;
+		case 'N': no_save = 1; break;
 		case 'f': framerate = atoi(optarg); break;
 		case 'e': exposure = atoi(optarg); break;
 		case 'g': gain = atoi(optarg); break;
@@ -959,7 +969,8 @@ int main(int argc, char *argv[])
 		dump_registers("IDLE STATE");
 
 	if (!info_only) {
-		int ret = do_capture(dev, width, height, outfile,
+		int ret = do_capture(dev, width, height,
+				     no_save ? NULL : outfile,
 				     nframes, timeout_ms, read_regs, poll_regs,
 				     single_shot, framerate, exposure, gain,
 				     focus, focus_dev);

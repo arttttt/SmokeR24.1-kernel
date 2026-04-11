@@ -85,6 +85,8 @@ err:
 	return PTR_ERR(sgt);
 }
 
+EXPORT_SYMBOL(__nvmap_pin);
+
 void __nvmap_unpin(struct nvmap_handle_ref *ref)
 {
 	struct nvmap_handle *h = ref->handle;
@@ -103,6 +105,7 @@ done:
 	trace_nvmap_unpin(h->owner, h->owner ? h->owner->name : "unknown", h,
 			atomic_read(&h->pin));
 }
+EXPORT_SYMBOL(__nvmap_unpin);
 
 int nvmap_pin_handles(struct nvmap_client *client, unsigned int nr,
 		      struct nvmap_handle * const *handles)

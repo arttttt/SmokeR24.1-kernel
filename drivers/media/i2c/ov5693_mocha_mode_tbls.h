@@ -432,7 +432,9 @@ static const ov5693_reg mode_2592x1944[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 1-lane CSI-E overrides */
+	/* Mocha 1-lane CSI-E overrides
+	 * HTS=5376(0x1500) — original mocha, bandwidth-limited
+	 * 160M/(5376*1984)=15fps */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x15},
@@ -695,7 +697,9 @@ static const ov5693_reg mode_2592x1458[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 1-lane CSI-E overrides */
+	/* Mocha 1-lane CSI-E overrides
+	 * HTS=5376(0x1500), VTS=1984 → 160M/(5376*1984)=15fps
+	 * Full-res on 1 lane: bandwidth-limited, can't reach 30fps */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x15},
@@ -947,11 +951,15 @@ static const ov5693_reg mode_1920x1080[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 1-lane CSI-E overrides */
+	/* Mocha 1-lane CSI-E overrides
+	 * 24fps: HTS=4032(0x0FC0), VTS=1654(0x0676)
+	 * 160M/(4032*1654)=24.0fps, MIPI=762Mbps */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0f},
 	{0x380d, 0xc0},
+	{0x380e, 0x06},
+	{0x380f, 0x76},
 	{OV5693_TABLE_END, 0x0000}
 };
 
@@ -1200,14 +1208,19 @@ static const ov5693_reg mode_1280x720_60fps[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 1-lane CSI-E overrides (60fps: HTS=0x1500=5376) */
+	/* Mocha 1-lane CSI-E overrides
+	 * 60fps: HTS=2688(0x0A80), VTS=992(0x03E0)
+	 * 160M/(2688*992)=60.1fps */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
-	{0x380c, 0x15},
-	{0x380d, 0x00},
+	{0x380c, 0x0a},
+	{0x380d, 0x80},
+	{0x380e, 0x03},
+	{0x380f, 0xe0},
 	{OV5693_TABLE_END, 0x0000}
 };
 
+#if 0 /* 90fps/120fps modes disabled — don't work on mocha 1-lane CSI */
 /*
  * 1280x720 @ 90fps (experimental)
  *
@@ -1463,7 +1476,9 @@ static const ov5693_reg mode_1280x720_90fps[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 1-lane CSI-E overrides (90fps: HTS=0x0e00=3584) */
+	/* Mocha 1-lane CSI-E overrides
+	 * HTS=3584(0x0E00), VTS=760 → 160M/(3584*760)=58.7fps
+	 * 1-lane bandwidth-limited */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0e},
@@ -1732,11 +1747,9 @@ static const ov5693_reg mode_1280x720_120fps[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/*
-	 * Mocha 1-lane CSI-E overrides (120fps: HTS=0x0a80=2688)
-	 * Uses original 2-lane PLL (0x3015=0x08) but 1-lane MIPI (0x3011=0x11).
-	 * This pushes more data per lane — may or may not work.
-	 */
+	/* Mocha 1-lane CSI-E overrides
+	 * HTS=2688(0x0A80), VTS=760 → 160M/(2688*760)=78.3fps
+	 * Named "120fps" but limited by 1-lane bandwidth */
 	{0x3011, 0x11},
 	{0x380c, 0x0a},
 	{0x380d, 0x80},
@@ -2002,13 +2015,16 @@ static const ov5693_reg mode_1280x720_120fps_safe[] = {
 	{0x5849, 0x0c},
 	{0x5e00, 0x00},
 	{0x5e10, 0x0c},
-	/* Mocha 1-lane CSI-E overrides (120fps safe: HTS=0x0a80=2688, mocha PLL) */
+	/* Mocha 1-lane CSI-E overrides
+	 * HTS=2688(0x0A80), VTS=760 → 160M/(2688*760)=78.3fps
+	 * Named "120fps safe" but limited by 1-lane bandwidth */
 	{0x3011, 0x11},
 	{0x3015, 0x28},
 	{0x380c, 0x0a},
 	{0x380d, 0x80},
 	{OV5693_TABLE_END, 0x0000}
 };
+#endif /* disabled 90fps/120fps modes */
 
 static const ov5693_reg mode_2592x1944_HDR_24fps[] = {
 	{0x0100, 0x00},/* Including sw reset */
@@ -2759,9 +2775,6 @@ enum {
 	OV5693_MODE_2592X1458,
 	OV5693_MODE_1920X1080,
 	OV5693_MODE_1280X720_60FPS,
-	OV5693_MODE_1280X720_90FPS,
-	OV5693_MODE_1280X720_120FPS,
-	OV5693_MODE_1280X720_120FPS_SAFE,
 	OV5693_MODE_2592X1944_HDR,
 	OV5693_MODE_1920X1080_HDR,
 
@@ -2775,9 +2788,6 @@ static const ov5693_reg *mode_table[] = {
 	[OV5693_MODE_2592X1458]			= mode_2592x1458,
 	[OV5693_MODE_1920X1080]			= mode_1920x1080,
 	[OV5693_MODE_1280X720_60FPS]		= mode_1280x720_60fps,
-	[OV5693_MODE_1280X720_90FPS]		= mode_1280x720_90fps,
-	[OV5693_MODE_1280X720_120FPS]		= mode_1280x720_120fps,
-	[OV5693_MODE_1280X720_120FPS_SAFE]	= mode_1280x720_120fps_safe,
 	[OV5693_MODE_2592X1944_HDR]		= mode_2592x1944_HDR_24fps,
 	[OV5693_MODE_1920X1080_HDR]		= mode_1920x1080_HDR_30fps,
 
@@ -2806,15 +2816,27 @@ static const int ov5693_120fps[] = {
 	120,
 };
 
+/* Per-mode VTS from register tables (0x380e:0x380f) */
+static const u32 ov5693_mode_frame_length[] = {
+	[OV5693_MODE_2592X1944]            = 0x07C0,  /* 1984 — 30fps */
+	[OV5693_MODE_2592X1458]            = 0x07C0,  /* 1984 — 30fps */
+	[OV5693_MODE_1920X1080]            = 0x0676,  /* 1654 — 24fps */
+	[OV5693_MODE_1280X720_60FPS]       = 0x03E0,  /* 992  — 60fps */
+	[OV5693_MODE_2592X1944_HDR]        = 0x07C0,  /* 1984 — 24fps HDR */
+	[OV5693_MODE_1920X1080_HDR]        = 0x073A,  /* 1850 — 30fps HDR */
+};
+
+#define OV5693_PIX_CLK_HZ		160000000ULL
+#define OV5693_LINE_LENGTH_FULL		2688
+#define OV5693_LINE_LENGTH_720P		1752
+
 static const struct camera_common_frmfmt ov5693_frmfmt[] = {
-	{{2592, 1944},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1944},
-	{{2592, 1458},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1458},
-	{{1920, 1080},	ov5693_30fps,	1, 0,	OV5693_MODE_1920X1080},
-	{{1280, 720},	ov5693_60fps,	1, 0,	OV5693_MODE_1280X720_60FPS},
-	{{1280, 720},	ov5693_90fps,	1, 0,	OV5693_MODE_1280X720_90FPS},
-	{{1280, 720},	ov5693_120fps,	1, 0,	OV5693_MODE_1280X720_120FPS},
-	{{2592, 1944},	ov5693_24fps,	1, 1,	OV5693_MODE_2592X1944_HDR},
-	{{1920, 1080},	ov5693_30fps,	1, 1,	OV5693_MODE_1920X1080_HDR},
+	{{2592, 1944},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1944,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
+	{{2592, 1458},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1458,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
+	{{1920, 1080},	ov5693_24fps,	1, 0,	OV5693_MODE_1920X1080,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
+	{{1280, 720},	ov5693_60fps,	1, 0,	OV5693_MODE_1280X720_60FPS,	OV5693_LINE_LENGTH_720P, OV5693_PIX_CLK_HZ},
+	{{2592, 1944},	ov5693_24fps,	1, 1,	OV5693_MODE_2592X1944_HDR,	OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
+	{{1920, 1080},	ov5693_30fps,	1, 1,	OV5693_MODE_1920X1080_HDR,	OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 };
 #endif  /* __OV5693_MOCHA_TABLES__ */
 

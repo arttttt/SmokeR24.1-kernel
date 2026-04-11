@@ -127,7 +127,7 @@ struct nvhost_device_data t124_isp_info = {
 	/* FIXME: control clocks from user space instead of hard-coding here */
 	.moduleid        = NVHOST_MODULE_ISP,
 	.class           = NV_VIDEO_STREAMING_ISP_CLASS_ID,
-	.modulemutexes   = {0}, /* disabled — stock kernel has no mlock in submit path */
+	.modulemutexes   = {NVMODMUTEX_ISP_0},
 	.devfs_name      = "isp",
 	.exclusive       = true,
 	.keepalive       = true,
@@ -169,7 +169,7 @@ struct nvhost_device_data t124_ispb_info = {
 	.moduleid        = (1 << 16) | NVHOST_MODULE_ISP,
 	.devfs_name      = "isp.1",
 	.class           = NV_VIDEO_STREAMING_ISPB_CLASS_ID,
-	.modulemutexes   = {0}, /* disabled — stock kernel has no mlock in submit path */
+	.modulemutexes   = {NVMODMUTEX_ISP_1},
 	.exclusive       = true,
 	.keepalive       = true,
 	.powergate_id    = TEGRA_POWERGATE_VENC,

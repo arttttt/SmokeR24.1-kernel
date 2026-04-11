@@ -97,3 +97,5 @@ x509.genkey
 /anykernel/kernel
 /Initramfs
 /output
+boot.img
+tools/camera/v4l2_diag_updated

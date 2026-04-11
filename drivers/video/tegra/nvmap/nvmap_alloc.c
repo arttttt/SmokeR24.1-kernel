@@ -383,6 +383,19 @@ void _nvmap_handle_free(struct nvmap_handle *h)
 	BUG_ON(h->size & ~PAGE_MASK);
 	BUG_ON(!h->pgalloc.pages);
 
+	if (h->foreign_dmabuf) {
+		/* Foreign dmabuf wrapper — release sg_table and detach, don't free pages */
+		if (h->foreign_sgt)
+			dma_buf_unmap_attachment(h->foreign_att, h->foreign_sgt,
+						DMA_BIDIRECTIONAL);
+		if (h->foreign_att)
+			dma_buf_detach(h->foreign_buf, h->foreign_att);
+		if (h->foreign_buf)
+			dma_buf_put(h->foreign_buf);
+		nvmap_altfree(h->pgalloc.pages, nr_page * sizeof(struct page *));
+		goto out;
+	}
+
 #ifdef NVMAP_LAZY_VFREE
 	if (h->vaddr) {
 		nvmap_kmaps_dec(h);

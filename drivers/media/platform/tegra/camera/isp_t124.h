@@ -14,11 +14,15 @@
 struct nvhost_channel;
 struct dentry;
 
+struct nvmap_client;
+struct nvmap_handle_ref;
+
 struct isp_dma_buf {
 	void *cpu;
 	dma_addr_t dma;
 	size_t size;
-	struct page *page;	/* backing pages (for alloc_pages path) */
+	/* nvmap backing */
+	struct nvmap_handle_ref *nvmap_ref;
 };
 
 struct tegra_isp_t124 {
@@ -43,7 +47,9 @@ struct tegra_isp_t124 {
 	int cal_words;
 
 	/* Runtime state (allocated during stream_init) */
-	struct isp_dma_buf work_buf;    /* 256KB ISP working buffer */
+	struct isp_dma_buf work_buf;    /* 512KB ISP working buffer */
+	struct isp_dma_buf stats_buf;   /* 256KB stats output (0x800/0x820) */
+	struct nvmap_client *nvmap;     /* nvmap client for buffer allocation */
 	u32 *cmdbuf;                    /* DMA-coherent command buffer */
 	dma_addr_t cmdbuf_phys;
 	bool streaming;                 /* stream_init called */

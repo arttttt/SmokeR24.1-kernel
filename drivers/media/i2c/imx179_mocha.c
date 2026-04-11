@@ -58,7 +58,7 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_OTP_SIZE			803
 #define IMX179_OTP_STR_SIZE		(IMX179_OTP_SIZE * 2)
 
-#define IMX179_GAIN_SHIFT		8
+#define IMX179_GAIN_SHIFT		0
 #define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)
 #define IMX179_MAX_GAIN			(16 << IMX179_GAIN_SHIFT)
 #define IMX179_MIN_FRAME_LENGTH		(0x0)
@@ -73,9 +73,13 @@ static struct tegra_io_dpd csib_io = {
 	(IMX179_DEFAULT_FRAME_LENGTH - IMX179_MAX_COARSE_DIFF)
 
 #define IMX179_DEFAULT_MODE		IMX179_MODE_3280X2460
-#define IMX179_DEFAULT_WIDTH		3280
-#define IMX179_DEFAULT_HEIGHT		2460
+#define IMX179_DEFAULT_WIDTH		3264
+#define IMX179_DEFAULT_HEIGHT		2448
 #define IMX179_DEFAULT_DATAFMT		V4L2_MBUS_FMT_SRGGB10_1X10
+
+static const struct camera_common_colorfmt imx179_color_fmts[] = {
+	{ V4L2_MBUS_FMT_SRGGB10_1X10, V4L2_COLORSPACE_SRGB, V4L2_PIX_FMT_SRGGB10, },
+};
 
 struct imx179 {
 	struct camera_common_power_rail	power;
@@ -101,6 +105,8 @@ struct imx179 {
 	struct regulator		*ext_reg1;
 	struct regulator		*ext_reg2;
 	struct regulator		*ext_reg3;
+
+	u32				cur_frame_length;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -150,6 +156,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 		.min = IMX179_MIN_EXPOSURE_COARSE,
 		.max = IMX179_MAX_EXPOSURE_COARSE,
 		.def = IMX179_DEFAULT_EXPOSURE_COARSE,
+		.step = 1,
+	},
+	{
+		.ops = &imx179_ctrl_ops,
+		.id = V4L2_CID_EXPOSURE,
+		.name = "Exposure (us)",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+		.min = 1,
+		.max = 1000000,
+		.def = 33000,
 		.step = 1,
 	},
 	{
@@ -242,6 +259,38 @@ static int imx179_write_table(struct imx179 *priv,
 					 IMX179_TABLE_END);
 }
 
+static int imx179_write_table_with_overrides(struct imx179 *priv,
+			const imx179_reg table[],
+			const imx179_reg overrides[],
+			int num_overrides)
+{
+	const imx179_reg *next;
+	int err, i;
+
+	for (next = table; next->addr != IMX179_TABLE_END; next++) {
+		if (next->addr == IMX179_TABLE_WAIT_MS) {
+			msleep(next->val);
+			continue;
+		}
+
+		u8 val = next->val;
+
+		if (overrides) {
+			for (i = 0; i < num_overrides; i++) {
+				if (next->addr == overrides[i].addr) {
+					val = overrides[i].val;
+					break;
+				}
+			}
+		}
+
+		err = imx179_write_reg(priv->s_data, next->addr, val);
+		if (err)
+			return err;
+	}
+	return 0;
+}
+
 static void imx179_gpio_set(struct imx179 *priv,
 			    unsigned int gpio, int val)
 {
@@ -324,18 +373,22 @@ static int imx179_power_on(struct camera_common_data *s_data)
 	/* Step 6: settling time */
 	usleep_range(1, 2);
 
-	/* Step 7: CAM_AF_PWDN=1, CAM_RSTN=0 */
+	/* Step 7: CAM_AF_PWDN=1, CAM1_PWDN=0, CAM_RSTN=0 */
 	if (pw->af_gpio)
 		imx179_gpio_set(priv, pw->af_gpio, 1);
+	if (pw->pwdn_gpio)
+		imx179_gpio_set(priv, pw->pwdn_gpio, 0);
 	if (pw->reset_gpio)
 		imx179_gpio_set(priv, pw->reset_gpio, 0);
 
 	/* Step 8: settling time */
 	usleep_range(10, 20);
 
-	/* Step 9: CAM_RSTN=1 */
+	/* Step 9: CAM_RSTN=1, CAM1_PWDN=1 */
 	if (pw->reset_gpio)
 		imx179_gpio_set(priv, pw->reset_gpio, 1);
+	if (pw->pwdn_gpio)
+		imx179_gpio_set(priv, pw->pwdn_gpio, 1);
 
 	/* Step 10: post-reset settling */
 	usleep_range(300, 310);
@@ -387,9 +440,11 @@ static int imx179_power_off(struct camera_common_data *s_data)
 		return err;
 	}
 
-	/* Step 1: reset and af GPIOs low */
+	/* Step 1: reset, pwdn, and af GPIOs low */
 	if (pw->reset_gpio)
 		imx179_gpio_set(priv, pw->reset_gpio, 0);
+	if (pw->pwdn_gpio)
+		imx179_gpio_set(priv, pw->pwdn_gpio, 0);
 	if (pw->af_gpio)
 		imx179_gpio_set(priv, pw->af_gpio, 0);
 
@@ -493,6 +548,7 @@ static int imx179_power_get(struct imx179 *priv)
 
 	if (!err) {
 		pw->reset_gpio = pdata->reset_gpio;
+		pw->pwdn_gpio = pdata->pwdn_gpio;
 		pw->af_gpio = pdata->af_gpio;
 	}
 
@@ -531,6 +587,7 @@ static int imx179_power_get(struct imx179 *priv)
 static int imx179_set_gain(struct imx179 *priv, s32 val);
 static int imx179_set_frame_length(struct imx179 *priv, s32 val);
 static int imx179_set_coarse_time(struct imx179 *priv, s32 val);
+static int imx179_set_group_hold(struct imx179 *priv);
 
 static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -548,41 +605,64 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 			mode_table[IMX179_MODE_STOP_STREAM]);
 	}
 
-	err = imx179_write_table(priv, mode_table[s_data->mode]);
-	if (err) {
-		dev_err(&client->dev,
-			"%s: write_table mode %d failed: %d\n",
-			__func__, s_data->mode, err);
-		goto exit;
+	/* Build override list for exposure/gain/frame_length —
+	 * stock driver replaces these registers during mode table write
+	 * so they take effect BEFORE stream starts */
+	{
+		imx179_reg overrides[5]; /* 2 frame_length + 2 coarse + 1 gain */
+		u32 frame_length, coarse_time, gain, max_coarse;
+		const struct camera_common_frmfmt *fmt =
+			&s_data->frmfmt[s_data->mode];
+
+		/* Always use per-mode frame_length from register tables.
+		 * The V4L2_CID_FRAME_LENGTH control default doesn't reset
+		 * on mode change, so we can't trust it — use mode table. */
+		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
+		frame_length = mode_fl;
+
+		max_coarse = frame_length - IMX179_MAX_COARSE_DIFF;
+
+		control.id = V4L2_CID_COARSE_TIME;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		coarse_time = err ? max_coarse : min((u32)control.value,
+						     max_coarse);
+
+		/* V4L2_CID_EXPOSURE overrides COARSE_TIME if set */
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		if (!err && control.value > 0) {
+			coarse_time = (u32)div_u64(
+				(u64)control.value * fmt->pix_clk_hz,
+				(u64)fmt->line_length * 1000000ULL);
+			if (coarse_time > max_coarse)
+				coarse_time = max_coarse;
+		}
+
+		control.id = V4L2_CID_GAIN;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		gain = err ? IMX179_DEFAULT_GAIN : control.value;
+
+		dev_info(&client->dev,
+			 "%s: mode=%d frame_len=%u (mode_default=%u) "
+			 "coarse=%u gain=%u\n",
+			 __func__, s_data->mode, frame_length, mode_fl,
+			 coarse_time, gain);
+
+		/* Build override register list */
+		imx179_get_frame_length_regs(overrides, frame_length);
+		imx179_get_coarse_time_regs(overrides + 2, coarse_time);
+		imx179_get_gain_reg(overrides + 4, gain);
+
+		/* Write mode table with overrides (like stock driver) */
+		err = imx179_write_table_with_overrides(priv,
+			mode_table[s_data->mode], overrides, 5);
+		if (err) {
+			dev_err(&client->dev,
+				"%s: write_table mode %d failed: %d\n",
+				__func__, s_data->mode, err);
+			goto exit;
+		}
 	}
-
-	/* write list of override regs for the asking frame length,
-	 * coarse integration time, and gain. Failures are non-fatal */
-	control.id = V4L2_CID_GAIN;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	if (!err)
-		err = imx179_set_gain(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev, "%s: warning gain override failed\n",
-			__func__);
-
-	control.id = V4L2_CID_FRAME_LENGTH;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	if (!err)
-		err = imx179_set_frame_length(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning frame length override failed\n",
-			__func__);
-
-	control.id = V4L2_CID_COARSE_TIME;
-	err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-	if (!err)
-		err = imx179_set_coarse_time(priv, control.value);
-	if (err)
-		dev_dbg(&client->dev,
-			"%s: warning coarse time override failed\n",
-			__func__);
 
 	err = imx179_write_table(priv, mode_table[IMX179_MODE_START_STREAM]);
 	if (err)
@@ -747,8 +827,14 @@ static int imx179_set_gain(struct imx179 *priv, s32 val)
 	if (!priv->group_hold_prev)
 		imx179_set_group_hold(priv);
 
-	/* IMX179 uses 8-bit gain register */
-	gain = (u16)(val & 0xFF);
+	/* IMX179 gain: real_gain = 256/(256-reg), so reg = 256 - 256/gain
+	 * V4L2 gain value is linear multiplier (1=1x, 16=16x) */
+	if (val <= 1)
+		gain = 0;
+	else if (val >= 256)
+		gain = 255;
+	else
+		gain = (u16)(256 - 256 / val);
 
 	imx179_get_gain_reg(&reg_list, gain);
 	dev_dbg(&priv->i2c_client->dev,
@@ -789,6 +875,7 @@ static int imx179_set_frame_length(struct imx179 *priv, s32 val)
 			goto fail;
 	}
 
+	priv->cur_frame_length = frame_length;
 	return 0;
 
 fail:
@@ -862,6 +949,21 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_FRAME_LENGTH:
 		err = imx179_set_frame_length(priv, ctrl->val);
 		break;
+	case V4L2_CID_EXPOSURE: {
+		/* Convert microseconds to coarse_time (sensor lines) */
+		struct camera_common_data *s_data = priv->s_data;
+		const struct camera_common_frmfmt *fmt =
+			&s_data->frmfmt[s_data->mode];
+		u32 fl = priv->cur_frame_length ?
+			 priv->cur_frame_length : IMX179_DEFAULT_FRAME_LENGTH;
+		u32 max_coarse = fl - IMX179_MAX_COARSE_DIFF;
+		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
+					  (u64)fmt->line_length * 1000000ULL);
+		if (coarse > max_coarse)
+			coarse = max_coarse;
+		err = imx179_set_coarse_time(priv, coarse);
+		break;
+	}
 	case V4L2_CID_COARSE_TIME:
 		err = imx179_set_coarse_time(priv, ctrl->val);
 		break;
@@ -1071,6 +1173,14 @@ static struct camera_common_pdata *imx179_parse_dt(struct i2c_client *client)
 	}
 	board_priv_pdata->reset_gpio = (unsigned int)gpio;
 
+	/* Mocha: CAM1_PWDN GPIO (power down, active high) */
+	gpio = of_get_named_gpio(node, "pwdn-gpios", 0);
+	if (gpio < 0) {
+		dev_dbg(&client->dev, "pwdn gpios not in DT\n");
+		gpio = 0;
+	}
+	board_priv_pdata->pwdn_gpio = (unsigned int)gpio;
+
 	/* Mocha: AF enable GPIO */
 	gpio = of_get_named_gpio(node, "af-gpios", 0);
 	if (gpio < 0) {
@@ -1226,6 +1336,8 @@ static int imx179_probe(struct i2c_client *client,
 	common_data->fmt_width		= common_data->def_width;
 	common_data->fmt_height		= common_data->def_height;
 	common_data->def_clk_freq	= IMX179_DEFAULT_CLK_FREQ;
+	common_data->color_fmts		= imx179_color_fmts;
+	common_data->num_color_fmts	= ARRAY_SIZE(imx179_color_fmts);
 
 	priv->i2c_client = client;
 	priv->s_data			= common_data;
