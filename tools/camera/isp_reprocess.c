@@ -180,6 +180,9 @@ int main(int argc, char **argv)
     typedef NvError (*NvIspHwSettingsDestroy_t)(void *);
     typedef NvError (*NvIspFlush_t)(void *);
 
+    typedef NvError (*NvIspSetConfig_t)(void *, NvU32, void *, void *);
+    typedef NvError (*NvIspSetAttr_t)(void *, NvU32, void *);
+
     NvRmOpenNew_t pRmOpen = dlsym(lib_nvrm, "NvRmOpenNew");
     NvIspOpen_t pIspOpen = dlsym(lib_isp, "NvIspOpen");
     NvIspClose_t pIspClose = dlsym(lib_isp, "NvIspClose");
@@ -187,6 +190,9 @@ int main(int argc, char **argv)
     NvIspHwSettingsApply_t pHwApply = dlsym(lib_isp, "NvIspHwSettingsApply");
     NvIspHwSettingsDestroy_t pHwDestroy = dlsym(lib_isp, "NvIspHwSettingsDestroy");
     NvIspFlush_t pFlush = dlsym(lib_isp, "NvIspFlush");
+    NvIspSetConfig_t pSetConfig = dlsym(lib_isp, "NvIspSetConfiguration");
+    NvIspSetAttr_t pSetAttr = dlsym(lib_isp, "NvIspSetAttribute");
+    printf("  SetConfiguration=%p SetAttribute=%p\n", pSetConfig, pSetAttr);
 
     void *hRm = NULL;
     pRmOpen(&hRm);
@@ -209,6 +215,14 @@ int main(int argc, char **argv)
 
     /* Disable stripping for our own reprocess gather */
     unsetenv("NVRM_SHIM_STRIP");
+
+    /* Try SetConfiguration to properly configure ISP pipeline */
+    if (pSetConfig) {
+        err = pSetConfig(isp_handle, 1, NULL, NULL);
+        printf("  SetConfiguration(type=1): err=0x%x\n", err);
+        err = pSetConfig(isp_handle, 2, NULL, NULL);
+        printf("  SetConfiguration(type=2): err=0x%x\n", err);
+    }
 
     /* Scan push buffer for output format (method 0xE02) set by calibration.
      * Push buffers are mmap'd by our shim — scan /proc/self/maps for them */
