@@ -341,87 +341,104 @@ int main(int argc, char **argv)
             printf("  RUNTIME: err=0x%x\n", err);
         }
 
-        /* Flush blob's pending gathers */
+        /*
+         * Key insight: blob SETUP writes INPUT regs (0xE3x) but NOBODY writes
+         * OUTPUT regs (0xE00-0xE0A). We need to push output config into the
+         * blob's NvRmStream before calling SUBMIT.
+         *
+         * Dump ISP context to find NvRmStream pointer, then use NvRmStream API
+         * to push output registers.
+         */
         if (err == 0) {
-            printf("  Flushing blob gathers...\n");
-            fflush(stdout);
-            err = pFlush(isp, NULL);
-            printf("  Flush: err=0x%x\n", err);
-        }
-
-        /* Now manual trigger via host1x (like isp_reprocess.c) */
-        if (err == 0) {
-            printf("  Manual trigger via host1x...\n");
+            printf("  Dumping ISP context to find stream handle...\n");
+            /* Scan first 0x30 bytes for pointers (large values = heap ptrs) */
+            for (int i = 0; i < 0x30/4; i++)
+                printf("    ctx+0x%02x = 0x%08x\n", i*4, isp_u32[i]);
+            /* Also check around 0x1270 (syncpt struct) */
+            printf("    ctx+0x1270 = 0x%08x (syncpt struct)\n", isp_u32[0x1270/4]);
+            printf("    ctx+0x1318 = 0x%08x (ring buf)\n", isp_u32[0x1318/4]);
             fflush(stdout);
 
-            int isp_fd = open("/dev/nvhost-isp", O_RDWR);
-            if (isp_fd < 0) { perror("open isp"); goto skip_b; }
+            /* Try to use NvRmStream API to push output registers.
+             * NvRmStreamBegin signature: (pStream, numWords, numRelocs, numSyncptIncrs)
+             * We need to find pStream — it should be a pointer in the ISP context. */
+            typedef void *(*StreamBeginFn)(void *stream, uint32_t words, uint32_t waits, uint32_t relocs);
+            typedef void (*StreamEndFn)(void *stream);
+            typedef void *(*StreamPushSetClassFn)(void *stream, void *cur, uint32_t class_id, uint32_t subchan);
+            typedef void (*StreamPushRelocFn)(void *stream, void *cur, void *hMem, uint32_t offset);
 
-            /* Get syncpt */
-            uint32_t sp_id = isp_u32[0x10/4];  /* ctx+0x10 = OP_DONE syncpt ID */
-            printf("  syncpt_id=%u\n", sp_id);
+            StreamBeginFn pStreamBegin = dlsym(lib_nvrm, "NvRmStreamBegin");
+            StreamEndFn pStreamEnd = dlsym(lib_nvrm, "NvRmStreamEnd");
+            StreamPushSetClassFn pPushClass = dlsym(lib_nvrm, "NvRmStreamPushSetClass");
+            StreamPushRelocFn pPushReloc = dlsym(lib_nvrm, "NvRmStreamPushReloc");
+            printf("  StreamBegin=%p StreamEnd=%p PushClass=%p PushReloc=%p\n",
+                   pStreamBegin, pStreamEnd, pPushClass, pPushReloc);
+            fflush(stdout);
 
-            /* Read current syncpt value */
-            uint32_t sp_val = 0;
-            int host_fd = open("/dev/nvhost-ctrl", O_RDWR);
-            if (host_fd >= 0) {
-                struct { uint32_t id, value; } rsv = { sp_id, 0 };
-                ioctl(host_fd, _IOW('H', 2, rsv), &rsv);  /* READ_SYNCPT */
-                sp_val = rsv.value;
-                printf("  syncpt current=%u\n", sp_val);
+            /* The stream pointer: scan ISP context for a heap pointer that looks
+             * like an NvRmStream. Candidates: any value >= 0x80000000 in first 0x20 bytes */
+            void *stream = NULL;
+            for (int i = 0; i < 0x20/4; i++) {
+                if (isp_u32[i] >= 0x80000000) {
+                    printf("    Candidate stream at ctx+0x%02x = 0x%08x\n", i*4, isp_u32[i]);
+                    if (!stream) stream = (void *)(uintptr_t)isp_u32[i];
+                }
             }
 
-            /* Build trigger gather: syncpt incr + trigger 0x0B */
-            uint32_t cmd[16];
-            int n = 0;
-            /* SET_CLASS ISP-A (0x32) */
-            cmd[n++] = (0 << 28) | (0x32 << 6) | (1 << 0);  /* setclass */
-            /* Trigger 0x0B (reprocess — our known working trigger) */
-            cmd[n++] = OP_NONINCR(0x00C, 1);
-            cmd[n++] = 0x0B;
-            /* Syncpt incr: cond=4 (OP_DONE), syncpt=sp_id */
-            cmd[n++] = (0 << 28) | (0x01 << 6) | (0 << 0);  /* setclass host1x */
-            cmd[n++] = (1 << 28) | (0x008 << 16) | 1;  /* incr syncpt */
-            cmd[n++] = (4 << 8) | sp_id;  /* cond=OP_DONE | sp_id */
+            if (stream && pStreamBegin && pStreamEnd) {
+                printf("  Pushing output regs via NvRmStream (stream=%p)...\n", stream);
+                fflush(stdout);
 
-            /* Allocate cmdbuf via nvmap */
-            struct { union { uint32_t size; int32_t fd; uint32_t id; }; uint32_t handle; } cch;
-            cch.size = 4096;
-            ioctl(nvmap_fd, _IOWR('N', 0, cch), &cch);
-            uint32_t cmd_h = cch.handle;
-            struct { uint32_t handle, heap, flags, align; } cah = { cmd_h, 1<<30, 2, 256 };
-            ioctl(nvmap_fd, _IOW('N', 3, cah), &cah);
+                /* Push output surface config: 0xE00(width), 0xE01(height), 0xE02(format) */
+                void *cur = pStreamBegin(stream, 16, 0, 1);  /* 16 words, 0 waits, 1 reloc */
+                if (cur && pPushClass) {
+                    cur = pPushClass(stream, cur, 0x32, 0);  /* ISP-A class */
 
-            struct { unsigned long addr; uint32_t handle, offset, elem_size, hmem_stride, user_stride, count; } rw2;
-            rw2 = (typeof(rw2)){ (unsigned long)cmd, cmd_h, 0, n*4, n*4, n*4, 1 };
-            ioctl(nvmap_fd, _IOW('N', 6, rw2), &rw2);
+                    /* Manually write INCR opcodes into the stream */
+                    uint32_t **pp = (uint32_t **)&cur;
 
-            /* Submit */
-            struct nvhost32_submit_args sa;
-            memset(&sa, 0, sizeof(sa));
+                    /* Output dims + format */
+                    *(*pp)++ = OP_INCR(0xE00, 1);
+                    *(*pp)++ = ((W - 1) & 0x3FFF) << 16;
+                    *(*pp)++ = OP_INCR(0xE01, 1);
+                    *(*pp)++ = ((H - 1) & 0x3FFF) << 16;
+                    *(*pp)++ = OP_INCR(0xE02, 1);
+                    *(*pp)++ = 0x010000C9;  /* output format (from working isp_reprocess) */
 
-            struct nvhost_cmdbuf cmdbuf = { .mem = cmd_h, .offset = 0, .words = n };
-            struct nvhost_syncpt_incr sp_incr = { .syncpt_id = sp_id, .syncpt_incrs = 1 };
+                    /* Output surface Y plane */
+                    *(*pp)++ = OP_INCR(0xE04, 3);
+                    if (pPushReloc) {
+                        /* Use reloc for IOVA resolution */
+                        pPushReloc(stream, *pp, (void *)(uintptr_t)out_h_raw, 0);
+                        (*pp)++;
+                    } else {
+                        *(*pp)++ = 0;  /* IOVA placeholder */
+                    }
+                    *(*pp)++ = 0;
+                    *(*pp)++ = W * 4;  /* output pitch */
 
-            sa.submit_version = 2;
-            sa.num_cmdbufs = 1;
-            sa.num_relocs = 0;
-            sa.num_waitchks = 0;
-            sa.num_syncpt_incrs = 1;
-            sa.cmdbufs = (uintptr_t)&cmdbuf;
-            sa.syncpt_incrs = (uintptr_t)&sp_incr;
-            sa.fence = sp_val + 1;
-            sa.timeout = 5000;
+                    /* Processing block (demosaic) */
+                    *(*pp)++ = OP_INCR(0x500, 1);
+                    *(*pp)++ = 0;  /* no special flags */
 
-            int ret = ioctl(isp_fd, _IOW('H', 26, sa), &sa);
-            printf("  submit: ret=%d fence=%u\n", ret, sa.fence);
-
-            if (ret == 0) {
-                /* Wait */
-                struct { uint32_t id, thresh, timeout; } wt = { sp_id, sa.fence, 5000 };
-                ret = ioctl(host_fd, _IOWR('H', 3, wt), &wt);
-                printf("  wait: ret=%d\n", ret);
+                    pStreamEnd(stream);
+                    printf("  Output regs pushed OK\n");
+                } else {
+                    printf("  StreamBegin returned %p, skipping push\n", cur);
+                }
+                fflush(stdout);
             }
+
+            /* Now call SUBMIT via vtable — it will add triggers + flush everything */
+            printf("  Calling SUBMIT...\n");
+            fflush(stdout);
+            typedef NvError (*SubmitFn)(void *, uint32_t, uint32_t, uint32_t, uint32_t);
+            uint32_t fence_b[8] = {0}, status_b = 0;
+            err = ((SubmitFn)(uintptr_t)isp_u32[0x1304/4])(
+                isp, 1, (uint32_t)(uintptr_t)fence_b, 0, (uint32_t)(uintptr_t)&status_b);
+            printf("  SUBMIT: err=0x%x status=%u fence={0x%x,0x%x}\n",
+                   err, status_b, fence_b[0], fence_b[1]);
+            fflush(stdout);
 
             /* Check output */
             struct { unsigned long addr; uint32_t handle, offset, elem_size, hmem_stride, user_stride, count; } rw3;
@@ -435,9 +452,6 @@ int main(int argc, char **argv)
             printf("  hex: ");
             for (int i = 0; i < 32; i++) printf("%02x ", check_b[i]);
             printf("\n");
-
-            if (host_fd >= 0) close(host_fd);
-            close(isp_fd);
         }
 skip_b:
         free(config_b); free(in_surf_b);
