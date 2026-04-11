@@ -289,7 +289,7 @@ int main(int argc, char **argv)
         NvError pe = pProcess(isp,
             1, 0, 0, 0, 0,
             (uint32_t)(uintptr_t)in_surf, 0,
-            config, 0, 0,
+            config, 1, 0,
             (uint32_t)(uintptr_t)&probe_status, &probe_fc);
         printf("  fmt[%d] %s (0x%08x): err=0x%x status=%u\n",
                fi, in_fmt_names[fi], in_fmts[fi], pe, probe_status);
@@ -338,8 +338,8 @@ int main(int argc, char **argv)
         (uint32_t)(uintptr_t)in_surf,        /* a7/array[5]: INPUT surface */
         0,                                    /* a8: 0 */
         config,                               /* a9: OUTPUT config */
-        0,                                    /* a10: flush_fence=NULL */
-        0,                                    /* a11: fence_out=NULL */
+        1,                                    /* a10: mode=1 (ISP-A) — MUST be non-zero! */
+        0,                                    /* a11: fence_out=NULL (blocking) */
         (uint32_t)(uintptr_t)&status,        /* a12: status ptr */
         &frame_count);
     printf("  Pass 1: err=0x%x status=%u frame=%u\n", err, status, frame_count);
