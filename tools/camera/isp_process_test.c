@@ -235,6 +235,10 @@ int main(int argc, char **argv)
     /* Single ProcessFrame call (no probe loop — avoid state corruption) */
     uint32_t status = 0;
     uint32_t frame_count = 0;
+    /* arg10 = flush_fence_out — POINTER to fence buffer, NOT integer mode!
+     * SUBMIT writes fence result here via NvIspFlush.
+     * ProcessFrame requires arg10 != 0 (null check). */
+    uint32_t fence_buf[8] = {0};
 
     /* Dump ISP context vtable pointers for verification */
     uint32_t *isp_u32 = (uint32_t *)isp;
@@ -292,8 +296,8 @@ int main(int argc, char **argv)
             fflush(stdout);
             typedef NvError (*SubmitFn)(void *, uint32_t, uint32_t, uint32_t, uint32_t);
             SubmitFn pSubmit = (SubmitFn)(uintptr_t)isp_u32[0x1304/4];
-            /* SUBMIT(handle, array[0], arg10, arg11, arg12) */
-            err = pSubmit(isp, 1, 1, 0, (uint32_t)(uintptr_t)&status);
+            /* SUBMIT(handle, array[0], flush_fence_out, fence_out, status_ptr) */
+            err = pSubmit(isp, 1, (uint32_t)(uintptr_t)fence_buf, 0, (uint32_t)(uintptr_t)&status);
             printf("  SUBMIT: err=0x%x status=%u\n", err, status);
             fflush(stdout);
         }
@@ -318,7 +322,7 @@ int main(int argc, char **argv)
         (uint32_t)(uintptr_t)in_surf,        /* a7/array[5]: INPUT surface */
         0,                                    /* a8: 0 */
         config,                               /* a9: OUTPUT config */
-        1,                                    /* a10: mode=1 (ISP-A) — MUST be non-zero! */
+        (uint32_t)(uintptr_t)fence_buf,      /* a10: flush_fence_out ptr (MUST be non-zero!) */
         0,                                    /* a11: fence_out=NULL (blocking) */
         (uint32_t)(uintptr_t)&status,        /* a12: status ptr */
         &frame_count);
