@@ -146,9 +146,9 @@ int main(int argc, char **argv)
     memset(out_surf, 0, sizeof(out_surf));
     out_surf[0] = W;               /* Width */
     out_surf[1] = H;               /* Height */
-    out_surf[2] = 0x2010531a;      /* ColorFormat: RGBA8 (X8Y8Z8W8) */
+    out_surf[2] = 0x10168811;      /* ColorFormat: try YUV from supported list */
     out_surf[3] = 0;               /* Layout: pitch linear */
-    out_surf[4] = W * 4;           /* Pitch: stride in bytes */
+    out_surf[4] = W * 2;           /* Pitch: stride in bytes (16bpp) */
     out_surf[5] = out_h;           /* hMem: nvmap handle */
     out_surf[6] = 0;               /* Offset */
     printf("  out_surf: %ux%u fmt=0x%x pitch=%u hmem=%u\n",
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
     memset(config, 0, sizeof(config));
     ((uint32_t *)config)[0] = W;               /* output width */
     ((uint32_t *)config)[1] = H;               /* output height */
-    ((uint32_t *)config)[2] = 0x2010531a;      /* output format */
+    ((uint32_t *)config)[2] = 0x10168811;       /* output format */
 
     printf("\n[4] Calling NvIspProcessFrame...\n");
     fflush(stdout);
