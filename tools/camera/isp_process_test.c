@@ -138,60 +138,62 @@ int main(int argc, char **argv)
     free(raw);
     printf("  Buffers ready: in=%u out=%u\n", in_h, out_h);
 
-    /* Build config struct for arg9 (NOT hw_settings!)
-     * From RE of VALIDATE (0x3044):
-     *   [0x00] = output_width
-     *   [0x04] = output_height
-     *   [0x94] = crop_top
-     *   [0x98] = crop_left
-     *   [0x9C] = crop_bottom
-     *   [0xA0] = crop_right
-     */
-    printf("\n[3] Building config struct...\n");
+    /* Build NvRmSurface for output (arg2)
+     * NvRmSurface layout: Width, Height, ColorFormat, Layout, Pitch,
+     *                     hMem, Offset, pBase, Kind, BlockHeightLog2 */
+    printf("\n[3] Building surface descriptors...\n");
+    uint32_t out_surf[10];
+    memset(out_surf, 0, sizeof(out_surf));
+    out_surf[0] = W;               /* Width */
+    out_surf[1] = H;               /* Height */
+    out_surf[2] = 0x2010531a;      /* ColorFormat: RGBA8 (X8Y8Z8W8) */
+    out_surf[3] = 0;               /* Layout: pitch linear */
+    out_surf[4] = W * 4;           /* Pitch: stride in bytes */
+    out_surf[5] = out_h;           /* hMem: nvmap handle */
+    out_surf[6] = 0;               /* Offset */
+    printf("  out_surf: %ux%u fmt=0x%x pitch=%u hmem=%u\n",
+           out_surf[0], out_surf[1], out_surf[2], out_surf[4], out_surf[5]);
+
+    /* Build NvRmSurface for input (arg11) */
+    uint32_t in_surf[10];
+    memset(in_surf, 0, sizeof(in_surf));
+    in_surf[0] = W;                /* Width */
+    in_surf[1] = H;                /* Height */
+    in_surf[2] = 0x10200024;       /* ColorFormat: 10-bit Bayer BGGR */
+    in_surf[3] = 0;                /* Layout: pitch linear */
+    in_surf[4] = W * 2;            /* Pitch: stride */
+    in_surf[5] = in_h;             /* hMem: nvmap handle */
+    in_surf[6] = 0;                /* Offset */
+    printf("  in_surf: %ux%u fmt=0x%x pitch=%u hmem=%u\n",
+           in_surf[0], in_surf[1], in_surf[2], in_surf[4], in_surf[5]);
+
+    /* Config struct for arg9 — contains output dims + crop */
     uint8_t config[256];
     memset(config, 0, sizeof(config));
-    ((uint32_t *)config)[0] = W;            /* width */
-    ((uint32_t *)config)[1] = H;            /* height */
-    ((uint32_t *)config)[2] = 0x2010531a;   /* format: RGBA8 32bpp (X8Y8Z8W8) */
-    ((uint32_t *)config)[3] = 1;            /* num planes? */
-    /* crop = 0 (full frame) */
-    printf("  config: w=%u h=%u fmt=0x%x\n", W, H, 0x2010531a);
-
-    /* Build input config struct for arg11/arg12.
-     * arg11 = input descriptor (non-zero for reprocess)
-     * arg12 = input param (required if arg11!=0)
-     * Try: arg11 = pointer to {in_h, W, H, format, stride}
-     * arg12 = pointer to additional params */
-    uint32_t input_desc[16];
-    memset(input_desc, 0, sizeof(input_desc));
-    input_desc[0] = in_h;       /* nvmap handle */
-    input_desc[1] = W;          /* width */
-    input_desc[2] = H;          /* height */
-    input_desc[3] = W * 2;      /* stride (10-bit Bayer in 16-bit LE) */
-
-    uint32_t input_param[8];
-    memset(input_param, 0, sizeof(input_param));
-    input_param[0] = fsize;
+    ((uint32_t *)config)[0] = W;               /* output width */
+    ((uint32_t *)config)[1] = H;               /* output height */
+    ((uint32_t *)config)[2] = 0x2010531a;      /* output format */
 
     printf("\n[4] Calling NvIspProcessFrame...\n");
     fflush(stdout);
 
     uint32_t frame_count = 0;
 
-    /* arg9 = config struct (width/height/crop)
-     * arg10 = mode (1=ISP-A triggers 0x09+0x0B)
-     * arg11 = input descriptor (non-zero = reprocess)
-     * arg12 = input param (required if arg11!=0) */
+    /* args 2-4: NvRmSurface* (output planes Y, U, V)
+     * arg9: config struct
+     * arg10: mode (1=ISP-A)
+     * arg11: NvRmSurface* input (non-zero = reprocess)
+     * arg12: input param (required if arg11!=0) */
     err = pProcess(isp,
-                   out_h,          /* a2: output surface 0 */
-                   0,              /* a3: output surface 1 */
-                   0,              /* a4: output surface 2 */
-                   0, 0, 0, 0,     /* a5-a8: unused */
-                   config,         /* a9: config struct */
-                   1,              /* a10: mode (1=ISP-A) */
-                   (uint32_t)(uintptr_t)input_desc,  /* a11: input descriptor */
-                   (uint32_t)(uintptr_t)input_param, /* a12: input param */
-                   &frame_count    /* a13: frame count output */
+                   (uint32_t)(uintptr_t)out_surf,  /* a2: output surface 0 */
+                   0,                               /* a3: output surface 1 */
+                   0,                               /* a4: output surface 2 */
+                   0, 0, 0, 0,                      /* a5-a8: unused */
+                   config,                           /* a9: config */
+                   1,                                /* a10: mode */
+                   (uint32_t)(uintptr_t)in_surf,    /* a11: input surface */
+                   (uint32_t)fsize,                  /* a12: input param */
+                   &frame_count                      /* a13: frame count */
                    );
     printf("  NvIspProcessFrame: err=0x%x frame_count=%u\n", err, frame_count);
     fflush(stdout);
