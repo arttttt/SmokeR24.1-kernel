@@ -278,58 +278,25 @@ int main(int argc, char **argv)
     printf("  in_surf: %ux%u fmt=0x%x layout=%u pitch=%u hmem=%u\n",
            in_surf[0], in_surf[1], in_surf[2], in_surf[3], in_surf[4], in_surf[5]);
 
-    /* Probe: try each input format to find which passes VALIDATE+SETUP */
-    printf("\n[4] Probing input formats...\n");
-    fflush(stdout);
-    int working_fmt = -1;
-    for (int fi = 0; fi < (int)(sizeof(in_fmts)/sizeof(in_fmts[0])); fi++) {
-        in_surf[0x08/4] = in_fmts[fi];
-        uint32_t probe_status = 0;
-        uint32_t probe_fc = 0;
-        NvError pe = pProcess(isp,
-            1, 0, 0, 0, 0,
-            (uint32_t)(uintptr_t)in_surf, 0,
-            config, 1, 0,
-            (uint32_t)(uintptr_t)&probe_status, &probe_fc);
-        printf("  fmt[%d] %s (0x%08x): err=0x%x status=%u\n",
-               fi, in_fmt_names[fi], in_fmts[fi], pe, probe_status);
-        if ((pe == 0 || pe == 0xa) && working_fmt < 0) working_fmt = fi;
-    }
-    fflush(stdout);
-
-    if (working_fmt < 0) {
-        printf("  FATAL: no input format passed VALIDATE+SETUP\n");
-        goto cleanup;
-    }
-
-    /* Use the working format */
-    in_surf[0x08/4] = in_fmts[working_fmt];
-    printf("  → Using: %s (0x%08x)\n", in_fmt_names[working_fmt], in_fmts[working_fmt]);
-
-    /* Now do the real two-pass ProcessFrame */
+    /* Single ProcessFrame call (no probe loop — avoid state corruption) */
     uint32_t status = 0;
     uint32_t frame_count = 0;
 
-    /* Need fresh ISP context — close and reopen to clear probe state */
-    pHwDestroy(settings);
-    pIspClose(isp);
-    isp = NULL;
-    err = pIspOpen(hRm, 1, &isp);
-    if (err) { printf("  Reopen failed: 0x%x\n", err); return 1; }
-    pHwCreate(isp, &settings);
-    pHwApply(settings);
-    sc2_mode = 1; sc2_size = 4;
-    pSetConfig(isp, 2, &sc2_mode, &sc2_size);
-    memset(fmt_cfg, 0, sizeof(fmt_cfg));
-    fmt_cfg[0] = combos[best >= 0 ? best : 0].st;
-    fmt_cfg[1] = combos[best >= 0 ? best : 0].ip;
-    fmt_cfg[2] = combos[best >= 0 ? best : 0].op;
-    fmt_cfg[3] = combos[best >= 0 ? best : 0].cs;
-    sc1_size = 0x40;
-    pSetConfig(isp, 1, fmt_cfg, &sc1_size);
-    printf("  ISP reopened + reconfigured\n");
+    /* Dump ISP context vtable pointers for verification */
+    uint32_t *isp_u32 = (uint32_t *)isp;
+    printf("\n[4] ISP context check:\n");
+    printf("  ctx+0x04 (class_id) = 0x%x\n", isp_u32[0x04/4]);
+    printf("  ctx+0x08 (host_class) = 0x%x\n", isp_u32[0x08/4]);
+    printf("  ctx+0x10 (stream) = 0x%x\n", isp_u32[0x10/4]);
+    printf("  ctx+0x130C (VALIDATE) = 0x%x\n", isp_u32[0x130C/4]);
+    printf("  ctx+0x1308 (SETUP) = 0x%x\n", isp_u32[0x1308/4]);
+    printf("  ctx+0x1304 (SUBMIT) = 0x%x\n", isp_u32[0x1304/4]);
+    printf("  ctx+0x12D4 (RUNTIME) = 0x%x\n", isp_u32[0x12D4/4]);
+    fflush(stdout);
 
-    printf("\n[5] NvIspProcessFrame (two-pass)...\n");
+    printf("\n[5] NvIspProcessFrame...\n");
+    printf("  args: handle=%p a2=1 a7=in_surf(%p) a9=config(%p) a10=1 a12=&status(%p)\n",
+           isp, in_surf, config, &status);
     fflush(stdout);
 
     err = pProcess(isp,
