@@ -138,42 +138,58 @@ int main(int argc, char **argv)
     free(raw);
     printf("  Buffers ready: in=%u out=%u\n", in_h, out_h);
 
-    /* Call NvIspProcessFrame
-     * Best guess at args:
-     *   r0=handle, r1=out_surface, r2=out_surface2, r3=out_surface3
-     *   sp+0=hw_settings, sp+4=trigger_mode, sp+8=input_buf, sp+12=input_param
-     *   sp+16=frame_count_out
-     *
-     * Actually from disasm r1,r2,r3 are saved as array at sp+0x3c
-     * Then: r5=sp+0x58=arg5, sl=sp+0x5c=arg6, r9=sp+0x60=arg7, fp=sp+0x64=arg8
-     * Total stack layout after push+sub:
-     *   arg5 = 5th param
-     *   arg6 = 6th param
-     *   arg7 = 7th param (optional)
-     *   arg8 = 8th param (needed if arg7!=0)
-     *   arg9 = 9th param (optional frame count)
+    /* Build config struct for arg9 (NOT hw_settings!)
+     * From RE of VALIDATE (0x3044):
+     *   [0x00] = output_width
+     *   [0x04] = output_height
+     *   [0x94] = crop_top
+     *   [0x98] = crop_left
+     *   [0x9C] = crop_bottom
+     *   [0xA0] = crop_right
      */
-    printf("\n[3] Calling NvIspProcessFrame...\n");
+    printf("\n[3] Building config struct...\n");
+    uint8_t config[256];
+    memset(config, 0, sizeof(config));
+    ((uint32_t *)config)[0] = W;       /* width */
+    ((uint32_t *)config)[1] = H;       /* height */
+    /* crop = 0 (full frame) */
+    printf("  config: w=%u h=%u\n", W, H);
+
+    /* Build input config struct for arg11/arg12.
+     * arg11 = input descriptor (non-zero for reprocess)
+     * arg12 = input param (required if arg11!=0)
+     * Try: arg11 = pointer to {in_h, W, H, format, stride}
+     * arg12 = pointer to additional params */
+    uint32_t input_desc[16];
+    memset(input_desc, 0, sizeof(input_desc));
+    input_desc[0] = in_h;       /* nvmap handle */
+    input_desc[1] = W;          /* width */
+    input_desc[2] = H;          /* height */
+    input_desc[3] = W * 2;      /* stride (10-bit Bayer in 16-bit LE) */
+
+    uint32_t input_param[8];
+    memset(input_param, 0, sizeof(input_param));
+    input_param[0] = fsize;
+
+    printf("\n[4] Calling NvIspProcessFrame...\n");
     fflush(stdout);
 
     uint32_t frame_count = 0;
 
-    /* 13 args. a2-a4 + a5-a8 likely surface descriptors (4 outputs?).
-     * a9=settings, a10=something required, a11=input (optional),
-     * a12=input param, a13=frame count out */
+    /* arg9 = config struct (width/height/crop)
+     * arg10 = mode (1=ISP-A triggers 0x09+0x0B)
+     * arg11 = input descriptor (non-zero = reprocess)
+     * arg12 = input param (required if arg11!=0) */
     err = pProcess(isp,
-                   out_h,       /* a2: output surface 0 */
-                   0,           /* a3: output surface 1 */
-                   0,           /* a4: output surface 2 */
-                   0,           /* a5 */
-                   0,           /* a6 */
-                   0,           /* a7 */
-                   0,           /* a8 */
-                   settings,    /* a9 = r5: hw_settings (REQUIRED) */
-                   1,           /* a10 = sl: trigger/mode? (REQUIRED, try 1) */
-                   in_h,        /* a11 = r9: input buffer (0=streaming) */
-                   fsize,       /* a12 = fp: input size */
-                   &frame_count /* a13: frame count output */
+                   out_h,          /* a2: output surface 0 */
+                   0,              /* a3: output surface 1 */
+                   0,              /* a4: output surface 2 */
+                   0, 0, 0, 0,     /* a5-a8: unused */
+                   config,         /* a9: config struct */
+                   1,              /* a10: mode (1=ISP-A) */
+                   (uint32_t)(uintptr_t)input_desc,  /* a11: input descriptor */
+                   (uint32_t)(uintptr_t)input_param, /* a12: input param */
+                   &frame_count    /* a13: frame count output */
                    );
     printf("  NvIspProcessFrame: err=0x%x frame_count=%u\n", err, frame_count);
     fflush(stdout);
