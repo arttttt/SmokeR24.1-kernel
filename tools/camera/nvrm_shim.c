@@ -293,12 +293,13 @@ int ioctl(int fd, int request, ...) {
             }
         }
 
-        /* If we stripped a trigger, zero syncpt_incrs so kernel
-         * doesn't wait for completion that will never happen. */
-        if (found_trigger && sa->num_syncpt_incrs > 0) {
-            fprintf(stderr, "nvrm_shim: zeroing num_syncpt_incrs (was %u)\n",
-                    sa->num_syncpt_incrs);
-            sa->num_syncpt_incrs = 0;
+        /* If we stripped a trigger, set huge timeout so kernel doesn't
+         * reset the channel before our reprocess gather completes.
+         * The conditional syncpt incrs won't fire (no trigger), but
+         * we need calibration registers to stay applied. */
+        if (found_trigger) {
+            fprintf(stderr, "nvrm_shim: timeout %u → 3600000 (1hr)\n", sa->timeout);
+            sa->timeout = 3600000;
         }
     }
 
