@@ -249,6 +249,12 @@ int ioctl(int fd, int request, ...) {
         struct { uint32_t mem; uint32_t offset; uint32_t words; } *cbs =
             (void *)(uintptr_t)sa->cmdbufs;
 
+        /* When stripping streaming, tell kernel to expect 0 syncpt incrs.
+         * Without the trigger, conditional incrs never fire → kernel
+         * timeout → channel reset → our reprocess gather dies.
+         * Setting num_syncpt_incrs=0 prevents kernel from waiting. */
+        int found_trigger = 0;
+
         for (uint32_t g = 0; g < sa->num_cmdbufs; g++) {
             /* Find the gather in our mapped push buffers */
             for (int m = 0; m < num_mapped; m++) {
@@ -277,29 +283,23 @@ int ioctl(int fd, int request, ...) {
                             fprintf(stderr, "\n");
                             pb[i] = 0x20000000;
                             pb[i+1] = 0x20000000;
+                            found_trigger = 1;
                         }
                     }
 
-                    /* Convert conditional syncpt incrs to immediate.
-                     * Without trigger, conditions (OP_DONE/STATS/RD_DONE) never
-                     * fire, so conditional incrs never happen, and kernel job
-                     * tracking gets stuck → timeout → channel reset.
-                     * Fix: set cond=0 (IMMEDIATE) so they fire unconditionally. */
-                    if (opcode == 2 && method == 0x000 && count == 1) {
-                        uint32_t cond = (pb[i+1] >> 8) & 0xFF;
-                        if (cond >= 4 && cond <= 6) {
-                            uint32_t sp_id = pb[i+1] & 0xFF;
-                            fprintf(stderr, "nvrm_shim: syncpt %u cond %u → immediate at pb[%u]\n",
-                                    sp_id, cond, i);
-                            pb[i+1] = sp_id; /* cond=0 = IMMEDIATE */
-                        }
-                    }
+                    /* Syncpt incrs are tracked via submit args, not push buffer.
+                     * We zero num_syncpt_incrs above when stripping triggers. */
                 }
             }
         }
 
-        /* Don't zero num_syncpt_incrs — kernel needs them for job tracking.
-         * NOP'd conditional incrs won't fire but immediate ones still will. */
+        /* If we stripped a trigger, zero syncpt_incrs so kernel
+         * doesn't wait for completion that will never happen. */
+        if (found_trigger && sa->num_syncpt_incrs > 0) {
+            fprintf(stderr, "nvrm_shim: zeroing num_syncpt_incrs (was %u)\n",
+                    sa->num_syncpt_incrs);
+            sa->num_syncpt_incrs = 0;
+        }
     }
 
     return real_ioctl(fd, request, arg);
