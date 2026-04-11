@@ -150,10 +150,12 @@ int main(int argc, char **argv)
     printf("\n[3] Building config struct...\n");
     uint8_t config[256];
     memset(config, 0, sizeof(config));
-    ((uint32_t *)config)[0] = W;       /* width */
-    ((uint32_t *)config)[1] = H;       /* height */
+    ((uint32_t *)config)[0] = W;            /* width */
+    ((uint32_t *)config)[1] = H;            /* height */
+    ((uint32_t *)config)[2] = 0x2010531a;   /* format: RGBA8 32bpp (X8Y8Z8W8) */
+    ((uint32_t *)config)[3] = 1;            /* num planes? */
     /* crop = 0 (full frame) */
-    printf("  config: w=%u h=%u\n", W, H);
+    printf("  config: w=%u h=%u fmt=0x%x\n", W, H, 0x2010531a);
 
     /* Build input config struct for arg11/arg12.
      * arg11 = input descriptor (non-zero for reprocess)
