@@ -111,11 +111,6 @@ struct nvhost32_submit_args {
 #define Y_SIZE (Y_STRIDE * H)
 #define UV_SIZE (UV_STRIDE * H / 2)
 #define OUT_SIZE (W * 4 * H)  /* 32bpp */
-/* Also keep YUV defines for diagnostics */
-#define Y_STRIDE ((W + 63) & ~63)
-#define UV_STRIDE (((W/2) + 63) & ~63)
-#define Y_SIZE (Y_STRIDE * H)
-#define UV_SIZE (UV_STRIDE * H / 2)
 
 static int nvmap_fd = -1;
 
@@ -391,168 +386,170 @@ int main(int argc, char **argv)
     }
     free(zeros);
 
-    /* ---- Step 5: Build reprocess command buffer ---- */
-    printf("\n[5] Build reprocess cmdbuf...\n");
-
-    uint32_t out_y_iova = out_iova;
-    uint32_t out_u_iova = out_iova + Y_SIZE;
-    uint32_t out_v_iova = out_iova + Y_SIZE + UV_SIZE;
-
-    uint32_t cmd[512];
-    int n = 0;
-    int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1, stats_reloc = -1;
-
+    /* ---- Step 5+6: Build and submit reprocess per strip ---- */
     /*
-     * Replicate exact stock ISP-B per-frame gather from
-     * docs/camera/unverified/stock-isp-b-cmdbuf-dump.txt
-     * Only changes: IOVAs (relocs), trigger 0x0B (reprocess) instead of 0x05,
-     * and added input block (0xE30-0xE34) for reprocess mode.
+     * ISP T124 has a max strip width of ~1296 pixels (W/2 for 5MP).
+     * Process full frame in 2 strips, each covering half the width.
+     * Per strip: adjust input/output IOVA offsets, keep full-row strides
+     * so strips interleave correctly in the output buffer.
      */
+    #define NUM_STRIPS 2
+    #define STRIP_W (W / NUM_STRIPS)  /* 1296 */
+    #define STRIP_OVERLAP 0
 
-    /* Output config — exactly as stock */
-    cmd[n++] = OP_INCR(0xE00, 1);
-    cmd[n++] = 0x0A1F0000;                /* width = 2592 */
-    cmd[n++] = OP_INCR(0xE01, 1);
-    cmd[n++] = 0x07970000;                /* height = 1944 */
-    cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x010000C9;                /* 8bpp format — ISP writes to plane 1 */
-    cmd[n++] = OP_INCR(0xE03, 1);
-    cmd[n++] = 0x00000000;
+    printf("\n[5] Reprocess: %d strips, strip_w=%d, overlap=%d\n",
+           NUM_STRIPS, STRIP_W, STRIP_OVERLAP);
 
-    /* Output surfaces — stock order, stock strides.
-     * In reprocess mode, ISP writes main data to plane 2 (0xE07).
-     * All three planes use full-res stride since ISP writes there. */
-    cmd[n++] = OP_INCR(0xE04, 3);
-    y_reloc = n;
-    cmd[n++] = out_y_iova;                /* plane 1 */
-    cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;                     /* 32bpp stride = 10368 */
-    /* Planes 2,3: stock strides */
-    cmd[n++] = OP_INCR(0xE07, 3);
-    u_reloc = n;
-    cmd[n++] = out_u_iova;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000540;                /* UV stride = 1344 */
-    cmd[n++] = OP_INCR(0xE0A, 3);
-    v_reloc = n;
-    cmd[n++] = out_v_iova;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000540;
+    for (int strip = 0; strip < NUM_STRIPS; strip++) {
+        int strip_x = strip * STRIP_W;
+        int in_off = strip_x * BPP;       /* input byte offset per row */
+        int out_off = strip_x * 4;        /* output byte offset per row (32bpp) */
 
-    /* Processing block — stock values */
-    cmd[n++] = OP_INCR(0x500, 6);
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x07980A20;                /* (H << 16) | W = stock value */
+        printf("\n  --- Strip %d (x=%d w=%d in_off=%d out_off=%d) ---\n",
+               strip, strip_x, STRIP_W, in_off, out_off);
 
-    /* SET_CLASS + Stats buffer — stock has SET_CLASS before stats */
-    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_INCR(0x100, 4);
-    stats_reloc = n;
-    cmd[n++] = stats_iova;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x00000000;
+        uint32_t cmd[512];
+        int n = 0;
+        int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1, stats_reloc = -1;
 
-    /* Input block (reprocess) — not in stock streaming, added for reprocess */
-    cmd[n++] = OP_INCR(0xE31, 1);
-    cmd[n++] = 0x07980A20;                /* input dims = (H << 16) | W */
-    cmd[n++] = OP_INCR(0xE33, 1);
-    cmd[n++] = 0x10200024;                /* input format from calibration */
-    cmd[n++] = OP_INCR(0xE34, 3);
-    in_reloc = n;
-    cmd[n++] = in_iova;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = W * BPP;                   /* input stride = 5184 */
-    cmd[n++] = OP_INCR(0xE32, 1);
-    cmd[n++] = (W & 0x3FFF);              /* strip width = full */
-    cmd[n++] = OP_INCR(0xE30, 1);
-    cmd[n++] = 1;                          /* input trigger */
+        /* Output config — strip dimensions, full-row stride */
+        cmd[n++] = OP_INCR(0xE00, 1);
+        cmd[n++] = ((STRIP_W - 1) & 0x3FFF) << 16;  /* output width = strip */
+        cmd[n++] = OP_INCR(0xE01, 1);
+        cmd[n++] = ((H - 1) & 0x3FFF) << 16;
+        cmd[n++] = OP_INCR(0xE02, 1);
+        cmd[n++] = 0x010000C9;
+        cmd[n++] = OP_INCR(0xE03, 1);
+        cmd[n++] = 0x00000000;
 
-    /* ISP_ENABLE — stock uses 7 for full pipeline */
-    cmd[n++] = OP_INCR(0x015, 1);
-    cmd[n++] = 7;
+        /* Output Y — reloc places IOVA at strip offset, full stride */
+        cmd[n++] = OP_INCR(0xE04, 3);
+        y_reloc = n;
+        cmd[n++] = 0;                     /* patched by reloc → out_iova + out_off */
+        cmd[n++] = 0x00000000;
+        cmd[n++] = W * 4;                 /* full row stride for interleaved output */
+        /* U/V planes (unused for 32bpp but keep for HW) */
+        cmd[n++] = OP_INCR(0xE07, 3);
+        u_reloc = n;
+        cmd[n++] = 0;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000540;
+        cmd[n++] = OP_INCR(0xE0A, 3);
+        v_reloc = n;
+        cmd[n++] = 0;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000540;
 
-    /* Syncpt conditional incrs — stock format */
-    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (4 << 8) | sp_memory;      /* cond 4: OP_DONE */
-    cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (5 << 8) | sp_stats;       /* cond 5: STATS_DONE */
-    cmd[n++] = OP_NONINCR(0x000, 1);
-    cmd[n++] = (6 << 8) | sp_loadv;       /* cond 6: RD_DONE */
+        /* Processing block — strip dimensions */
+        cmd[n++] = OP_INCR(0x500, 6);
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = (H << 16) | STRIP_W;
 
-    /* ISP_CONTROL trigger — 0x0B for reprocess (stock uses 0x05 for streaming) */
-    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x0B;
+        /* Stats buffer */
+        cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        cmd[n++] = OP_INCR(0x100, 4);
+        stats_reloc = n;
+        cmd[n++] = 0;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x00000000;
 
-    printf("  cmdbuf: %d words\n", n);
+        /* Input — full image dims for spatial corrections (lens shading etc) */
+        cmd[n++] = OP_INCR(0xE31, 1);
+        cmd[n++] = (H << 16) | W;         /* full input dims */
+        cmd[n++] = OP_INCR(0xE33, 1);
+        cmd[n++] = 0x10200024;            /* 10-bit Bayer BGGR */
+        cmd[n++] = OP_INCR(0xE34, 3);
+        in_reloc = n;
+        cmd[n++] = 0;                     /* patched by reloc → in_iova + in_off */
+        cmd[n++] = 0x00000000;
+        cmd[n++] = W * BPP;              /* full row stride */
+        cmd[n++] = OP_INCR(0xE32, 1);
+        cmd[n++] = (STRIP_W & 0x3FFF) | (STRIP_OVERLAP << 16);
+        cmd[n++] = OP_INCR(0xE30, 1);
+        cmd[n++] = 1;                     /* trigger */
 
-    /* Upload cmdbuf */
-    nvmap_write(cmd_h, 0, cmd, n * 4);
+        /* ISP_ENABLE */
+        cmd[n++] = OP_INCR(0x015, 1);
+        cmd[n++] = 7;
 
-    /* Build relocs */
-    struct nvhost_reloc relocs[8];
-    struct nvhost_reloc_shift shifts[8];
-    int nr = 0;
+        /* Syncpt conditional incrs */
+        cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        cmd[n++] = OP_NONINCR(0x000, 1);
+        cmd[n++] = (4 << 8) | sp_memory;
+        cmd[n++] = OP_NONINCR(0x000, 1);
+        cmd[n++] = (5 << 8) | sp_stats;
+        cmd[n++] = OP_NONINCR(0x000, 1);
+        cmd[n++] = (6 << 8) | sp_loadv;
 
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
-    shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, Y_SIZE };
-    shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
-    shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
-    shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, stats_reloc*4, stats_h, 0 };
-    shifts[nr++].shift = 0;
+        /* ISP_CONTROL — reprocess trigger */
+        cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        cmd[n++] = OP_NONINCR(0x00C, 1);
+        cmd[n++] = 0x0B;
 
-    /* ---- Step 6: Submit ---- */
-    /* Read current syncpt value first */
-    struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp_memory, .thresh = 0, .timeout = 0 };
-    ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
-    printf("\n[6] Submit (syncpt %u current=%u)...\n", sp_memory, rd.value);
+        printf("    cmdbuf: %d words\n", n);
+        nvmap_write(cmd_h, 0, cmd, n * 4);
 
-    struct nvhost_cmdbuf cb = { .mem = cmd_h, .offset = 0, .words = n };
-    struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 3 };
-    uint32_t class_id = ISP_CLASS;
-    struct nvhost_fence fence = { 0, 0 };
+        /* Relocs — per-strip offsets for input/output IOVAs */
+        struct nvhost_reloc relocs[8];
+        struct nvhost_reloc_shift shifts[8];
+        int nr = 0;
 
-    struct nvhost32_submit_args sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.submit_version = 0;
-    sa.num_syncpt_incrs = 1;
-    sa.num_cmdbufs = 1;
-    sa.num_relocs = nr;
-    sa.timeout = 5000;
-    sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
-    sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
-    sa.relocs = (uint32_t)(uintptr_t)relocs;
-    sa.reloc_shifts = (uint32_t)(uintptr_t)shifts;
-    sa.class_ids = (uint32_t)(uintptr_t)&class_id;
-    sa.fences = (uint32_t)(uintptr_t)&fence;
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, out_off };
+        shifts[nr++].shift = 0;
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, Y_SIZE };
+        shifts[nr++].shift = 0;
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
+        shifts[nr++].shift = 0;
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, in_off };
+        shifts[nr++].shift = 0;
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, stats_reloc*4, stats_h, 0 };
+        shifts[nr++].shift = 0;
 
-    if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa) < 0) {
-        perror("submit");
-        printf("  Submit failed!\n");
-    } else {
-        printf("  Submitted, fence=%u\n", fence.value);
+        /* Submit this strip */
+        struct nvhost_ctrl_syncpt_waitex_args rd = { .id = sp_memory, .thresh = 0, .timeout = 0 };
+        ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd);
+        printf("    submit (syncpt %u cur=%u)...\n", sp_memory, rd.value);
 
-        /* Wait */
-        struct nvhost_ctrl_syncpt_waitex_args wa = {
-            .id = sp_memory, .thresh = fence.value, .timeout = 5000
-        };
-        int ret = ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa);
-        if (ret < 0)
-            printf("  TIMEOUT waiting for ISP (syncpt %u thresh %u)\n",
-                   sp_memory, fence.value);
-        else
-            printf("  ISP done! syncpt=%u value=%u\n", sp_memory, wa.value);
-    }
+        struct nvhost_cmdbuf cb = { .mem = cmd_h, .offset = 0, .words = n };
+        struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 3 };
+        uint32_t class_id = ISP_CLASS;
+        struct nvhost_fence fence = { 0, 0 };
+
+        struct nvhost32_submit_args sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.submit_version = 0;
+        sa.num_syncpt_incrs = 1;
+        sa.num_cmdbufs = 1;
+        sa.num_relocs = nr;
+        sa.timeout = 5000;
+        sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
+        sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
+        sa.relocs = (uint32_t)(uintptr_t)relocs;
+        sa.reloc_shifts = (uint32_t)(uintptr_t)shifts;
+        sa.class_ids = (uint32_t)(uintptr_t)&class_id;
+        sa.fences = (uint32_t)(uintptr_t)&fence;
+
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa) < 0) {
+            perror("submit");
+            printf("    Strip %d FAILED\n", strip);
+        } else {
+            printf("    fence=%u\n", fence.value);
+            struct nvhost_ctrl_syncpt_waitex_args wa = {
+                .id = sp_memory, .thresh = fence.value, .timeout = 5000
+            };
+            if (ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa) < 0)
+                printf("    TIMEOUT strip %d (syncpt %u thresh %u)\n",
+                       strip, sp_memory, fence.value);
+            else
+                printf("    Strip %d done (syncpt=%u val=%u)\n",
+                       strip, sp_memory, wa.value);
+        }
+    } /* end strip loop */
 
     /* ---- Step 7: Read output ---- */
     printf("\n[7] Reading output...\n");
