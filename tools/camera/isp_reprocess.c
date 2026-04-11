@@ -494,8 +494,10 @@ int main(int argc, char **argv)
         cmd[n++] = OP_NONINCR(0x000, 1);
         cmd[n++] = (6 << 8) | sp_loadv;
 
-        /* ISP_CONTROL — trigger 0x0B (produces output; 0x05 gives zeros) */
+        /* ISP_CONTROL — blob sends 0x09 then 0x0B for ISP-A */
         cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        cmd[n++] = OP_NONINCR(0x00C, 1);
+        cmd[n++] = 0x09;
         cmd[n++] = OP_NONINCR(0x00C, 1);
         cmd[n++] = 0x0B;
 
