@@ -173,6 +173,7 @@ int main(int argc, char **argv)
     ((uint32_t *)config)[0] = W;               /* output width */
     ((uint32_t *)config)[1] = H;               /* output height */
     ((uint32_t *)config)[2] = 0x10168811;       /* output format */
+    ((uint32_t *)config)[3] = 1;               /* num_planes/type (VALIDATE requires 1 or 3) */
 
     printf("\n[4] Calling NvIspProcessFrame...\n");
     fflush(stdout);
