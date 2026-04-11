@@ -280,11 +280,20 @@ int ioctl(int fd, int request, ...) {
                         }
                     }
 
-                    /* Keep syncpt incrs — ISP needs them to complete jobs */
-
-                    /* Don't NOP syncpt incrs — kernel needs them for job tracking.
-                     * Only NOP the trigger (0x00C) to prevent ISP from starting
-                     * streaming mode. ISP will still execute register writes. */
+                    /* Convert conditional syncpt incrs to immediate.
+                     * Without trigger, conditions (OP_DONE/STATS/RD_DONE) never
+                     * fire, so conditional incrs never happen, and kernel job
+                     * tracking gets stuck → timeout → channel reset.
+                     * Fix: set cond=0 (IMMEDIATE) so they fire unconditionally. */
+                    if (opcode == 2 && method == 0x000 && count == 1) {
+                        uint32_t cond = (pb[i+1] >> 8) & 0xFF;
+                        if (cond >= 4 && cond <= 6) {
+                            uint32_t sp_id = pb[i+1] & 0xFF;
+                            fprintf(stderr, "nvrm_shim: syncpt %u cond %u → immediate at pb[%u]\n",
+                                    sp_id, cond, i);
+                            pb[i+1] = sp_id; /* cond=0 = IMMEDIATE */
+                        }
+                    }
                 }
             }
         }
