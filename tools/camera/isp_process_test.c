@@ -1,9 +1,22 @@
 /*
- * Test NvIspProcessFrame with MIUI blob
+ * Test NvIspProcessFrame with MIUI blob — based on full RE of all 4 vtable functions
  *
- * NvIspProcessFrame(handle, surf0, surf1, surf2,
- *                   hw_settings, trigger?, input_buf?, input_param?,
- *                   frame_count_out?)
+ * Corrected arg mapping (from disasm of 0x1784):
+ *   arg1  (r0):  handle
+ *   arg2  (r1):  array[0] = mode: 1=reprocess(0x09+0x0B), 2=init/streaming(0x05)
+ *   arg3  (r2):  array[1] = output crop_left  (0=skip dim check)
+ *   arg4  (r3):  array[2] = output crop_top
+ *   arg5:        array[3] = output crop_right
+ *   arg6:        array[4] = output crop_bottom
+ *   arg7:        array[5] = INPUT surface ptr (NvRmSurface*) — SETUP writes 0xE3x regs
+ *   arg8:        array[6] = 0
+ *   arg9  (r5):  config = OUTPUT surface desc (NvRmSurface[3] + numPlanes + input_crop)
+ *   arg10 (sl):  flush_fence_out ptr (or 0)
+ *   arg11 (r9):  fence_out ptr (0=blocking wait)
+ *   arg12 (fp):  STATUS ptr (uint32_t, init 0) — SUBMIT two-pass protocol!
+ *   arg13:       &frame_count_out
+ *
+ * SUBMIT two-pass: 1st call *status==0 → set 1, return 0xa. 2nd call *status>=1 → submit.
  *
  * Build: $CC --sysroot=$SYSROOT -std=gnu99 -pie -o isp_process_test isp_process_test.c -ldl
  * Run: LD_PRELOAD=nvrm_shim.so LD_LIBRARY_PATH=/data/local/tmp ./isp_process_test raw_file
@@ -29,7 +42,7 @@ int main(int argc, char **argv)
 {
     if (argc < 2) { printf("Usage: %s <raw_bayer>\n", argv[0]); return 1; }
 
-    printf("=== NvIspProcessFrame Test ===\n");
+    printf("=== NvIspProcessFrame Test (RE-based) ===\n");
 
     /* Load libs */
     dlopen("libnvos.so", RTLD_NOW | RTLD_GLOBAL);
@@ -44,23 +57,18 @@ int main(int argc, char **argv)
     typedef NvError (*HwCreate_t)(void *, void **);
     typedef NvError (*HwApply_t)(void *);
     typedef NvError (*HwDestroy_t)(void *);
-    /* 13 args! stack frame analysis:
-     * r5=sp+0x58=original_sp+0x10=arg9, sl=arg10, r9=arg11, fp=arg12, arg13
-     * r0=handle, r1-r3=args2-4, sp+0..sp+0x10=args5-9 */
+    /* NvIspSetConfiguration(handle, type, config, &size) */
+    typedef NvError (*SetConfig_t)(void *handle, uint32_t type, void *config, uint32_t *size);
+    /* 13 args: r0-r3 + 9 on stack */
     typedef NvError (*ProcessFrame_t)(void *handle,
         uint32_t a2, uint32_t a3, uint32_t a4,
         uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8,
-        void *settings,   /* arg9 = r5 in func */
-        uint32_t a10,     /* arg10 = sl */
-        uint32_t a11,     /* arg11 = r9 (optional: input?) */
-        uint32_t a12,     /* arg12 = fp (needed if a11!=0) */
+        void *config,     /* arg9: output surface config */
+        uint32_t a10,     /* arg10: flush_fence_out */
+        uint32_t a11,     /* arg11: fence_out (0=blocking) */
+        uint32_t a12,     /* arg12: status ptr */
         uint32_t *frame_count /* arg13 */
         );
-    typedef NvError (*Flush_t)(void *);
-    typedef NvError (*MemCreate_t)(void *, void **, NvU32);
-    typedef NvError (*MemAlloc_t)(void *, void *, NvU32, NvU32, NvU32, NvU32);
-    typedef void (*MemFree_t)(void *);
-    typedef NvError (*MemPin_t)(void *, unsigned long *);
 
     RmOpen_t pRmOpen = dlsym(dlopen("libnvrm.so", RTLD_NOLOAD), "NvRmOpenNew");
     IspOpen_t pIspOpen = dlsym(lib, "NvIspOpen");
@@ -68,16 +76,10 @@ int main(int argc, char **argv)
     HwCreate_t pHwCreate = dlsym(lib, "NvIspHwSettingsCreate");
     HwApply_t pHwApply = dlsym(lib, "NvIspHwSettingsApply");
     HwDestroy_t pHwDestroy = dlsym(lib, "NvIspHwSettingsDestroy");
+    SetConfig_t pSetConfig = dlsym(lib, "NvIspSetConfiguration");
     ProcessFrame_t pProcess = dlsym(lib, "NvIspProcessFrame");
-    Flush_t pFlush = dlsym(lib, "NvIspFlush");
 
-    /* NvRm memory functions for creating NvRmMemHandle-style buffers */
-    void *lib_nvrm = dlopen("libnvrm.so", RTLD_NOLOAD);
-    MemCreate_t pMemCreate = dlsym(lib_nvrm, "NvRmMemHandleCreate");
-    MemAlloc_t pMemAlloc = dlsym(lib_nvrm, "NvRmMemHandleAlloc");
-    MemFree_t pMemFree = dlsym(lib_nvrm, "NvRmMemHandleFree");
-
-    printf("  ProcessFrame=%p\n", pProcess);
+    printf("  ProcessFrame=%p SetConfig=%p\n", pProcess, pSetConfig);
 
     /* Init ISP */
     void *hRm = NULL;
@@ -88,10 +90,50 @@ int main(int argc, char **argv)
     printf("  IspOpen: err=0x%x isp=%p\n", err, isp);
     if (err) return 1;
 
+    /* Apply calibration (lens shading + tone curves) */
     void *settings = NULL;
     pHwCreate(isp, &settings);
     pHwApply(settings);
     printf("  Calibration applied\n");
+
+    /*
+     * NvIspSetConfiguration — REQUIRED before ProcessFrame
+     * Type=2: enable output surface (simple toggle)
+     * Type=1: set pixel format (16 enum fields → HW registers)
+     *
+     * param (arg4) is always &size — handler validates and corrects
+     */
+
+    /* Type=2: Enable output surface */
+    uint32_t sc2_mode = 1;   /* 1=enable standard output */
+    uint32_t sc2_size = 4;
+    err = pSetConfig(isp, 2, &sc2_mode, &sc2_size);
+    printf("  SetConfig(type=2, mode=1): err=0x%x\n", err);
+
+    /* Type=1: Set pixel format for Bayer BGGR → R4G4B4A4 reprocess
+     * 0x40-byte struct with 16 enum fields:
+     *   [0x00] surface_type: 0=input, 1=streaming, 2=reprocess
+     *   [0x04] in_pix_fmt: 0=Bayer8/Y8, 7=16bpp Bayer10+
+     *   [0x08] out_pix_fmt: 2=16bpp 4:4:4:4, 10=32bpp 8:8:8:8
+     *   [0x0C] color_space: 0=Bayer/default
+     *   [0x10-0x3C] stage repeats (mirror primary for now) */
+    uint32_t fmt_cfg[16];
+    memset(fmt_cfg, 0, sizeof(fmt_cfg));
+    fmt_cfg[0x00/4] = 2;    /* reprocess */
+    fmt_cfg[0x04/4] = 7;    /* input: 16bpp Bayer10+ */
+    fmt_cfg[0x08/4] = 2;    /* output: 4:4:4:4 (R4G4B4A4) */
+    fmt_cfg[0x0C/4] = 0;    /* Bayer color space */
+    /* Stage 1 mirrors primary */
+    fmt_cfg[0x10/4] = 7;    /* in_pix_fmt repeat */
+    fmt_cfg[0x14/4] = 2;    /* out_pix_fmt repeat */
+    fmt_cfg[0x18/4] = 0;
+    fmt_cfg[0x1C/4] = 0;
+    /* Extended stages — output R4G4B4A4 */
+    fmt_cfg[0x20/4] = 2;    /* extended: 4:4:4:4 */
+    fmt_cfg[0x24/4] = 2;
+    uint32_t sc1_size = 0x40;
+    err = pSetConfig(isp, 1, fmt_cfg, &sc1_size);
+    printf("  SetConfig(type=1, reprocess): err=0x%x\n", err);
 
     /* Load raw file */
     printf("\n[2] Loading %s...\n", argv[1]);
@@ -105,15 +147,12 @@ int main(int argc, char **argv)
     fclose(f);
     printf("  %d bytes loaded\n", fsize);
 
-    /* Allocate nvmap buffers via ioctl (NvRm MemHandle is for blob's internal use) */
+    /* Allocate nvmap buffers */
     int nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
-
-    /* Create NvRmMemHandles for output — blob expects these */
-    /* For now, try passing nvmap handles directly as u32 */
     struct { union { uint32_t size; int32_t fd; uint32_t id; }; uint32_t handle; } ch;
 
-    /* Output buffer */
-    int out_size = W * H * 4;  /* RGBA just in case */
+    /* Output buffer — R4G4B4A4 = 2 bytes/pixel */
+    int out_size = W * H * 4;  /* over-allocate */
     ch.size = out_size;
     ioctl(nvmap_fd, _IOWR('N', 0, ch), &ch);
     uint32_t out_h = ch.handle;
@@ -136,81 +175,149 @@ int main(int argc, char **argv)
         ioctl(nvmap_fd, _IOW('N', 6, rw), &rw);
     }
     free(raw);
-    printf("  Buffers ready: in=%u out=%u\n", in_h, out_h);
+    printf("  Buffers: in=%u out=%u\n", in_h, out_h);
 
-    /* Build NvRmSurface for output (arg2)
-     * NvRmSurface layout: Width, Height, ColorFormat, Layout, Pitch,
-     *                     hMem, Offset, pBase, Kind, BlockHeightLog2 */
-    printf("\n[3] Building surface descriptors...\n");
-    /* Large surface struct — SETUP reads up to offset 0x90+ */
-    uint32_t out_surf[64];  /* 256 bytes */
-    memset(out_surf, 0, sizeof(out_surf));
-    out_surf[0] = W;               /* [0x00] Width */
-    out_surf[1] = H;               /* [0x04] Height */
-    out_surf[2] = 0x10168811;      /* [0x08] ColorFormat */
-    out_surf[3] = 0;               /* [0x0C] Layout: pitch linear */
-    out_surf[4] = W * 2;           /* [0x10] Pitch */
-    out_surf[5] = out_h;           /* [0x14] hMem */
-    out_surf[6] = 0;               /* [0x18] Offset */
-    /* [0x90] = offset 36 in uint32 — SETUP reads this */
-    out_surf[36] = 0;              /* unknown, try 0 */
-    printf("  out_surf: %ux%u fmt=0x%x pitch=%u hmem=%u\n",
-           out_surf[0], out_surf[1], out_surf[2], out_surf[4], out_surf[5]);
+    /*
+     * Config struct (arg9) = OUTPUT surface description
+     * Layout: NvRmSurface surfaces[3] (0x00-0x8F, each 0x30 bytes)
+     *         + uint32_t numPlanes (0x90)
+     *         + crop rect (0x94-0xA0)
+     *
+     * NvRmSurface: Width(0), Height(4), ColorFormat(8), Layout(C),
+     *              Pitch(10), hMem(14), Offset(18), pBase(1C),
+     *              Kind(20), BlockHeightLog2(24), [pad to 0x30]
+     *
+     * VALIDATE checks:
+     *   - Layout must be 1(pitch) or 3(blocklinear)
+     *   - Pitch & 0x3F == 0 (64-byte aligned)
+     *   - Offset bit 5 == 0
+     *   - Format in supported output list
+     *   - numPlanes matches format (1 for RGB, 2 for NV12, 3 for YUV420P)
+     */
+    printf("\n[3] Building descriptors...\n");
 
-    /* Build input surface (arg11) — also large */
-    uint32_t in_surf[64];
-    memset(in_surf, 0, sizeof(in_surf));
-    in_surf[0] = W;                /* Width */
-    in_surf[1] = H;                /* Height */
-    in_surf[2] = 0x10200024;       /* ColorFormat: 10-bit Bayer BGGR */
-    in_surf[3] = 0;                /* Layout: pitch linear */
-    in_surf[4] = W * 2;            /* Pitch: stride */
-    in_surf[5] = in_h;             /* hMem: nvmap handle */
-    in_surf[6] = 0;                /* Offset */
-    printf("  in_surf: %ux%u fmt=0x%x pitch=%u hmem=%u\n",
-           in_surf[0], in_surf[1], in_surf[2], in_surf[4], in_surf[5]);
-
-    /* Config struct for arg9 — contains output dims + crop */
     uint8_t config[256];
     memset(config, 0, sizeof(config));
-    ((uint32_t *)config)[0] = W;               /* output width */
-    ((uint32_t *)config)[1] = H;               /* output height */
-    ((uint32_t *)config)[2] = 0x10168811;       /* output format */
-    ((uint32_t *)config)[3] = 1;               /* num_planes/type (VALIDATE requires 1 or 3) */
-    /* Crop rect at offsets 0x94-0xA0 — full frame */
-    ((uint32_t *)config)[0x94/4] = 0;          /* crop_top */
-    ((uint32_t *)config)[0x98/4] = 0;          /* crop_left */
-    ((uint32_t *)config)[0x9C/4] = H;          /* crop_bottom */
-    ((uint32_t *)config)[0xA0/4] = W;          /* crop_right */
+    uint32_t *cfg = (uint32_t *)config;
 
-    printf("\n[4] Calling NvIspProcessFrame...\n");
-    fflush(stdout);
+    /* Output surface plane 0 (NvRmSurface at offset 0x00) */
+    cfg[0x00/4] = W;                     /* Width */
+    cfg[0x04/4] = H;                     /* Height */
+    cfg[0x08/4] = 0x10168811;            /* R4G4B4A4 (in VALIDATE list → ISP code 0x2a) */
+    cfg[0x0C/4] = 1;                     /* Layout: pitch linear */
+    cfg[0x10/4] = W * 2;                 /* Pitch: 5184 (64-byte aligned: 5184/64=81) */
+    cfg[0x14/4] = out_h;                 /* hMem: nvmap handle */
+    cfg[0x18/4] = 0;                     /* Offset */
 
+    /* numPlanes */
+    cfg[0x90/4] = 1;
+
+    /* Input crop — full frame
+     * CORRECTED order from RE: 0x94=left, 0x98=top, 0x9C=right, 0xA0=bottom */
+    cfg[0x94/4] = 0;                     /* crop_left */
+    cfg[0x98/4] = 0;                     /* crop_top */
+    cfg[0x9C/4] = W;                     /* crop_right */
+    cfg[0xA0/4] = H;                     /* crop_bottom */
+
+    printf("  config: %ux%u fmt=0x%x layout=%u pitch=%u hmem=%u planes=%u\n",
+           cfg[0], cfg[1], cfg[2], cfg[3], cfg[4], cfg[5], cfg[0x90/4]);
+    printf("  crop: L=%u T=%u R=%u B=%u\n",
+           cfg[0x94/4], cfg[0x98/4], cfg[0x9C/4], cfg[0xA0/4]);
+
+    /*
+     * Input surface (arg7/array[5]) — NvRmSurface for raw Bayer input
+     * SETUP reads this and writes to ISP input registers 0xE30-0xE3C
+     */
+    uint32_t in_surf[48];  /* 0x30*3 + extra = 192 bytes (struct may need up to 0x90+) */
+    memset(in_surf, 0, sizeof(in_surf));
+    in_surf[0x00/4] = W;                 /* Width */
+    in_surf[0x04/4] = H;                 /* Height */
+    in_surf[0x08/4] = 0x10A9200E;        /* X6Bayer10BGGR (10-bit in 16-bit container, BGGR) */
+    in_surf[0x0C/4] = 1;                 /* Layout: pitch linear */
+    in_surf[0x10/4] = W * 2;             /* Pitch: 5184 bytes */
+    in_surf[0x14/4] = in_h;              /* hMem: nvmap handle */
+    in_surf[0x18/4] = 0;                 /* Offset */
+
+    printf("  in_surf: %ux%u fmt=0x%x layout=%u pitch=%u hmem=%u\n",
+           in_surf[0], in_surf[1], in_surf[2], in_surf[3], in_surf[4], in_surf[5]);
+
+    /* Status variable for SUBMIT two-pass protocol */
+    uint32_t status = 0;
     uint32_t frame_count = 0;
 
-    /* args 2-4: NvRmSurface* (output planes Y, U, V)
-     * arg9: config struct
-     * arg10: mode (1=ISP-A)
-     * arg11: NvRmSurface* input (non-zero = reprocess)
-     * arg12: input param (required if arg11!=0) */
-    err = pProcess(isp,
-                   2,                               /* a2: mode (2=init stream path in SETUP) */
-                   0,                               /* a3 */
-                   0,                               /* a4 */
-                   0, 0,                             /* a5-a6 */
-                   (uint32_t)(uintptr_t)out_surf,   /* a7: output surface (SETUP checks [5]!=0) */
-                   0,                                /* a8 */
-                   config,                           /* a9: config */
-                   1,                                /* a10: mode */
-                   (uint32_t)(uintptr_t)in_surf,    /* a11: input surface */
-                   (uint32_t)(uintptr_t)in_surf,      /* a12: input param (ptr, dereferenced!) */
-                   &frame_count                      /* a13: frame count */
-                   );
-    printf("  NvIspProcessFrame: err=0x%x frame_count=%u\n", err, frame_count);
+    printf("\n[4] NvIspProcessFrame (two-pass protocol)...\n");
     fflush(stdout);
 
+    /*
+     * Pass 1: VALIDATE+SETUP+RUNTIME execute, SUBMIT sees *status==0 → sets *status=1, returns 0xa
+     *
+     * array[0]=1 (reprocess mode):
+     *   VALIDATE: type=1 → reads *array[5] for output dims (in_surf.W=2592 < 6000 → OK)
+     *   SETUP: mode=1 → surface config path (writes input regs 0xE3x from array[5])
+     *   SUBMIT: mode=1 → would fire 0x09+0x0B (but first-pass just sets status)
+     */
+    err = pProcess(isp,
+        1,                                    /* a2/array[0]: 1=reprocess */
+        0, 0, 0, 0,                          /* a3-a6/array[1-4]: output crop=0 (skip dim check) */
+        (uint32_t)(uintptr_t)in_surf,        /* a7/array[5]: INPUT surface ptr */
+        0,                                    /* a8/array[6]: 0 */
+        config,                               /* a9: OUTPUT surface config */
+        0,                                    /* a10: flush_fence_out=NULL */
+        0,                                    /* a11: fence_out=NULL (blocking) */
+        (uint32_t)(uintptr_t)&status,        /* a12: status ptr (starts at 0) */
+        &frame_count);
+    printf("  Pass 1: err=0x%x status=%u frame=%u\n", err, status, frame_count);
+    fflush(stdout);
+
+    if (err != 0 && err != 0xa) {
+        printf("  FATAL: unexpected error on pass 1 (expected 0 or 0xa)\n");
+        printf("  err=0x2: format not supported by VALIDATE\n");
+        printf("  err=0x4: null/alignment/format error in VALIDATE or SETUP\n");
+        printf("  err=0xa: dimension check (VALIDATE) or first-pass (SUBMIT)\n");
+        goto cleanup;
+    }
+
+    if (err == 0xa) {
+        printf("  → SUBMIT first-pass (expected), calling pass 2...\n");
+        fflush(stdout);
+
+        /*
+         * Pass 2: SUBMIT sees *status>=1 → builds trigger gathers → flushes → waits
+         * Triggers: 0x09 (start) + 0x0B (process) to register 0x00C
+         */
+        err = pProcess(isp,
+            1,
+            0, 0, 0, 0,
+            (uint32_t)(uintptr_t)in_surf,
+            0,
+            config,
+            0,
+            0,
+            (uint32_t)(uintptr_t)&status,
+            &frame_count);
+        printf("  Pass 2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
+        fflush(stdout);
+    }
+
+    if (err == 0) {
+        printf("  SUCCESS! ISP processed frame.\n");
+    } else {
+        printf("  ERROR: ProcessFrame failed with 0x%x\n", err);
+        /* Try a third pass in case dual-output needs status=2 */
+        if (err == 0xa && status == 2) {
+            printf("  → Dual-output mode, trying pass 3...\n");
+            err = pProcess(isp,
+                1, 0, 0, 0, 0,
+                (uint32_t)(uintptr_t)in_surf, 0,
+                config, 0, 0,
+                (uint32_t)(uintptr_t)&status,
+                &frame_count);
+            printf("  Pass 3: err=0x%x status=%u frame=%u\n", err, status, frame_count);
+        }
+    }
+
     /* Read output */
-    printf("\n[4] Reading output...\n");
+    printf("\n[5] Reading output...\n");
     uint8_t check[4096];
     memset(check, 0, sizeof(check));
     rw = (typeof(rw)){ (unsigned long)check, out_h, 0, 4096, 4096, 4096, 1 };
@@ -218,11 +325,45 @@ int main(int argc, char **argv)
     int nz = 0;
     for (int i = 0; i < 4096; i++) if (check[i]) nz++;
     printf("  First 4KB: %d/4096 non-zero\n", nz);
-    printf("  hex: ");
-    for (int i = 0; i < 32; i++) printf("%02x ", check[i]);
+
+    /* Print first 64 bytes hex */
+    printf("  hex[0-63]: ");
+    for (int i = 0; i < 64; i++) printf("%02x ", check[i]);
     printf("\n");
 
-    /* Cleanup */
+    /* Check for R4G4B4A4 pattern (2 bytes per pixel) */
+    if (nz > 0) {
+        printf("  Pixel samples (R4G4B4A4, 2 bytes each):\n");
+        uint16_t *pix = (uint16_t *)check;
+        for (int i = 0; i < 16; i++)
+            printf("    px[%d] = 0x%04x (R=%u G=%u B=%u A=%u)\n",
+                   i, pix[i],
+                   (pix[i] >> 12) & 0xF, (pix[i] >> 8) & 0xF,
+                   (pix[i] >> 4) & 0xF, pix[i] & 0xF);
+    }
+
+    /* Also dump a larger sample to file */
+    if (err == 0 || nz > 100) {
+        int dump_size = W * H * 2;  /* R4G4B4A4 = 2 bytes/pixel */
+        uint8_t *dump = malloc(dump_size);
+        if (dump) {
+            memset(dump, 0, dump_size);
+            for (int off = 0; off < dump_size && off < out_size; off += chunk) {
+                int sz = (dump_size - off < chunk) ? dump_size - off : chunk;
+                rw = (typeof(rw)){ (unsigned long)(dump+off), out_h, off, sz, sz, sz, 1 };
+                ioctl(nvmap_fd, _IOW('N', 7, rw), &rw);
+            }
+            FILE *of = fopen("/data/local/tmp/isp_pf_out.raw", "wb");
+            if (of) {
+                fwrite(dump, 1, dump_size, of);
+                fclose(of);
+                printf("  Output saved: /data/local/tmp/isp_pf_out.raw (%d bytes)\n", dump_size);
+            }
+            free(dump);
+        }
+    }
+
+cleanup:
     pHwDestroy(settings);
     pIspClose(isp);
     close(nvmap_fd);
