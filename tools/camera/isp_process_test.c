@@ -117,23 +117,46 @@ int main(int argc, char **argv)
      *   [0x08] out_pix_fmt: 2=16bpp 4:4:4:4, 10=32bpp 8:8:8:8
      *   [0x0C] color_space: 0=Bayer/default
      *   [0x10-0x3C] stage repeats (mirror primary for now) */
+    /* Try multiple format combinations — find one that works */
     uint32_t fmt_cfg[16];
-    memset(fmt_cfg, 0, sizeof(fmt_cfg));
-    fmt_cfg[0x00/4] = 2;    /* reprocess */
-    fmt_cfg[0x04/4] = 7;    /* input: 16bpp Bayer10+ */
-    fmt_cfg[0x08/4] = 2;    /* output: 4:4:4:4 (R4G4B4A4) */
-    fmt_cfg[0x0C/4] = 0;    /* Bayer color space */
-    /* Stage 1 mirrors primary */
-    fmt_cfg[0x10/4] = 7;    /* in_pix_fmt repeat */
-    fmt_cfg[0x14/4] = 2;    /* out_pix_fmt repeat */
-    fmt_cfg[0x18/4] = 0;
-    fmt_cfg[0x1C/4] = 0;
-    /* Extended stages — output R4G4B4A4 */
-    fmt_cfg[0x20/4] = 2;    /* extended: 4:4:4:4 */
-    fmt_cfg[0x24/4] = 2;
-    uint32_t sc1_size = 0x40;
-    err = pSetConfig(isp, 1, fmt_cfg, &sc1_size);
-    printf("  SetConfig(type=1, reprocess): err=0x%x\n", err);
+    uint32_t sc1_size;
+
+    /* Combo table: {surface_type, in_pix, out_pix, colorspace, description} */
+    struct { uint32_t st, ip, op, cs; const char *desc; } combos[] = {
+        {2, 0, 10, 0, "reprocess bayer8→8888"},
+        {2, 7, 10, 0, "reprocess bayer10→8888"},
+        {2, 0,  2, 0, "reprocess bayer8→4444"},
+        {2, 7,  2, 0, "reprocess bayer10→4444"},
+        {2, 0,  0, 0, "reprocess all-default"},
+        {2, 0,  5, 0, "reprocess bayer8→yuv422"},
+        {1, 0, 10, 0, "streaming bayer8→8888"},
+        {0, 0, 10, 0, "input bayer8→8888"},
+    };
+    int best = -1;
+    for (int i = 0; i < (int)(sizeof(combos)/sizeof(combos[0])); i++) {
+        memset(fmt_cfg, 0, sizeof(fmt_cfg));
+        fmt_cfg[0] = combos[i].st;
+        fmt_cfg[1] = combos[i].ip;
+        fmt_cfg[2] = combos[i].op;
+        fmt_cfg[3] = combos[i].cs;
+        sc1_size = 0x40;
+        err = pSetConfig(isp, 1, fmt_cfg, &sc1_size);
+        printf("  SetConfig(type=1, %s): err=0x%x\n", combos[i].desc, err);
+        if (err == 0 && best < 0) best = i;
+    }
+    if (best >= 0) {
+        /* Re-apply the working combo */
+        memset(fmt_cfg, 0, sizeof(fmt_cfg));
+        fmt_cfg[0] = combos[best].st;
+        fmt_cfg[1] = combos[best].ip;
+        fmt_cfg[2] = combos[best].op;
+        fmt_cfg[3] = combos[best].cs;
+        sc1_size = 0x40;
+        pSetConfig(isp, 1, fmt_cfg, &sc1_size);
+        printf("  → Using: %s\n", combos[best].desc);
+    } else {
+        printf("  WARNING: no SetConfig combo worked, proceeding anyway\n");
+    }
 
     /* Load raw file */
     printf("\n[2] Loading %s...\n", argv[1]);
@@ -203,9 +226,9 @@ int main(int argc, char **argv)
     /* Output surface plane 0 (NvRmSurface at offset 0x00) */
     cfg[0x00/4] = W;                     /* Width */
     cfg[0x04/4] = H;                     /* Height */
-    cfg[0x08/4] = 0x10168811;            /* R4G4B4A4 (in VALIDATE list → ISP code 0x2a) */
+    cfg[0x08/4] = 0x2016881a;            /* R8G8B8A8 (in VALIDATE list → ISP code 0x43) */
     cfg[0x0C/4] = 1;                     /* Layout: pitch linear */
-    cfg[0x10/4] = W * 2;                 /* Pitch: 5184 (64-byte aligned: 5184/64=81) */
+    cfg[0x10/4] = W * 4;                 /* Pitch: 10368 (64-byte aligned: 10368/64=162) */
     cfg[0x14/4] = out_h;                 /* hMem: nvmap handle */
     cfg[0x18/4] = 0;                     /* Offset */
 
@@ -331,20 +354,20 @@ int main(int argc, char **argv)
     for (int i = 0; i < 64; i++) printf("%02x ", check[i]);
     printf("\n");
 
-    /* Check for R4G4B4A4 pattern (2 bytes per pixel) */
+    /* Check for R8G8B8A8 pattern (4 bytes per pixel) */
     if (nz > 0) {
-        printf("  Pixel samples (R4G4B4A4, 2 bytes each):\n");
-        uint16_t *pix = (uint16_t *)check;
+        printf("  Pixel samples (R8G8B8A8, 4 bytes each):\n");
+        uint32_t *pix = (uint32_t *)check;
         for (int i = 0; i < 16; i++)
-            printf("    px[%d] = 0x%04x (R=%u G=%u B=%u A=%u)\n",
+            printf("    px[%d] = 0x%08x (R=%u G=%u B=%u A=%u)\n",
                    i, pix[i],
-                   (pix[i] >> 12) & 0xF, (pix[i] >> 8) & 0xF,
-                   (pix[i] >> 4) & 0xF, pix[i] & 0xF);
+                   (pix[i] >> 0) & 0xFF, (pix[i] >> 8) & 0xFF,
+                   (pix[i] >> 16) & 0xFF, (pix[i] >> 24) & 0xFF);
     }
 
     /* Also dump a larger sample to file */
     if (err == 0 || nz > 100) {
-        int dump_size = W * H * 2;  /* R4G4B4A4 = 2 bytes/pixel */
+        int dump_size = W * H * 4;  /* R8G8B8A8 = 4 bytes/pixel */
         uint8_t *dump = malloc(dump_size);
         if (dump) {
             memset(dump, 0, dump_size);
