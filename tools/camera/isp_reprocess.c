@@ -516,7 +516,7 @@ int main(int argc, char **argv)
         printf("    submit (syncpt %u cur=%u)...\n", sp_memory, rd.value);
 
         struct nvhost_cmdbuf cb = { .mem = cmd_h, .offset = 0, .words = n };
-        struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 3 };
+        struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 1 };
         uint32_t class_id = ISP_CLASS;
         struct nvhost_fence fence = { 0, 0 };
 
