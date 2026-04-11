@@ -440,7 +440,43 @@ int main(int argc, char **argv)
                    err, status_b, fence_b[0], fence_b[1]);
             fflush(stdout);
 
-            /* Check output */
+            /* === DUMP 1: Ring buffer — find where ISP wrote output === */
+            printf("\n  [B-dump1] Ring buffer (ctx+0x1318):\n");
+            uint32_t *ring = (uint32_t *)(uintptr_t)isp_u32[0x1318/4];
+            if (ring) {
+                /* Ring header */
+                for (int i = 0; i < 16; i++)
+                    printf("    ring+0x%02x = 0x%08x\n", i*4, ring[i]);
+                /* First slot: ring_base + 0*0x250 + 0x10 */
+                /* DMA handle at slot+0x23C */
+                uint32_t *slot0 = (uint32_t *)((uint8_t *)ring + 0x10);
+                printf("    slot0+0x238 = 0x%08x\n", slot0[0x238/4]);
+                printf("    slot0+0x23C = 0x%08x (DMA handle?)\n", slot0[0x23C/4]);
+                printf("    slot0+0x240 = 0x%08x\n", slot0[0x240/4]);
+                printf("    slot0+0x244 = 0x%08x\n", slot0[0x244/4]);
+                /* Scan for any nvmap-like handles (values 0x400-0x500 range) */
+                printf("    Scanning slot0 for handles...\n");
+                for (int i = 0; i < 0x250/4; i++) {
+                    uint32_t v = slot0[i];
+                    if (v >= 0x400 && v < 0x500)
+                        printf("      slot0+0x%03x = 0x%08x (handle?)\n", i*4, v);
+                }
+            }
+            fflush(stdout);
+
+            /* === DUMP 2: NvRmStream struct layout === */
+            printf("\n  [B-dump2] NvRmStream (ctx+0x0c -> %p):\n", stream);
+            if (stream) {
+                uint32_t *s = (uint32_t *)stream;
+                for (int i = 0; i < 32; i++)
+                    printf("    stream+0x%02x = 0x%08x\n", i*4, s[i]);
+                /* SUBMIT accesses stream+0x4c as pCurrent */
+                printf("    stream+0x4c (pCurrent?) = 0x%08x\n", s[0x4c/4]);
+                printf("    stream+0x50 = 0x%08x\n", s[0x50/4]);
+            }
+            fflush(stdout);
+
+            /* Check our output buffer (probably empty) */
             struct { unsigned long addr; uint32_t handle, offset, elem_size, hmem_stride, user_stride, count; } rw3;
             uint8_t check_b[4096];
             memset(check_b, 0, sizeof(check_b));
@@ -448,10 +484,29 @@ int main(int argc, char **argv)
             ioctl(nvmap_fd, _IOW('N', 7, rw3), &rw3);
             int nz = 0;
             for (int i = 0; i < 4096; i++) if (check_b[i]) nz++;
-            printf("  Output: %d/4096 non-zero\n", nz);
-            printf("  hex: ");
-            for (int i = 0; i < 32; i++) printf("%02x ", check_b[i]);
-            printf("\n");
+            printf("\n  Our output buf: %d/4096 non-zero\n", nz);
+
+            /* Try reading the ring buffer's DMA handle if it looks valid */
+            if (ring) {
+                uint32_t *slot0 = (uint32_t *)((uint8_t *)ring + 0x10);
+                uint32_t dma_h = slot0[0x23C/4];
+                if (dma_h > 0 && dma_h < 0x10000) {
+                    printf("  Trying to read DMA handle 0x%x...\n", dma_h);
+                    memset(check_b, 0, sizeof(check_b));
+                    rw3 = (typeof(rw3)){ (unsigned long)check_b, dma_h, 0, 4096, 4096, 4096, 1 };
+                    int ret = ioctl(nvmap_fd, _IOW('N', 7, rw3), &rw3);
+                    if (ret == 0) {
+                        nz = 0;
+                        for (int i = 0; i < 4096; i++) if (check_b[i]) nz++;
+                        printf("  Ring DMA buf: %d/4096 non-zero\n", nz);
+                        printf("  hex: ");
+                        for (int i = 0; i < 64; i++) printf("%02x ", check_b[i]);
+                        printf("\n");
+                    } else {
+                        printf("  Read failed (ret=%d)\n", ret);
+                    }
+                }
+            }
         }
 skip_b:
         free(config_b); free(in_surf_b);
