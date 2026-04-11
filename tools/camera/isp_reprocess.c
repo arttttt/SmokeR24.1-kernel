@@ -216,13 +216,7 @@ int main(int argc, char **argv)
     /* Disable stripping for our own reprocess gather */
     unsetenv("NVRM_SHIM_STRIP");
 
-    /* Try SetConfiguration to properly configure ISP pipeline */
-    if (pSetConfig) {
-        err = pSetConfig(isp_handle, 1, NULL, NULL);
-        printf("  SetConfiguration(type=1): err=0x%x\n", err);
-        err = pSetConfig(isp_handle, 2, NULL, NULL);
-        printf("  SetConfiguration(type=2): err=0x%x\n", err);
-    }
+    /* TODO: NvIspSetConfiguration needs proper args, skipping for now */
 
     /* Scan push buffer for output format (method 0xE02) set by calibration.
      * Push buffers are mmap'd by our shim — scan /proc/self/maps for them */
@@ -500,10 +494,10 @@ int main(int argc, char **argv)
         cmd[n++] = OP_NONINCR(0x000, 1);
         cmd[n++] = (6 << 8) | sp_loadv;
 
-        /* ISP_CONTROL — reprocess trigger */
+        /* ISP_CONTROL — reprocess trigger (0x05 = bit2:reprocess + bit0:active) */
         cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
         cmd[n++] = OP_NONINCR(0x00C, 1);
-        cmd[n++] = 0x0B;
+        cmd[n++] = 0x05;
 
         printf("    cmdbuf: %d words\n", n);
         nvmap_write(cmd_h, 0, cmd, n * 4);
