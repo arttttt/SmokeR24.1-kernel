@@ -203,27 +203,6 @@ int main(int argc, char **argv)
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
-    /* Configure ISP for reprocess BEFORE HwSettingsApply */
-    printf("  Calling NvIspSetConfiguration...\n");
-    {
-        /* type=2: enable output surface */
-        uint32_t enable = 1;
-        uint32_t sz2 = 4;
-        err = pSetConfig(isp_handle, 2, &enable, &sz2);
-        printf("    SetConfig(type=2, enable): err=0x%x\n", err);
-
-        /* type=1: pixel format config for reprocess */
-        uint8_t fmt_config[0x40];
-        memset(fmt_config, 0, sizeof(fmt_config));
-        *(uint32_t *)(fmt_config + 0x00) = 2;   /* surface_type = reprocess */
-        *(uint32_t *)(fmt_config + 0x04) = 7;   /* in_pix_fmt = Bayer10 */
-        *(uint32_t *)(fmt_config + 0x08) = 10;  /* out_pix_fmt = 8:8:8:8 */
-        *(uint32_t *)(fmt_config + 0x0C) = 0;   /* color_space = Bayer */
-        uint32_t sz1 = 0x40;
-        err = pSetConfig(isp_handle, 1, fmt_config, &sz1);
-        printf("    SetConfig(type=1, reprocess 8888): err=0x%x\n", err);
-    }
-
     void *hw_settings = NULL;
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
@@ -445,7 +424,7 @@ int main(int argc, char **argv)
         cmd[n++] = OP_INCR(0xE01, 1);
         cmd[n++] = ((H - 1) & 0x3FFF) << 16;
         cmd[n++] = OP_INCR(0xE02, 1);
-        cmd[n++] = 0x010000C9;
+        cmd[n++] = 0x43;                  /* R8G8B8A8 (ISP code 0x43) */
         cmd[n++] = OP_INCR(0xE03, 1);
         cmd[n++] = 0x00000000;
 
