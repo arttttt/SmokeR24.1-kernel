@@ -435,18 +435,18 @@ int main(int argc, char **argv)
         y_reloc = n;
         cmd[n++] = 0;                     /* patched by reloc → out_iova + out_off */
         cmd[n++] = 0x00000000;
-        cmd[n++] = W * 4;                 /* full row stride for interleaved output */
-        /* U/V planes (unused for 32bpp but keep for HW) */
+        cmd[n++] = W * 4;                 /* 32bpp stride */
+        /* U/V planes — point to same buffer with valid stride to avoid MC errors */
         cmd[n++] = OP_INCR(0xE07, 3);
         u_reloc = n;
         cmd[n++] = 0;
         cmd[n++] = 0x00000000;
-        cmd[n++] = 0x00000540;
+        cmd[n++] = W * 4;
         cmd[n++] = OP_INCR(0xE0A, 3);
         v_reloc = n;
         cmd[n++] = 0;
         cmd[n++] = 0x00000000;
-        cmd[n++] = 0x00000540;
+        cmd[n++] = W * 4;
 
         /* Processing block — full dimensions */
         cmd[n++] = OP_INCR(0x500, 6);
@@ -509,9 +509,9 @@ int main(int argc, char **argv)
 
         relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, out_off };
         shifts[nr++].shift = 0;
-        relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, Y_SIZE };
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, 0 };
         shifts[nr++].shift = 0;
-        relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, 0 };
         shifts[nr++].shift = 0;
         relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, in_off };
         shifts[nr++].shift = 0;
