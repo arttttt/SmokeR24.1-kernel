@@ -494,10 +494,10 @@ int main(int argc, char **argv)
         cmd[n++] = OP_NONINCR(0x000, 1);
         cmd[n++] = (6 << 8) | sp_loadv;
 
-        /* ISP_CONTROL — reprocess trigger (0x05 = bit2:reprocess + bit0:active) */
+        /* ISP_CONTROL — trigger 0x0B (produces output; 0x05 gives zeros) */
         cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
         cmd[n++] = OP_NONINCR(0x00C, 1);
-        cmd[n++] = 0x05;
+        cmd[n++] = 0x0B;
 
         printf("    cmdbuf: %d words\n", n);
         nvmap_write(cmd_h, 0, cmd, n * 4);
