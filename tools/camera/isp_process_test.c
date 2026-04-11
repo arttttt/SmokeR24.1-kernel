@@ -248,7 +248,33 @@ int main(int argc, char **argv)
     printf("  ctx+0x12D4 (RUNTIME) = 0x%x\n", isp_u32[0x12D4/4]);
     fflush(stdout);
 
-    printf("\n[5] NvIspProcessFrame...\n");
+    /* Test: call VALIDATE directly via vtable to isolate crash */
+    printf("\n[5a] Direct VALIDATE call...\n");
+    fflush(stdout);
+    {
+        typedef NvError (*ValidateFn)(void *, void *, void *);
+        ValidateFn pValidate = (ValidateFn)(uintptr_t)isp_u32[0x130C/4];
+        uint32_t array[7];
+        array[0] = 1;  /* type=1 (reprocess) */
+        array[1] = 0;  array[2] = 0;  array[3] = 0;  array[4] = 0;
+        array[5] = (uint32_t)(uintptr_t)in_surf;
+        array[6] = 0;
+        printf("  VALIDATE func=%p array=%p config=%p\n", pValidate, array, config);
+        fflush(stdout);
+        err = pValidate(isp, array, config);
+        printf("  VALIDATE: err=0x%x\n", err);
+        fflush(stdout);
+    }
+
+    /* Test: also try ProcessFrame's mutex area */
+    printf("\n[5b] Mutex check...\n");
+    printf("  ctx+0x1240 = 0x%x\n", isp_u32[0x1240/4]);
+    printf("  ctx+0x1250 (mutex) = 0x%x\n", isp_u32[0x1250/4]);
+    printf("  ctx+0x1254 (frame_cnt) = 0x%x\n", isp_u32[0x1254/4]);
+    printf("  ctx+0x1264 (sentinel) = 0x%x\n", isp_u32[0x1264/4]);
+    fflush(stdout);
+
+    printf("\n[5c] NvIspProcessFrame...\n");
     printf("  args: handle=%p a2=1 a7=in_surf(%p) a9=config(%p) a10=1 a12=&status(%p)\n",
            isp, in_surf, config, &status);
     fflush(stdout);
