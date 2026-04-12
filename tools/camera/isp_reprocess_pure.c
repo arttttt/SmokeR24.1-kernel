@@ -325,9 +325,9 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE30, 1);
     cmd[n++] = 1;                         /* input trigger */
 
-    /* ISP_ENABLE */
+    /* ISP_ENABLE = 0x04040007 (from Ghidra RE — reprocess uses same as streaming) */
     cmd[n++] = OP_INCR(0x015, 1);
-    cmd[n++] = 7;
+    cmd[n++] = 0x04040007;
 
     /* Syncpt conditional incrs */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
@@ -338,8 +338,10 @@ int main(int argc, char **argv)
     cmd[n++] = OP_NONINCR(0x000, 1);
     cmd[n++] = (6 << 8) | sp_loadv;
 
-    /* Reprocess trigger */
+    /* Reprocess trigger: two-step 0x09 then 0x0B (from Ghidra RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+    cmd[n++] = OP_NONINCR(0x00C, 1);
+    cmd[n++] = 0x09;
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
