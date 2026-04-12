@@ -91,18 +91,102 @@ it never appears in the gathers being submitted.
 
 The stock init value is likely 0x04040007 (streaming + stats mode).
 
+### 0xD0A — Lens Shading Enable
+
+Stock value: 0x00000000. Written in cal gather (not per-frame).
+
+| Value | Result |
+|-------|--------|
+| 1 | No effect (patcher doesn't reach cal gather) |
+
+**Conclusion**: Not patchable — written in calibration gather which is a
+separate submit from the per-frame gather. Patcher only modifies per-frame.
+
+### 0x651 — Tone Curve Ch0 Control
+
+Stock value: 0x00000000. Written in cal gather.
+
+| Value | Result |
+|-------|--------|
+| 1 | No effect (same reason — cal gather) |
+
+**Conclusion**: Not patchable via per-frame patch.
+
+### 0x053 — Work Buffer Enable + IOVA
+
+Stock value: 0x00000001 + IOVA. Written in cal gather.
+
+| Value | Result |
+|-------|--------|
+| 0 | No effect (cal gather, not per-frame) |
+
+**Conclusion**: Not patchable via per-frame patch.
+
+### 0x100 — Stats Buffer IOVA
+
+Stock value: stats buffer IOVA. Written in per-frame gather.
+
+| Value | Result |
+|-------|--------|
+| 0 | No visible effect |
+
+**Conclusion**: Stats buffer address doesn't affect pixel output.
+ISP writes stats to this address but output image is independent.
+
+### 0x00C — ISP Control Trigger
+
+Stock value: 0x05 (streaming). Written in per-frame gather via NONINCR.
+
+| Value | Result |
+|-------|--------|
+| 0x0B (reprocess) | No visible effect |
+
+**Conclusion**: Changing trigger from streaming (0x05) to reprocess (0x0B)
+on a live streaming pipeline has no visible effect. ISP may continue
+processing VI data on inertia, or 0x0B without input surface config
+simply does nothing. Trigger change likely only matters at pipeline start.
+
+## Patcher Scope
+
+The isp_patch module patches gathers as they are submitted. However,
+not all registers are in every gather:
+
+**Per-frame gather (45w)** — patchable:
+- 0xE00-0xE0A (output config + surfaces)
+- 0x500 (processing)
+- 0x100 (stats buffer)
+- 0x00C (trigger)
+- syncpt incrs
+
+**Cal gather (~1527w)** — also patchable (same patcher runs on all ISP gathers):
+- 0xD00-0xD0B (lens shading)
+- 0x651-0x658 (tone curves)
+- 0x053 (work buffer)
+- 0x00C = 0x0F (post-apply trigger)
+
+However, some cal registers (0xD0A, 0x651, 0x053) showed no effect when
+patched. This may be because:
+1. The values are the same as stock defaults (0→1 for enable might not change behavior with zero data)
+2. The ISP latches these at init and per-frame writes are ignored
+3. These need companion data (e.g. 0xD0A=1 needs non-zero 0xD0B data)
+
 ## Key Takeaways
 
-1. **ISP registers are not all hot-patchable** — some (0x015) are set once
-   at init and cannot be changed per-frame.
+1. **ISP registers fall into two categories**: per-frame (output config,
+   trigger) and init-only (ISP_ENABLE 0x015, possibly others).
 
 2. **Format and stride are tightly coupled to buffer allocation** — changing
    them without matching buffer layout always corrupts output.
 
 3. **Processing flags must be 0** — any non-zero value breaks output.
-   This applies to both streaming and reprocess modes.
 
 4. **0xE03 is unused** — safe to set to 0 and ignore.
 
 5. **Real color control is through calibration** — lens shading (0xD0B)
    and tone curves (0x652-0x658), not through output config registers.
+
+6. **Trigger changes on live pipeline have no effect** — pipeline mode
+   (streaming vs reprocess) is set at start, not switchable mid-stream.
+
+7. **Stats buffer (0x100) is independent of pixel output** — can be
+   zeroed without affecting the image.
