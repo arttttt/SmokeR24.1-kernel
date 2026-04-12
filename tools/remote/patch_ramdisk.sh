@@ -1,64 +1,135 @@
 #!/bin/bash
 #
 # Patch ramdisk with WiFi remote debug server.
-# Uses overlay from tools/remote/overlay/ and binaries from tools/remote/bin/.
 #
-# Usage:
-#   ./tools/remote/patch_ramdisk.sh <ramdisk.img|gz> [output]
+# Supports two modes:
+#   Android (default) — services start on sys.boot_completed=1
+#   TWRP (--twrp)     — services start on boot, WiFi via wpa_supplicant
 #
-# Parameters:
-#   ramdisk.img|gz  — gzipped cpio ramdisk to patch (from boot.img)
-#   output          — output file path (optional, default: in-place with .orig backup)
-#
-# Output: patched gzipped cpio ramdisk with remote server overlay injected
-#
-# What it does:
-#   - Copies busybox, kexec, micropython into overlay/sbin/
-#   - Extracts ramdisk, merges overlay files, adds init.remote.rc import
-#   - Repacks as gzipped cpio with uid=0:gid=0
-#
-# Requires: python3, curl (for busybox download on first run)
+# Requires: python3, cpio, curl (for busybox download on first run)
 # Binaries: tools/remote/bin/kexec-armv7l, tools/remote/bin/micropython-armv7l
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OVERLAY_DIR="${SCRIPT_DIR}/overlay"
+OVERLAY_TWRP_DIR="${SCRIPT_DIR}/overlay-twrp"
 CACHE_DIR="${SCRIPT_DIR}/.cache"
 BIN_DIR="${SCRIPT_DIR}/bin"
 
 BUSYBOX_URL="https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l"
 
-RAMDISK="${1:?Usage: $0 <ramdisk.img|gz> [output]}"
-OUTPUT="${2:-}"
+MODE="android"
+RAMDISK=""
+OUTPUT=""
 
-die() { echo "ERROR: $*" >&2; exit 1; }
+# ---- Output helpers ----
 
-[ -f "$RAMDISK" ] || die "Ramdisk not found: $RAMDISK"
-[ -d "$OVERLAY_DIR" ] || die "Overlay dir not found: $OVERLAY_DIR"
+die() {
+    echo "ERROR: $1" >&2
+    [ -n "${2:-}" ] && echo "  hint: $2" >&2
+    exit 1
+}
 
-mkdir -p "$CACHE_DIR"
+usage() {
+    local fd=1
+    local code=0
+    if [ "${1:-}" = "error" ]; then
+        fd=2
+        code=1
+    fi
 
-# --- Prepare overlay: copy binaries into overlay/sbin/ ---
+    cat >&$fd <<'EOF'
+Usage: patch_ramdisk.sh [OPTIONS] <ramdisk.gz> [output]
+
+Patch a ramdisk with WiFi remote debug server overlay.
+
+Options:
+  --twrp       Patch for TWRP recovery (WiFi via wpa_supplicant from
+               /system, credentials from /data/misc/wifi/wpa_supplicant.conf)
+  -h, --help   Show this help
+
+Arguments:
+  ramdisk.gz   Gzipped cpio ramdisk to patch (extracted from boot.img)
+  output       Output file path (default: in-place, original saved as .orig)
+
+Modes:
+  Android (default):
+    Services start on sys.boot_completed=1 property trigger.
+    WiFi is managed by Android framework.
+
+  TWRP (--twrp):
+    Services start on boot trigger. WiFi is brought up by
+    wifi-connect.sh which mounts /system and /data, uses
+    wpa_supplicant with saved credentials, and runs udhcpc.
+    If WiFi fails, TWRP continues normally — services are
+    still running but unreachable until WiFi is up.
+
+Examples:
+  ./tools/remote/patch_ramdisk.sh ramdisk.gz
+  ./tools/remote/patch_ramdisk.sh --twrp ramdisk.gz /tmp/patched.gz
+EOF
+    exit $code
+}
+
+# ---- Argument parsing ----
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage ;;
+            --twrp)    MODE="twrp"; shift ;;
+            -*)        die "Unknown option: $1" "See --help for usage" ;;
+            *)
+                if [ -z "$RAMDISK" ]; then
+                    RAMDISK="$1"
+                elif [ -z "$OUTPUT" ]; then
+                    OUTPUT="$1"
+                else
+                    die "Too many arguments: $1" "See --help for usage"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    [ -n "$RAMDISK" ] || usage error
+    [ -f "$RAMDISK" ] || die "Ramdisk not found: $RAMDISK" "Check the path and try again"
+    [ -d "$OVERLAY_DIR" ] || die "Overlay dir not found: $OVERLAY_DIR" "Run from the kernel source root"
+
+    if [ "$MODE" = "twrp" ] && [ ! -d "$OVERLAY_TWRP_DIR" ]; then
+        die "TWRP overlay dir not found: $OVERLAY_TWRP_DIR" "Expected at tools/remote/overlay-twrp/"
+    fi
+
+    # Resolve to absolute path
+    RAMDISK="$(cd "$(dirname "$RAMDISK")" && pwd)/$(basename "$RAMDISK")"
+    [ -n "$OUTPUT" ] && OUTPUT="$(cd "$(dirname "$OUTPUT")" && pwd)/$(basename "$OUTPUT")"
+}
+
+# ---- Prepare overlay binaries ----
+
 prepare_overlay() {
+    mkdir -p "$CACHE_DIR"
+
     # Busybox: download if needed
     if [ ! -f "$CACHE_DIR/busybox" ]; then
         echo "[*] Downloading busybox..."
-        curl -L -o "$CACHE_DIR/busybox" "$BUSYBOX_URL"
+        curl -L -o "$CACHE_DIR/busybox" "$BUSYBOX_URL" \
+            || die "Failed to download busybox" "Check internet connection"
     fi
     cp "$CACHE_DIR/busybox" "$OVERLAY_DIR/sbin/busybox"
     chmod 755 "$OVERLAY_DIR/sbin/busybox"
     ln -sf busybox "$OVERLAY_DIR/sbin/telnetd"
     echo "[*] busybox: ready"
 
-    # Kexec: from bin/
+    # Kexec
     if [ -f "$BIN_DIR/kexec-armv7l" ]; then
         cp "$BIN_DIR/kexec-armv7l" "$OVERLAY_DIR/sbin/kexec"
         chmod 755 "$OVERLAY_DIR/sbin/kexec"
         echo "[*] kexec: ready"
     fi
 
-    # Micropython: from bin/
+    # Micropython
     if [ -f "$BIN_DIR/micropython-armv7l" ]; then
         cp "$BIN_DIR/micropython-armv7l" "$OVERLAY_DIR/sbin/micropython"
         chmod 755 "$OVERLAY_DIR/sbin/micropython"
@@ -66,53 +137,89 @@ prepare_overlay() {
     fi
 }
 
-# --- Patch ramdisk ---
-patch_ramdisk() {
-    local workdir
-    workdir=$(mktemp -d)
-    trap "rm -rf '$workdir'" EXIT
+# ---- Ramdisk extraction ----
+
+extract_ramdisk() {
+    local workdir="$1"
 
     echo "[*] Extracting ramdisk..."
     cd "$workdir"
     gzip -dc "$RAMDISK" | cpio -idm 2>/dev/null
 
-    # Save original cpio file list
+    # Save original file list for repack
     gzip -dc "$RAMDISK" | cpio -t 2>/dev/null > "$workdir/_orig_cpio_list.txt"
+}
 
-    # Apply overlay — everything in overlay/ goes into ramdisk
-    cp -R "$OVERLAY_DIR"/* .
-    chmod 755 sbin/cgi-bin/* sbin/remote-server.sh sbin/rebuild_boot.sh sbin/rebuild_boot.py 2>/dev/null
+# ---- Apply overlay files ----
 
-    # Add import to init rc
+apply_overlay() {
+    local workdir="$1"
+
+    # Shared overlay (always)
+    cp -R "$OVERLAY_DIR"/* "$workdir/"
+    chmod 755 "$workdir/sbin/cgi-bin"/* \
+              "$workdir/sbin/remote-server.sh" \
+              "$workdir/sbin/rebuild_boot.sh" \
+              "$workdir/sbin/rebuild_boot.py" 2>/dev/null || true
+
+    # TWRP overlay (overwrites init.remote.rc, adds wifi-connect.sh + udhcpc.script)
+    if [ "$MODE" = "twrp" ]; then
+        cp -R "$OVERLAY_TWRP_DIR"/* "$workdir/"
+        chmod 755 "$workdir/sbin/wifi-connect.sh" \
+                  "$workdir/sbin/udhcpc.script" 2>/dev/null || true
+        echo "[*] TWRP overlay applied"
+    fi
+}
+
+# ---- Inject import into init rc ----
+
+inject_import() {
+    local workdir="$1"
     local init_rc=""
-    if [ -f init.tn8.rc ]; then
-        init_rc=init.tn8.rc
-    elif [ -f init.mocha.rc ]; then
-        init_rc=init.mocha.rc
-    fi
 
-    if [ -n "$init_rc" ]; then
-        sed -i.tmp '/init\.telnetd\.rc/d; /init\.remote\.rc/d' "$init_rc"
-        rm -f "${init_rc}.tmp"
-
-        local last_import
-        last_import=$(grep -n '^import' "$init_rc" | tail -1 | cut -d: -f1)
-        if [ -n "$last_import" ]; then
-            sed -i.tmp "${last_import}a\\
-import init.remote.rc" "$init_rc"
-        else
-            sed -i.tmp '1i\
-import init.remote.rc' "$init_rc"
+    if [ "$MODE" = "twrp" ]; then
+        # TWRP: use init.rc
+        [ -f "$workdir/init.rc" ] || die "init.rc not found in ramdisk" \
+            "This doesn't look like a TWRP ramdisk"
+        init_rc="init.rc"
+    else
+        # Android: use device-specific rc
+        if [ -f "$workdir/init.tn8.rc" ]; then
+            init_rc="init.tn8.rc"
+        elif [ -f "$workdir/init.mocha.rc" ]; then
+            init_rc="init.mocha.rc"
         fi
-        rm -f "${init_rc}.tmp"
-        echo "[*] Added import to $init_rc"
+        [ -n "$init_rc" ] || die "No device init rc found in ramdisk" \
+            "Expected init.tn8.rc or init.mocha.rc"
     fi
 
-    # Build file list: original + new files (auto-detected)
-    local new_files
-    new_files=$(cd "$workdir" && find . -mindepth 1 | sed 's|^\./||' | sort | comm -23 - <(sort "$workdir/_orig_cpio_list.txt"))
+    cd "$workdir"
 
-    # Repack
+    # Remove any existing remote imports
+    sed -i.tmp '/init\.telnetd\.rc/d; /init\.remote\.rc/d' "$init_rc"
+    rm -f "${init_rc}.tmp"
+
+    # Insert after last existing import (or at top)
+    local last_import
+    last_import=$(grep -n '^import' "$init_rc" | tail -1 | cut -d: -f1)
+    if [ -n "$last_import" ]; then
+        sed -i.tmp "${last_import}a\\
+import init.remote.rc" "$init_rc"
+    else
+        sed -i.tmp '1i\
+import init.remote.rc' "$init_rc"
+    fi
+    rm -f "${init_rc}.tmp"
+
+    echo "[*] Added import to $init_rc"
+}
+
+# ---- Repack ramdisk as gzipped cpio ----
+
+repack_ramdisk() {
+    local workdir="$1"
+
+    # Determine output path
     local output_file
     if [ -n "$OUTPUT" ]; then
         output_file="$OUTPUT"
@@ -122,13 +229,18 @@ import init.remote.rc' "$init_rc"
         output_file="$RAMDISK"
     fi
 
+    # Build merged file list: original + new
+    local new_files
+    new_files=$(cd "$workdir" && find . -mindepth 1 | sed 's|^\./||' | sort \
+        | comm -23 - <(sort "$workdir/_orig_cpio_list.txt"))
+
     {
         cat "$workdir/_orig_cpio_list.txt"
         echo "$new_files"
     } > "$workdir/_patched_cpio_list.txt"
 
     WORKDIR="$workdir" OUTPUT_FILE="$output_file" python3 << 'PYEOF'
-import gzip, os, struct
+import gzip, os
 
 def cpio_header(name, stat_info, content_len):
     mode = stat_info.st_mode
@@ -193,18 +305,39 @@ with gzip.open(os.environ['OUTPUT_FILE'], 'wb') as f:
     f.write(bytes(out))
 print(f"Packed {len(filelist)} entries, uid=0:gid=0")
 PYEOF
+
     rm -f "$workdir/_orig_cpio_list.txt" "$workdir/_patched_cpio_list.txt"
 }
 
-# --- Main ---
-echo "=== Mocha ramdisk patcher ==="
-prepare_overlay
-patch_ramdisk
+# ---- Main orchestration ----
 
-local_out="${OUTPUT:-${RAMDISK}}"
-local_size=$(stat -f%z "$local_out" 2>/dev/null || stat -c%s "$local_out" 2>/dev/null)
-echo "[+] Patched ramdisk: $local_out ($local_size bytes)"
-echo ""
-echo "Next: build boot.img with this ramdisk, or use:"
-echo "  mocha-remote.sh kexec boot.img"
-echo "  mocha-remote.sh flash boot.img"
+patch_ramdisk() {
+    local workdir
+    workdir=$(mktemp -d)
+    trap "rm -rf '$workdir'" EXIT
+
+    extract_ramdisk "$workdir"
+    apply_overlay "$workdir"
+    inject_import "$workdir"
+    repack_ramdisk "$workdir"
+}
+
+main() {
+    parse_args "$@"
+
+    echo "=== Mocha ramdisk patcher (mode: $MODE) ==="
+    prepare_overlay
+
+    patch_ramdisk
+
+    local output_file="${OUTPUT:-${RAMDISK}}"
+    local size
+    size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null)
+    echo "[+] Patched ramdisk: $output_file ($size bytes)"
+    echo ""
+    echo "Next: build boot.img with this ramdisk, or use:"
+    echo "  mocha-remote.sh kexec boot.img"
+    echo "  mocha-remote.sh flash boot.img"
+}
+
+main "$@"

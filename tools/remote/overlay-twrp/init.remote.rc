@@ -1,0 +1,27 @@
+# TWRP recovery service definitions for WiFi remote debug.
+# Imported by init.rc (added by patch_ramdisk.sh --twrp).
+#
+# All services start on boot independently:
+#   - wificonnect: best-effort WiFi setup (never crashes recovery)
+#   - telnetd on port 2323
+#   - remotehttpd on port 8080
+
+service wificonnect /sbin/wifi-connect.sh
+    class default
+    oneshot
+    seclabel u:r:recovery:s0
+
+service telnetd /sbin/busybox telnetd -l /sbin/sh -b 0.0.0.0 -p 2323 -F
+    class default
+    oneshot
+    seclabel u:r:recovery:s0
+
+service remotehttpd /sbin/remote-server.sh
+    class default
+    oneshot
+    seclabel u:r:recovery:s0
+
+on boot
+    start wificonnect
+    start telnetd
+    start remotehttpd
