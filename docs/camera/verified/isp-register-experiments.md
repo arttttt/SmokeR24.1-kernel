@@ -190,3 +190,30 @@ patched. This may be because:
 
 7. **Stats buffer (0x100) is independent of pixel output** — can be
    zeroed without affecting the image.
+
+## Additional Experiments (Round 2)
+
+### 0xE00 / 0xE01 — Output Width / Height
+
+| Register | Value | When | Result |
+|----------|-------|------|--------|
+| 0xE00 | 0x050F0000 (W=1296) | Live | ISP panic |
+| 0xE00 | 0x050F0000 (W=1296) | Before camera open | ISP panic |
+| 0xE01 | 0x03CB0000 (H=972) | Before camera open | ISP panic |
+
+**Conclusion**: Output dimensions cannot be changed — must match VI/buffer
+allocation. ISP panics on any dimension mismatch. Downscaling is likely
+handled by a separate scaler block (see NvIspHwSettingsCopyOutputDownScaler
+in blob), not through 0xE00/0xE01.
+
+### 0xE05 — Y Surface Word 2 (normally 0)
+
+| Value | Result |
+|-------|--------|
+| 0 - 0xFFFFFFFF (full range) | No visible effect |
+
+**Conclusion**: Unused padding word in surface descriptor. Safe to leave as 0.
+
+### 0x650 — Tone Curve Master Enable (?)
+
+Not tested to conclusion — register purpose unclear, likely in cal gather.
