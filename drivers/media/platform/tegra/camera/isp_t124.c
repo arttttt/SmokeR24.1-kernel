@@ -1399,14 +1399,7 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	int cal_off, cal_words, cal_sp_off;
 	int g1_off, g1_words, g2_off, g2_words, g3_off;
 	u32 W = isp->width, H = isp->height;
-	u32 y_stride = isp->y_stride;
-	u32 uv_stride = isp->uv_stride;
 	u32 raw_stride = isp->in_stride;
-	size_t y_size = (size_t)y_stride * H;
-	size_t uv_size = (size_t)uv_stride * (H / 2);
-	dma_addr_t out_y = out_dma;
-	dma_addr_t out_u = out_dma + y_size;
-	dma_addr_t out_v = out_dma + y_size + uv_size;
 	u32 in_w, in_h;
 
 	if (!isp->streaming || !isp->cmdbuf)
