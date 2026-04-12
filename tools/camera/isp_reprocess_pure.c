@@ -203,11 +203,44 @@ int main(int argc, char **argv)
         rw.offsets = (uint32_t)(uintptr_t)&offset;
         rw.values = (uint32_t)(uintptr_t)&value;
         rw.write = 1;
-        if (ioctl(isp_ctrl_fd >= 0 ? isp_ctrl_fd : ctrl_fd,
-                  NVHOST32_IOCTL_CTRL_MODULE_REGRDWR, &rw) < 0)
-            perror("PIO write 0xFC (non-fatal)");
-        else
-            printf("PIO write: ISP reg 0xFC = 0x20\n");
+        /* Try channel fd first (NR=14), then ctrl fd (NR=5) */
+        int pio_ok = 0;
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CTRL_MODULE_REGRDWR, &rw) == 0) {
+            printf("PIO write via channel: ISP reg 0xFC = 0x20\n");
+            pio_ok = 1;
+        }
+        if (!pio_ok) {
+            /* Try 64-bit version (NR=27) on channel */
+            #define NVHOST_IOCTL_CHANNEL_MODULE_REGRDWR _IOWR(NVHOST_IOCTL_MAGIC, 27, struct { uint32_t id; uint32_t num_offsets; uint32_t block_size; uint32_t write; uint64_t offsets; uint64_t values; })
+            struct {
+                uint32_t id;
+                uint32_t num_offsets;
+                uint32_t block_size;
+                uint32_t write;
+                uint64_t offsets;
+                uint64_t values;
+            } rw64;
+            memset(&rw64, 0, sizeof(rw64));
+            rw64.id = 0x0B;
+            rw64.num_offsets = 1;
+            rw64.block_size = 4;
+            rw64.write = 1;
+            rw64.offsets = (uint64_t)(uintptr_t)&offset;
+            rw64.values = (uint64_t)(uintptr_t)&value;
+            if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_MODULE_REGRDWR, &rw64) == 0) {
+                printf("PIO write via channel (64bit): ISP reg 0xFC = 0x20\n");
+                pio_ok = 1;
+            }
+        }
+        if (!pio_ok) {
+            /* Last resort: ctrl node */
+            if (ioctl(ctrl_fd, NVHOST32_IOCTL_CTRL_MODULE_REGRDWR, &rw) == 0) {
+                printf("PIO write via ctrl: ISP reg 0xFC = 0x20\n");
+                pio_ok = 1;
+            }
+        }
+        if (!pio_ok)
+            printf("PIO write FAILED (all methods)\n");
     }
 
     /* Get syncpoints */
