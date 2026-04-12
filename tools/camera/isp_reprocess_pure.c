@@ -156,14 +156,11 @@ int main(int argc, char **argv)
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
     if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
-    /* Use ISP-B (class 0x34) — stock camera uses ISP-B for OV5693 front */
-    int isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
-    if (isp_fd < 0) {
-        isp_fd = open("/dev/nvhost-isp", O_RDWR);
-        printf("Fell back to ISP-A\n");
-    } else {
-        printf("Using ISP-B\n");
-    }
+    /* Use ISP-A (class 0x32) — ISP-B doesn't support reprocess mode */
+    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
+    if (isp_fd < 0) { perror("open isp-a"); return 1; }
+    printf("Using ISP-A\n");
+    isp_class = ISP_CLASS_A;
     if (isp_fd < 0) { perror("open isp"); return 1; }
 
     /* Open ISP ctrl node — needed for PIO register writes */
