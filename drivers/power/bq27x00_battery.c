@@ -583,9 +583,15 @@ static int bq27x00_voltage_to_soc(int voltage_mv)
 		return 50;
 	if (voltage_mv >= 3700)
 		return 35;
+	if (voltage_mv >= 3650)
+		return 30;
 	if (voltage_mv >= 3600)
+		return 25;
+	if (voltage_mv >= 3550)
 		return 20;
 	if (voltage_mv >= 3500)
+		return 15;
+	if (voltage_mv >= 3450)
 		return 10;
 	if (voltage_mv >= 3400)
 		return 5;
