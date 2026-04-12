@@ -718,11 +718,13 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 	bq27x00_battery_temperature(di, &val);
 	temp = val.intval;
 
-	pr_info("bq27x00 BMS soc %d %d v %d i %d t %d c %d rm %d %d fcc %d %d flag %x\n",
+	pr_info("bq27x00: soc=%d%% true_soc=%d%% vol=%dmV cur=%dmA temp=%d.%dC "
+		"cycles=%d rm=%d/%dmAh fcc=%d/%dmAh flags=0x%04x\n",
 		di->cache.capacity, di->cache.true_soc,
-		di->cache.voltage * 1000,
-		(int)((s16)di->cache.average_i * (-1000)),
-		temp, di->cache.cycle_count,
+		di->cache.voltage,
+		(int)((s16)di->cache.average_i) * (-1),
+		temp / 10, abs(temp % 10),
+		di->cache.cycle_count,
 		di->cache.remain_cap, di->cache.true_cap,
 		di->cache.full_charge_cap, di->cache.true_fcc,
 		di->cache.flags);
