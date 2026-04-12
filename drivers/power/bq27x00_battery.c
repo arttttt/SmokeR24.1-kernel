@@ -682,27 +682,17 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 		/*
 		 * Detect corrupted Impedance Track state:
 		 * voltage indicates a healthy battery but gauge reports SOC=0.
-		 * Try to recover by simulating battery re-insertion (works in
-		 * SEALED mode per bq27520-G4 TRM, SLUUA35) and fall back to
-		 * a voltage-based SOC estimate so the system doesn't shut down.
+		 * Fall back to a voltage-based SOC estimate so the system
+		 * doesn't shut down.
 		 */
 		if (cache.voltage > 3400 && cache.capacity == 0 &&
 		    cache.remain_cap == 0 && cache.true_cap == 0) {
-			dev_warn(&di->client->dev,
-				"IT state corrupt: voltage %d mV but SOC=0, "
-				"attempting BAT_REMOVE/INSERT recovery\n",
-				cache.voltage);
-			bq27x00_control_cmd(di, BAT_REMOVE_SUBCMD);
-			msleep(100);
-			bq27x00_control_cmd(di, BAT_INSERT_SUBCMD);
-			msleep(100);
-
-			/* Use voltage-based estimate until gauge recovers */
 			cache.capacity = bq27x00_voltage_to_soc(cache.voltage);
 			cache.true_soc = cache.capacity;
-			dev_info(&di->client->dev,
-				"using voltage-based SOC estimate: %d%%\n",
-				cache.capacity);
+			dev_warn(&di->client->dev,
+				"IT state corrupt: voltage %d mV but SOC=0, "
+				"using voltage-based estimate: %d%%\n",
+				cache.voltage, cache.capacity);
 		}
 	}
 
