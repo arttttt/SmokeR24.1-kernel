@@ -266,8 +266,6 @@ static int bq27x00_read_block_i2c(struct bq27x00_device_info *di, u8 reg,
 	unsigned char *buf, size_t len);
 static int bq27x00_battery_temperature(struct bq27x00_device_info *di,
 	union power_supply_propval *val);
-static int update_firmware(struct bq27x00_device_info *di);
-
 enum bq27x00_chip { BQ27000, BQ27500 };
 
 struct bq27x00_reg_cache {
@@ -364,7 +362,6 @@ struct bq27x00_device_info {
 	struct battery_gauge_dev	*bg_dev;
 	int bat_status;
 	int is_rom_mode;
-	int it_corrupt_reflash;
 };
 
 struct bq27x00_firmware_data {
@@ -696,14 +693,6 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 				"IT state corrupt: voltage %d mV but SOC=0, "
 				"using voltage-based estimate: %d%%\n",
 				cache.voltage, cache.capacity);
-
-			if (!di->it_corrupt_reflash) {
-				di->it_corrupt_reflash = 1;
-				dev_warn(&di->client->dev,
-					"scheduling dataflash reflash to "
-					"reset IT algorithm\n");
-				update_firmware(di);
-			}
 		}
 	}
 
@@ -1726,15 +1715,14 @@ static int update_firmware(struct bq27x00_device_info *di)
 	}
 
 	version = simple_strtoul(pdata->fw_name[type], NULL, 16);
-	dev_info(&di->client->dev, "id %d ver %lu, df_ver %x rom %d reflash %d\n",
-		type, version, di->df_ver, di->is_rom_mode,
-		di->it_corrupt_reflash);
-	if (di->is_rom_mode || di->it_corrupt_reflash)
+	dev_info(&di->client->dev, "id %d ver %lu, df_ver %x rom %d\n",
+		type, version, di->df_ver, di->is_rom_mode);
+	if (di->is_rom_mode || version != di->df_ver)
 		error = _update_firmware(&di->client->dev, pdata->fw_name[type]);
 	else
 		bq27x00_update(di);
 
-	if ((di->is_rom_mode || di->it_corrupt_reflash) && error == 0) {
+	if ((di->is_rom_mode || version != di->df_ver) && error == 0) {
 		bq27x00_reset_registers(di);
 		di->is_rom_mode = 0;
 	}
