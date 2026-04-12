@@ -60,7 +60,9 @@
 /* Subcommands of Control() */
 #define DEV_TYPE_SUBCMD			0x0001
 #define FW_VER_SUBCMD			0x0002
+#define OCV_CMD_SUBCMD			0x000C
 #define BAT_INSERT_SUBCMD		0x000D
+#define BAT_REMOVE_SUBCMD		0x000E
 #define DF_VER_SUBCMD			0x001F
 #define IT_ENABLE_SUBCMD		0x0021
 #define RESET_SUBCMD			0x0041
@@ -562,6 +564,33 @@ static int bq27x00_battery_read_time(struct bq27x00_device_info *di, u8 reg)
 	return tval * 60;
 }
 
+/*
+ * Rough SOC estimate from voltage for single-cell Li-ion (3.0V–4.2V).
+ * Used as fallback when the gauge's Impedance Track data is corrupted.
+ */
+static int bq27x00_voltage_to_soc(int voltage_mv)
+{
+	if (voltage_mv >= 4150)
+		return 95;
+	if (voltage_mv >= 4050)
+		return 80;
+	if (voltage_mv >= 3900)
+		return 65;
+	if (voltage_mv >= 3780)
+		return 50;
+	if (voltage_mv >= 3700)
+		return 35;
+	if (voltage_mv >= 3600)
+		return 20;
+	if (voltage_mv >= 3500)
+		return 10;
+	if (voltage_mv >= 3400)
+		return 5;
+	if (voltage_mv >= 3300)
+		return 2;
+	return 0;
+}
+
 static void bq27x00_update(struct bq27x00_device_info *di)
 {
 	struct bq27x00_reg_cache cache = {0, };
@@ -645,6 +674,32 @@ static void bq27x00_update(struct bq27x00_device_info *di)
 		/* We only have to read charge design full once */
 		if (di->charge_design_full <= 0)
 			di->charge_design_full = bq27x00_battery_read_ilmd(di);
+
+		/*
+		 * Detect corrupted Impedance Track state:
+		 * voltage indicates a healthy battery but gauge reports SOC=0.
+		 * Try to recover by simulating battery re-insertion (works in
+		 * SEALED mode per bq27520-G4 TRM, SLUUA35) and fall back to
+		 * a voltage-based SOC estimate so the system doesn't shut down.
+		 */
+		if (cache.voltage > 3400 && cache.capacity == 0 &&
+		    cache.remain_cap == 0 && cache.true_cap == 0) {
+			dev_warn(&di->client->dev,
+				"IT state corrupt: voltage %d mV but SOC=0, "
+				"attempting BAT_REMOVE/INSERT recovery\n",
+				cache.voltage);
+			bq27x00_control_cmd(di, BAT_REMOVE_SUBCMD);
+			msleep(100);
+			bq27x00_control_cmd(di, BAT_INSERT_SUBCMD);
+			msleep(100);
+
+			/* Use voltage-based estimate until gauge recovers */
+			cache.capacity = bq27x00_voltage_to_soc(cache.voltage);
+			cache.true_soc = cache.capacity;
+			dev_info(&di->client->dev,
+				"using voltage-based SOC estimate: %d%%\n",
+				cache.capacity);
+		}
 	}
 
 	/* Ignore current_now which is a snapshot of the current battery state
