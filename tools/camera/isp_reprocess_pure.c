@@ -221,6 +221,21 @@ int main(int argc, char **argv)
             perror("PIO write 0xFC FAILED");
     }
 
+    /* Get waitbase (NR=17) — stock camera does this during init */
+    struct nvhost_get_param_arg gwb;
+    gwb.param = 0;
+    if (ioctl(isp_fd, _IOWR(NVHOST_IOCTL_MAGIC, 17, struct nvhost_get_param_arg), &gwb) < 0)
+        perror("get waitbase (non-fatal)");
+    else
+        printf("Waitbase param=0 → %u\n", gwb.value);
+
+    /* Get waitbases (NR=3) */
+    struct { uint32_t value; } gwbs;
+    if (ioctl(isp_fd, _IOR(NVHOST_IOCTL_MAGIC, 3, gwbs), &gwbs) < 0)
+        perror("get waitbases (non-fatal)");
+    else
+        printf("Waitbases → %u\n", gwbs.value);
+
     /* Get syncpoints */
     struct nvhost_get_param_arg gsp;
     gsp.param = 0; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp);
