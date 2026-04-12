@@ -41,6 +41,7 @@
 #include <linux/vmalloc.h>
 #include <linux/firmware.h>
 #include <asm/unaligned.h>
+#include <linux/wakelock.h>
 #include <linux/switch.h>
 #include <linux/interrupt.h>
 #include <linux/power/battery-charger-gauge-comm.h>
@@ -63,6 +64,7 @@
 #define OCV_CMD_SUBCMD			0x000C
 #define BAT_INSERT_SUBCMD		0x000D
 #define BAT_REMOVE_SUBCMD		0x000E
+#define CLEAR_HIBERNATE_SUBCMD		0x0012
 #define DF_VER_SUBCMD			0x001F
 #define IT_ENABLE_SUBCMD		0x0021
 #define RESET_SUBCMD			0x0041
@@ -356,6 +358,8 @@ struct bq27x00_device_info {
 	int df_ver;
 
 	struct switch_dev sdev;
+	struct wake_lock wake_lock;
+	struct delayed_work ocv_work;
 	struct battery_gauge_dev	*bg_dev;
 	int bat_status;
 	int is_rom_mode;
@@ -1055,6 +1059,20 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 	return ret;
 }
 
+/*
+ * Delayed OCV measurement after boot.
+ * At POR the system draws too much current for a valid OCV (need < C/20).
+ * Schedule this ~10s after probe when current has stabilized.
+ */
+static void bq27x00_ocv_work(struct work_struct *work)
+{
+	struct bq27x00_device_info *di =
+		container_of(work, struct bq27x00_device_info, ocv_work.work);
+
+	dev_info(&di->client->dev, "sending delayed OCV_CMD for SOC recalculation\n");
+	bq27x00_control_cmd(di, OCV_CMD_SUBCMD);
+}
+
 static void bq27x00_external_power_changed(struct power_supply *psy)
 {
 	struct bq27x00_device_info *di = to_bq27x00_device_info(psy);
@@ -1075,6 +1093,7 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	di->bat.external_power_changed = bq27x00_external_power_changed;
 
 	INIT_DELAYED_WORK(&di->work, bq27x00_battery_poll);
+	INIT_DELAYED_WORK(&di->ocv_work, bq27x00_ocv_work);
 	mutex_init(&di->lock);
 
 	/*
@@ -1100,7 +1119,8 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 
 static void bq27x00_powersupply_unregister(struct bq27x00_device_info *di)
 {
-	cancel_delayed_work(&di->work);
+	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work_sync(&di->ocv_work);
 
 	power_supply_unregister(&di->bat);
 
@@ -1344,6 +1364,7 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 
 	if (flags & SYSDOWN_BIT) {
 		dev_warn(&di->client->dev, "detected SYSDOWN condition, pulsing poweroff switch\n");
+		wake_lock(&di->wake_lock);
 		switch_set_state(&di->sdev, 0);
 		switch_set_state(&di->sdev, 1);
 		cancel_delayed_work(&di->work);
@@ -1352,6 +1373,7 @@ static irqreturn_t soc_int_irq_threaded_handler(int irq, void *arg)
 	} else {
 		dev_info(&di->client->dev, "SYSDOWN condition not detected\n");
 		switch_set_state(&di->sdev, 0);
+		wake_unlock(&di->wake_lock);
 	}
 
 	mutex_unlock(&di->lock);
@@ -1841,6 +1863,30 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 
 	bq27x00_reset_registers(di);
 
+	/*
+	 * Poll CONTROL_STATUS [INITCOMP] bit to ensure the gauge has
+	 * finished initialization before we read any data (TRM 2.1.1).
+	 */
+	{
+		int ctrl, retries = 20;
+
+		do {
+			ctrl = bq27x00_battery_read_control_reg(di);
+			if (ctrl >= 0 && (ctrl & BIT(7))) /* INITCOMP = high byte bit7 */
+				break;
+			msleep(100);
+		} while (--retries > 0);
+
+		if (retries == 0)
+			dev_warn(&client->dev,
+				"gauge INITCOMP not set after 2s, proceeding anyway\n");
+		else
+			dev_info(&client->dev,
+				"gauge initialization complete (ctrl=0x%04x)\n", ctrl);
+	}
+
+	wake_lock_init(&di->wake_lock, WAKE_LOCK_SUSPEND, "battery_wake_lock");
+
 	/* use switch dev reporting to tell userspace to poweroff gracefully */
 	di->sdev.name = "poweroff";
 	retval = switch_dev_register(&di->sdev);
@@ -1885,6 +1931,14 @@ static int bq27x00_battery_probe(struct i2c_client *client,
 	/* Update firmware */
 	update_firmware(di);
 
+	/*
+	 * Schedule a delayed OCV measurement ~10s after probe.
+	 * At POR the boot current exceeds C/20, causing a bad initial OCV.
+	 * By this time the system has stabilized and OCV_CMD can get a good
+	 * reading to re-establish accurate SOC (TRM Appendix A.2.3).
+	 */
+	queue_delayed_work(system_power_efficient_wq, &di->ocv_work, 10 * HZ);
+
 	return 0;
 
 batt_failed_3:
@@ -1905,6 +1959,7 @@ static int bq27x00_battery_remove(struct i2c_client *client)
 
 	bq27x00_powersupply_unregister(di);
 
+	wake_lock_destroy(&di->wake_lock);
 	kfree(di->bat.name);
 
 	mutex_lock(&battery_mutex);
@@ -1946,7 +2001,9 @@ static void bq27x00_shutdown(struct i2c_client *client)
 	if (di->client->irq)
 		disable_irq(di->client->irq);
 
-	cancel_delayed_work(&di->work);
+	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work_sync(&di->ocv_work);
+	wake_lock_destroy(&di->wake_lock);
 	dev_err(&di->client->dev, "At shutdown Voltage %dmV\n",
 			di->cache.voltage);
 }
@@ -1959,7 +2016,8 @@ static int bq27x00_suspend(struct device *dev)
 	mutex_lock(&di->lock);
 
 	bq27x00_battery_dump_qpassed(di, buf, sizeof(buf));
-	cancel_delayed_work(&di->work);
+	cancel_delayed_work_sync(&di->work);
+	cancel_delayed_work_sync(&di->ocv_work);
 
 	mutex_unlock(&di->lock);
 
@@ -1979,6 +2037,9 @@ static int bq27x00_resume(struct device *dev)
 
 	if (device_may_wakeup(&di->client->dev) && di->client->irq)
 		disable_irq_wake(di->client->irq);
+
+	/* Ensure gauge exits HIBERNATE and resumes active gauging (TRM 5.6.5) */
+	bq27x00_control_cmd(di, CLEAR_HIBERNATE_SUBCMD);
 
 	mutex_lock(&di->lock);
 
