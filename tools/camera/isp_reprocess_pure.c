@@ -222,6 +222,55 @@ int main(int argc, char **argv)
     }
     free(zeros);
 
+    /* ---- Init submit: trigger 0x0F to initialize ISP pipeline ---- */
+    {
+        uint32_t init_cmd[8];
+        int in = 0;
+        init_cmd[in++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        init_cmd[in++] = OP_INCR(0x053, 2);
+        init_cmd[in++] = 1;               /* work buf enable */
+        init_cmd[in++] = work_iova;       /* work buf IOVA (no reloc in init) */
+        init_cmd[in++] = OP_INCR(0x015, 1);
+        init_cmd[in++] = 7;               /* ISP_ENABLE = full pipeline */
+        init_cmd[in++] = OP_NONINCR(0x00C, 1);
+        init_cmd[in++] = 0x0F;            /* post-apply trigger */
+
+        nvmap_write(cmd_h, 0, init_cmd, in * 4);
+
+        struct nvhost_cmdbuf icb = { .mem = cmd_h, .offset = 0, .words = in };
+        struct nvhost_syncpt_incr isi = { .syncpt_id = sp_memory, .syncpt_incrs = 1 };
+        uint32_t iclass = ISP_CLASS;
+        struct nvhost_fence ifence = { 0, 0 };
+
+        struct nvhost32_submit_args isa;
+        memset(&isa, 0, sizeof(isa));
+        isa.submit_version = 0;
+        isa.num_syncpt_incrs = 1;
+        isa.num_cmdbufs = 1;
+        isa.num_relocs = 0;
+        isa.timeout = 5000;
+        isa.syncpt_incrs = (uint32_t)(uintptr_t)&isi;
+        isa.cmdbufs = (uint32_t)(uintptr_t)&icb;
+        isa.class_ids = (uint32_t)(uintptr_t)&iclass;
+        isa.fences = (uint32_t)(uintptr_t)&ifence;
+
+        printf("Init submit (0x0F trigger)...\n");
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0) {
+            perror("init submit");
+        } else {
+            uint32_t ithresh = isa.fence;
+            struct nvhost_ctrl_syncpt_waitex_args iwa = {
+                .id = sp_memory, .thresh = ithresh, .timeout = 5000
+            };
+            if (ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &iwa) < 0)
+                printf("Init TIMEOUT (may be normal — 0x0F has no cond incr)\n");
+            else
+                printf("Init done (syncpt=%u val=%u)\n", sp_memory, iwa.value);
+        }
+    }
+
+    /* ---- Reprocess submit ---- */
+
     /* Build minimal reprocess gather */
     uint32_t cmd[64];
     int n = 0;
