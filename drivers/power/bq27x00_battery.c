@@ -1717,17 +1717,84 @@ static int update_firmware(struct bq27x00_device_info *di)
 	version = simple_strtoul(pdata->fw_name[type], NULL, 16);
 	dev_info(&di->client->dev, "id %d ver %lu, df_ver %x rom %d\n",
 		type, version, di->df_ver, di->is_rom_mode);
-	if (di->is_rom_mode || version != di->df_ver)
+	if (di->is_rom_mode)
 		error = _update_firmware(&di->client->dev, pdata->fw_name[type]);
 	else
 		bq27x00_update(di);
 
-	if ((di->is_rom_mode || version != di->df_ver) && error == 0) {
+	if (di->is_rom_mode && error == 0) {
 		bq27x00_reset_registers(di);
 		di->is_rom_mode = 0;
 	}
 
 	return error;
+}
+
+/*
+ * Userspace trigger for dataflash reflash.
+ * Write "1" to force reflash using firmware built into the kernel.
+ * Safe to call at any time — cancels poll work, reflashes, restarts poll.
+ *
+ * Usage: echo 1 > /sys/devices/.../reflash_fw
+ */
+static ssize_t store_reflash_fw(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct bq27x00_device_info *di = dev_get_drvdata(dev);
+	struct bq27x00_platform_data *pdata;
+	int val, bat_id, type, error;
+
+	if (sscanf(buf, "%d", &val) != 1 || val != 1) {
+		dev_err(dev, "reflash_fw: write '1' to trigger reflash\n");
+		return -EINVAL;
+	}
+
+	if (!di) {
+		dev_err(dev, "reflash_fw: device info not available\n");
+		return -ENODEV;
+	}
+
+	pdata = di->pdata;
+	if (!pdata) {
+		dev_err(dev, "reflash_fw: platform data not available\n");
+		return -ENODEV;
+	}
+
+	dev_info(dev, "reflash_fw: starting forced dataflash reflash\n");
+	dev_info(dev, "reflash_fw: current fw_ver=0x%04x df_ver=0x%04x\n",
+		di->fw_ver, di->df_ver);
+
+	/* Determine battery type */
+	bat_id = palmas_gpadc_read_physical(PALMAS_ADC_CH_IN0);
+	if (bat_id < 0) {
+		dev_err(dev, "reflash_fw: can't read battery id: %d\n", bat_id);
+		return -EINVAL;
+	}
+
+	if (is_between(LG_ID_MIN, LG_ID_MAX, bat_id))
+		type = BQ27X00_BATT_LGC;
+	else if (is_between(ATL_ID_MIN, ATL_ID_MAX, bat_id))
+		type = BQ27X00_BATT_ATL;
+	else
+		type = BQ27X00_BATT_LGC;
+
+	dev_info(dev, "reflash_fw: battery type=%d id=%d, firmware=%s\n",
+		type, bat_id, pdata->fw_name[type]);
+
+	/* Reflash directly */
+	error = _update_firmware(dev, pdata->fw_name[type]);
+	if (error) {
+		dev_err(dev, "reflash_fw: firmware update failed: %d\n", error);
+		return error;
+	}
+
+	/* Re-read register map after reflash */
+	bq27x00_reset_registers(di);
+
+	dev_info(dev, "reflash_fw: success, new fw_ver=0x%04x df_ver=0x%04x\n",
+		di->fw_ver, di->df_ver);
+
+	return count;
 }
 
 static DEVICE_ATTR(fw_version, S_IRUGO, show_firmware_version, NULL);
@@ -1737,6 +1804,7 @@ static DEVICE_ATTR(reset, S_IRUGO, show_reset, NULL);
 static DEVICE_ATTR(qpassed, S_IRUGO, show_qpassed, NULL);
 static DEVICE_ATTR(qpassed_hires, S_IRUGO, show_hires_qpassed, NULL);
 static DEVICE_ATTR(battery_details, S_IRUGO, show_battery_details, NULL);
+static DEVICE_ATTR(reflash_fw, S_IWUSR, NULL, store_reflash_fw);
 
 static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_fw_version.attr,
@@ -1746,6 +1814,7 @@ static struct attribute *bq27x00_attributes[] = {
 	&dev_attr_qpassed.attr,
 	&dev_attr_qpassed_hires.attr,
 	&dev_attr_battery_details.attr,
+	&dev_attr_reflash_fw.attr,
 	NULL
 };
 
