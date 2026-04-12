@@ -245,27 +245,20 @@ int main(int argc, char **argv)
         struct nvhost32_submit_args isa;
         memset(&isa, 0, sizeof(isa));
         isa.submit_version = 0;
-        isa.num_syncpt_incrs = 1;
+        isa.num_syncpt_incrs = 0;  /* no syncpt wait — 0x0F doesn't incr */
         isa.num_cmdbufs = 1;
         isa.num_relocs = 0;
         isa.timeout = 5000;
-        isa.syncpt_incrs = (uint32_t)(uintptr_t)&isi;
         isa.cmdbufs = (uint32_t)(uintptr_t)&icb;
         isa.class_ids = (uint32_t)(uintptr_t)&iclass;
         isa.fences = (uint32_t)(uintptr_t)&ifence;
 
-        printf("Init submit (0x0F trigger)...\n");
+        printf("Init submit (0x0F, no syncpt wait)...\n");
         if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0) {
             perror("init submit");
         } else {
-            uint32_t ithresh = isa.fence;
-            struct nvhost_ctrl_syncpt_waitex_args iwa = {
-                .id = sp_memory, .thresh = ithresh, .timeout = 5000
-            };
-            if (ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &iwa) < 0)
-                printf("Init TIMEOUT (may be normal — 0x0F has no cond incr)\n");
-            else
-                printf("Init done (syncpt=%u val=%u)\n", sp_memory, iwa.value);
+            printf("Init submitted OK, fence=%u\n", isa.fence);
+            usleep(100000);  /* 100ms for ISP to process */
         }
     }
 
