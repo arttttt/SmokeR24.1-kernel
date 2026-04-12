@@ -1,23 +1,20 @@
 /*
  * ISP reprocess test — pure kernel path, NO blobs
  *
- * Opens /dev/nvhost-isp directly, allocates nvmap buffers,
- * submits minimal reprocess gather. No dlopen, no shim.
+ * Opens ISP channel via NvRmChannelOpen (from libnvrm.so) for proper
+ * HW init, but builds and submits gathers ourselves — no libnvisp_v3.so.
  *
- * Based on verified stock register analysis (2026-04-12):
- * - Format 0x43 (R8G8B8A8) for reprocess
- * - Trigger 0x0B (reprocess from memory)
- * - Minimal gather: output config + input config + syncpts + trigger
- * - No calibration, no processing block, no stats needed
+ * This isolates the channel init (which we can't reproduce yet) from
+ * the gather building (which we understand fully).
  *
  * Input: 2592x1944 BG10 (10-bit Bayer BGGR, 16-bit LE containers)
  * Output: RGBA 2592x1944 (32bpp)
  *
  * Build:
- *   $CC --sysroot=$SYSROOT -std=gnu99 -pie -o isp_reprocess_pure isp_reprocess_pure.c
+ *   $CC --sysroot=$SYSROOT -std=gnu99 -pie -o isp_reprocess_pure isp_reprocess_pure.c -ldl
  *
  * Usage:
- *   ./isp_reprocess_pure /data/local/tmp/front_raw.raw
+ *   LD_LIBRARY_PATH=/system/vendor/lib ./isp_reprocess_pure /data/local/tmp/front_raw.raw
  */
 
 #include <stdio.h>
@@ -26,6 +23,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #include <sys/ioctl.h>
 
 /* ---- nvmap ioctls ---- */

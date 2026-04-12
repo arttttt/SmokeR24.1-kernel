@@ -242,3 +242,56 @@ in blob), not through 0xE00/0xE01.
 ### 0x650 — Tone Curve Master Enable (?)
 
 Not tested to conclusion — register purpose unclear, likely in cal gather.
+
+## Minimal ISP Configuration (Round 3)
+
+Tested by progressively removing register blocks to find minimum viable set.
+Used override to replace cal gather with NOP + patcher to zero individual registers.
+
+### What can be removed (streaming still works):
+
+| Block | Registers | Words | Result when zeroed/removed |
+|-------|-----------|-------|---------------------------|
+| Cal gather | all ~1527w | 1527 | Works fine — cal not needed |
+| Processing | 0x500-0x505 | 6+1 | Works — dims/flags not needed |
+| Stats buffer | 0x100-0x103 | 4+1 | Works — stats independent of output |
+| Output color | 0xE03 | 1+1 | Works — unused register |
+
+### What CANNOT be removed:
+
+| Block | Registers | Words | Result when zeroed |
+|-------|-----------|-------|--------------------|
+| Output dims | 0xE00-0xE01 | 4 | ISP panic |
+| Output format | 0xE02 | 2 | ISP panic or corruption |
+| Y surface | 0xE04-0xE06 | 4 | No output (need IOVA + stride) |
+| U/V surfaces | 0xE07-0xE0C | 8 | Monochrome output (chroma lost) |
+| Syncpt incrs | 0x000 | 6 | Needed for fence/completion |
+| Trigger | 0x00C | 2 | Needed to fire ISP |
+
+### Minimum viable per-frame gather (~26 words):
+
+```
+SETCLASS(class_id)                         # 1w
+INCR(0xE00, 1): width                     # 2w
+INCR(0xE01, 1): height                    # 2w
+INCR(0xE02, 1): format                    # 2w
+INCR(0xE04, 3): Y_IOVA, 0, Y_stride      # 4w
+INCR(0xE07, 3): U_IOVA, 0, UV_stride     # 4w
+INCR(0xE0A, 3): V_IOVA, 0, UV_stride     # 4w
+NONINCR(0x000, 1): syncpt_memory          # 2w
+NONINCR(0x000, 1): syncpt_stats           # 2w
+NONINCR(0x000, 1): syncpt_loadv           # 2w
+NONINCR(0x00C, 1): trigger                # 2w
+                                    Total: ~27w
+```
+
+Compared to stock: **27 words vs 1572 words (cal + per-frame)** — 98% reduction.
+
+### Implications for kernel driver
+
+The kernel ISP driver can be drastically simplified:
+- No calibration submit needed per frame
+- No processing block (0x500)
+- No stats buffer (0x100)
+- Just output surfaces + syncpts + trigger
+- Calibration (lens shading, tone curves) only needed when color correction is desired
