@@ -1,0 +1,412 @@
+================================================================================
+NvRm Channel/Stream/SyncPoint Reverse Engineering
+Binary: /tmp/libnvrm_graphics_old.so (ARM32, 46KB, Tegra K1 MIUI blob)
+================================================================================
+
+ARCHITECTURE OVERVIEW
+=====================
+
+libnvrm_graphics_old.so uses a vtable dispatch pattern. Every NvRmChannel*
+function calls FUN_000138d0() to load a backend, then dispatches through a
+vtable. There are TWO backends:
+  1. nvhost backend (for host1x devices: ISP, VI, display, etc.)
+  2. nvgpu backend (for GPU: /dev/dri/card*)
+
+The backend vtable is loaded via NvOsLibraryLoad("libnvstreamdisasm") or
+similar, then function pointers are resolved via NvOsLibraryGetSymbol.
+But the ACTUAL implementations of the ioctls are in THIS library, in the
+unnamed FUN_* functions. The vtable entries point to them.
+
+NOTE: NvRmChannelOpen is NOT in libnvrm.so (the base RM library).
+It is ONLY in libnvrm_graphics_old.so.
+
+
+VTABLE OFFSETS (from vtable base pointer)
+==========================================
++0x0c  NvRmChannelOpenDeviceFile
++0x10  NvRmChannelOpen
++0x14  NvRmChannelClose
++0x18  NvRmChannelSetErrNotifier
++0x1c  NvRmChannelDup
++0x24  NvRmChannelSetSubmitTimeout
++0x28  FUN_00013a70 (set push buffer / stream pair)
++0x2c  FUN_00013abc (map/unmap buffer)
++0x30  FUN_00013b08 (CHANNEL SUBMIT - 22 params!)
++0x34  NvRmChannelSyncPointFree
++0x38  NvRmChannelGetModuleSyncPoint
++0x3c  NvRmChannelGetClientManagedSyncPoint
++0x48  NvRmChannelGetModuleWaitBase
++0x4c  NvRmChannelGetModuleClockRate
++0x50  NvRmChannelSetModuleClockRate
++0x54  NvRmChannelSetModuleBandwidth
++0x58  NvRmChannelSetModulePixelRate
++0x70  NvRmChannelSyncPointRead
++0x74  NvRmChannelGatherFilterEnabled
++0x78  FUN_00013f6c (get max syncpoints?)
++0x7c  NvRmChannelMapAtSubmitEnabled
++0x80  NvRmChannelSupportPreFences
++0x8c  NvRmChannelSyncPointIncr
++0x90  NvRmChannelSyncPointWait
++0x94  NvRmChannelSyncPointWaitTimeout
++0xb8  NvRmFenceSignalSemaphore
++0xc4  FUN_0001421c (fence from file?)
+
+
+================================================================================
+1. NvRmChannelOpen(rm_handle, &channel_handle, num_modules, &module_id)
+================================================================================
+
+CALL CHAIN:
+  NvRmChannelOpen -> vtable[+0x10] -> FUN_000146f0 (module-to-devpath lookup)
+                                    -> FUN_0001467c (actual open)
+
+Step 1: FUN_000146f0 - Module ID to device path lookup
+  Input: module_id (e.g. 0x0B for ISP-A, 0x1000B for ISP-B)
+
+  module_type = module_id & 0xFFFF
+  instance    = (module_id >> 16) & 0xFF
+
+  Special case: module_type=0x0C, instance=1 => tries /dev/nvhost-vi.1 first
+                (with access() check), falls back to /dev/nvhost-vi
+
+  Module ID to device path table:
+    0x0004 inst=0 -> /dev/nvhost-display
+    0x000B inst=0 -> /dev/nvhost-isp       (ISP-A)
+    0x000B inst=1 -> /dev/nvhost-isp.1     (ISP-B)
+    0x000C inst=0 -> /dev/nvhost-vi
+    0x000C inst=1 -> /dev/nvhost-vi.1
+    0x0023        -> /dev/nvhost-dsi
+    0x006A        -> /dev/nvhost-vic
+    0x006B        -> /dev/nvhost-gpu
+    0x006D        -> /dev/nvhost-msenc
+    0x006E inst=0 -> /dev/nvhost-tsec
+    0x006E inst=1 -> /dev/nvhost-tsecb
+    0x0075        -> /dev/nvhost-nvdec
+    0x0076        -> /dev/nvhost-nvjpg
+
+Step 2: FUN_0001467c - Actual device open
+  channel_ctx = NvOsAlloc(0x28)    // 40 bytes = 10 uint32 fields
+  channel_ctx->fd = open(devpath, O_RDWR | O_CLOEXEC | O_NONBLOCK)
+                      // flags = 0x80002 = O_RDWR | O_CLOEXEC
+  channel_ctx->name_ptr = devpath
+  channel_ctx->ctrl_fd = global_ctrl_fd    // from FUN_00014490 init
+  channel_ctx->state = 0
+
+Step 3: Then CHANNEL_OPEN ioctl (NR=112)
+  FUN_0001482c is called separately (for dup/open):
+  result = ioctl(channel_fd, 0x80044870, &channel_ctx_id)
+  // _IOR('H', 112, uint32) = NVHOST_IOCTL_CHANNEL_OPEN
+  // Returns a context ID in channel_ctx_id
+
+ANSWER TO QUESTIONS:
+  Q1: Does it call open("/dev/nvhost-isp")?
+  A1: YES. For module_id=0x0B, it opens "/dev/nvhost-isp".
+      For module_id=0x1000B (ISP-B), it opens "/dev/nvhost-isp.1".
+      open() flags: O_RDWR | O_CLOEXEC (0x80002)
+
+  Q2: Does it do CHANNEL_OPEN ioctl (NR=112)?
+  A2: YES. ioctl(fd, 0x80044870, &ctx_id) is called in FUN_0001482c.
+      This allocates a hardware context.
+
+  Q3: Does it set up hwctx or gather filter?
+  A3: NOT directly in ChannelOpen. But NvRmStreamInit does check
+      NvRmChannelGatherFilterEnabled() and NvRmChannelSupportPreFences()
+      and stores the results in the stream context.
+
+  Q4: What other ioctls does it call?
+  A4: During initialization (FUN_00014490 - one-time init):
+      - open("/dev/nvhost-ctrl", O_RDWR|O_CLOEXEC|O_SYNC)  // 0x181002
+      - ioctl(ctrl_fd, 0x80044807) = GET_VERSION
+      - ioctl(ctrl_fd, 0xc010480e) = CTRL_MODULE_REGRDWR
+      Also reads sysfs capabilities:
+      - /sys/devices/platform/host1x/capabilities/gather_filter_enabled
+      - /sys/devices/platform/host1x/capabilities/alloc_chs_per_submits
+      - /sys/devices/platform/host1x/capabilities/num_mlocks
+      - /sys/devices/platform/host1x/capabilities/num_pts
+
+  Q5: Does it call module_busy or any power-on sequence?
+  A5: NO. There is no explicit power-on ioctl in ChannelOpen.
+      Power management is handled by the kernel driver on channel open/submit.
+
+
+================================================================================
+2. NvRmStreamInit(channel_handle, stream_handle, push_buf_size_ptr)
+================================================================================
+
+SIGNATURE: NvRmStreamInit(channel_handle, stream_handle, &push_buf_size)
+
+CALL: Sets push_buf_size = 0x8000 (32KB) if not provided, then calls
+      FUN_0001245c(rm_handle, channel_handle, &size, stream_handle)
+
+WHAT IT ALLOCATES (FUN_0001245c):
+
+1. Stream context: NvOsAlloc(0x9788) = 38,792 bytes!
+   This is a massive structure containing:
+
+   Offset  Field
+   ------  -----
+   +0x00   push_buf_handle[0]     (NvRmMemHandle for buffer A)
+   +0x04   push_buf_handle[1]     (NvRmMemHandle for buffer B)
+   +0x08   push_buf_map[0]        (mapped VA for buffer A)
+   +0x0C   push_buf_map[1]        (mapped VA for buffer B)
+   +0x10   push_buf_words         (size/2 = 0x4000 = 16K words per buf)
+   +0x14   cmd_count
+   +0x18   push_buf_capacity      (= push_buf_words)
+   +0x1C   cur_cmd_count
+   +0x20   cur_buf_select         (0 or 1, double-buffered)
+   +0x24   semaphore              (NvOsSemaphore for completion)
+   +0x28   gather_entries[0..255] (at +0x28, 12 bytes each, 256 max)
+                                   // Each gather: {mem_handle(4), offset(4), words(4)}
+   +0x0C28 class_ids[256]         // per-gather class ID
+   +0x1028 gather_ptr             // current gather write pointer
+   +0x102C gather_class[256]      // class tracking
+   +0x1430 reloc_entries[]        // at +0x1430, 8 bytes each
+   +0x7430 reloc_ptr
+   +0x7434 reloc_shifts[]
+   +0x8434 reloc_shift_ptr
+   +0x8438 waitchk_entries[]
+   +0x9438 waitchk_ptr
+   +0x943C fence_fd
+   +0x9440 ???
+   +0x9444 channel_handle
+   +0x9448 syncpt_values[]        // syncpoint tracking
+   +0x9548 num_syncpts_tracked
+   +0x954C syncpt_ids[]
+   +0x964C num_syncpts_in_submit
+   +0x9754 syncpt_table_ptr
+   +0x9758 syncpt_list_head
+   +0x975C syncpt_list_tail
+   +0x9760 syncpt_max_count
+   +0x9764 gather_filter_enabled  (byte)
+   +0x9765 support_pre_fences     (byte)
+   +0x976C end_of_pushbuf         (VA)
+   +0x9770 last_flush_pos         (VA)
+   +0x9774 ???
+   +0x9778 debug_buf_ptr
+   +0x977C debug_buf_size
+   +0x9780 disasm_initialized     (byte)
+   +0x9788 END
+
+2. Push buffer: TWO NvRmMem allocations (double-buffered!)
+   size = push_buf_size / 2 = 0x4000 = 16,384 bytes each
+   Attributes: heap=0x20000002 (GART?), kind=0x900 (pitch linear)
+   Each is NvRmMemMap'd with flags=3 (read+write)
+
+3. Syncpoint table: NvOsAlloc(max_syncpoints * 0x14)
+   Each entry is 20 bytes: {id(4), count(4), prev(4), next(4), fence_idx(4)}
+
+4. After allocation:
+   - Calls FUN_00013a70(channel, buf0, buf1, 1) = set push buffer pair
+     This does ioctl 0xc0084812 = SET_TIMEOUT_EX (NR=18)
+     Then ioctl 0x4004480b = SET_TIMEOUT (NR=11)
+   - Gets wait base: NvRmChannelGetModuleWaitBase(channel, 0, 0)
+     -> ioctl 0xc0084811 = GET_WAITBASE (NR=17)
+
+PUSH BUFFER SIZE: 0x8000 (32KB total), split into 2x 16KB for double-buffering.
+
+
+================================================================================
+3. NvRmChannelGetModuleSyncPoint(channel, module_idx, instance, &syncpt_id)
+================================================================================
+
+Dispatches to vtable[+0x38] -> FUN_00014d84
+
+HOW IT GETS SYNCPOINTS:
+
+Method 1 (preferred): ioctl(channel_fd, 0xc0084810, {index, &syncpt_id})
+  = NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT (NR=16)
+  struct nvhost_get_param_arg { __u32 param; __u32 value; }
+  Input:  param = module_instance * 2 + (module_type >> 16 & 0xFF) for type=4
+          OR param = index for other types
+  Output: value = syncpoint ID
+
+Method 2 (fallback if ioctl fails):
+  ioctl(channel_fd, 0x80044802, &bitmask) = GET_SYNCPOINTS (NR=2)
+  Returns a bitmask of allocated syncpoints, then iterates to find the Nth set bit.
+
+After getting the syncpoint:
+  Sets channel_ctx->state = 2 (syncpoints assigned)
+
+ALSO: NvRmChannelGetClientManagedSyncPoint (NR=19):
+  ioctl(channel_fd, 0xc0104813, {name, flags, &syncpt_id})
+  Gets a client-managed syncpoint with a name string.
+
+
+================================================================================
+4. Channel Submit Flow (FUN_000129a0 -> FUN_00013b08 -> FUN_00014a9c)
+================================================================================
+
+The submit path is the most complex. Here is the sequence:
+
+FUN_000129a0 (called from NvRmStreamFlush and NvRmStreamBegin):
+  1. Updates syncpoint tracking
+  2. Emits final syncpoint incr command into push buffer:
+     INCR opcode = 0x20000001 | (syncpt_id & 0xFF) | (cond << 8 or << 10)
+  3. Calls NvRmMemCacheSyncForDevice on the push buffer (cache flush)
+  4. Calls FUN_00013abc = MAP_BUFFER ioctl if needed:
+     ioctl(channel_fd, 0xc010481d, ...) = MAP_BUFFER (NR=29)
+  5. Resolves relocations: writes relocated addresses into push buffer
+  6. Calls FUN_00013b08 = CHANNEL SUBMIT (vtable[+0x30])
+
+FUN_00014a9c - The actual submit:
+  Primary: ioctl(channel_fd, 0xc080481a, &submit_args)
+    = NVHOST_IOCTL_CHANNEL_SUBMIT (NR=26, size=128)
+    struct nvhost_submit_args with:
+      - cmdbufs, num_cmdbufs (gather entries)
+      - relocs, num_relocs
+      - waitchks, num_waitchks
+      - syncpt_incrs, waitbases, class_ids
+      - fences (output)
+      - timeout, flags
+    Retries on EINTR (errno == 4)
+
+  Fallback (if primary fails): ioctl(channel_fd, 0xc044480f, &submit_args)
+    = NVHOST32_IOCTL_CHANNEL_SUBMIT (NR=15, old 32-bit compat)
+    Retries on EINTR, with 60-second timeout for ENOMEM (errno == 12)
+
+  After submit:
+    - Calls UNMAP_BUFFER: ioctl(channel_fd, 0xc010481c, ...) (NR=28)
+
+
+================================================================================
+5. Syncpoint Read/Wait/Incr
+================================================================================
+
+NvRmChannelSyncPointRead (vtable[+0x70]):
+  -> FUN_00014f10
+  ioctl(channel_fd, 0x8004480c, &value)
+  = _IOR('H', 12, uint32) = GET_TIMEDOUT (reads current syncpoint value)
+
+NvRmChannelSyncPointIncr:
+  -> FUN_0001542c
+  ioctl(ctrl_fd, 0x40044802, &syncpt_id)
+  = NVHOST_IOCTL_CTRL_SYNCPT_INCR (NR=2, on ctrl device!)
+
+NvRmChannelSyncPointWait:
+  -> FUN_000154a4
+  First tries: ioctl(ctrl_fd, 0xc0104806, {id, thresh, timeout, value})
+    = NVHOST_IOCTL_CTRL_SYNCPT_WAITCHECK (NR=6) - non-blocking check
+  If ETIMEDOUT (25) or EFAULT (14), retries with:
+    ioctl(ctrl_fd, 0x400c4803, {id, thresh, timeout})
+    = NVHOST_IOCTL_CTRL_SYNCPT_WAIT (NR=3) - blocking wait
+  Returns 5 (NvError_Timeout) on EAGAIN, 6 (NvError_BadParameter) otherwise
+
+NvRmChannelSyncPointWaitTimeout:
+  -> FUN_0001557c
+  ioctl(ctrl_fd, 0xc0204809, {id, thresh, timeout, value, tv_sec, tv_nsec})
+  = NVHOST_IOCTL_CTRL_SYNCPT_WAITMEX (NR=9) - wait with timestamp
+
+IMPORTANT: Syncpoint reads go to the CHANNEL fd (0x8004480c).
+           Syncpoint waits/incrs go to the CTRL fd (/dev/nvhost-ctrl).
+
+
+================================================================================
+6. Complete ISP Channel Open Sequence (reconstructed)
+================================================================================
+
+For ISP-A (module_id = 0x0B):
+
+  1. One-time init (FUN_00014490):
+     ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR|O_CLOEXEC|O_SYNC)
+     ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_GET_VERSION, &version)
+     ioctl(ctrl_fd, NVHOST_IOCTL_CTRL_MODULE_REGRDWR, ...)
+     Read sysfs capabilities
+
+  2. NvRmChannelOpen(rm, &ch, 1, &module_id):
+     isp_fd = open("/dev/nvhost-isp", O_RDWR|O_CLOEXEC)
+     ctx_id = ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_OPEN)
+
+  3. NvRmStreamInit(ch, &stream, NULL):
+     Alloc 0x9788-byte stream context
+     pushbuf[0] = NvRmMemAlloc(16384)   // mapped into userspace
+     pushbuf[1] = NvRmMemAlloc(16384)   // double-buffered
+     ioctl(isp_fd, SET_TIMEOUT_EX, ...)  // set push buffer pair
+     waitbase = ioctl(isp_fd, GET_WAITBASE, 0)
+
+  4. NvRmChannelGetModuleSyncPoint(ch, 0, 0, &syncpt):
+     syncpt_id = ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, 0)
+
+  5. NvRmStreamBegin / PushSetClass / PushIncr / PushReloc / StreamFlush:
+     Build command buffer in userspace pushbuf
+     On flush: ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SUBMIT, ...)
+
+For ISP-B (module_id = 0x1000B):
+     Same sequence but opens "/dev/nvhost-isp.1" instead
+
+
+================================================================================
+7. All Ioctl Numbers Used (with kernel names)
+================================================================================
+
+On /dev/nvhost-ctrl:
+  0x80044807  _IOR('H', 7)    NVHOST_IOCTL_CTRL_GET_VERSION
+  0xc010480e  _IOWR('H', 14)  NVHOST_IOCTL_CTRL_MODULE_REGRDWR
+  0xc0084801  _IOWR('H', 1)   NVHOST_IOCTL_CTRL_SYNCPT_READ
+  0x40044802  _IOW('H', 2)    NVHOST_IOCTL_CTRL_SYNCPT_INCR
+  0x400c4803  _IOW('H', 3)    NVHOST_IOCTL_CTRL_SYNCPT_WAIT
+  0xc0084804  _IOWR('H', 4)   NVHOST_IOCTL_CTRL_SYNCPT_WAITEX
+  0xc0104806  _IOWR('H', 6)   NVHOST_IOCTL_CTRL_SYNCPT_WAITCHECK
+  0xc0204809  _IOWR('H', 9)   NVHOST_IOCTL_CTRL_SYNCPT_WAITMEX
+
+On /dev/nvhost-isp (channel fd):
+  0x80044802  _IOR('H', 2)    NVHOST_IOCTL_CHANNEL_GET_SYNCPOINTS
+  0x80044803  _IOR('H', 3)    NVHOST_IOCTL_CHANNEL_GET_WAITBASES
+  0x80044804  _IOR('H', 4)    NVHOST_IOCTL_CHANNEL_GET_MODMUTEXES
+  0xc0084809  _IOWR('H', 9)   NVHOST_IOCTL_CHANNEL_GET_CLK_RATE
+  0x4008480a  _IOW('H', 10)   NVHOST_IOCTL_CHANNEL_SET_CLK_RATE
+  0x4004480b  _IOW('H', 11)   NVHOST_IOCTL_CHANNEL_SET_TIMEOUT
+  0x8004480c  _IOR('H', 12)   NVHOST_IOCTL_CHANNEL_GET_TIMEDOUT (read SP value)
+  0x4004480d  _IOW('H', 13)   NVHOST_IOCTL_CHANNEL_SET_PRIORITY
+  0xc044480f  _IOWR('H', 15)  NVHOST32_IOCTL_CHANNEL_SUBMIT (legacy)
+  0xc0084810  _IOWR('H', 16)  NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT
+  0xc0084811  _IOWR('H', 17)  NVHOST_IOCTL_CHANNEL_GET_WAITBASE
+  0xc0084812  _IOWR('H', 18)  NVHOST_IOCTL_CHANNEL_SET_TIMEOUT_EX
+  0xc0104813  _IOWR('H', 19)  NVHOST_IOCTL_CHANNEL_GET_CLIENT_MANAGED_SYNCPOINT
+  0xc0084814  _IOWR('H', 20)  NVHOST_IOCTL_CHANNEL_FREE_CLIENT_MANAGED_SYNCPOINT
+  0xc0084817  _IOWR('H', 23)  NVHOST_IOCTL_CHANNEL_GET_MODMUTEX
+  0xc080481a  _IOWR('H', 26)  NVHOST_IOCTL_CHANNEL_SUBMIT
+  0xc010481c  _IOWR('H', 28)  NVHOST_IOCTL_CHANNEL_UNMAP_BUFFER
+  0xc010481d  _IOWR('H', 29)  NVHOST_IOCTL_CHANNEL_MAP_BUFFER
+  0xc018486f  _IOWR('H', 111) NVHOST_IOCTL_CHANNEL_SET_ERROR_NOTIFIER
+  0x80044870  _IOR('H', 112)  NVHOST_IOCTL_CHANNEL_OPEN
+
+On GPU channel (/dev/dri/card*):
+  0xc0106445  _IOWR('d', 69)  NVGPU_IOCTL_CHANNEL_OPEN
+  0xc00c642e  _IOWR('d', 46)  NVGPU_IOCTL_CHANNEL_ALLOC_OBJ_CTX
+  0xc0106447  _IOWR('d', 71)  NVGPU_IOCTL_CHANNEL_GET_SYNCPOINT
+  0xc0586448  _IOWR('d', 72)  NVGPU_IOCTL_CHANNEL_SUBMIT_GPFIFO
+  0x40086409  _IOW('d', 9)    NVGPU_IOCTL_CHANNEL_FREE_OBJ_CTX
+
+
+================================================================================
+8. Key Data Structures
+================================================================================
+
+Channel context (0x28 = 40 bytes):
+  +0x00  fd              (device file descriptor)
+  +0x04  ???
+  +0x08  device_name     (string ptr, e.g. "/dev/nvhost-isp")
+  +0x0C  ctrl_fd         (global ctrl fd from init)
+  +0x10  state           (0=fresh, 1=syncpt assigned via ioctl 13, 2=via ioctl 16)
+  +0x14..+0x24 reserved
+
+Stream handle (passed to NvRmStreamInit, 0x48 bytes user-facing):
+  +0x00  current_syncpt_id    (0xFFFFFFFF initially)
+  +0x04  syncpt_count
+  +0x08  wait_base
+  +0x0C  flags
+  +0x0D  byte flags
+  +0x0E  byte flag (pre-fence mode)
+  +0x10  push_buf_handle
+  +0x14  push_buf_va_base
+  +0x18  push_buf_va_start
+  +0x1C  push_buf_va_current  (write pointer)
+  +0x20  push_buf_va_end
+  +0x28  callback_fn
+  +0x2C  ???
+  +0x30  error_code
+  +0x34  stream_ctx_ptr       -> points to 0x9788-byte internal context
+  +0x38  cmdstream_start      (current gather base)
+  +0x3C  cmdstream_ptr        (current write pos)
+  +0x40  pushbuf_mem_handle
+  +0x44  pushbuf_map_va
