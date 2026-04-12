@@ -80,6 +80,10 @@ struct nvhost32_submit_args {
 #define NVHOST32_IOCTL_CHANNEL_SUBMIT _IOWR(NVHOST_IOCTL_MAGIC, 15, struct nvhost32_submit_args)
 #define NVHOST_IOCTL_CTRL_SYNCPT_WAITEX _IOWR(NVHOST_IOCTL_MAGIC, 6, struct nvhost_ctrl_syncpt_waitex_args)
 
+/* Clock/power control */
+struct nvhost_clk_rate_args { uint32_t rate; uint32_t moduleid; };
+#define NVHOST_IOCTL_CHANNEL_SET_CLK_RATE _IOW(NVHOST_IOCTL_MAGIC, 10, struct nvhost_clk_rate_args)
+
 /* Host1X opcodes */
 #define OP_SETCLASS(c,o,m) ((0<<28)|((o)<<16)|((c)<<6)|(m))
 #define OP_INCR(o,n)       ((1<<28)|((o)<<16)|(n))
@@ -147,6 +151,28 @@ int main(int argc, char **argv)
     struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
     if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &snf) < 0)
         perror("set nvmap fd (non-fatal)");
+
+    /* Set ISP clock rate — required for ISP to process frames.
+     * moduleid encoding: [31:24]=clock_attr, [15:0]=module_id
+     * clock_attr: 0=NVHOST_CLOCK, 1=NVHOST_BW
+     * module_id: from enum nvhost_module_id (ISP=3) */
+    struct nvhost_clk_rate_args clk;
+
+    /* ISP core clock = 384 MHz */
+    clk.rate = 384000000;
+    clk.moduleid = 0;  /* clock index 0 = ISP core */
+    if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_CLK_RATE, &clk) < 0)
+        perror("set ISP clk (non-fatal)");
+    else
+        printf("ISP clk set to %u Hz\n", clk.rate);
+
+    /* EMC clock = 768 MHz */
+    clk.rate = 768000000;
+    clk.moduleid = 1;  /* clock index 1 = EMC */
+    if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_CLK_RATE, &clk) < 0)
+        perror("set EMC clk (non-fatal)");
+    else
+        printf("EMC clk set to %u Hz\n", clk.rate);
 
     /* Get syncpoints */
     struct nvhost_get_param_arg gsp;
