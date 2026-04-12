@@ -100,7 +100,10 @@ struct nvhost32_ctrl_module_regrdwr_args {
 #define OP_SETCLASS(c,o,m) ((0<<28)|((o)<<16)|((c)<<6)|(m))
 #define OP_INCR(o,n)       ((1<<28)|((o)<<16)|(n))
 #define OP_NONINCR(o,n)    ((2<<28)|((o)<<16)|(n))
-#define ISP_CLASS 0x32  /* ISP-A */
+#define ISP_CLASS_A 0x32
+#define ISP_CLASS_B 0x34
+static int isp_class = ISP_CLASS_B;  /* default ISP-B */
+#define ISP_CLASS isp_class
 
 /* Frame params */
 #define W 2592
@@ -153,7 +156,14 @@ int main(int argc, char **argv)
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
     if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
-    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
+    /* Use ISP-B (class 0x34) — stock camera uses ISP-B for OV5693 front */
+    int isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
+    if (isp_fd < 0) {
+        isp_fd = open("/dev/nvhost-isp", O_RDWR);
+        printf("Fell back to ISP-A\n");
+    } else {
+        printf("Using ISP-B\n");
+    }
     if (isp_fd < 0) { perror("open isp"); return 1; }
 
     /* Open ISP ctrl node — needed for PIO register writes */
