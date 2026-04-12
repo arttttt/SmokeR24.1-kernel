@@ -188,13 +188,16 @@ int main(int argc, char **argv)
     /* Allocate buffers */
     uint32_t in_h = nvmap_create(IN_SIZE);
     uint32_t out_h = nvmap_create(OUT_SIZE);
+    uint32_t work_h = nvmap_create(512 * 1024);  /* ISP work buffer */
     uint32_t cmd_h = nvmap_create(4096);
-    if (!in_h || !out_h || !cmd_h) { printf("alloc failed\n"); return 1; }
-    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(cmd_h);
+    if (!in_h || !out_h || !work_h || !cmd_h) { printf("alloc failed\n"); return 1; }
+    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h);
 
     uint32_t in_iova = nvmap_pin(in_h);
     uint32_t out_iova = nvmap_pin(out_h);
-    printf("in_iova=0x%08x out_iova=0x%08x\n", in_iova, out_iova);
+    uint32_t work_iova = nvmap_pin(work_h);
+    printf("in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
+           in_iova, out_iova, work_iova);
 
     /* Load raw frame */
     printf("Loading %s...\n", argv[1]);
@@ -223,6 +226,13 @@ int main(int argc, char **argv)
     uint32_t cmd[64];
     int n = 0;
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1;
+    int work_reloc = -1;
+
+    /* ISP work buffer (0x053) — needed for cold start */
+    cmd[n++] = OP_INCR(0x053, 2);
+    work_reloc = n;
+    cmd[n++] = 1;                         /* enable */
+    cmd[n++] = 0;                         /* IOVA patched by reloc */
 
     /* Output: dims + format */
     cmd[n++] = OP_INCR(0xE00, 1);
@@ -287,9 +297,11 @@ int main(int argc, char **argv)
     nvmap_write(cmd_h, 0, cmd, n * 4);
 
     /* Relocs */
-    struct nvhost_reloc relocs[4];
-    struct nvhost_reloc_shift shifts[4];
+    struct nvhost_reloc relocs[5];
+    struct nvhost_reloc_shift shifts[5];
     int nr = 0;
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, (work_reloc+1)*4, work_h, 0 };
+    shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, 0 };
