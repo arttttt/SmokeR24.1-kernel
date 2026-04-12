@@ -84,6 +84,17 @@ struct nvhost32_submit_args {
 struct nvhost_clk_rate_args { uint32_t rate; uint32_t moduleid; };
 #define NVHOST_IOCTL_CHANNEL_SET_CLK_RATE _IOW(NVHOST_IOCTL_MAGIC, 10, struct nvhost_clk_rate_args)
 
+/* PIO register read/write (via ctrl node) */
+struct nvhost32_ctrl_module_regrdwr_args {
+    uint32_t id;
+    uint32_t num_offsets;
+    uint32_t block_size;
+    uint32_t offsets;
+    uint32_t values;
+    uint32_t write;
+};
+#define NVHOST32_IOCTL_CTRL_MODULE_REGRDWR _IOWR(NVHOST_IOCTL_MAGIC, 5, struct nvhost32_ctrl_module_regrdwr_args)
+
 /* Host1X opcodes */
 #define OP_SETCLASS(c,o,m) ((0<<28)|((o)<<16)|((c)<<6)|(m))
 #define OP_INCR(o,n)       ((1<<28)|((o)<<16)|(n))
@@ -144,6 +155,10 @@ int main(int argc, char **argv)
     int isp_fd = open("/dev/nvhost-isp", O_RDWR);
     if (isp_fd < 0) { perror("open isp"); return 1; }
 
+    /* Open ISP ctrl node — needed for PIO register writes */
+    int isp_ctrl_fd = open("/dev/nvhost-ctrl-isp", O_RDWR);
+    if (isp_ctrl_fd < 0) perror("open isp ctrl (non-fatal)");
+
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
     if (ctrl_fd < 0) { perror("open ctrl"); return 1; }
 
@@ -173,6 +188,27 @@ int main(int argc, char **argv)
         perror("set EMC clk (non-fatal)");
     else
         printf("EMC clk set to %u Hz\n", clk.rate);
+
+    /* PIO write: ISP register 0xFC = 0x20 (enable/reset)
+     * From RE of NvIspOpen — NvRmHostModuleRegWr(hRm, module_id, 1, {0xFC, 0x20})
+     * This is the ISP top-level enable that must happen before any submit. */
+    {
+        uint32_t offset = 0xFC;
+        uint32_t value = 0x20;
+        struct nvhost32_ctrl_module_regrdwr_args rw;
+        memset(&rw, 0, sizeof(rw));
+        rw.id = 0x0B;           /* ISP module id */
+        rw.num_offsets = 1;
+        rw.block_size = 4;
+        rw.offsets = (uint32_t)(uintptr_t)&offset;
+        rw.values = (uint32_t)(uintptr_t)&value;
+        rw.write = 1;
+        if (ioctl(isp_ctrl_fd >= 0 ? isp_ctrl_fd : ctrl_fd,
+                  NVHOST32_IOCTL_CTRL_MODULE_REGRDWR, &rw) < 0)
+            perror("PIO write 0xFC (non-fatal)");
+        else
+            printf("PIO write: ISP reg 0xFC = 0x20\n");
+    }
 
     /* Get syncpoints */
     struct nvhost_get_param_arg gsp;
@@ -221,48 +257,6 @@ int main(int argc, char **argv)
         nvmap_write(out_h, off, zeros, sz);
     }
     free(zeros);
-
-    /* ---- Init submit: trigger 0x0F to initialize ISP pipeline ---- */
-    {
-        uint32_t init_cmd[8];
-        int in = 0;
-        init_cmd[in++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        init_cmd[in++] = OP_INCR(0x053, 2);
-        init_cmd[in++] = 1;               /* work buf enable */
-        init_cmd[in++] = work_iova;       /* work buf IOVA (no reloc in init) */
-        init_cmd[in++] = OP_INCR(0x015, 1);
-        init_cmd[in++] = 7;               /* ISP_ENABLE = full pipeline */
-        init_cmd[in++] = OP_NONINCR(0x00C, 1);
-        init_cmd[in++] = 0x0F;            /* post-apply trigger */
-
-        nvmap_write(cmd_h, 0, init_cmd, in * 4);
-
-        struct nvhost_cmdbuf icb = { .mem = cmd_h, .offset = 0, .words = in };
-        struct nvhost_syncpt_incr isi = { .syncpt_id = sp_memory, .syncpt_incrs = 1 };
-        uint32_t iclass = ISP_CLASS;
-        struct nvhost_fence ifence = { 0, 0 };
-
-        struct nvhost32_submit_args isa;
-        memset(&isa, 0, sizeof(isa));
-        isa.submit_version = 0;
-        isa.num_syncpt_incrs = 0;  /* no syncpt wait — 0x0F doesn't incr */
-        isa.num_cmdbufs = 1;
-        isa.num_relocs = 0;
-        isa.timeout = 5000;
-        isa.cmdbufs = (uint32_t)(uintptr_t)&icb;
-        isa.class_ids = (uint32_t)(uintptr_t)&iclass;
-        isa.fences = (uint32_t)(uintptr_t)&ifence;
-
-        printf("Init submit (0x0F, no syncpt wait)...\n");
-        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0) {
-            perror("init submit");
-        } else {
-            printf("Init submitted OK, fence=%u\n", isa.fence);
-            usleep(100000);  /* 100ms for ISP to process */
-        }
-    }
-
-    /* ---- Reprocess submit ---- */
 
     /* Build minimal reprocess gather */
     uint32_t cmd[64];
