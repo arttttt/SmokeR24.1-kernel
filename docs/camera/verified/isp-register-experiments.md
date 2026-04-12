@@ -170,6 +170,31 @@ patched. This may be because:
 2. The ISP latches these at init and per-frame writes are ignored
 3. These need companion data (e.g. 0xD0A=1 needs non-zero 0xD0B data)
 
+## DANGER: Registers That Break ISP (require reboot)
+
+| Register | Description | What breaks it |
+|----------|-------------|----------------|
+| **0x500[0]** | Processing flags | Any non-zero value (1, 2, 3) |
+| **0xE00** | Output width | Any value ≠ stock (even before camera open) |
+| **0xE01** | Output height | Any value ≠ stock (even before camera open) |
+| **0xE02** | Output format | Any value ≠ 0x04FE00E6 (corrupts, may need reboot) |
+
+These cause ISP panic / fence timeouts and require device reboot to recover.
+
+## Safe Registers (no effect or image corruption only)
+
+| Register | Description | Effect |
+|----------|-------------|--------|
+| 0xE03 | Output color config | No effect (unused) |
+| 0xE05 | Y surface word 2 | No effect (unused) |
+| 0xE06 | Y stride | Image corruption (recoverable, no panic) |
+| 0x015 | ISP_ENABLE | No effect (not in per-frame gather) |
+| 0x100 | Stats buffer | No effect on image |
+| 0x00C | Trigger | No visible effect on live stream |
+| 0xD0A | Lens shading enable | No effect (cal gather) |
+| 0x651 | Tone curve ctrl | No effect (cal gather) |
+| 0x053 | Work buffer | No effect (cal gather) |
+
 ## Key Takeaways
 
 1. **ISP registers fall into two categories**: per-frame (output config,
