@@ -265,6 +265,9 @@ int main(int argc, char **argv)
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1;
     int work_reloc = -1;
 
+    /* SETCLASS must be first — tells host1x which engine gets the commands */
+    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+
     /* ISP work buffer (0x053) — needed for cold start */
     cmd[n++] = OP_INCR(0x053, 2);
     work_reloc = n;
