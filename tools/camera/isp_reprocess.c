@@ -218,10 +218,10 @@ int main(int argc, char **argv)
 
     /* TODO: NvIspSetConfiguration needs proper args, skipping for now */
 
-    /* Scan push buffer for output format (method 0xE02) set by calibration.
-     * Push buffers are mmap'd by our shim — scan /proc/self/maps for them */
-    printf("  Scanning calibration gather for output format (0xE02)...\n");
+    /* Scan push buffer and dump raw cal gather to file */
+    printf("  Scanning calibration gather...\n");
     {
+        int pb_dumped = 0;
         /* The blob's push buffer is at the shim mmap'd address.
          * Shim maps 16KB push buffers via dmabuf. Scan for INCR(0xE02,1) opcode. */
         FILE *maps = fopen("/proc/self/maps", "r");
@@ -234,6 +234,20 @@ int main(int argc, char **argv)
                     if (size == 16384 || size == 32768) { /* push buffer size */
                         uint32_t *pb = (uint32_t *)start;
                         uint32_t words = size / 4;
+                        /* Dump raw push buffer to file */
+                        if (!pb_dumped) {
+                            FILE *df = fopen("/data/local/tmp/cal_pushbuf.bin", "wb");
+                            if (df) {
+                                /* Find last non-zero word */
+                                uint32_t last_nz = 0;
+                                for (uint32_t j = 0; j < words; j++)
+                                    if (pb[j]) last_nz = j;
+                                fwrite(pb, 4, last_nz + 1, df);
+                                fclose(df);
+                                printf("    Raw pushbuf dumped: %u words\n", last_nz + 1);
+                                pb_dumped = 1;
+                            }
+                        }
                         for (uint32_t j = 0; j < words; j++) {
                             uint32_t op = pb[j];
                             uint32_t opcode = op >> 28;
