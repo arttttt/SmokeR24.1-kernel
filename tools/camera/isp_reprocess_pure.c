@@ -144,7 +144,7 @@ static uint32_t nvmap_pin(uint32_t handle) {
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <raw_bayer_file>\n", argv[0]);
+        printf("Usage: %s <raw_bayer_file> [format_hex]\n", argv[0]);
         return 1;
     }
 
@@ -376,7 +376,10 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x43;                      /* R8G8B8A8 */
+    uint32_t out_fmt = 0x43;  /* default R8G8B8A8 */
+    if (argc > 2) out_fmt = strtoul(argv[2], NULL, 16);
+    cmd[n++] = out_fmt;
+    printf("Output format: 0x%08x\n", out_fmt);
 
     /* Output Y surface */
     cmd[n++] = OP_INCR(0xE04, 3);
@@ -501,7 +504,8 @@ int main(int argc, char **argv)
     printf("\n");
 
     /* Dump full output */
-    const char *outpath = "/data/local/tmp/isp_pure_out.rgba";
+    char outpath[128];
+    snprintf(outpath, sizeof(outpath), "/data/local/tmp/isp_fmt_%08x.bin", out_fmt);
     FILE *fp = fopen(outpath, "wb");
     if (fp) {
         uint8_t *buf = malloc(chunk);
