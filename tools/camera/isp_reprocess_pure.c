@@ -354,7 +354,7 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x43;                      /* R8G8B8A8 — testing with full cal */
+    cmd[n++] = 0xC8;                      /* YUYV — testing with full cal */
 
     /* Output Y surface — stride=W*4 (32bpp) */
     cmd[n++] = OP_INCR(0xE04, 3);
