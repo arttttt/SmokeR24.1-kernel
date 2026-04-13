@@ -203,8 +203,45 @@ int main(int argc, char **argv)
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
-    /* Step 1: SKIP HwSettingsCreate + HwSettingsApply — test if NvIspOpen alone is enough */
-    printf("  SKIPPED HwSettingsCreate + HwSettingsApply\n");
+    /* Step 2: Replace HwSettingsApply with manual 0x0F trigger submit */
+    printf("  Manual init: SETCLASS + trigger 0x0F...\n");
+    {
+        /* Extract ISP fd early for init submit */
+        uint32_t *ectx = (uint32_t *)isp_handle;
+        void *ech = (void *)(uintptr_t)ectx[3];
+        int init_fd = *(int *)ech;
+
+        uint32_t init_cmd[4];
+        init_cmd[0] = OP_SETCLASS(0x32, 0, 0); /* ISP-A class */
+        init_cmd[1] = OP_NONINCR(0x00C, 1);
+        init_cmd[2] = 0x0F;                     /* post-apply trigger */
+        init_cmd[3] = 0x00000000;               /* NOP padding */
+
+        /* Need a nvmap handle for cmdbuf */
+        uint32_t init_h = nvmap_create(4096);
+        nvmap_alloc(init_h);
+        nvmap_write(init_h, 0, init_cmd, sizeof(init_cmd));
+
+        struct nvhost_cmdbuf icb = { .mem = init_h, .offset = 0, .words = 3 };
+        uint32_t iclass = 0x32;
+        struct nvhost_fence ifence = { 0, 0 };
+
+        struct nvhost32_submit_args isa;
+        memset(&isa, 0, sizeof(isa));
+        isa.submit_version = 0;
+        isa.num_syncpt_incrs = 0;  /* 0x0F doesn't generate cond incr */
+        isa.num_cmdbufs = 1;
+        isa.timeout = 5000;
+        isa.cmdbufs = (uint32_t)(uintptr_t)&icb;
+        isa.class_ids = (uint32_t)(uintptr_t)&iclass;
+        isa.fences = (uint32_t)(uintptr_t)&ifence;
+
+        if (ioctl(init_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0)
+            perror("init submit 0x0F");
+        else
+            printf("  Init submit OK (0x0F trigger)\n");
+        usleep(100000); /* 100ms for ISP to process */
+    }
 
     /* Skip push buffer scanning — no HwSettingsApply means no cal gather */
     printf("  Skip push buffer scan\n");
