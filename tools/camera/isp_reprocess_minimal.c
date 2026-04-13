@@ -219,15 +219,26 @@ int main(int argc, char **argv)
         uint32_t sp_stream = gsp_s.value;
         printf("    stream syncpt=%u\n", sp_stream);
 
-        /* G[0]: minimal cal — just SETCLASS + trigger 0x0F */
+        /* G[0]: cal with work buffer + ISP_ENABLE + trigger 0x0F */
+        uint32_t work_h = nvmap_create(512 * 1024);
+        nvmap_alloc(work_h);
+        uint32_t work_iova = nvmap_pin(work_h);
+        printf("    work_iova=0x%08x\n", work_iova);
+
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
 
-        uint32_t g0[4];
-        g0[0] = OP_SETCLASS(0x32, 0, 0);
-        g0[1] = OP_NONINCR(0x00C, 1);
-        g0[2] = 0x0F;
-        nvmap_write(init_h, 0, g0, 3 * 4);
+        uint32_t g0[16];
+        int gi = 0;
+        g0[gi++] = OP_SETCLASS(0x32, 0, 0);
+        g0[gi++] = OP_INCR(0x053, 2);       /* work buffer */
+        g0[gi++] = 0x00000001;               /* enable */
+        g0[gi++] = work_iova;                /* IOVA */
+        g0[gi++] = OP_INCR(0x015, 1);       /* ISP_ENABLE */
+        g0[gi++] = 0x07;                     /* full pipeline */
+        g0[gi++] = OP_NONINCR(0x00C, 1);    /* trigger */
+        g0[gi++] = 0x0F;                     /* post-apply */
+        nvmap_write(init_h, 0, g0, gi * 4);
 
         /* G[1]: immediate syncpt incr (like stock) */
         uint32_t g1[2];
@@ -236,7 +247,7 @@ int main(int argc, char **argv)
         nvmap_write(init_h, 256, g1, 2 * 4);
 
         struct nvhost_cmdbuf cbs[2];
-        cbs[0] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 0, .words = 3 };
+        cbs[0] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 0, .words = gi };
         cbs[1] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 256, .words = 2 };
 
         struct nvhost_syncpt_incr isi = { .syncpt_id = sp_stream, .syncpt_incrs = 1 };
