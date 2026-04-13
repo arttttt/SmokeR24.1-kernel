@@ -585,6 +585,48 @@ module_param(disable_proptx, int, 0644);
 module_param_string(firmware_path, firmware_path, MOD_PARAM_PATHLEN, 0660);
 module_param_string(nvram_path, nvram_path, MOD_PARAM_PATHLEN, 0660);
 
+/*
+ * WiFi reinit trigger — write 1 to re-register the driver with
+ * current firmware_path/nvram_path. Allows recovery/TWRP to set
+ * firmware paths after boot and restart the WiFi subsystem.
+ */
+static int wifi_reinit;
+extern int dhd_wifi_platform_load_retry(void);
+
+static int reinit_set(const char *val, const struct kernel_param *kp)
+{
+	int v;
+
+	if (kstrtoint(val, 10, &v) || v != 1)
+		return -EINVAL;
+
+	pr_info("bcmdhd: reinit triggered, fw=%s nvram=%s\n",
+		firmware_path, nvram_path);
+
+	if (firmware_path[0] == '\0') {
+		pr_err("bcmdhd: reinit: firmware_path not set\n");
+		return -EINVAL;
+	}
+
+	strncpy(fw_bak_path, firmware_path, MOD_PARAM_PATHLEN);
+	fw_bak_path[MOD_PARAM_PATHLEN - 1] = '\0';
+	strncpy(nv_bak_path, nvram_path, MOD_PARAM_PATHLEN);
+	nv_bak_path[MOD_PARAM_PATHLEN - 1] = '\0';
+
+	if (dhd_wifi_platform_load_retry()) {
+		pr_err("bcmdhd: reinit failed\n");
+		return -EIO;
+	}
+
+	pr_info("bcmdhd: reinit success\n");
+	return 0;
+}
+
+static const struct kernel_param_ops reinit_ops = {
+	.set = reinit_set,
+};
+module_param_cb(reinit, &reinit_ops, &wifi_reinit, 0220);
+
 /* Watchdog interval */
 
 /* extend watchdog expiration to 2 seconds when DPC is running */

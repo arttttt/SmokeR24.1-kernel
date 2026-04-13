@@ -8,7 +8,6 @@
 #
 # Requires: busybox (udhcpc), wpa_supplicant (from /system)
 
-WPA_CONF="/data/misc/wifi/wpa_supplicant.conf"
 WPA_BIN="/system/bin/wpa_supplicant"
 IFACE="wlan0"
 LOG_TAG="wifi-connect"
@@ -30,22 +29,42 @@ mount_if_needed /data   || abort "/data mount failed"
 
 # --- Validate prerequisites ---
 [ -x "$WPA_BIN" ]  || abort "wpa_supplicant not found at $WPA_BIN"
-[ -f "$WPA_CONF" ] || abort "WiFi config not found at $WPA_CONF"
-grep -q "network=" "$WPA_CONF" || abort "No saved networks in $WPA_CONF"
 
-# --- Set firmware path (Android init normally does this) ---
+# Find wpa_supplicant config (differs between MIUI and LOS)
+WPA_CONF=""
+for p in \
+    /data/misc/wifi/wpa_supplicant.conf \
+    /data/misc/wifi/wpa_supplicant/wpa_supplicant.conf; do
+    [ -f "$p" ] && { WPA_CONF="$p"; break; }
+done
+[ -n "$WPA_CONF" ] || abort "WiFi config not found"
+grep -q "network=" "$WPA_CONF" || abort "No saved networks in $WPA_CONF"
+log "wpa config: $WPA_CONF"
+
+# --- Detect firmware and nvram paths ---
 FW_BIN=""
+NVRAM=""
 for p in \
     /system/vendor/firmware/mocha_fw_bcmdhd.bin \
     /system/etc/firmware/fw_bcmdhd.bin; do
-    if [ -f "$p" ]; then
-        FW_BIN="$p"
-        break
-    fi
+    [ -f "$p" ] && { FW_BIN="$p"; break; }
+done
+for p in \
+    /system/vendor/etc/mocha_nvram.txt \
+    /system/etc/firmware/nvram.txt; do
+    [ -f "$p" ] && { NVRAM="$p"; break; }
 done
 [ -n "$FW_BIN" ] || abort "WiFi firmware not found"
+[ -n "$NVRAM" ]  || abort "WiFi nvram not found"
+log "firmware: $FW_BIN"
+log "nvram: $NVRAM"
+
+# --- Set paths and reinit WiFi driver ---
 echo "$FW_BIN" > /sys/module/bcmdhd/parameters/firmware_path 2>/dev/null
-log "firmware path: $FW_BIN"
+echo "$NVRAM"  > /sys/module/bcmdhd/parameters/nvram_path 2>/dev/null
+echo 1 > /sys/module/bcmdhd/parameters/reinit 2>/dev/null || \
+    abort "WiFi reinit failed"
+sleep 2
 
 # --- Bring up interface ---
 log "bringing up $IFACE"
