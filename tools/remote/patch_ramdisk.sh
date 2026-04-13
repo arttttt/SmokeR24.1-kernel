@@ -166,7 +166,8 @@ apply_overlay() {
     if [ "$MODE" = "twrp" ]; then
         cp -R "$OVERLAY_TWRP_DIR"/* "$workdir/"
         chmod 755 "$workdir/sbin/wifi-connect.sh" \
-                  "$workdir/sbin/udhcpc.script" 2>/dev/null || true
+                  "$workdir/sbin/udhcpc.script" \
+                  "$workdir/sbin/watchdog-kick.sh" 2>/dev/null || true
         echo "[*] TWRP overlay applied"
     fi
 }

@@ -33,6 +33,20 @@ mount_if_needed /data   || abort "/data mount failed"
 [ -f "$WPA_CONF" ] || abort "WiFi config not found at $WPA_CONF"
 grep -q "network=" "$WPA_CONF" || abort "No saved networks in $WPA_CONF"
 
+# --- Set firmware path (Android init normally does this) ---
+FW_BIN=""
+for p in \
+    /system/vendor/firmware/mocha_fw_bcmdhd.bin \
+    /system/etc/firmware/fw_bcmdhd.bin; do
+    if [ -f "$p" ]; then
+        FW_BIN="$p"
+        break
+    fi
+done
+[ -n "$FW_BIN" ] || abort "WiFi firmware not found"
+echo "$FW_BIN" > /sys/module/bcmdhd/parameters/firmware_path 2>/dev/null
+log "firmware path: $FW_BIN"
+
 # --- Bring up interface ---
 log "bringing up $IFACE"
 ifconfig "$IFACE" up 2>/dev/null || abort "ifconfig $IFACE up failed"
