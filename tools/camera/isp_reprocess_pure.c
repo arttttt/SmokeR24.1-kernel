@@ -333,8 +333,8 @@ int main(int argc, char **argv)
             printf("Init submit OK (0x019/0x01B/0x01C), fence=%u\n", isa.fence);
     }
 
-    /* Build minimal reprocess gather */
-    uint32_t cmd[64];
+    /* Build reprocess gather with ISP pipeline init */
+    uint32_t cmd[256];
     int n = 0;
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1;
     int work_reloc = -1;
@@ -348,13 +348,37 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Output: dims + format (YUV420 planar — stock format) */
+    /* ISP pipeline register blocks — zero-init to enable demosaic */
+    /* 0x200: input config (3 words) */
+    cmd[n++] = OP_INCR(0x200, 2); cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = OP_INCR(0x202, 3); cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = OP_INCR(0x205, 4); cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    /* 0x700: GPP / NR block (16 words) */
+    cmd[n++] = OP_INCR(0x700, 16);
+    for (int i = 0; i < 16; i++) cmd[n++] = 0;
+    /* 0x750: secondary processing (16 words) */
+    cmd[n++] = OP_INCR(0x750, 16);
+    for (int i = 0; i < 16; i++) cmd[n++] = 0;
+    /* 0xD00: demosaic/lens shading ctrl (10 words) */
+    cmd[n++] = OP_INCR(0xD00, 10);
+    for (int i = 0; i < 10; i++) cmd[n++] = 0;
+    /* 0xD0A: lens shading enable */
+    cmd[n++] = OP_INCR(0xD0A, 1); cmd[n++] = 0;
+    /* 0x300: CCM (8 words) */
+    cmd[n++] = OP_INCR(0x300, 4); cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = OP_INCR(0x304, 4); cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    /* 0x01E/0x01F: additional pipeline config (from stock tail) */
+    cmd[n++] = OP_INCR(0x01E, 1); cmd[n++] = 0;
+    cmd[n++] = OP_INCR(0x01F, 1); cmd[n++] = 1;
+    cmd[n++] = OP_INCR(0x05F, 1); cmd[n++] = 0x10;
+
+    /* Output: dims + format */
     cmd[n++] = OP_INCR(0xE00, 1);
     cmd[n++] = ((W - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x010000C9;                /* blob default format — may have color */
+    cmd[n++] = 0x43;                      /* R8G8B8A8 */
 
     /* Output Y surface */
     cmd[n++] = OP_INCR(0xE04, 3);
