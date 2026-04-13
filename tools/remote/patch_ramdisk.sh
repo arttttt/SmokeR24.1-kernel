@@ -184,14 +184,25 @@ inject_import() {
             "This doesn't look like a TWRP ramdisk"
         init_rc="init.rc"
     else
-        # Android: use device-specific rc
-        if [ -f "$workdir/init.tn8.rc" ]; then
-            init_rc="init.tn8.rc"
-        elif [ -f "$workdir/init.mocha.rc" ]; then
-            init_rc="init.mocha.rc"
+        # Android: find device-specific rc that is actually imported
+        # init.rc imports init.${ro.hardware}.rc which is init.mocha.rc or init.tn8.rc
+        for rc in init.mocha.rc init.tn8.rc; do
+            if [ -f "$workdir/$rc" ] && grep -q "${rc%.rc}" "$workdir/init.rc" 2>/dev/null; then
+                init_rc="$rc"
+                break
+            fi
+        done
+        # Fallback: just check file existence
+        if [ -z "$init_rc" ]; then
+            for rc in init.mocha.rc init.tn8.rc; do
+                if [ -f "$workdir/$rc" ]; then
+                    init_rc="$rc"
+                    break
+                fi
+            done
         fi
         [ -n "$init_rc" ] || die "No device init rc found in ramdisk" \
-            "Expected init.tn8.rc or init.mocha.rc"
+            "Expected init.mocha.rc or init.tn8.rc"
     fi
 
     cd "$workdir"
