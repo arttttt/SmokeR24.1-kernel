@@ -1395,128 +1395,59 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	u32 *cmd;
 	dma_addr_t cmd_phys;
 	int err;
-	int n;
-	int cal_off, cal_words, cal_sp_off;
-	int g1_off, g1_words, g2_off, g2_words, g3_off;
+	int n, g_off, g_words, sp_off;
 	u32 W = isp->width, H = isp->height;
-	u32 raw_stride = isp->in_stride;
 
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
-
-	/* ISP kept powered from stream_init — no module_busy needed */
 
 	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS;
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
 	n = 0;
 
-	/* ---- Submit 1: Cal update ---- */
-	cal_off = n;
-	memcpy(&cmd[n], isp->cal_data, isp->cal_words * 4);
-	n += isp->cal_words;
-	cmd[n - 2] = 0x00000001;
-	cmd[n - 1] = (u32)isp->work_buf.dma;
-	cal_words = n - cal_off;
-
-	cal_sp_off = n;
-	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-		host1x_uclass_incr_syncpt_cond_immediate_v(),
-		isp->syncpt_stream);
-	cmd[n++] = NVHOST_OPCODE_NOOP;
-
-	{
-		struct nvhost_job *cal_job;
-		cal_job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
-		if (!cal_job) {
-			return -ENOMEM;
-		}
-		cal_job->sp[0].id = isp->syncpt_stream;
-		cal_job->sp[0].incrs = 1;
-		cal_job->num_syncpts = 1;
-
-		nvhost_job_add_gather(cal_job, 0, cal_words, 0,
-				      isp->class_id, 0);
-		cal_job->gathers[0].mem_base = cmd_phys + cal_off * 4;
-
-		nvhost_job_add_gather(cal_job, 0, 2, 0, isp->class_id, 0);
-		cal_job->gathers[1].mem_base = cmd_phys + cal_sp_off * 4;
-
-		err = nvhost_channel_submit(cal_job);
-		if (err) {
-			dev_err(&isp->pdev->dev,
-				"ISP reprocess cal submit failed: %d\n", err);
-			nvhost_job_put(cal_job);
-			return err;
-		}
-		nvhost_job_put(cal_job);
-	}
-
-	/* ---- Submit 2: Reprocess per-frame ---- */
-	g1_off = n;
+	/* ---- Per-frame reprocess gather ---- */
+	g_off = n;
 
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 
-	/* Output — R8G8B8A8 (ISP code 0x43, verified working in userspace test) */
+	/* Output — R8G8B8A8 (verified: no W/2 compression in reprocess) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = 0x43; /* R8G8B8A8 — fixes W/2 compression */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0x00000000;
+	cmd[n++] = ISP_FORMAT_R8G8B8A8;
 
 	/* Output surfaces — all point to same buffer with 32bpp stride
-	 * to avoid MC decode errors (ISP writes all 3 even for RGBA) */
+	 * (ISP writes all 3 surfaces even for RGBA — avoids MC errors) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
 	cmd[n++] = (u32)out_dma;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 	cmd[n++] = W * 4;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
 	cmd[n++] = (u32)out_dma;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 	cmd[n++] = W * 4;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
 	cmd[n++] = (u32)out_dma;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 	cmd[n++] = W * 4;
 
-	/* Processing — flags=0 (verified working) */
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = (H << 16) | W;
-
-	/* Stats buffer */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = (u32)stats_dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-
-	/* Input — 10-bit Bayer BGGR (0x10200024, verified working) */
+	/* Input */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_DIMS, 1);
 	cmd[n++] = (H << 16) | W;
-
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_FORMAT, 1);
-	cmd[n++] = 0x10200024; /* 10-bit Bayer BGGR */
-
+	cmd[n++] = ISP_IN_FORMAT_BG10;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_SURF0, 3);
 	cmd[n++] = (u32)raw_dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = raw_stride;
-
+	cmd[n++] = 0;
+	cmd[n++] = isp->in_stride;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_STRIP, 1);
 	cmd[n++] = W & 0x3FFF;
-
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
-	cmd[n++] = 0x00000001;
+	cmd[n++] = 1;
 
-	/* ISP_ENABLE */
+	/* ISP enable */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
 	cmd[n++] = ISP_ENABLE_FULL_PIPELINE;
 
@@ -1529,56 +1460,26 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
 
-	/* Reprocess trigger 0x0B (NOT 0x05 which waits for VI streaming) */
+	/* Reprocess trigger: 0x09 then 0x0B (from RE of NvIspProcessFrame) */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = 0x0B;
+	cmd[n++] = ISP_TRIGGER_REPROCESS_A;
+	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
+	cmd[n++] = ISP_TRIGGER_REPROCESS_B;
 
-	g1_words = n - g1_off;
+	g_words = n - g_off;
 
-	/* Dump reprocess gather on first frame */
-	if (isp->frame_fence_memory == 0) {
-		int i;
-		dev_info(&isp->pdev->dev,
-			 "REPROCESS G[0]: %d words\n", g1_words);
-		for (i = g1_off; i < g1_off + g1_words; i += 8) {
-			int rem = g1_words - (i - g1_off);
-			if (rem >= 8)
-				dev_info(&isp->pdev->dev,
-					 "RCMD[%d]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
-					 i - g1_off,
-					 cmd[i], cmd[i+1], cmd[i+2], cmd[i+3],
-					 cmd[i+4], cmd[i+5], cmd[i+6], cmd[i+7]);
-			else {
-				char buf[128];
-				int pos = 0, j;
-				for (j = i; j < g1_off + g1_words; j++)
-					pos += snprintf(buf + pos,
-						sizeof(buf) - pos,
-						"%08x ", cmd[j]);
-				dev_info(&isp->pdev->dev,
-					 "RCMD[%d]: %s\n", i - g1_off, buf);
-			}
-		}
-	}
-
-	/* G[1]: immediate syncpt */
-	g2_off = n;
+	/* Immediate syncpt incr */
+	sp_off = n;
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_immediate_v(),
 		isp->syncpt_stream);
 	cmd[n++] = NVHOST_OPCODE_NOOP;
-	g2_words = n - g2_off;
 
-	/* G[2]+G[3]: post-frame (filled after submit) */
-	g3_off = n;
-	n += 10;
-
-	/* Submit per-frame job */
+	/* Submit: 2 gathers, 4 syncpts */
 	job = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
-	if (!job) {
+	if (!job)
 		return -ENOMEM;
-	}
 
 	job->sp[0].id = isp->syncpt_memory;
 	job->sp[0].incrs = 1;
@@ -1590,88 +1491,22 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	job->sp[3].incrs = 1;
 	job->num_syncpts = 4;
 
-	nvhost_job_add_gather(job, 0, g1_words, 0, isp->class_id, 0);
-	job->gathers[0].mem_base = cmd_phys + g1_off * 4;
-
-	nvhost_job_add_gather(job, 0, g2_words, 0, isp->class_id, 0);
-	job->gathers[1].mem_base = cmd_phys + g2_off * 4;
+	nvhost_job_add_gather(job, 0, g_words, 0, isp->class_id, 0);
+	job->gathers[0].mem_base = cmd_phys + g_off * 4;
+	nvhost_job_add_gather(job, 0, 2, 0, isp->class_id, 0);
+	job->gathers[1].mem_base = cmd_phys + sp_off * 4;
 
 	err = nvhost_channel_submit(job);
 	if (err) {
 		dev_err(&isp->pdev->dev,
-			"ISP reprocess frame submit failed: %d\n", err);
+			"ISP reprocess submit failed: %d\n", err);
 		nvhost_job_put(job);
 		return err;
 	}
 
 	isp->frame_fence_memory = job->sp[0].fence;
 	isp->frame_fence_stats = job->sp[1].fence;
-
 	nvhost_job_put(job);
-
-	/* Diagnostic: check if per-frame methods reach ISP hardware.
-	 * S5 sets 0x015=0x04040007, reprocess per-frame sets 0x015=0x07.
-	 * If readback shows 0x07 — methods work. If 0x04040007 — they don't. */
-	if (isp->frame_fence_memory <= 1) {
-		void __iomem *base;
-		msleep(50); /* give CDMA time to execute */
-		base = ioremap(
-			(isp->class_id == ISP_A_CLASS_ID) ?
-			0x54600000 : 0x54680000, 0x100);
-		if (base) {
-			dev_info(&isp->pdev->dev,
-				 "REPROCESS DIAG: ENABLE(015)=0x%08x (expect 0x07)\n",
-				 readl(base + 0x015 * 4));
-			iounmap(base);
-		}
-	}
-
-	/* Post-frame WAIT_SYNCPT */
-	{
-		int pn = g3_off;
-		cmd[pn++] = nvhost_opcode_setclass(NV_HOST1X_CLASS_ID, 0, 0);
-		cmd[pn++] = nvhost_opcode_nonincr(0x008, 1);
-		cmd[pn++] = (isp->syncpt_memory << 24) |
-			    (isp->frame_fence_memory & 0xFFFFFF);
-		cmd[pn++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-		cmd[pn++] = nvhost_opcode_setclass(NV_HOST1X_CLASS_ID, 0, 0);
-		cmd[pn++] = nvhost_opcode_nonincr(0x008, 1);
-		cmd[pn++] = (isp->syncpt_stats << 24) |
-			    (isp->frame_fence_stats & 0xFFFFFF);
-		cmd[pn++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	}
-
-	{
-		int g4_off = g3_off + 8;
-		struct nvhost_job *pf_job;
-
-		cmd[g4_off] = nvhost_opcode_imm_incr_syncpt(
-			host1x_uclass_incr_syncpt_cond_immediate_v(),
-			isp->syncpt_stream);
-		cmd[g4_off + 1] = NVHOST_OPCODE_NOOP;
-
-		pf_job = nvhost_job_alloc(isp->channel, 2, 0, 0, 1);
-		if (pf_job) {
-			pf_job->sp[0].id = isp->syncpt_stream;
-			pf_job->sp[0].incrs = 1;
-			pf_job->num_syncpts = 1;
-
-			nvhost_job_add_gather(pf_job, 0, 8, 0,
-					      isp->class_id, 0);
-			pf_job->gathers[0].mem_base = cmd_phys + g3_off * 4;
-
-			nvhost_job_add_gather(pf_job, 0, 2, 0,
-					      isp->class_id, 0);
-			pf_job->gathers[1].mem_base = cmd_phys + g4_off * 4;
-
-			err = nvhost_channel_submit(pf_job);
-			if (err)
-				dev_err(&isp->pdev->dev,
-					"ISP reprocess post-frame failed: %d\n",
-					err);
-			nvhost_job_put(pf_job);
-		}
-	}
 
 	return 0;
 }
