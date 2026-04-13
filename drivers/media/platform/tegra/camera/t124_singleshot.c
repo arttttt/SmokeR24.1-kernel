@@ -255,8 +255,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			stride = 0;
 		} else if (chan->use_isp) {
 			/* ISP reprocess: VI writes raw — use VI-side IOVA */
-			addr = chan->vi_raw_dma ? chan->vi_raw_dma :
-						  chan->isp_raw_dma;
+			addr = chan->isp_raw_buf ? chan->isp_raw_buf->dma : 0;
 			stride = chan->format.width * 2;
 		} else {
 			/* Normal: VI writes to V4L2 buffer */
@@ -340,7 +339,7 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 		}
 	} else if (chan->use_isp && isp_reprocess) {
 		/* ISP reprocess: VI→memory→ISP.
-		 * First wait MW_ACK (VI write to isp_raw_dma),
+		 * First wait MW_ACK (VI write to isp_raw_buf),
 		 * then submit ISP reprocess job. */
 		for (index = 0; index < chan->valid_ports; index++) {
 			err = arm_wait_mw_ack(chan, index, &ts);
@@ -354,8 +353,8 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 		}
 		if (!err) {
 			err = isp_t124_process_frame_reprocess(chan->isp,
-					chan->isp_raw_dma,
-					chan->isp_out_dma, 0);
+					chan->isp_raw_buf->dma,
+					chan->isp_out_buf->dma, 0);
 			if (err) {
 				dev_err(&chan->video.dev,
 					"ISP reprocess failed: %d\n", err);

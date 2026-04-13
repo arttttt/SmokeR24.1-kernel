@@ -45,9 +45,10 @@
  * DMA buffer helpers
  * ---------------------------------------------------------------- */
 
-/* Allocate buffer via nvmap (same path as stock camera HAL) */
-static int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
-			       struct isp_dma_buf *buf, size_t size)
+/* Allocate buffer via nvmap (same path as stock camera HAL).
+ * IOVMM heap — SMMU-mapped, visible to all engines (VI, ISP, host1x). */
+int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
+			struct isp_dma_buf *buf, size_t size)
 {
 	struct nvmap_handle_ref *ref;
 	phys_addr_t phys;
@@ -98,8 +99,10 @@ static int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
 	return 0;
 }
 
-static void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
-			       struct isp_dma_buf *buf)
+EXPORT_SYMBOL(isp_nvmap_buf_alloc);
+
+void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
+			struct isp_dma_buf *buf)
 {
 	if (!buf->nvmap_ref)
 		return;
@@ -111,6 +114,7 @@ static void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
 	nvmap_free_handle(isp->nvmap, buf->nvmap_ref->handle);
 	memset(buf, 0, sizeof(*buf));
 }
+EXPORT_SYMBOL(isp_nvmap_buf_free);
 
 /* Standard DMA coherent — kept for potential fallback */
 static int __maybe_unused

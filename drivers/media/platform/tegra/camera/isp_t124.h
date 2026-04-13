@@ -91,6 +91,12 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 				     dma_addr_t stats_dma);
 int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 
+/* nvmap buffer alloc/free — IOVMM heap, shared SMMU mapping */
+int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
+			struct isp_dma_buf *buf, size_t size);
+void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
+			struct isp_dma_buf *buf);
+
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */
 
 /* Control */
