@@ -203,44 +203,73 @@ int main(int argc, char **argv)
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
-    /* Step 2: Replace HwSettingsApply with manual 0x0F trigger submit */
-    printf("  Manual init: SETCLASS + trigger 0x0F...\n");
+    /* Step 2: Replace HwSettingsApply with manual cal submit + 0x0F trigger.
+     * Stock cal submit structure: G[0]=cal data, G[1]=immediate syncpt incr.
+     * We send minimal: G[0]=SETCLASS+trigger, G[1]=immediate syncpt. */
+    printf("  Manual cal submit (0x0F trigger)...\n");
     {
-        /* Extract ISP fd early for init submit */
         uint32_t *ectx = (uint32_t *)isp_handle;
         void *ech = (void *)(uintptr_t)ectx[3];
         int init_fd = *(int *)ech;
 
-        uint32_t init_cmd[4];
-        init_cmd[0] = OP_SETCLASS(0x32, 0, 0); /* ISP-A class */
-        init_cmd[1] = OP_NONINCR(0x00C, 1);
-        init_cmd[2] = 0x0F;                     /* post-apply trigger */
-        init_cmd[3] = 0x00000000;               /* NOP padding */
+        /* Get stream syncpt (param 2 from stock trace) */
+        struct nvhost_get_param_arg gsp_s;
+        gsp_s.param = 2;
+        ioctl(init_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp_s);
+        uint32_t sp_stream = gsp_s.value;
+        printf("    stream syncpt=%u\n", sp_stream);
 
-        /* Need a nvmap handle for cmdbuf */
+        /* G[0]: minimal cal — just SETCLASS + trigger 0x0F */
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
-        nvmap_write(init_h, 0, init_cmd, sizeof(init_cmd));
 
-        struct nvhost_cmdbuf icb = { .mem = init_h, .offset = 0, .words = 3 };
-        uint32_t iclass = 0x32;
+        uint32_t g0[4];
+        g0[0] = OP_SETCLASS(0x32, 0, 0);
+        g0[1] = OP_NONINCR(0x00C, 1);
+        g0[2] = 0x0F;
+        nvmap_write(init_h, 0, g0, 3 * 4);
+
+        /* G[1]: immediate syncpt incr (like stock) */
+        uint32_t g1[2];
+        g1[0] = (4 << 28) | (0x00 << 16) | sp_stream;  /* IMM incr syncpt */
+        g1[1] = 0x00000000;  /* NOP */
+        nvmap_write(init_h, 256, g1, 2 * 4);
+
+        struct nvhost_cmdbuf cbs[2];
+        cbs[0] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 0, .words = 3 };
+        cbs[1] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 256, .words = 2 };
+
+        struct nvhost_syncpt_incr isi = { .syncpt_id = sp_stream, .syncpt_incrs = 1 };
+        uint32_t iclasses[2] = { 0x32, 0x32 };
         struct nvhost_fence ifence = { 0, 0 };
 
         struct nvhost32_submit_args isa;
         memset(&isa, 0, sizeof(isa));
         isa.submit_version = 0;
-        isa.num_syncpt_incrs = 0;  /* 0x0F doesn't generate cond incr */
-        isa.num_cmdbufs = 1;
+        isa.num_syncpt_incrs = 1;
+        isa.num_cmdbufs = 2;
+        isa.num_relocs = 0;
         isa.timeout = 5000;
-        isa.cmdbufs = (uint32_t)(uintptr_t)&icb;
-        isa.class_ids = (uint32_t)(uintptr_t)&iclass;
+        isa.syncpt_incrs = (uint32_t)(uintptr_t)&isi;
+        isa.cmdbufs = (uint32_t)(uintptr_t)cbs;
+        isa.class_ids = (uint32_t)(uintptr_t)iclasses;
         isa.fences = (uint32_t)(uintptr_t)&ifence;
 
         if (ioctl(init_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0)
-            perror("init submit 0x0F");
-        else
-            printf("  Init submit OK (0x0F trigger)\n");
-        usleep(100000); /* 100ms for ISP to process */
+            perror("cal submit FAILED");
+        else {
+            printf("    Cal submit OK, fence=%u\n", isa.fence);
+            /* Wait for completion */
+            struct nvhost_ctrl_syncpt_waitex_args wa = {
+                .id = sp_stream, .thresh = isa.fence, .timeout = 1000
+            };
+            int ctrl = open("/dev/nvhost-ctrl", O_RDWR);
+            if (ioctl(ctrl, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa) < 0)
+                printf("    Cal wait timeout (may be OK)\n");
+            else
+                printf("    Cal done (val=%u)\n", wa.value);
+            close(ctrl);
+        }
     }
 
     /* Skip push buffer scanning — no HwSettingsApply means no cal gather */
