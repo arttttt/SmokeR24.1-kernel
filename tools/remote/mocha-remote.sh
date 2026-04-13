@@ -5,7 +5,7 @@
 # Usage:
 #   mocha-remote cmd "dmesg | tail -50"    — execute command on device
 #   mocha-remote dmesg                     — shortcut for dmesg
-#   mocha-remote flash boot.img            — flash boot.img to LNX partition + reboot
+#   mocha-remote flash boot.img LNX          — flash image to partition (LNX=boot, SOS=recovery)
 #   mocha-remote kexec boot.img            — kexec boot (no flash, like fastboot boot)
 #   mocha-remote push local.file /tmp/     — upload file to device
 #   mocha-remote shell                     — interactive shell (telnet)
@@ -101,14 +101,19 @@ cmd_push() {
     remote_upload "$src" "$dest"
 }
 
-# Flash boot.img to LNX partition + multirom trampoline inject + reboot
+# Flash image to a partition + multirom trampoline inject + reboot
 # Uses /cgi-bin/flash if available, otherwise fallback via upload + cmd
-# Usage: cmd_flash <boot.img> [--no-inject]
+# Usage: cmd_flash <image> <partition> [--no-inject]
+#   partition: LNX (boot), SOS (recovery), etc.
 cmd_flash() {
-    [ $# -ge 1 ] || die "Usage: mocha-remote flash <boot.img> [--no-inject]"
+    [ $# -ge 2 ] || die "Usage: mocha-remote flash <image> <partition>
+  partition: LNX (boot), SOS (recovery), USP (staging), etc.
+  example: mocha-remote flash boot.img LNX
+  example: mocha-remote flash recovery.img SOS"
     local img="$1"
+    local partition="$2"
     local no_inject=0
-    [ "${2:-}" = "--no-inject" ] && no_inject=1
+    [ "${3:-}" = "--no-inject" ] && no_inject=1
     [ -f "$img" ] || die "File not found: $img"
     local size
     size=$(stat -f%z "$img" 2>/dev/null || stat -c%s "$img" 2>/dev/null)
@@ -120,15 +125,15 @@ cmd_flash() {
 
     local result
     if [ "$has_cgi" = "yes" ]; then
-        echo "[*] Uploading + flashing $(basename "$img") ($size bytes)..."
+        echo "[*] Uploading + flashing $(basename "$img") to $partition ($size bytes)..."
         result=$(curl -s --fail --max-time 300 -X POST --data-binary "@${img}" \
-            "$(url /cgi-bin/flash?part=LNX)") || die "Flash failed"
+            "$(url /cgi-bin/flash?part=${partition})") || die "Flash failed"
     else
         echo "[*] CGI not available, using fallback..."
         echo "[*] Uploading $(basename "$img") ($size bytes)..."
         remote_upload "$img" "${WORK_DIR}/boot.img" || die "Upload failed"
         remote_upload "${SCRIPT_DIR}/overlay/sbin/cgi-bin/flash" "${WORK_DIR}/flash.sh" || die "Upload flash script failed"
-        result=$(remote_cmd "cat ${WORK_DIR}/boot.img | QUERY_STRING=part=LNX REQUEST_METHOD=POST CONTENT_LENGTH=\$(/sbin/busybox stat -c%s ${WORK_DIR}/boot.img) /system/bin/sh ${WORK_DIR}/flash.sh 2>&1")
+        result=$(remote_cmd "cat ${WORK_DIR}/boot.img | QUERY_STRING=part=${partition} REQUEST_METHOD=POST CONTENT_LENGTH=\$(/sbin/busybox stat -c%s ${WORK_DIR}/boot.img) /system/bin/sh ${WORK_DIR}/flash.sh 2>&1")
         remote_cmd "rm -f ${WORK_DIR}/flash.sh ${WORK_DIR}/boot.img"
     fi
 
@@ -257,7 +262,7 @@ Commands:
   cmd <command>       Execute shell command on device
   dmesg [flags]       Show kernel log
   push <file> <path>  Upload file to device
-  flash <boot.img>    Flash boot.img to LNX + reboot
+  flash <img> <part>  Flash image to partition (LNX=boot, SOS=recovery)
   kexec <boot.img>    Kexec boot (like fastboot boot, no flash)
   shell               Interactive telnet shell
   wait [timeout]      Wait for device to come online
