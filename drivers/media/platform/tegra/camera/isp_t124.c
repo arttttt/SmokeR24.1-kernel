@@ -1088,8 +1088,10 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	dma_addr_t cmd_phys;
 	int err;
 	int n;
-	int cal_off, cal_words, cal_sp_off;
-	int g1_off, g1_words, g2_off, g2_words, g3_off;
+	int cal_off, cal_words, cal_sp_off;    /* cal submit */
+	int g1_off, g1_words;                  /* per-frame gather */
+	int g2_off, g2_words;                  /* syncpt gather */
+	int g3_off;                            /* post-frame gather */
 	u32 W = isp->width, H = isp->height;
 	u32 y_stride = isp->y_stride;
 	u32 uv_stride = isp->uv_stride;
