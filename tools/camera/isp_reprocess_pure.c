@@ -154,16 +154,34 @@ int main(int argc, char **argv)
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
     if (nvmap_fd < 0) { perror("open nvmap"); return 1; }
 
-    /* Use ISP-A (class 0x32) — ISP-B doesn't support reprocess mode */
-    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
-    if (isp_fd < 0) { perror("open isp-a"); return 1; }
-    printf("Using ISP-A\n");
-    isp_class = ISP_CLASS_A;
-    if (isp_fd < 0) { perror("open isp"); return 1; }
-
-    /* Open ISP ctrl node — needed for PIO register writes */
+    /* Open ISP ctrl node first (like NvIspOpen) */
     int isp_ctrl_fd = open("/dev/nvhost-ctrl-isp", O_RDWR);
     if (isp_ctrl_fd < 0) perror("open isp ctrl (non-fatal)");
+
+    /* Open ISP-A channel */
+    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
+    if (isp_fd < 0) { perror("open isp-a"); return 1; }
+    printf("ISP-A fd=%d\n", isp_fd);
+    isp_class = ISP_CLASS_A;
+
+    /* CHANNEL_OPEN ioctl (NR=112) — from RE of NvRmChannelOpen.
+     * This allocates a hardware channel context in the kernel.
+     * Without it, ISP may not process gathers. */
+    {
+        int32_t channel_fd = -1;
+        #define NVHOST_IOCTL_CHANNEL_OPEN _IOR(NVHOST_IOCTL_MAGIC, 112, int32_t)
+        if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_OPEN, &channel_fd) < 0)
+            perror("CHANNEL_OPEN (non-fatal)");
+        else {
+            printf("CHANNEL_OPEN → fd=%d\n", channel_fd);
+            if (channel_fd >= 0) {
+                /* Use the new fd for all subsequent operations */
+                close(isp_fd);
+                isp_fd = channel_fd;
+                printf("Switched to channel fd=%d\n", isp_fd);
+            }
+        }
+    }
 
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
     if (ctrl_fd < 0) { perror("open ctrl"); return 1; }
@@ -278,6 +296,57 @@ int main(int argc, char **argv)
         nvmap_write(out_h, off, zeros, sz);
     }
     free(zeros);
+
+    /* Init gather: configure ISP DMA pipeline (required for pixel output) */
+    {
+        uint32_t init_cmd[8];
+        int ini = 0;
+        init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        init_cmd[ini++] = OP_INCR(0x019, 1);
+        init_cmd[ini++] = 0x00000400;
+        init_cmd[ini++] = OP_INCR(0x01B, 2);
+        init_cmd[ini++] = 0x00000200;
+        init_cmd[ini++] = 0x00000002;
+
+        uint32_t init_h = nvmap_create(4096);
+        nvmap_alloc(init_h);
+        nvmap_write(init_h, 0, init_cmd, ini * 4);
+
+        /* G[1]: immediate syncpt incr */
+        struct nvhost_get_param_arg gsp_s;
+        gsp_s.param = 2;
+        ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp_s);
+        uint32_t sp_stream = gsp_s.value;
+        printf("Stream syncpt=%u\n", sp_stream);
+
+        uint32_t g1_data[2];
+        g1_data[0] = (4 << 28) | sp_stream;  /* IMM incr */
+        g1_data[1] = 0;
+        nvmap_write(init_h, 256, g1_data, 8);
+
+        struct nvhost_cmdbuf icbs[2];
+        icbs[0] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 0, .words = ini };
+        icbs[1] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 256, .words = 2 };
+        struct nvhost_syncpt_incr isi = { .syncpt_id = sp_stream, .syncpt_incrs = 1 };
+        uint32_t iclasses[2] = { ISP_CLASS, ISP_CLASS };
+        struct nvhost_fence ifence = {0,0};
+
+        struct nvhost32_submit_args isa;
+        memset(&isa, 0, sizeof(isa));
+        isa.submit_version = 0;
+        isa.num_syncpt_incrs = 1;
+        isa.num_cmdbufs = 2;
+        isa.timeout = 5000;
+        isa.syncpt_incrs = (uint32_t)(uintptr_t)&isi;
+        isa.cmdbufs = (uint32_t)(uintptr_t)icbs;
+        isa.class_ids = (uint32_t)(uintptr_t)iclasses;
+        isa.fences = (uint32_t)(uintptr_t)&ifence;
+
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0)
+            perror("init submit FAILED");
+        else
+            printf("Init submit OK (0x019/0x01B/0x01C), fence=%u\n", isa.fence);
+    }
 
     /* Build minimal reprocess gather */
     uint32_t cmd[64];
