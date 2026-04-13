@@ -495,115 +495,158 @@ static int isp_append_syncpt(struct tegra_isp_t124 *isp, u32 *buf, int n)
 	return n;
 }
 
-/**
- * isp_t124_stream_init() - Prepare ISP for streaming
- *
- * Reproduces exact stock init sequence: 5 submits.
- * S1: cal + 0x018 tail + cal + 0x018 tail2
- * S2: cal + trigger
- * S3: SET_CLASS only
- * S4: cal + trigger (repeat)
- * S5: runtime config (0x400, 0x800, 0x930, 0x506, cal, trigger)
- */
-int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
-			 bool reprocess)
+/* Common HW setup: clocks, PIO, nvmap, buffers, cmdbuf allocation.
+ * Shared by both streaming and reprocess init paths. */
+static int isp_hw_setup(struct tegra_isp_t124 *isp, u32 width, u32 height)
 {
 	struct device *dev = &isp->pdev->dev;
 	struct platform_device *host1x_pdev;
 	struct device *host1x_dev;
-	u32 *cmd;
-	dma_addr_t cmd_phys;
-	int err, n;
+	int err;
+	struct nvhost_device_data *pd = platform_get_drvdata(isp->pdev);
+	int clk_err;
+
+	isp->width = width;
+	isp->height = height;
+	isp->y_stride = (isp->width + 63) & ~63;
+	isp->uv_stride = ((isp->width / 2) + 63) & ~63;
+	isp->in_stride = width * 2;
+	isp->in_format = ISP_IN_FORMAT_BG10;
+
+	err = nvhost_module_busy(isp->pdev);
+	if (err)
+		return err;
+
+	/* ISP 384 MHz, EMC 768 MHz — from stock trace */
+	clk_err = nvhost_module_set_rate(isp->pdev, isp,
+		384000000, 0, NVHOST_CLOCK);
+	if (clk_err)
+		dev_warn(dev, "ISP set_rate failed: %d\n", clk_err);
+	clk_err = nvhost_module_set_rate(isp->pdev, isp,
+		768000000, 1, NVHOST_CLOCK);
+	if (clk_err)
+		dev_warn(dev, "ISP EMC set_rate failed: %d\n", clk_err);
+
+	/* PIO write: ISP top-level enable */
+	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
+
+	if (!isp->nvmap) {
+		isp->nvmap = __nvmap_create_client(nvmap_dev, "isp_t124");
+		if (!isp->nvmap) {
+			err = -ENOMEM;
+			goto idle;
+		}
+	}
+
+	err = isp_nvmap_buf_alloc(isp, &isp->work_buf, ISP_WORK_BUF_SIZE);
+	if (err)
+		goto idle;
+
+	err = isp_nvmap_buf_alloc(isp, &isp->stats_buf, 256 * 1024);
+	if (err) {
+		isp_nvmap_buf_free(isp, &isp->work_buf);
+		goto idle;
+	}
+
+	host1x_pdev = nvhost_get_parent(isp->pdev);
+	host1x_dev = host1x_pdev ? &host1x_pdev->dev : dev;
+	isp->cmdbuf = dma_alloc_coherent(host1x_dev, ISP_CMDBUF_SIZE * 2,
+					  &isp->cmdbuf_phys, GFP_KERNEL);
+	if (!isp->cmdbuf) {
+		err = -ENOMEM;
+		isp_nvmap_buf_free(isp, &isp->stats_buf);
+		isp_nvmap_buf_free(isp, &isp->work_buf);
+		goto idle;
+	}
+
+	dev_info(dev, "ISP hw setup: %ux%u work=0x%pad stats=0x%pad\n",
+		 width, height, &isp->work_buf.dma, &isp->stats_buf.dma);
+	return 0;
+
+idle:
+	nvhost_module_idle(isp->pdev);
+	return err;
+}
+
+/* Reprocess init — minimal, matches working userspace test (isp_reprocess_pure.c).
+ * Only DMA pipeline config (0x019/0x01B/0x01C).
+ * NO streaming init (S1-S5) — that configures ISP for VI pixel input. */
+static int isp_reprocess_init(struct tegra_isp_t124 *isp)
+{
+	u32 *cmd = isp->cmdbuf;
+	dma_addr_t cmd_phys = isp->cmdbuf_phys;
+	int n = 0, err;
+
+	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_DMA_CONFIG, 1);
+	cmd[n++] = ISP_DMA_OUT_THRESHOLD;   /* 0x019 = 0x400 */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_DMA_INPUT, 2);
+	cmd[n++] = ISP_DMA_IN_THRESHOLD;    /* 0x01B = 0x200 */
+	cmd[n++] = ISP_DMA_ENABLE;          /* 0x01C = 0x002 */
+	n = isp_append_syncpt(isp, cmd, n);
+
+	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "reprocess-init");
+	if (err)
+		return err;
+
+	dev_info(&isp->pdev->dev, "ISP reprocess init OK: %ux%u class=0x%02x\n",
+		 isp->width, isp->height, isp->class_id);
+	return 0;
+}
+
+/* Streaming init: S1-S5 (full stock sequence) + S6-S7 warmup */
+static int isp_streaming_init(struct tegra_isp_t124 *isp);
+
+/**
+ * isp_t124_stream_init() - Prepare ISP for streaming or reprocess
+ */
+int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
+			 bool reprocess)
+{
+	int err;
 
 	if (!isp->channel || !isp->syncpt_stream)
 		return -ENODEV;
 	if (isp->streaming)
 		return -EBUSY;
 
-	/* Use actual capture resolution, not hardcoded sensor max.
-	 * ISP input/output dims must match what VI sends. */
-	isp->width = width;
-	isp->height = height;
-	isp->y_stride = (isp->width + 63) & ~63;
-	isp->uv_stride = ((isp->width / 2) + 63) & ~63;
-	isp->in_stride = width * 2;  /* RAW10 packed to 16-bit = 2 bytes/pixel */
-	isp->in_format = 0x10200024; /* 10-bit Bayer BGGR (verified in userspace) */
-
-	err = nvhost_module_busy(isp->pdev);
+	err = isp_hw_setup(isp, width, height);
 	if (err)
 		return err;
 
-	/* Set ISP clock rate — stock uses 384 MHz for ISP, 768 MHz for EMC.
-	 * Without this, ISP may run at default (low) clock and fail to
-	 * process frames in time. Discovered from stock isp_trace. */
-	{
-		int clk_err;
-		struct nvhost_device_data *pd = platform_get_drvdata(isp->pdev);
-		/* ISP core clock = 384 MHz (moduleid 0xb) */
-		clk_err = nvhost_module_set_rate(isp->pdev, isp,
-			384000000, 0, NVHOST_CLOCK);
-		if (clk_err)
-			dev_warn(dev, "ISP set_rate failed: %d\n", clk_err);
-		dev_info(dev, "ISP clk[0]: %lu Hz (requested 384MHz)\n",
-			 pd->clk[0] ? clk_get_rate(pd->clk[0]) : 0);
-		/* EMC clock = 768 MHz (moduleid 0x100004b) */
-		clk_err = nvhost_module_set_rate(isp->pdev, isp,
-			768000000, 1, NVHOST_CLOCK);
-		if (clk_err)
-			dev_warn(dev, "ISP EMC set_rate failed: %d\n", clk_err);
-		dev_info(dev, "ISP clk[1] (EMC): %lu Hz (requested 768MHz)\n",
-			 pd->clk[1] ? clk_get_rate(pd->clk[1]) : 0);
-	}
+	if (reprocess)
+		err = isp_reprocess_init(isp);
+	else
+		err = isp_streaming_init(isp);
 
-	/* PIO write: stock does this before first submit */
-	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
-
-	/* Create nvmap client (stock HAL uses nvmap for all ISP buffers) */
-	if (!isp->nvmap) {
-		isp->nvmap = __nvmap_create_client(nvmap_dev, "isp_t124");
-		if (!isp->nvmap) {
-			dev_err(dev, "nvmap client creation failed\n");
-			err = -ENOMEM;
-			goto idle;
-		}
-	}
-
-	/* Allocate working buffer via nvmap */
-	err = isp_nvmap_buf_alloc(isp, &isp->work_buf, ISP_WORK_BUF_SIZE);
 	if (err) {
-		dev_err(dev, "ISP work buf alloc failed: %d\n", err);
-		goto idle;
-	}
-	dev_info(dev, "work_buf: iova=0x%pad size=%zu\n",
-		 &isp->work_buf.dma, isp->work_buf.size);
-
-	/* Allocate separate stats buffer via nvmap */
-	err = isp_nvmap_buf_alloc(isp, &isp->stats_buf, 256 * 1024);
-	if (err) {
-		dev_err(dev, "ISP stats buf alloc failed: %d\n", err);
+		struct platform_device *hp = nvhost_get_parent(isp->pdev);
+		struct device *hd = hp ? &hp->dev : &isp->pdev->dev;
+		dma_free_coherent(hd, ISP_CMDBUF_SIZE * 2,
+				  isp->cmdbuf, isp->cmdbuf_phys);
+		isp->cmdbuf = NULL;
+		isp_nvmap_buf_free(isp, &isp->stats_buf);
 		isp_nvmap_buf_free(isp, &isp->work_buf);
-		goto idle;
-	}
-	dev_info(dev, "stats_buf: iova=0x%pad size=%zu\n",
-		 &isp->stats_buf.dma, isp->stats_buf.size);
-
-	/* Command buffer — 16KB total for all submits */
-	host1x_pdev = nvhost_get_parent(isp->pdev);
-	host1x_dev = host1x_pdev ? &host1x_pdev->dev : dev;
-	isp->cmdbuf = dma_alloc_coherent(host1x_dev,
-					  ISP_CMDBUF_SIZE * 2,
-					  &isp->cmdbuf_phys, GFP_KERNEL);
-	if (!isp->cmdbuf) {
-		err = -ENOMEM;
-		goto free_work;
+		nvhost_module_idle(isp->pdev);
+		return err;
 	}
 
-	cmd = isp->cmdbuf;
-	cmd_phys = isp->cmdbuf_phys;
+	isp->streaming = true;
+	isp->frame_count = 0;
+	isp->reprocess = reprocess;
 
-	dev_info(dev, "stream_init: %ux%u cmdbuf=0x%pad work=0x%pad stats=0x%pad\n",
-		 width, height, &cmd_phys, &isp->work_buf.dma,
-		 &isp->stats_buf.dma);
+	if (!reprocess)
+		nvhost_module_idle(isp->pdev);
+	return 0;
+}
+EXPORT_SYMBOL(isp_t124_stream_init);
+
+static int isp_streaming_init(struct tegra_isp_t124 *isp)
+{
+	struct device *dev = &isp->pdev->dev;
+	u32 *cmd = isp->cmdbuf;
+	dma_addr_t cmd_phys = isp->cmdbuf_phys;
+	int err, n;
 
 	/* S1 (stock 3654w): zero_block×2 + 0x018 tails + syncpt
 	 * Stock structure: SETCLASS + zero_init + SETCLASS + trigger +
@@ -633,7 +676,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S1-init");
 	if (err)
-		goto free_cmdbuf;
+		return err;
 
 	/* S2 (stock 1817w): zero_block + trigger + syncpt */
 	n = 0;
@@ -642,7 +685,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S2-cal");
 	if (err)
-		goto free_cmdbuf;
+		return err;
 
 	/* S3 (stock 1+2w): SET_CLASS + syncpt */
 	n = 0;
@@ -654,7 +697,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S3-class");
 	if (err)
-		goto free_cmdbuf;
+		return err;
 
 	/* S4 (stock 1817w): zero_block + trigger + syncpt */
 	n = 0;
@@ -663,7 +706,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S4-cal");
 	if (err)
-		goto free_cmdbuf;
+		return err;
 
 	/* S5 (stock 1238w): full runtime config from stock trace + cal + trigger
 	 * Values differ between ISP-A (isp.0, IMX179 rear) and ISP-B (isp.1, OV5693 front).
@@ -889,7 +932,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S5-rtcfg");
 	if (err)
-		goto free_cmdbuf;
+		return err;
 
 	/* S6+S7: Only for streaming mode (warmup needs ISP pipeline active).
 	 *
@@ -904,7 +947,6 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	 * - TPG + ISP works regardless of S6/S7
 	 * - Problem is VI→ISP pixel routing, not ISP processing itself
 	 */
-	if (!reprocess) {
 	/* S6: Histogram config + ISP enable */
 	n = 0;
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
@@ -926,7 +968,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	n = isp_append_syncpt(isp, cmd, n);
 	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S6-hist");
 	if (err)
-		goto free_cmdbuf;
+		return err;
 
 	/* S7: Warmup 8×8 frame — primes ISP processing pipeline */
 	n = 0;
@@ -979,7 +1021,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 			isp->syncpt_stream);
 		cmd[n++] = NVHOST_OPCODE_NOOP;
 		wjob = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
-		if (!wjob) { err = -ENOMEM; goto free_cmdbuf; }
+		if (!wjob) { err = -ENOMEM; return err; }
 		wjob->sp[0].id = isp->syncpt_memory;
 		wjob->sp[0].incrs = 1;
 		wjob->sp[1].id = isp->syncpt_stats;
@@ -997,7 +1039,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 		if (err) {
 			dev_err(dev, "ISP warmup submit failed: %d\n", err);
 			nvhost_job_put(wjob);
-			goto free_cmdbuf;
+			return err;
 		}
 		err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
 				isp->syncpt_memory, wjob->sp[0].fence,
@@ -1008,36 +1050,11 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 			dev_info(dev, "ISP S7-warmup OK\n");
 		nvhost_job_put(wjob);
 	}
-	} /* end !reprocess */
 
-	isp->streaming = true;
-	isp->frame_count = 0;
-	isp->reprocess = reprocess;
-
-	dev_info(dev, "ISP stream init OK: %ux%u, class=0x%02x (%s)\n",
-		 width, height, isp->class_id,
-		 reprocess ? "reprocess" : "streaming");
-	if (!reprocess)
-		nvhost_module_idle(isp->pdev);
-	/* Reprocess: keep powered — ISP state lost on power cycle */
+	dev_info(dev, "ISP streaming init OK: %ux%u class=0x%02x\n",
+		 isp->width, isp->height, isp->class_id);
 	return 0;
-
-free_cmdbuf:
-	{
-		struct platform_device *hp = nvhost_get_parent(isp->pdev);
-		struct device *hd = hp ? &hp->dev : dev;
-		dma_free_coherent(hd, ISP_CMDBUF_SIZE * 2,
-				  isp->cmdbuf, isp->cmdbuf_phys);
-		isp->cmdbuf = NULL;
-	}
-free_work:
-	isp_nvmap_buf_free(isp, &isp->stats_buf);
-	isp_nvmap_buf_free(isp, &isp->work_buf);
-idle:
-	nvhost_module_idle(isp->pdev);
-	return err;
 }
-EXPORT_SYMBOL(isp_t124_stream_init);
 
 /**
  * isp_t124_stream_stop() - Release ISP streaming resources
@@ -1370,6 +1387,11 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 
+	/* Work buffer — required per userspace test */
+	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ISP_ENABLE, 2);
+	cmd[n++] = 1;                        /* 0x053 = enable */
+	cmd[n++] = (u32)isp->work_buf.dma;   /* 0x054 = IOVA */
+
 	/* Output — R8G8B8A8 (verified: no W/2 compression in reprocess) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
@@ -1407,9 +1429,10 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_IN_TRIGGER, 1);
 	cmd[n++] = 1;
 
-	/* ISP enable */
+	/* ISP enable — must be 0x04040007 (streaming+stats mode),
+	 * not 0x07. Verified in working userspace test. */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = ISP_ENABLE_FULL_PIPELINE;
+	cmd[n++] = ISP_ENABLE_STATS_STREAMING;
 
 	/* Syncpt conditional incrs */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
