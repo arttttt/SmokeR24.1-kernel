@@ -164,24 +164,9 @@ int main(int argc, char **argv)
     printf("ISP-A fd=%d\n", isp_fd);
     isp_class = ISP_CLASS_A;
 
-    /* CHANNEL_OPEN ioctl (NR=112) — from RE of NvRmChannelOpen.
-     * This allocates a hardware channel context in the kernel.
-     * Without it, ISP may not process gathers. */
-    {
-        int32_t channel_fd = -1;
-        #define NVHOST_IOCTL_CHANNEL_OPEN _IOR(NVHOST_IOCTL_MAGIC, 112, int32_t)
-        if (ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_OPEN, &channel_fd) < 0)
-            perror("CHANNEL_OPEN (non-fatal)");
-        else {
-            printf("CHANNEL_OPEN → fd=%d\n", channel_fd);
-            if (channel_fd >= 0) {
-                /* Use the new fd for all subsequent operations */
-                close(isp_fd);
-                isp_fd = channel_fd;
-                printf("Switched to channel fd=%d\n", isp_fd);
-            }
-        }
-    }
+    /* NOTE: CHANNEL_OPEN ioctl (NR=112) causes kernel panic on 24.1.
+     * On 24.1, open() already creates hwctx via nvhost_channelopen().
+     * Skip CHANNEL_OPEN and rely on open() + init gather. */
 
     int ctrl_fd = open("/dev/nvhost-ctrl", O_RDWR);
     if (ctrl_fd < 0) { perror("open ctrl"); return 1; }
