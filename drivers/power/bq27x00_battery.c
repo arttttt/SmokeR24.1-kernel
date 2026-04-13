@@ -1581,6 +1581,7 @@ static int load_firmware(struct bq27x00_device_info *di,
 				}
 				if (i2c_transfer(client->adapter, &msg, 1) < 0)
 					goto error;
+				msleep(10);
 				break;
 			case 'R':
 			case 'C':
