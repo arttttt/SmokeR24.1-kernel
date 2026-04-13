@@ -1169,64 +1169,47 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 		nvhost_job_put(cal_job);
 	}
 
-	/* ---- Submit 2: Per-frame (stock 45 words) ---- */
+	/* ---- Per-frame gather (matches stock 45-word structure) ---- */
 	g1_off = n;
 
-	/* SET_CLASS */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 
-	/* Output width/height/format/color — stock: INCR(0xE00,1)..INCR(0xE03,1) */
+	/* Output: dims + format + surfaces (YUV420 planar) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
 	cmd[n++] = ((W - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_STOCK;
+	cmd[n++] = ISP_FORMAT_YUV420;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 
-	/* Output Y/U/V surfaces: INCR(0xE04,3), INCR(0xE07,3), INCR(0xE0A,3) */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
 	cmd[n++] = (u32)out_y;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 	cmd[n++] = y_stride;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_U, 3);
 	cmd[n++] = (u32)out_u;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 	cmd[n++] = uv_stride;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_V, 3);
 	cmd[n++] = (u32)out_v;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0;
 	cmd[n++] = uv_stride;
 
-	/* Processing INCR(0x500,6): [0, 0, 0, 0, 0, (H<<16)|W]
-	 * Input resolution = actual capture dims from stream_init */
-	{
-	u32 in_w = isp->width, in_h = isp->height;
+	/* Processing: flags=0, dims=H×W */
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = (in_h << 16) | in_w;
-	}
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+	cmd[n++] = 0; cmd[n++] = 0;
+	cmd[n++] = (H << 16) | W;
 
-	/* ISP_ENABLE = 0x04040007 (stats/streaming mode) — stock writes
-	 * this in every per-frame submit, between 0x500 and 0x100. */
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x04040007;
-
-	/* Stats buffer INCR(0x100,4): [IOVA, 0, 0, 0] */
+	/* Stats buffer */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
 	cmd[n++] = (u32)stats_dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
+	cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
 
-	/* Conditional syncpt incrs — stock: SET_CLASS between each pair */
+	/* Syncpt conditional incrs */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
@@ -1236,40 +1219,14 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
 	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
 
-	/* Runtime trigger: SET_CLASS + NONINCR(0x00C,1) = 0x05 */
+	/* Streaming trigger */
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
 	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
 	cmd[n++] = ISP_TRIGGER_RUNTIME;
 
 	g1_words = n - g1_off;
 
-	/* Dump per-frame gather for comparison with stock */
-	{
-		int i;
-		dev_info(&isp->pdev->dev,
-			 "PER-FRAME G[0]: %d words\n", g1_words);
-		for (i = g1_off; i < g1_off + g1_words; i += 8) {
-			int rem = g1_words - (i - g1_off);
-			if (rem >= 8)
-				dev_info(&isp->pdev->dev,
-					 "CMD[%d]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
-					 i - g1_off,
-					 cmd[i], cmd[i+1], cmd[i+2], cmd[i+3],
-					 cmd[i+4], cmd[i+5], cmd[i+6], cmd[i+7]);
-			else {
-				char buf[128];
-				int pos = 0, j;
-				for (j = i; j < g1_off + g1_words; j++)
-					pos += snprintf(buf + pos,
-						sizeof(buf) - pos,
-						"%08x ", cmd[j]);
-				dev_info(&isp->pdev->dev,
-					 "CMD[%d]: %s\n", i - g1_off, buf);
-			}
-		}
-	}
-
-	/* ---- G[1]: immediate syncpt incr for stream ---- */
+	/* Immediate syncpt incr */
 	g2_off = n;
 	cmd[n++] = nvhost_opcode_imm_incr_syncpt(
 		host1x_uclass_incr_syncpt_cond_immediate_v(),
