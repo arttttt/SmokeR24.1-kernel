@@ -502,9 +502,7 @@ static int isp_hw_setup(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	struct device *dev = &isp->pdev->dev;
 	struct platform_device *host1x_pdev;
 	struct device *host1x_dev;
-	int err;
-	struct nvhost_device_data *pd = platform_get_drvdata(isp->pdev);
-	int clk_err;
+	int err, clk_err;
 
 	isp->width = width;
 	isp->height = height;
