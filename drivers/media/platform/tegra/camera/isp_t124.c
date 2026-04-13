@@ -63,11 +63,12 @@ static int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
 	if (IS_ERR(ref))
 		return PTR_ERR(ref);
 
-	/* Allocate backing memory (like NVMAP_IOC_ALLOC)
-	 * heap=0x1 (carveout), flags=0x1 (WRITE_COMBINE), align=32 */
+	/* Allocate backing memory via IOVMM (SMMU-mapped).
+	 * Must use IOVMM (not carveout) so ISP DMA can access via SMMU.
+	 * Userspace test uses NVMAP_HEAP_IOVMM and works. */
 	err = nvmap_alloc_handle(isp->nvmap, ref->handle,
-				 0x1, /* heap_mask — stock uses 0x1 */
-				 32,  /* align */
+				 NVMAP_HEAP_IOVMM, /* 1<<30 = SMMU-mapped */
+				 4096, /* align — match userspace */
 				 0,   /* kind */
 				 NVMAP_HANDLE_WRITE_COMBINE,
 				 NVMAP_IVM_INVALID_PEER);
