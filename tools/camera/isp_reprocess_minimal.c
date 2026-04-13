@@ -203,52 +203,42 @@ int main(int argc, char **argv)
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
-    /* Step 2: Replace HwSettingsApply with manual cal submit + 0x0F trigger.
-     * Stock cal submit structure: G[0]=cal data, G[1]=immediate syncpt incr.
-     * We send minimal: G[0]=SETCLASS+trigger, G[1]=immediate syncpt. */
-    printf("  Manual cal submit (0x0F trigger)...\n");
+    /* Cal submit using exact gather dumped from working blob HwSettingsApply */
+    printf("  Cal submit (blob gather dump)...\n");
+    #include "cal_gather_blob.h"
     {
         uint32_t *ectx = (uint32_t *)isp_handle;
         void *ech = (void *)(uintptr_t)ectx[3];
         int init_fd = *(int *)ech;
 
-        /* Get stream syncpt (param 2 from stock trace) */
         struct nvhost_get_param_arg gsp_s;
         gsp_s.param = 2;
         ioctl(init_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp_s);
         uint32_t sp_stream = gsp_s.value;
         printf("    stream syncpt=%u\n", sp_stream);
 
-        /* G[0]: cal with work buffer + ISP_ENABLE + trigger 0x0F */
-        uint32_t work_h = nvmap_create(512 * 1024);
-        nvmap_alloc(work_h);
-        uint32_t work_iova = nvmap_pin(work_h);
-        printf("    work_iova=0x%08x\n", work_iova);
+        /* Allocate and upload cal gather */
+        uint32_t cal_h = nvmap_create(CAL_GATHER_WORDS * 4 + 256);
+        nvmap_alloc(cal_h);
 
-        uint32_t init_h = nvmap_create(4096);
-        nvmap_alloc(init_h);
+        /* Upload in chunks */
+        for (int off = 0; off < CAL_GATHER_WORDS * 4; off += 65536) {
+            int sz = CAL_GATHER_WORDS * 4 - off;
+            if (sz > 65536) sz = 65536;
+            nvmap_write(cal_h, off, ((const uint8_t *)cal_gather_data) + off, sz);
+        }
+        printf("    Uploaded %d cal words\n", CAL_GATHER_WORDS);
 
-        uint32_t g0[16];
-        int gi = 0;
-        g0[gi++] = OP_SETCLASS(0x32, 0, 0);
-        g0[gi++] = OP_INCR(0x053, 2);       /* work buffer */
-        g0[gi++] = 0x00000001;               /* enable */
-        g0[gi++] = work_iova;                /* IOVA */
-        g0[gi++] = OP_INCR(0x015, 1);       /* ISP_ENABLE */
-        g0[gi++] = 0x07;                     /* full pipeline */
-        g0[gi++] = OP_NONINCR(0x00C, 1);    /* trigger */
-        g0[gi++] = 0x0F;                     /* post-apply */
-        nvmap_write(init_h, 0, g0, gi * 4);
-
-        /* G[1]: immediate syncpt incr (like stock) */
+        /* G[1]: immediate syncpt incr */
+        uint32_t g1off = CAL_GATHER_WORDS * 4;
         uint32_t g1[2];
-        g1[0] = (4 << 28) | (0x00 << 16) | sp_stream;  /* IMM incr syncpt */
-        g1[1] = 0x00000000;  /* NOP */
-        nvmap_write(init_h, 256, g1, 2 * 4);
+        g1[0] = (4 << 28) | (0x00 << 16) | sp_stream;
+        g1[1] = 0x00000000;
+        nvmap_write(cal_h, g1off, g1, 8);
 
         struct nvhost_cmdbuf cbs[2];
-        cbs[0] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 0, .words = gi };
-        cbs[1] = (struct nvhost_cmdbuf){ .mem = init_h, .offset = 256, .words = 2 };
+        cbs[0] = (struct nvhost_cmdbuf){ .mem = cal_h, .offset = 0, .words = CAL_GATHER_WORDS };
+        cbs[1] = (struct nvhost_cmdbuf){ .mem = cal_h, .offset = g1off, .words = 2 };
 
         struct nvhost_syncpt_incr isi = { .syncpt_id = sp_stream, .syncpt_incrs = 1 };
         uint32_t iclasses[2] = { 0x32, 0x32 };
@@ -270,7 +260,6 @@ int main(int argc, char **argv)
             perror("cal submit FAILED");
         else {
             printf("    Cal submit OK, fence=%u\n", isa.fence);
-            /* Wait for completion */
             struct nvhost_ctrl_syncpt_waitex_args wa = {
                 .id = sp_stream, .thresh = isa.fence, .timeout = 1000
             };
