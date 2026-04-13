@@ -249,7 +249,7 @@ int main(int argc, char **argv)
     uint32_t in_h = nvmap_create(IN_SIZE);
     uint32_t out_h = nvmap_create(OUT_SIZE);
     uint32_t work_h = nvmap_create(512 * 1024);  /* ISP work buffer */
-    uint32_t cmd_h = nvmap_create(4096);
+    uint32_t cmd_h = nvmap_create(16384);  /* larger for lens shading data */
     if (!in_h || !out_h || !work_h || !cmd_h) { printf("alloc failed\n"); return 1; }
     nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h);
 
@@ -334,7 +334,8 @@ int main(int argc, char **argv)
     }
 
     /* Build reprocess gather with ISP pipeline init */
-    uint32_t cmd[256];
+    #include "isp_lens_shading.h"
+    uint32_t cmd[768];
     int n = 0;
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1;
     int work_reloc = -1;
@@ -371,6 +372,11 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0x01E, 1); cmd[n++] = 0;
     cmd[n++] = OP_INCR(0x01F, 1); cmd[n++] = 1;
     cmd[n++] = OP_INCR(0x05F, 1); cmd[n++] = 0x10;
+
+    /* Lens shading table (from stock OV5693 trace — enables demosaic color) */
+    cmd[n++] = OP_NONINCR(0xD0B, LS_DATA_WORDS);
+    for (int i = 0; i < LS_DATA_WORDS; i++)
+        cmd[n++] = ls_data[i];
 
     /* Output: dims + format */
     cmd[n++] = OP_INCR(0xE00, 1);
