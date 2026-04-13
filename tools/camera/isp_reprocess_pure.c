@@ -108,7 +108,11 @@ static int isp_class = ISP_CLASS_B;  /* default ISP-B */
 #define H 1944
 #define BPP 2
 #define IN_SIZE  (W * H * BPP)
-#define OUT_SIZE (W * 4 * H)
+#define Y_STRIDE ((W + 63) & ~63)        /* 2624 */
+#define UV_STRIDE (((W/2) + 63) & ~63)   /* 1344 */
+#define Y_SIZE   (Y_STRIDE * H)          /* 5101056 */
+#define UV_SIZE  (UV_STRIDE * (H / 2))   /* 1306368 */
+#define OUT_SIZE (Y_SIZE + UV_SIZE * 2)  /* Y + U + V */
 
 static int nvmap_fd = -1;
 
@@ -348,31 +352,32 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Output: dims + format */
+    /* Output: dims + format (YUV420 planar — stock format) */
     cmd[n++] = OP_INCR(0xE00, 1);
     cmd[n++] = ((W - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x43;                      /* R8G8B8A8 */
+    cmd[n++] = 0x04FE00E6;               /* YUV420 planar (stock) */
 
-    /* Output Y surface */
+    /* Output Y surface — stride=2624 */
     cmd[n++] = OP_INCR(0xE04, 3);
     y_reloc = n;
-    cmd[n++] = 0;                         /* IOVA patched by reloc */
+    cmd[n++] = 0;                         /* IOVA patched by reloc → out_iova */
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;                     /* 32bpp stride */
-    /* U/V — same buffer to avoid MC errors */
+    cmd[n++] = Y_STRIDE;
+    /* U surface — at Y_SIZE offset, stride=1344 */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
-    cmd[n++] = 0;
+    cmd[n++] = 0;                         /* IOVA patched by reloc → out_iova + Y_SIZE */
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;
+    cmd[n++] = UV_STRIDE;
+    /* V surface — at Y_SIZE + UV_SIZE offset */
     cmd[n++] = OP_INCR(0xE0A, 3);
     v_reloc = n;
-    cmd[n++] = 0;
+    cmd[n++] = 0;                         /* IOVA patched by reloc → out_iova + Y_SIZE + UV_SIZE */
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;
+    cmd[n++] = UV_STRIDE;
 
     /* Input: dims + format + surface + strip + trigger */
     cmd[n++] = OP_INCR(0xE31, 1);
@@ -420,9 +425,9 @@ int main(int argc, char **argv)
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, 0 };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, Y_SIZE };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, 0 };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
     shifts[nr++].shift = 0;
