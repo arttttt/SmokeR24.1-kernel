@@ -2,9 +2,14 @@
 # Imported by init.rc (added by patch_ramdisk.sh --twrp).
 #
 # All services start on boot independently:
+#   - watchdogkick: prevent hardware watchdog reboot
 #   - wificonnect: best-effort WiFi setup (never crashes recovery)
 #   - telnetd on port 2323
 #   - remotehttpd on port 8080
+
+service watchdogkick /sbin/watchdog-kick.sh
+    class default
+    seclabel u:r:recovery:s0
 
 service wificonnect /sbin/wifi-connect.sh
     class default
@@ -22,6 +27,7 @@ service remotehttpd /sbin/remote-server.sh
     seclabel u:r:recovery:s0
 
 on boot
+    start watchdogkick
     start wificonnect
     start telnetd
     start remotehttpd
