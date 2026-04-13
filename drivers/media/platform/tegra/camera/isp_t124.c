@@ -526,7 +526,7 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 	isp->y_stride = (isp->width + 63) & ~63;
 	isp->uv_stride = ((isp->width / 2) + 63) & ~63;
 	isp->in_stride = width * 2;  /* RAW10 packed to 16-bit = 2 bytes/pixel */
-	isp->in_format = 0x11000020; /* RAW Bayer single-plane linear (from RE) */
+	isp->in_format = 0x10200024; /* 10-bit Bayer BGGR (verified in userspace) */
 
 	err = nvhost_module_busy(isp->pdev);
 	if (err)
@@ -1400,19 +1400,11 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	int g1_off, g1_words, g2_off, g2_words, g3_off;
 	u32 W = isp->width, H = isp->height;
 	u32 raw_stride = isp->in_stride;
-	u32 in_w, in_h;
 
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
 
 	/* ISP kept powered from stream_init — no module_busy needed */
-
-	/* Sensor resolution for processing dim */
-	if (isp->class_id == ISP_A_CLASS_ID) {
-		in_w = 3280; in_h = 2460;
-	} else {
-		in_w = 2592; in_h = 1944;
-	}
 
 	cmd = isp->cmdbuf + ISP_CMDBUF_WORDS;
 	cmd_phys = isp->cmdbuf_phys + ISP_CMDBUF_SIZE;
