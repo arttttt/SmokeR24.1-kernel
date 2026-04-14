@@ -357,9 +357,9 @@ int main(int argc, char **argv)
 
     /* 0x200 experiments — try values one at a time */
     cmd[n++] = OP_INCR(0x200, 9);
-    cmd[n++] = 0x00000001;  /* 0x200: enable */
+    cmd[n++] = 0x00000000;  /* 0x200 */
     cmd[n++] = 0x00000000;  /* 0x201 */
-    cmd[n++] = 0x00000000;  /* 0x202 */
+    cmd[n++] = 0x00000001;  /* 0x202: try enable here */
     cmd[n++] = 0x00000000;  /* 0x203 */
     cmd[n++] = 0x00000000;  /* 0x204 */
     cmd[n++] = 0x00000000;  /* 0x205 */
