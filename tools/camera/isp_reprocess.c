@@ -199,9 +199,23 @@ int main(int argc, char **argv)
     printf("  hRm=%p\n", hRm);
 
     void *isp_handle = NULL;
-    NvError err = pIspOpen(hRm, 1, &isp_handle); /* ISP-A = 1 for MIUI */
+    NvError err = pIspOpen(hRm, 2, &isp_handle); /* ISP-B = 2 (stock uses ISP-B) */
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
+
+    /* SetConfiguration type=1 and type=2 (from stock proxy dump) */
+    if (pSetConfig) {
+        /* Stock data: array of uint32 indices for pixel format mapping */
+        uint32_t cfg1[] = {1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        uint32_t cfg2[] = {2, 4, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        /* data2 from stock: {0x40, 1, 7, 9, 10, 3, 0, 6, ...} */
+        uint32_t cfg_d2[] = {0x40, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+
+        err = pSetConfig(isp_handle, 1, cfg1, cfg_d2);
+        printf("  SetConfig(1): err=0x%x\n", err);
+        err = pSetConfig(isp_handle, 2, cfg2, cfg_d2);
+        printf("  SetConfig(2): err=0x%x\n", err);
+    }
 
     void *hw_settings = NULL;
     pHwCreate(isp_handle, &hw_settings);
@@ -510,37 +524,30 @@ int main(int argc, char **argv)
         memset(out_cfg, 0, sizeof(out_cfg));
         uint32_t y_stride = (W + 63) & ~63;      /* 2624 */
         uint32_t uv_stride = ((W/2) + 63) & ~63; /* 1344 */
-        /* Surface 0: Y plane (match stock: blocklinear, kind=0xFE, blockH=4) */
+        /* Surface 0: Y plane — pitch layout */
         *(uint32_t*)&out_cfg[0x00] = W;
         *(uint32_t*)&out_cfg[0x04] = H;
         *(uint32_t*)&out_cfg[0x08] = 0x08592004; /* Y8 */
-        *(uint32_t*)&out_cfg[0x0C] = 3;  /* blocklinear (stock=3) */
+        *(uint32_t*)&out_cfg[0x0C] = 1;  /* pitch layout */
         *(uint32_t*)&out_cfg[0x10] = y_stride;
         *(uint32_t*)&out_cfg[0x14] = out_h;
-        *(uint32_t*)&out_cfg[0x18] = 0;  /* offset */
-        *(uint32_t*)&out_cfg[0x20] = 0xFE;  /* kind */
-        *(uint32_t*)&out_cfg[0x24] = 4;  /* blockHeightLog2 */
         /* Surface 1: U plane */
         *(uint32_t*)&out_cfg[0x30] = W/2;
         *(uint32_t*)&out_cfg[0x34] = H/2;
         *(uint32_t*)&out_cfg[0x38] = 0x08590404; /* U8 */
-        *(uint32_t*)&out_cfg[0x3C] = 3;  /* blocklinear */
+        *(uint32_t*)&out_cfg[0x3C] = 1;
         *(uint32_t*)&out_cfg[0x40] = uv_stride;
         *(uint32_t*)&out_cfg[0x44] = out_h;
-        *(uint32_t*)&out_cfg[0x48] = 0x5400; /* offset (from stock proxy) */
-        *(uint32_t*)&out_cfg[0x50] = 0xFE;  /* kind */
-        *(uint32_t*)&out_cfg[0x54] = 4;  /* blockHeightLog2 */
+        *(uint32_t*)&out_cfg[0x48] = y_stride * H;
         /* Surface 2: V plane */
         *(uint32_t*)&out_cfg[0x60] = W/2;
         *(uint32_t*)&out_cfg[0x64] = H/2;
         *(uint32_t*)&out_cfg[0x68] = 0x08582404; /* V8 */
-        *(uint32_t*)&out_cfg[0x6C] = 3;  /* blocklinear */
+        *(uint32_t*)&out_cfg[0x6C] = 1;
         *(uint32_t*)&out_cfg[0x70] = uv_stride;
         *(uint32_t*)&out_cfg[0x74] = out_h;
-        *(uint32_t*)&out_cfg[0x78] = 0x6A00; /* offset (from stock proxy) */
-        *(uint32_t*)&out_cfg[0x80] = 0xFE;  /* kind */
-        *(uint32_t*)&out_cfg[0x84] = 4;  /* blockHeightLog2 */
-        *(uint32_t*)&out_cfg[0x90] = 3;  /* numPlanes = 3 (Y+U+V) */
+        *(uint32_t*)&out_cfg[0x78] = y_stride * H + uv_stride * (H/2);
+        *(uint32_t*)&out_cfg[0x90] = 3;  /* numPlanes */
 
         /* ProcessFrame signature from Ghidra RE:
          * NvIspProcessFrame(handle, mode, crop_x1, crop_y1,
