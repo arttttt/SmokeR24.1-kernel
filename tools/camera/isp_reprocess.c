@@ -207,28 +207,7 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
-    /* NvIspSetConfiguration BEFORE HwSettingsApply —
-     * configures ISP pipeline mode, Apply flushes to HW. */
-    if (pSetConfig) {
-        /* Type 2: enable output surface */
-        uint32_t enable = 1;
-        uint32_t size2 = 4;
-        err = pSetConfig(isp_handle, 2, &enable, &size2);
-        printf("  SetConfiguration(type=2, enable=1): err=0x%x\n", err);
-
-        /* Type 1: pixel format — reprocess Bayer→RGBA */
-        uint8_t fmt_config[0x40];
-        memset(fmt_config, 0, sizeof(fmt_config));
-        *(uint32_t*)&fmt_config[0x00] = 2;   /* surface_type: 2=reprocess */
-        *(uint32_t*)&fmt_config[0x04] = 7;   /* in_pix_fmt: 7=16bpp Bayer10+ */
-        *(uint32_t*)&fmt_config[0x08] = 10;  /* out_pix_fmt: 10=8:8:8:8 */
-        *(uint32_t*)&fmt_config[0x0C] = 0;   /* color_space: 0=Bayer */
-        uint32_t size1 = 0x40;
-        err = pSetConfig(isp_handle, 1, fmt_config, &size1);
-        printf("  SetConfiguration(type=1, reprocess Bayer→8888): err=0x%x\n", err);
-    }
-
-    /* HwSettingsApply — now includes SetConfiguration changes */
+    /* HwSettingsApply */
     setenv("NVRM_SHIM_STRIP", "1", 1);
     err = pHwApply(hw_settings);
     printf("  HwSettingsApply: err=0x%x (streaming stripped by shim)\n", err);
