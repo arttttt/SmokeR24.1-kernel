@@ -500,7 +500,7 @@ int main(int argc, char **argv)
         memset(in_surf, 0, sizeof(in_surf));
         *(uint32_t*)&in_surf[0x00] = W;
         *(uint32_t*)&in_surf[0x04] = H;
-        *(uint32_t*)&in_surf[0x08] = 0x10a92087; /* BayerS16BGGR */
+        *(uint32_t*)&in_surf[0x08] = 0x1010d109; /* BG10 (from Ghidra RE, maps to ISP 0x24) */
         *(uint32_t*)&in_surf[0x0C] = 1;  /* pitch layout */
         *(uint32_t*)&in_surf[0x10] = W * 2; /* stride */
         *(uint32_t*)&in_surf[0x14] = in_h; /* nvmap handle */
