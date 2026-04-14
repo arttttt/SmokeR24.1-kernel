@@ -91,6 +91,19 @@ select.input{appearance:none;-webkit-appearance:none;padding-right:32px;padding-
 <div class="header">
 <h1>mocha-remote</h1>
 <span id="dev-name" class="chip">...</span>
+<span class="flex1"></span>
+<button class="btn danger" onclick="showPowerMenu()" id="power-btn" style="padding:4px 10px;font-size:16px">&#x23FB;</button>
+</div>
+<div id="power-menu" style="display:none;position:absolute;right:16px;top:44px;z-index:101">
+<div class="boot-card" style="min-width:180px;gap:6px">
+<button class="btn" onclick="doPower('reboot');hidePowerMenu()">Reboot</button>
+<button class="btn" onclick="doPower('reboot recovery');hidePowerMenu()">Recovery</button>
+<button class="btn" onclick="doPower('reboot bootloader');hidePowerMenu()">Fastboot</button>
+<button class="btn danger" onclick="doPower('reboot -p');hidePowerMenu()">Power off</button>
+<div style="border-top:1px solid var(--border);margin:4px 0"></div>
+<button class="btn" onclick="doPower('input keyevent 26');hidePowerMenu()">Screen on/off</button>
+<button class="btn" onclick="doPower('input keyevent 26;sleep 0.3;input keyevent 82;input swipe 540 1800 540 400 200');hidePowerMenu()">Unlock</button>
+</div>
 </div>
 
 <div class="tabs">
@@ -409,6 +422,10 @@ function bootFlashExisting(){
 }
 
 function doReboot(m){var c=m?'reboot '+m:'reboot';blogLog('> '+c);api(c,function(r){blogLog(r||'sent')})}
+function doPower(c){api(c,function(){})}
+function showPowerMenu(){var m=document.getElementById('power-menu');m.style.display=m.style.display==='none'?'block':'none'}
+function hidePowerMenu(){document.getElementById('power-menu').style.display='none'}
+document.addEventListener('click',function(e){if(!e.target.closest('#power-menu,#power-btn'))hidePowerMenu()})
 
 function dumpPartition(){
   var name=document.getElementById('dump-partition').value;
