@@ -288,32 +288,16 @@ int main(int argc, char **argv)
     }
     free(zeros);
 
-    /* Init gather: DMA pipeline + 0x200 input config + trigger 0x0F */
+    /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
-        uint32_t init_cmd[32];
+        uint32_t init_cmd[8];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        /* DMA pipeline (required) */
         init_cmd[ini++] = OP_INCR(0x019, 1);
         init_cmd[ini++] = 0x00000400;
         init_cmd[ini++] = OP_INCR(0x01B, 2);
         init_cmd[ini++] = 0x00000200;
         init_cmd[ini++] = 0x00000002;
-        /* 0x200 input config — in init, not per-frame */
-        init_cmd[ini++] = OP_INCR(0x200, 9);
-        init_cmd[ini++] = 0x00000001;  /* 0x200 enable */
-        init_cmd[ini++] = 0x00000000;  /* 0x201 */
-        init_cmd[ini++] = 0x00000001;  /* 0x202 enable */
-        init_cmd[ini++] = 0x00790079;  /* 0x203 = H/16 | H/16 */
-        init_cmd[ini++] = 0x00790079;  /* 0x204 */
-        init_cmd[ini++] = 0x00000000;  /* 0x205 */
-        init_cmd[ini++] = 0x000600c8;  /* 0x206 from stock */
-        init_cmd[ini++] = 0x000f000f;  /* 0x207 from stock */
-        init_cmd[ini++] = 0x00000000;  /* 0x208 */
-        /* Post-apply trigger (like stock cal) */
-        init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        init_cmd[ini++] = OP_NONINCR(0x00C, 1);
-        init_cmd[ini++] = 0x0F;  /* trigger post-apply */
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
@@ -371,7 +355,11 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* 0x200 moved to init gather — don't write here */
+    /* Zero 0x200 (reset from previous) */
+    cmd[n++] = OP_INCR(0x200, 9);
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0;
 
     /* ---- S5 register blocks ---- */
 
