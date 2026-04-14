@@ -561,9 +561,10 @@ int main(int argc, char **argv)
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, use_yuv ? Y_SIZE : 0 };
+    /* Stock uses U offset 0x540000 within output buffer (not Y_SIZE) */
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, use_yuv ? 0x540000 : 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, use_yuv ? (Y_SIZE + U_SIZE) : 0 };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, use_yuv ? (0x540000 + U_SIZE) : 0 };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
     shifts[nr++].shift = 0;
@@ -622,7 +623,7 @@ int main(int argc, char **argv)
     /* Check U plane for YUV */
     if (use_yuv) {
         uint8_t ucheck[64];
-        nvmap_read(out_h, Y_SIZE, ucheck, 64);
+        nvmap_read(out_h, 0x540000, ucheck, 64);
         int unz = 0;
         for (int i = 0; i < 64; i++) if (ucheck[i]) unz++;
         printf("U plane first 64 bytes: %d non-zero → ", unz);
@@ -631,7 +632,7 @@ int main(int argc, char **argv)
     }
 
     /* Dump full output */
-    int dump_size = use_yuv ? (Y_SIZE + U_SIZE + V_SIZE) : OUT_SIZE;
+    int dump_size = use_yuv ? (0x540000 + U_SIZE + V_SIZE) : OUT_SIZE;
     char outpath[128];
     snprintf(outpath, sizeof(outpath), "/data/local/tmp/isp_fmt_%08x.bin", out_fmt);
     FILE *fp = fopen(outpath, "wb");
