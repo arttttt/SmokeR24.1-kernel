@@ -355,8 +355,17 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Replicate exact stock cal structure in per-frame gather:
-     * 0xD0A=0, 0xD0B=lens shading, tone curves identity, 0x053=work buf */
+    /* Demosaic coefficients from stock streaming trace (0x506, 9 words) */
+    cmd[n++] = OP_INCR(0x506, 9);
+    cmd[n++] = 0x3f3fcff3;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x04c1304c;
+    cmd[n++] = 0x08220882;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x03d0f43d;
+    cmd[n++] = 0x08621886;
+    cmd[n++] = 0x01204812;
+    cmd[n++] = 0x06e1b86e;
 
     /* Lens shading enable (stock=0, but data present) */
     cmd[n++] = OP_INCR(0xD0A, 1);
