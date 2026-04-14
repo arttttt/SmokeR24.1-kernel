@@ -395,7 +395,7 @@ int main(int argc, char **argv)
         memset(in_surf, 0, sizeof(in_surf));
         *(uint32_t*)&in_surf[0x00] = W;
         *(uint32_t*)&in_surf[0x04] = H;
-        *(uint32_t*)&in_surf[0x08] = 0x10A9200E; /* X6Bayer10BGGR */
+        *(uint32_t*)&in_surf[0x08] = 0x10a92087; /* BayerS16BGGR */
         *(uint32_t*)&in_surf[0x0C] = 1;  /* pitch layout */
         *(uint32_t*)&in_surf[0x10] = W * 2; /* stride */
         *(uint32_t*)&in_surf[0x14] = in_h; /* nvmap handle */
@@ -436,8 +436,16 @@ int main(int argc, char **argv)
         uint32_t frame_count = 0;
 
         /* Two-pass protocol — pass args as array pointer per RE */
-        printf("  ProcessFrame pass 1...\n");
+        /* Try different arg orders to find correct one */
+        printf("  ProcessFrame pass 1 (normal)...\n");
         uint32_t flush_fence = 0, fence_val = 0;
+
+        /* Print addresses for debug */
+        printf("  in_surf=%p out_cfg=%p\n", in_surf, out_cfg);
+        printf("  in_surf[0x14]=0x%x (handle)\n", *(uint32_t*)&in_surf[0x14]);
+        printf("  out_cfg[0x14]=0x%x (handle) planes=%u\n",
+               *(uint32_t*)&out_cfg[0x14], *(uint32_t*)&out_cfg[0x90]);
+
         err = pProcessFrame(isp_handle,
             1, 0, 0, 0, 0,     /* mode=reprocess, no crop */
             in_surf, 0,         /* input surface, zero */
