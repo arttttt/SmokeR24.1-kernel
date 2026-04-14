@@ -326,11 +326,13 @@ int main(int argc, char **argv)
         uint32_t init_cmd[8];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        init_cmd[ini++] = OP_INCR(0x019, 1);
-        init_cmd[ini++] = 0x00000400;
-        init_cmd[ini++] = OP_INCR(0x01B, 2);
-        init_cmd[ini++] = 0x00000200;
-        init_cmd[ini++] = 0x00000002;
+        /* Stock DMA values from SetConfig RE + 0x01C=2 for reprocess */
+        init_cmd[ini++] = OP_INCR(0x018, 5);
+        init_cmd[ini++] = 0x0A00500A;  /* 0x018 — from stock SetConfig */
+        init_cmd[ini++] = 0x00008089;  /* 0x019 */
+        init_cmd[ini++] = 0x013645CB;  /* 0x01A */
+        init_cmd[ini++] = 0x000001E7;  /* 0x01B */
+        init_cmd[ini++] = 0x00000002;  /* 0x01C — reprocess mode */
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
