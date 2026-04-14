@@ -148,15 +148,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int use_miui = 0, use_miui_init = 0;
+    int use_yuv = 0;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--miui") == 0) { use_miui = 1; use_miui_init = 1; }
-        if (strcmp(argv[i], "--miui-init") == 0) use_miui_init = 1;
+        if (strcmp(argv[i], "--yuv") == 0) use_yuv = 1;
     }
 
-    printf("=== ISP Pure Reprocess (no blobs)%s%s ===\n",
-           use_miui_init ? " + MIUI init" : "",
-           use_miui ? " + MIUI 0x200" : "");
+    printf("=== ISP Pure Reprocess (no blobs)%s ===\n",
+           use_yuv ? " + YUV420" : "");
 
     /* Open devices */
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
@@ -298,28 +296,14 @@ int main(int argc, char **argv)
 
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
-        uint32_t init_cmd[16];
+        uint32_t init_cmd[8];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        if (use_miui_init) {
-            printf("Using MIUI init: 0x018-0x01C + 0x01F + 0x05F\n");
-            init_cmd[ini++] = OP_INCR(0x018, 5);
-            init_cmd[ini++] = 0x0A00500A;  /* 0x018 */
-            init_cmd[ini++] = 0x00008089;  /* 0x019 */
-            init_cmd[ini++] = 0x013645CB;  /* 0x01A */
-            init_cmd[ini++] = 0x000001E7;  /* 0x01B */
-            init_cmd[ini++] = 0x00000001;  /* 0x01C */
-            init_cmd[ini++] = OP_INCR(0x01F, 1);
-            init_cmd[ini++] = 0x00000001;
-            init_cmd[ini++] = OP_INCR(0x05F, 1);
-            init_cmd[ini++] = 0x00000010;
-        } else {
-            init_cmd[ini++] = OP_INCR(0x019, 1);
-            init_cmd[ini++] = 0x00000400;
-            init_cmd[ini++] = OP_INCR(0x01B, 2);
-            init_cmd[ini++] = 0x00000200;
-            init_cmd[ini++] = 0x00000002;
-        }
+        init_cmd[ini++] = OP_INCR(0x019, 1);
+        init_cmd[ini++] = 0x00000400;
+        init_cmd[ini++] = OP_INCR(0x01B, 2);
+        init_cmd[ini++] = 0x00000200;
+        init_cmd[ini++] = 0x00000002;
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
@@ -377,24 +361,11 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* 0x200 pipeline mode */
+    /* Zero 0x200 (reset from previous) */
     cmd[n++] = OP_INCR(0x200, 9);
-    if (use_miui) {
-        printf("Using MIUI 0x200 block (pipeline mode)\n");
-        cmd[n++] = 0x00000001;  /* 0x200 */
-        cmd[n++] = 0x00000000;  /* 0x201 */
-        cmd[n++] = 0x00000001;  /* 0x202 */
-        cmd[n++] = 0x02000200;  /* 0x203 */
-        cmd[n++] = 0x02000200;  /* 0x204 */
-        cmd[n++] = 0x00000000;  /* 0x205 */
-        cmd[n++] = 0x000600C8;  /* 0x206 */
-        cmd[n++] = 0x000F000F;  /* 0x207 */
-        cmd[n++] = 0x00003333;  /* 0x208 */
-    } else {
-        cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-        cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-        cmd[n++] = 0;
-    }
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0;
 
     /* ---- S5 register blocks ---- */
 
@@ -497,51 +468,7 @@ int main(int argc, char **argv)
     }
 
     /* === MIUI-only register blocks (from stock camera gather #8) === */
-    if (use_miui) {
-        printf("Adding MIUI blocks: 0x400, 0x800, 0xD20, 0x930\n");
-
-        /* 0x400-0x40A: unknown processing block */
-        cmd[n++] = OP_INCR(0x400, 11);
-        cmd[n++] = 0x00000001;  /* 0x400 */
-        cmd[n++] = 0x004B0000;  /* 0x401 */
-        cmd[n++] = 0x00930000;  /* 0x402 */
-        cmd[n++] = 0x00220000;  /* 0x403 */
-        cmd[n++] = 0x2FF01000;  /* 0x404 */
-        cmd[n++] = 0x2FF01000;  /* 0x405 */
-        cmd[n++] = 0x2FF01000;  /* 0x406 */
-        cmd[n++] = 0x2FF01000;  /* 0x407 */
-        cmd[n++] = 0x00030000;  /* 0x408 */
-        cmd[n++] = 0x00000000;  /* 0x409 */
-        cmd[n++] = 0x00020000;  /* 0x40A */
-
-        /* 0x800/0x820: black level */
-        cmd[n++] = OP_INCR(0x800, 1);
-        cmd[n++] = 0x85001000;
-        cmd[n++] = OP_INCR(0x820, 1);
-        cmd[n++] = 0x85001000;
-
-        /* 0xD20-0xD25: lens shading extra */
-        cmd[n++] = OP_INCR(0xD20, 6);
-        cmd[n++] = 0x00003101;
-        cmd[n++] = 0x00000000;
-        cmd[n++] = 0x01EC0000;
-        cmd[n++] = 0x01EC0000;
-        cmd[n++] = 0x01EC0000;
-        cmd[n++] = 0x01EC0000;
-
-        /* 0x930-0x941: extended stats config */
-        cmd[n++] = OP_INCR(0x930, 16);
-        cmd[n++] = 0x0000001C; cmd[n++] = 0x88888888;
-        cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
-        cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
-        cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
-        cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
-        cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
-        cmd[n++] = 0x00000078; cmd[n++] = 0x3FC00000;
-        cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
-        cmd[n++] = OP_INCR(0x941, 1);
-        cmd[n++] = 0x00070000;
-    }
+    /* (MIUI extra blocks removed — not needed for basic test) */
 
     /* Output: dims + format */
     cmd[n++] = OP_INCR(0xE00, 1);
@@ -549,28 +476,37 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    uint32_t out_fmt = 0x43;  /* default R8G8B8A8 */
-    if (argc > 2) out_fmt = strtoul(argv[2], NULL, 16);
+
+    /* YUV420 planar: stride=(W+63)&~63, UV stride=((W/2)+63)&~63 */
+    #define Y_STRIDE  ((W + 63) & ~63)         /* 2624 */
+    #define UV_STRIDE (((W / 2) + 63) & ~63)   /* 1344 */
+    #define Y_SIZE    (Y_STRIDE * H)            /* 5101056 */
+    #define U_SIZE    (UV_STRIDE * (H / 2))     /* 1306368 */
+    #define V_SIZE    U_SIZE
+
+    uint32_t out_fmt = use_yuv ? 0x04FE00E6 : 0x43;
+    if (argc > 2 && argv[2][0] != '-') out_fmt = strtoul(argv[2], NULL, 16);
     cmd[n++] = out_fmt;
-    printf("Output format: 0x%08x\n", out_fmt);
+    printf("Output format: 0x%08x%s\n", out_fmt, use_yuv ? " (YUV420)" : "");
 
     /* Output Y surface */
     cmd[n++] = OP_INCR(0xE04, 3);
     y_reloc = n;
     cmd[n++] = 0;
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;
-    /* U/V — same buffer */
+    cmd[n++] = use_yuv ? Y_STRIDE : W * 4;
+    /* U surface */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
     cmd[n++] = 0;
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;
+    cmd[n++] = use_yuv ? UV_STRIDE : W * 4;
+    /* V surface */
     cmd[n++] = OP_INCR(0xE0A, 3);
     v_reloc = n;
     cmd[n++] = 0;
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * 4;
+    cmd[n++] = use_yuv ? UV_STRIDE : W * 4;
 
     /* Input: dims + format + surface + strip + trigger */
     cmd[n++] = OP_INCR(0xE31, 1);
@@ -625,9 +561,9 @@ int main(int argc, char **argv)
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, 0 };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, use_yuv ? Y_SIZE : 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, 0 };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, use_yuv ? (Y_SIZE + U_SIZE) : 0 };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
     shifts[nr++].shift = 0;
@@ -683,20 +619,32 @@ int main(int argc, char **argv)
     for (int i = 0; i < 16; i++) printf("%02x ", check[i]);
     printf("\n");
 
+    /* Check U plane for YUV */
+    if (use_yuv) {
+        uint8_t ucheck[64];
+        nvmap_read(out_h, Y_SIZE, ucheck, 64);
+        int unz = 0;
+        for (int i = 0; i < 64; i++) if (ucheck[i]) unz++;
+        printf("U plane first 64 bytes: %d non-zero → ", unz);
+        for (int i = 0; i < 16; i++) printf("%02x ", ucheck[i]);
+        printf("\n");
+    }
+
     /* Dump full output */
+    int dump_size = use_yuv ? (Y_SIZE + U_SIZE + V_SIZE) : OUT_SIZE;
     char outpath[128];
     snprintf(outpath, sizeof(outpath), "/data/local/tmp/isp_fmt_%08x.bin", out_fmt);
     FILE *fp = fopen(outpath, "wb");
     if (fp) {
         uint8_t *buf = malloc(chunk);
-        for (int off = 0; off < OUT_SIZE; off += chunk) {
-            int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
+        for (int off = 0; off < dump_size; off += chunk) {
+            int sz = (dump_size - off < chunk) ? dump_size - off : chunk;
             nvmap_read(out_h, off, buf, sz);
             fwrite(buf, 1, sz, fp);
         }
         free(buf);
         fclose(fp);
-        printf("Saved to %s (%d bytes)\n", outpath, OUT_SIZE);
+        printf("Saved to %s (%d bytes)\n", outpath, dump_size);
     }
 
     close(ctrl_fd);
