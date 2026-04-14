@@ -351,6 +351,15 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 				break;
 			}
 		}
+		if (!err && chan->isp_raw_buf->cpu) {
+			u32 *raw = chan->isp_raw_buf->cpu;
+			int nz = 0, i;
+			for (i = 0; i < 256; i++)
+				if (raw[i]) nz++;
+			dev_info(&chan->video.dev,
+				 "ISP raw buf check: %d/256 non-zero, first=0x%08x 0x%08x 0x%08x 0x%08x\n",
+				 nz, raw[0], raw[1], raw[2], raw[3]);
+		}
 		if (!err) {
 			err = isp_t124_process_frame_reprocess(chan->isp,
 					chan->isp_raw_buf->dma,
