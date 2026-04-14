@@ -510,29 +510,36 @@ int main(int argc, char **argv)
         memset(out_cfg, 0, sizeof(out_cfg));
         uint32_t y_stride = (W + 63) & ~63;      /* 2624 */
         uint32_t uv_stride = ((W/2) + 63) & ~63; /* 1344 */
-        /* Surface 0: Y plane */
+        /* Surface 0: Y plane (match stock: blocklinear, kind=0xFE, blockH=4) */
         *(uint32_t*)&out_cfg[0x00] = W;
         *(uint32_t*)&out_cfg[0x04] = H;
         *(uint32_t*)&out_cfg[0x08] = 0x08592004; /* Y8 */
-        *(uint32_t*)&out_cfg[0x0C] = 1;  /* pitch */
+        *(uint32_t*)&out_cfg[0x0C] = 3;  /* blocklinear (stock=3) */
         *(uint32_t*)&out_cfg[0x10] = y_stride;
         *(uint32_t*)&out_cfg[0x14] = out_h;
+        *(uint32_t*)&out_cfg[0x18] = 0;  /* offset */
+        *(uint32_t*)&out_cfg[0x20] = 0xFE;  /* kind */
+        *(uint32_t*)&out_cfg[0x24] = 4;  /* blockHeightLog2 */
         /* Surface 1: U plane */
         *(uint32_t*)&out_cfg[0x30] = W/2;
         *(uint32_t*)&out_cfg[0x34] = H/2;
         *(uint32_t*)&out_cfg[0x38] = 0x08590404; /* U8 */
-        *(uint32_t*)&out_cfg[0x3C] = 1;
+        *(uint32_t*)&out_cfg[0x3C] = 3;  /* blocklinear */
         *(uint32_t*)&out_cfg[0x40] = uv_stride;
         *(uint32_t*)&out_cfg[0x44] = out_h;
-        *(uint32_t*)&out_cfg[0x48] = y_stride * H; /* offset */
+        *(uint32_t*)&out_cfg[0x48] = 0x5400; /* offset (from stock proxy) */
+        *(uint32_t*)&out_cfg[0x50] = 0xFE;  /* kind */
+        *(uint32_t*)&out_cfg[0x54] = 4;  /* blockHeightLog2 */
         /* Surface 2: V plane */
         *(uint32_t*)&out_cfg[0x60] = W/2;
         *(uint32_t*)&out_cfg[0x64] = H/2;
         *(uint32_t*)&out_cfg[0x68] = 0x08582404; /* V8 */
-        *(uint32_t*)&out_cfg[0x6C] = 1;
+        *(uint32_t*)&out_cfg[0x6C] = 3;  /* blocklinear */
         *(uint32_t*)&out_cfg[0x70] = uv_stride;
         *(uint32_t*)&out_cfg[0x74] = out_h;
-        *(uint32_t*)&out_cfg[0x78] = y_stride * H + uv_stride * (H/2);
+        *(uint32_t*)&out_cfg[0x78] = 0x6A00; /* offset (from stock proxy) */
+        *(uint32_t*)&out_cfg[0x80] = 0xFE;  /* kind */
+        *(uint32_t*)&out_cfg[0x84] = 4;  /* blockHeightLog2 */
         *(uint32_t*)&out_cfg[0x90] = 3;  /* numPlanes = 3 (Y+U+V) */
 
         /* ProcessFrame signature from Ghidra RE:
