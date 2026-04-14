@@ -392,18 +392,51 @@ int main(int argc, char **argv)
     CopyDemosaic_t pCopyDemosaic = dlsym(lib_isp, "NvIspHwSettingsCopyDemosaic");
     printf("  NvIspHwSettingsCopyDemosaic=%p\n", pCopyDemosaic);
 
-    /* Hex dump first 512 bytes of hw_settings to understand struct */
+    /* Follow settings[0x18] → register descriptor array.
+     * Search for method 0x506 (demosaic) and set dirty flag. */
     {
-        uint8_t *p = (uint8_t *)hw_settings;
-        printf("  hw_settings hex dump (first 512 bytes):\n");
-        for (int i = 0; i < 512; i += 16) {
-            printf("  %04x:", i);
-            for (int j = 0; j < 16; j++) printf(" %02x", p[i+j]);
-            printf("\n");
+        uint32_t *sp = (uint32_t *)hw_settings;
+        uint8_t *desc_base = (uint8_t *)(uintptr_t)sp[6]; /* settings[0x18] */
+        printf("  settings[0x18] = %p (descriptor array)\n", desc_base);
+
+        if (desc_base) {
+            /* Dump first 256 bytes of descriptor array */
+            printf("  descriptor array hex:\n");
+            for (int i = 0; i < 256; i += 16) {
+                printf("  %04x:", i);
+                for (int j = 0; j < 16; j++) printf(" %02x", desc_base[i+j]);
+                printf("\n");
+            }
+
+            /* From HwSettingsApply: descriptor format:
+             * [0] method (u32), [4] count (u16), [6] dirty (u8), [7] nonincr (u8),
+             * [8] end_marker (u8), [0xC] data or reloc, [0x10+] values
+             * Iterate looking for method=0x506 or scan for patterns */
+            printf("  Scanning for ISP methods in descriptors...\n");
+            for (int i = 0; i < 8192; i += 4) {
+                uint32_t method = *(uint32_t *)(desc_base + i);
+                uint16_t count = *(uint16_t *)(desc_base + i + 4);
+                uint8_t dirty = desc_base[i + 6];
+                uint8_t nonincr = desc_base[i + 7];
+                uint8_t end = desc_base[i + 8];
+
+                /* Valid descriptor: method < 0x1000, count < 1000, end=0 or 1 */
+                if (method > 0 && method < 0x1000 && count > 0 && count < 1000) {
+                    printf("    off=0x%04x: method=0x%03x count=%u dirty=%u nonincr=%u end=%u\n",
+                           i, method, count, dirty, nonincr, end);
+                    if (method == 0x506) {
+                        printf("    *** FOUND DEMOSAIC at offset 0x%04x! ***\n", i);
+                    }
+                }
+                if (end == 1) {
+                    printf("    END marker at 0x%04x\n", i);
+                    break;
+                }
+            }
         }
     }
 
-    if (pCopyDemosaic && hw_settings) {
+    if (0 && pCopyDemosaic && hw_settings) { /* DISABLED — crashes */
         /* Demosaic struct (from disasm at 0x18248):
          * [0x00] enable (byte)
          * [0x04] numLumaCoeffs (u32)
