@@ -416,22 +416,43 @@ int main(int argc, char **argv)
 
     /* ---- End S5 blocks ---- */
 
-    /* Lens shading enable (stock=0, but data present) */
+    /* Lens shading control (0xD00, 10 words) — from stock color filter trace */
+    cmd[n++] = OP_INCR(0xD00, 10);
+    cmd[n++] = 0x00000001;  /* enable */
+    cmd[n++] = 0x00ca4580;
+    cmd[n++] = 0x006522c0;
+    cmd[n++] = 0x00ca4580;
+    cmd[n++] = 0x010db200;
+    cmd[n++] = 0x0086d900;
+    cmd[n++] = 0x010db200;
+    cmd[n++] = 0x05100288;  /* grid: 1296x648 */
+    cmd[n++] = 0x03cc01e6;  /* grid: 972x486 */
+    cmd[n++] = 0x00000021;  /* mode */
+
+    /* Lens shading enable */
     cmd[n++] = OP_INCR(0xD0A, 1);
-    cmd[n++] = 0;
+    cmd[n++] = 1;
 
     /* Lens shading table — 480 words from stock OV5693 */
     cmd[n++] = OP_NONINCR(0xD0B, LS_DATA_WORDS);
     for (int i = 0; i < LS_DATA_WORDS; i++)
         cmd[n++] = ls_data[i];
 
-    /* Tone curves — identity (0x1000) × 4 channels × 257 entries */
+    /* Tone curves — S-curve (shadows=1.0, mids ramp to 3.0, highlights=3.0) */
     for (int ch = 0; ch < 4; ch++) {
         cmd[n++] = OP_INCR(0x651 + ch * 2, 1);
-        cmd[n++] = 0;  /* ctrl = 0 */
+        cmd[n++] = 0;
         cmd[n++] = OP_NONINCR(0x652 + ch * 2, 257);
-        for (int i = 0; i < 257; i++)
-            cmd[n++] = 0x00001000;  /* identity */
+        for (int i = 0; i < 257; i++) {
+            uint32_t val;
+            if (i < 64)
+                val = 0x1000;  /* 1.0 — shadows */
+            else if (i < 192)
+                val = 0x1000 + (i - 64) * 0x2000 / 128;  /* ramp 1.0→3.0 */
+            else
+                val = 0x3000;  /* 3.0 — highlights */
+            cmd[n++] = val;
+        }
     }
 
     /* Output: dims + format */
