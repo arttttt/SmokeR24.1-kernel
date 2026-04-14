@@ -518,7 +518,7 @@ int main(int argc, char **argv)
     #define U_SIZE    (UV_STRIDE * (H / 2))     /* 1306368 */
     #define V_SIZE    U_SIZE
 
-    uint32_t out_fmt = use_yuv ? 0x04FE00E6 : 0x43;
+    uint32_t out_fmt = use_yuv ? 0x010000E6 : 0x43; /* pitch YUV420 */
     if (argc > 2 && argv[2][0] != '-') out_fmt = strtoul(argv[2], NULL, 16);
     cmd[n++] = out_fmt;
     printf("Output format: 0x%08x%s\n", out_fmt, use_yuv ? " (YUV420)" : "");
@@ -616,18 +616,22 @@ int main(int argc, char **argv)
     printf("Submit (syncpt %u cur=%u)...\n", sp_memory, rd.value);
 
     struct nvhost_cmdbuf cb = { .mem = cmd_h, .offset = 0, .words = n };
-    struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 1 };
+    struct nvhost_syncpt_incr si[3] = {
+        { .syncpt_id = sp_memory, .syncpt_incrs = 1 },
+        { .syncpt_id = sp_stats,  .syncpt_incrs = 1 },
+        { .syncpt_id = sp_loadv,  .syncpt_incrs = 1 },
+    };
     uint32_t class_id = ISP_CLASS;
     struct nvhost_fence fence = { 0, 0 };
 
     struct nvhost32_submit_args sa;
     memset(&sa, 0, sizeof(sa));
     sa.submit_version = 0;
-    sa.num_syncpt_incrs = 1;
+    sa.num_syncpt_incrs = 3;
     sa.num_cmdbufs = 1;
     sa.num_relocs = nr;
     sa.timeout = 5000;
-    sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
+    sa.syncpt_incrs = (uint32_t)(uintptr_t)si;
     sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
     sa.relocs = (uint32_t)(uintptr_t)relocs;
     sa.reloc_shifts = (uint32_t)(uintptr_t)shifts;
