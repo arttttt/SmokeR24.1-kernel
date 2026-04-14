@@ -404,7 +404,13 @@ int main(int argc, char **argv)
         err = pSetConfig(isp_handle, 1, fmtcfg, &sz1);
         printf("  SetConfig(1): err=0x%x\n", err);
 
-        /* Re-apply — shim will dump new gather */
+        /* Destroy old settings, create new ones (will have demosaic dirty) */
+        pHwDestroy(hw_settings);
+        hw_settings = NULL;
+        pHwCreate(isp_handle, &hw_settings);
+        printf("  HwSettingsCreate (post-SetConfig): settings=%p\n", hw_settings);
+
+        /* Re-apply — shim will dump new gather with demosaic */
         setenv("NVRM_SHIM_STRIP", "1", 1);
         err = pHwApply(hw_settings);
         printf("  HwSettingsApply post-SetConfig: err=0x%x\n", err);
