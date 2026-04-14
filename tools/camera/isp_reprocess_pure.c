@@ -616,22 +616,18 @@ int main(int argc, char **argv)
     printf("Submit (syncpt %u cur=%u)...\n", sp_memory, rd.value);
 
     struct nvhost_cmdbuf cb = { .mem = cmd_h, .offset = 0, .words = n };
-    struct nvhost_syncpt_incr si[3] = {
-        { .syncpt_id = sp_memory, .syncpt_incrs = 1 },
-        { .syncpt_id = sp_stats,  .syncpt_incrs = 1 },
-        { .syncpt_id = sp_loadv,  .syncpt_incrs = 1 },
-    };
+    struct nvhost_syncpt_incr si = { .syncpt_id = sp_memory, .syncpt_incrs = 1 };
     uint32_t class_id = ISP_CLASS;
     struct nvhost_fence fence = { 0, 0 };
 
     struct nvhost32_submit_args sa;
     memset(&sa, 0, sizeof(sa));
     sa.submit_version = 0;
-    sa.num_syncpt_incrs = 3;
+    sa.num_syncpt_incrs = 1;
     sa.num_cmdbufs = 1;
     sa.num_relocs = nr;
     sa.timeout = 5000;
-    sa.syncpt_incrs = (uint32_t)(uintptr_t)si;
+    sa.syncpt_incrs = (uint32_t)(uintptr_t)&si;
     sa.cmdbufs = (uint32_t)(uintptr_t)&cb;
     sa.relocs = (uint32_t)(uintptr_t)relocs;
     sa.reloc_shifts = (uint32_t)(uintptr_t)shifts;
