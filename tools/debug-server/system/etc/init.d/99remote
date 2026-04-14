@@ -1,0 +1,7 @@
+#!/system/bin/sh
+# Remote debug server startup for MIUI (Android 4.4).
+# Runs via sysinit service: busybox run-parts /system/etc/init.d
+# Must exit quickly — run-parts waits for each script to complete.
+
+/system/remote/busybox telnetd -l /system/bin/sh -b 0.0.0.0 -p 2323 &
+/system/bin/sh /system/remote/server.sh &
