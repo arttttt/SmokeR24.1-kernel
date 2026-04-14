@@ -392,6 +392,17 @@ int main(int argc, char **argv)
     CopyDemosaic_t pCopyDemosaic = dlsym(lib_isp, "NvIspHwSettingsCopyDemosaic");
     printf("  NvIspHwSettingsCopyDemosaic=%p\n", pCopyDemosaic);
 
+    /* Hex dump first 512 bytes of hw_settings to understand struct */
+    {
+        uint8_t *p = (uint8_t *)hw_settings;
+        printf("  hw_settings hex dump (first 512 bytes):\n");
+        for (int i = 0; i < 512; i += 16) {
+            printf("  %04x:", i);
+            for (int j = 0; j < 16; j++) printf(" %02x", p[i+j]);
+            printf("\n");
+        }
+    }
+
     if (pCopyDemosaic && hw_settings) {
         /* Demosaic struct (from disasm at 0x18248):
          * [0x00] enable (byte)
