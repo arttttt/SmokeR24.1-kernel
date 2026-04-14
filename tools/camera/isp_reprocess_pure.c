@@ -355,13 +355,17 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Zero out 0x200 block (may be dirty from previous run) */
-    cmd[n++] = OP_INCR(0x200, 2);
-    cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = OP_INCR(0x202, 3);
-    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = OP_INCR(0x205, 4);
-    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    /* 0x200 experiments — try values one at a time */
+    cmd[n++] = OP_INCR(0x200, 9);
+    cmd[n++] = 0x00000001;  /* 0x200: enable */
+    cmd[n++] = 0x00000000;  /* 0x201 */
+    cmd[n++] = 0x00000000;  /* 0x202 */
+    cmd[n++] = 0x00000000;  /* 0x203 */
+    cmd[n++] = 0x00000000;  /* 0x204 */
+    cmd[n++] = 0x00000000;  /* 0x205 */
+    cmd[n++] = 0x00000000;  /* 0x206 */
+    cmd[n++] = 0x00000000;  /* 0x207 */
+    cmd[n++] = 0x00000000;  /* 0x208 */
 
     /* ---- S5 register blocks ---- */
 
