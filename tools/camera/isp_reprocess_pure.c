@@ -505,9 +505,12 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE30, 1);
     cmd[n++] = 1;                         /* input trigger */
 
-    /* ISP_ENABLE = 0x04040007 (from Ghidra RE — reprocess uses same as streaming) */
+    /* ISP_ENABLE — try different values */
     cmd[n++] = OP_INCR(0x015, 1);
-    cmd[n++] = 0x04040007;
+    uint32_t isp_enable = 0x04040007;
+    if (argc > 3) isp_enable = strtoul(argv[3], NULL, 16);
+    cmd[n++] = isp_enable;
+    printf("ISP_ENABLE: 0x%08x\n", isp_enable);
 
     /* Syncpt conditional incrs */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
