@@ -304,7 +304,7 @@ int main(int argc, char **argv)
         init_cmd[ini++] = OP_INCR(0x01B, 2);
         init_cmd[ini++] = 0x00000200;
         uint32_t dma_mode = 0x00000002;
-        if (use_yuv) dma_mode = 0x00000003;
+        if (use_yuv) dma_mode = 0x00000001;
         init_cmd[ini++] = dma_mode;
         printf("DMA mode (0x01C): 0x%x\n", dma_mode);
 
