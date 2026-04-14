@@ -355,7 +355,11 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* ---- S5 register blocks (input config 0x200 SKIPPED — streaming only) ---- */
+    /* ---- S5 register blocks ---- */
+
+    /* 0x200: input enable — try just enable flag */
+    cmd[n++] = OP_INCR(0x200, 1);
+    cmd[n++] = 0x00000001;
 
     /* 0x700: processing channel A (16 words) */
     cmd[n++] = OP_INCR(0x700, 16);
