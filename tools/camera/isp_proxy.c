@@ -125,15 +125,62 @@ uint32_t NvIspHwSettingsCopyDemosaic(void *dst, void *src) {
 
 /* ---- Pass-through for all other exports ---- */
 
-/* Safe pass-through: always pass 8 args. ARM ABI: r0-r3 + stack.
- * Extra args are ignored by callee. */
-typedef uint32_t (*FnGeneric)(uint32_t,uint32_t,uint32_t,uint32_t,
-                              uint32_t,uint32_t,uint32_t,uint32_t);
+/* Pass-through via function pointers initialized at load time.
+ * Each function is a simple stub that jumps to the real implementation.
+ * Using naked + bx to preserve caller's exact stack/register state. */
 #define FWD(name) \
-    uint32_t name(uint32_t a, uint32_t b, uint32_t c, uint32_t d, \
-                  uint32_t e, uint32_t f, uint32_t g, uint32_t h) { \
-        return ((FnGeneric)get_real(#name))(a,b,c,d,e,f,g,h); \
+    static void *_real_##name = 0; \
+    __attribute__((naked)) void name(void) { \
+        __asm__ volatile( \
+            "push {r0}\n\t" \
+            "ldr r0, .L_" #name "_ptr\n\t" \
+            "ldr r0, [r0]\n\t" \
+            "mov r12, r0\n\t" \
+            "pop {r0}\n\t" \
+            "bx r12\n\t" \
+            ".align 2\n\t" \
+            ".L_" #name "_ptr: .word _real_" #name "\n\t" \
+        ); \
     }
+
+/* Initialize all real pointers */
+static void init_fwd_ptrs(void) __attribute__((constructor));
+
+#define INIT_FWD(name) _real_##name = get_real(#name);
+
+static void init_fwd_ptrs(void) {
+    INIT_FWD(NvIspCtrlCleanup)
+    INIT_FWD(NvIspCtrlInitialize)
+    INIT_FWD(NvIspFlush)
+    INIT_FWD(NvIspGetAttribute)
+    INIT_FWD(NvIspGetConfiguration)
+    INIT_FWD(NvIspGetStats)
+    INIT_FWD(NvIspGetStatus)
+    INIT_FWD(NvIspHwSettingsDestroy)
+    INIT_FWD(NvIspHwSettingsDestroyClientHwSettingsList)
+    INIT_FWD(NvIspHwSettingsGetAppliedSettings)
+    INIT_FWD(NvIspHwSettingsGetAttribute)
+    INIT_FWD(NvIspHwSettingsSetAttribute)
+    INIT_FWD(NvIspHwSettingsClone)
+    INIT_FWD(NvIspHwSettingsCopyBitwiseOperation)
+    INIT_FWD(NvIspHwSettingsCopyGpp)
+    INIT_FWD(NvIspHwSettingsCopyLensShading)
+    INIT_FWD(NvIspHwSettingsCopyLumaEnhancement)
+    INIT_FWD(NvIspHwSettingsCopyOutputDownScaler)
+    INIT_FWD(NvIspSetAttribute)
+    INIT_FWD(NvIspSetIspClockRate)
+    INIT_FWD(NvIspSetMemoryBandwidth)
+    INIT_FWD(NvIspSetStats)
+    INIT_FWD(NvIspUpdateEmcClock)
+    INIT_FWD(PopulateIspHwFunctions_T12x)
+    INIT_FWD(IsBayerColorFormat)
+    INIT_FWD(NvCameraConvertRGrGbBToTlTrBlBr)
+    INIT_FWD(NvCameraGetBayerComponent)
+    INIT_FWD(NvCameraHwSettingsApply)
+    INIT_FWD(NvCameraHwSettingsUpdateDirty)
+    INIT_FWD(NvCameraMatMult3x3)
+    LOG("init_fwd_ptrs done");
+}
 
 FWD(NvIspCtrlCleanup)
 FWD(NvIspCtrlInitialize)
