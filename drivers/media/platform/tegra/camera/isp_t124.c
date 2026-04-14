@@ -1658,8 +1658,8 @@ static const struct file_operations isp_t124_debugfs_opdone_fops = {
 	.release = single_release,
 };
 
-static void isp_t124_debugfs_init(struct tegra_isp_t124 *isp,
-				  const char *name)
+static void __maybe_unused isp_t124_debugfs_init(struct tegra_isp_t124 *isp,
+						  const char *name)
 {
 	isp->debugfs_dir = debugfs_create_dir(name, NULL);
 	if (!isp->debugfs_dir)
