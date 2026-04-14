@@ -355,21 +355,15 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* ---- S5 register blocks ---- */
-
-    /* 0x200: input enable + config for reprocess dims */
-    cmd[n++] = OP_INCR(0x202, 3);
-    cmd[n++] = 0x00000001;              /* enable */
-    cmd[n++] = ((H/16) << 16) | (H/16); /* dims scaled */
-    cmd[n++] = ((H/16) << 16) | (H/16);
+    /* Zero out 0x200 block (may be dirty from previous run) */
     cmd[n++] = OP_INCR(0x200, 2);
-    cmd[n++] = 0x00000001;              /* enable */
-    cmd[n++] = 0x00000000;
+    cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = OP_INCR(0x202, 3);
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
     cmd[n++] = OP_INCR(0x205, 4);
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x000600c8;
-    cmd[n++] = 0x000f000f;
-    cmd[n++] = 0x00000000;
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+
+    /* ---- S5 register blocks ---- */
 
     /* 0x700: processing channel A (16 words) */
     cmd[n++] = OP_INCR(0x700, 16);
