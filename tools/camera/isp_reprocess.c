@@ -209,7 +209,12 @@ int main(int argc, char **argv)
 
     /* Try NvIspSetConfiguration + NvIspProcessFrame
      * SetConfiguration is REQUIRED before ProcessFrame (from RE) */
-    typedef NvError (*NvIspProcessFrame_t)(void *, ...);
+    typedef NvError (*NvIspProcessFrame_t)(void *handle,
+        uint32_t mode, uint32_t crop_l, uint32_t crop_t,
+        uint32_t crop_r, uint32_t crop_b,
+        void *in_surf, uint32_t zero,
+        void *out_cfg, void *flush_fence, void *fence,
+        uint32_t *status, uint32_t *frame_count);
     NvIspProcessFrame_t pProcessFrame = dlsym(lib_isp, "NvIspProcessFrame");
     printf("  NvIspProcessFrame=%p\n", pProcessFrame);
 
@@ -382,30 +387,8 @@ int main(int argc, char **argv)
     free(zeros);
 
     /* ---- Try NvIspProcessFrame (blob handles everything) ---- */
-    if (pProcessFrame && pSetConfig) {
-        printf("\n[4b] Trying NvIspProcessFrame...\n");
-
-        /* SetConfiguration type=2: enable output */
-        uint32_t enable = 1;
-        uint32_t sz2 = 4;
-        err = pSetConfig(isp_handle, 2, &enable, &sz2);
-        printf("  SetConfig(2): err=0x%x\n", err);
-
-        /* SetConfiguration type=1: pixel format */
-        uint8_t fmtcfg[0x40];
-        memset(fmtcfg, 0, sizeof(fmtcfg));
-        *(uint32_t*)&fmtcfg[0x00] = 2;   /* surface_type: reprocess */
-        *(uint32_t*)&fmtcfg[0x04] = 7;   /* in: Bayer10+ */
-        *(uint32_t*)&fmtcfg[0x08] = 10;  /* out: 8:8:8:8 */
-        *(uint32_t*)&fmtcfg[0x0C] = 0;   /* colorspace: Bayer */
-        uint32_t sz1 = 0x40;
-        err = pSetConfig(isp_handle, 1, fmtcfg, &sz1);
-        printf("  SetConfig(1): err=0x%x\n", err);
-
-        /* Re-apply after config */
-        setenv("NVRM_SHIM_STRIP", "1", 1);
-        pHwApply(hw_settings);
-        unsetenv("NVRM_SHIM_STRIP");
+    if (pProcessFrame) {
+        printf("\n[4b] Trying NvIspProcessFrame (no SetConfig)...\n");
 
         /* Build NvRmSurface for input (BG10 2592x1944) */
         uint8_t in_surf[0x30];
@@ -436,19 +419,19 @@ int main(int argc, char **argv)
 
         /* Two-pass protocol — pass args as array pointer per RE */
         printf("  ProcessFrame pass 1...\n");
-        uint32_t flush_fence = 0, fence = 0;
+        uint32_t flush_fence = 0, fence_val = 0;
         err = pProcessFrame(isp_handle,
-            array[0], array[1], array[2], array[3], array[4],
-            array[5], array[6],
-            out_cfg, &flush_fence, &fence, &status, &frame_count);
+            1, 0, 0, 0, 0,     /* mode=reprocess, no crop */
+            in_surf, 0,         /* input surface, zero */
+            out_cfg, &flush_fence, &fence_val, &status, &frame_count);
         printf("  pass1: err=0x%x status=%u\n", err, status);
 
         if (err == 0xa && status >= 1) {
             printf("  ProcessFrame pass 2...\n");
             err = pProcessFrame(isp_handle,
-                array[0], array[1], array[2], array[3], array[4],
-                array[5], array[6],
-                out_cfg, &flush_fence, &fence, &status, &frame_count);
+                1, 0, 0, 0, 0,
+                in_surf, 0,
+                out_cfg, &flush_fence, &fence_val, &status, &frame_count);
             printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
         }
 
