@@ -276,17 +276,18 @@ function fmGo(path){
   var cwd=path||document.getElementById('fm-cwd').value;
   if(!cwd.endsWith('/'))cwd+='/';
   document.getElementById('fm-cwd').value=cwd;
-  api('ls -la "'+cwd+'" 2>&1',function(r){
+  api(BB+' ls -la "'+cwd+'" 2>&1',function(r){
     var list=document.getElementById('fm-list'),dirs=[],files=[];
     r.split('\n').forEach(function(line){
       if(!line||line.startsWith('total'))return;
-      var p=line.split(/\s+/);if(p.length<7)return;
-      var perm=p[0],name=p[p.length-1];
+      // busybox ls -la: perms links owner group size month day time name...
+      var m=line.match(/^(\S+)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\S+\s+\S+)\s+(.+)$/);
+      if(!m)return;
+      var perm=m[1],size=m[2],date=m[3],name=m[4];
       if(name==='.'||name==='..')return;
-      var isDir=perm[0]==='d',isLink=perm[0]==='l';
-      var size='',date='';
-      if(p.length>=7){date=p[p.length-3]+' '+p[p.length-2];size=isDir?'':p[p.length-4]||''}
-      var entry={name:name,isDir:isDir,isLink:isLink,perm:perm,size:size,date:date,path:cwd+name};
+      var isLink=perm[0]==='l',isDir=perm[0]==='d';
+      if(isLink)name=name.replace(/\s*->.*$/,'');
+      var entry={name:name,isDir:isDir,isLink:isLink,perm:perm,size:isDir?'':size,date:date,path:cwd+name};
       isDir?dirs.push(entry):files.push(entry);
     });
     list.innerHTML='';
@@ -465,9 +466,18 @@ function downloadBinary(remotePath,fileName,totalSize,cb){
 
 // === Info ===
 function loadInfo(){
-  api('uname -a;echo "|||";uptime;echo "|||";cat /proc/meminfo|head -3;echo "|||";ip addr show wlan0|grep "inet ";echo "|||";cat /sys/class/power_supply/battery/capacity 2>/dev/null||echo n/a;echo "|||";pidof telnetd >/dev/null&&echo running||echo stopped;echo "|||";pidof httpd >/dev/null&&echo running||echo stopped;echo "|||";df /data /sdcard 2>/dev/null|tail -2',function(r){
-    var p=r.split('|||'),l=['Kernel','Uptime','Memory','WiFi IP','Battery %','telnetd','httpd','Storage'],h='';
-    for(var i=0;i<l.length&&i<p.length;i++)h+='<div class="label">'+l[i]+'</div><div>'+esc(p[i].trim())+'</div>';
+  api('uname -a;echo "|||";uptime;echo "|||";cat /proc/meminfo|head -3;echo "|||";ip addr show wlan0|grep "inet ";echo "|||";B=/sys/class/power_supply/battery;echo "$(cat $B/capacity 2>/dev/null||echo ?)% $(cat $B/status 2>/dev/null) $(cat $B/current_now 2>/dev/null)uA $(cat $B/voltage_now 2>/dev/null)uV";echo "|||";ps|grep -c "[r]emote/busybox";echo "|||";df /data /sdcard 2>/dev/null|tail -2',function(r){
+    var p=r.split('|||'),l=['Kernel','Uptime','Memory','WiFi IP','Battery','Services','Storage'],h='';
+    for(var i=0;i<l.length&&i<p.length;i++){
+      var v=p[i].trim();
+      if(l[i]==='Battery'){
+        var m=v.match(/(\d+)%\s+(\w+)\s+(-?\d+)uA\s+(\d+)uV/);
+        if(m)v=m[1]+'% '+m[2]+' '+Math.abs(m[3]/1000).toFixed(0)+'mA '+(m[4]/1000000).toFixed(2)+'V';
+      }else if(l[i]==='Services'){
+        var n=parseInt(v);v=(n>=2?'running ('+n+')':'stopped');
+      }
+      h+='<div class="label">'+l[i]+'</div><div>'+esc(v)+'</div>';
+    }
     document.getElementById('info-grid').innerHTML=h;
   });
 }
