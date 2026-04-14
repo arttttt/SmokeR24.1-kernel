@@ -148,12 +148,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int use_miui = 0;
-    for (int i = 1; i < argc; i++)
-        if (strcmp(argv[i], "--miui") == 0) use_miui = 1;
+    int use_miui = 0, use_miui_init = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--miui") == 0) { use_miui = 1; use_miui_init = 1; }
+        if (strcmp(argv[i], "--miui-init") == 0) use_miui_init = 1;
+    }
 
-    printf("=== ISP Pure Reprocess (no blobs)%s ===\n",
-           use_miui ? " + MIUI regs" : "");
+    printf("=== ISP Pure Reprocess (no blobs)%s%s ===\n",
+           use_miui_init ? " + MIUI init" : "",
+           use_miui ? " + MIUI 0x200" : "");
 
     /* Open devices */
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
@@ -298,7 +301,7 @@ int main(int argc, char **argv)
         uint32_t init_cmd[16];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        if (use_miui) {
+        if (use_miui_init) {
             printf("Using MIUI init: 0x018-0x01C + 0x01F + 0x05F\n");
             init_cmd[ini++] = OP_INCR(0x018, 5);
             init_cmd[ini++] = 0x0A00500A;  /* 0x018 */
