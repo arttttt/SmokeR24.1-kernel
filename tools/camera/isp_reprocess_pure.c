@@ -355,12 +355,24 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Zero 0x200 block first, then set 0x202=1 */
-    cmd[n++] = OP_INCR(0x200, 9);
-    cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = 1; /* 0x202 = 1 */
-    cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    /* 0x200 block — stock streaming values adapted for our resolution
+     * Stock ISP-B: 0x200=1,0x201=0,0x202=1,0x203=0x78|0x78,0x204=0x78|0x78
+     * 0x78 = 120 = 1944/16.2 ≈ H/16
+     * Try: 0x203/204 = (W/16)<<16 | (H/16) */
+    {
+        uint32_t bw = W / 16;  /* 162 */
+        uint32_t bh = H / 16;  /* 121 */
+        cmd[n++] = OP_INCR(0x200, 9);
+        cmd[n++] = 0x00000001;            /* 0x200: enable */
+        cmd[n++] = 0x00000000;            /* 0x201 */
+        cmd[n++] = 0x00000001;            /* 0x202: enable */
+        cmd[n++] = (bh << 16) | bh;      /* 0x203 */
+        cmd[n++] = (bh << 16) | bh;      /* 0x204 */
+        cmd[n++] = 0x00000000;            /* 0x205 */
+        cmd[n++] = 0x000600c8;            /* 0x206: from stock */
+        cmd[n++] = 0x000f000f;            /* 0x207: from stock */
+        cmd[n++] = 0x00000000;            /* 0x208 */
+    }
 
     /* ---- S5 register blocks ---- */
 
