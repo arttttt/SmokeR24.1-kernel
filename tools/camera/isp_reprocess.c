@@ -207,16 +207,11 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
-    /* Dump ISP context and settings objects */
-    {
-        printf("  Dumping ISP handle (%p, 0x1330 bytes)...\n", isp_handle);
-        FILE *df = fopen("/data/local/tmp/isp_handle_dump.bin", "wb");
-        if (df) { fwrite(isp_handle, 1, 0x1330, df); fclose(df); }
-
-        printf("  Dumping HW settings (%p, 0x4000 bytes)...\n", hw_settings);
-        FILE *sf = fopen("/data/local/tmp/isp_settings_dump.bin", "wb");
-        if (sf) { fwrite(hw_settings, 1, 0x4000, sf); fclose(sf); }
-    }
+    /* Try NvIspSetConfiguration + NvIspProcessFrame
+     * SetConfiguration is REQUIRED before ProcessFrame (from RE) */
+    typedef NvError (*NvIspProcessFrame_t)(void *, ...);
+    NvIspProcessFrame_t pProcessFrame = dlsym(lib_isp, "NvIspProcessFrame");
+    printf("  NvIspProcessFrame=%p\n", pProcessFrame);
 
     /* HwSettingsApply */
     setenv("NVRM_SHIM_STRIP", "1", 1);
@@ -385,6 +380,86 @@ int main(int argc, char **argv)
         nvmap_write(out_h, off, zeros, sz);
     }
     free(zeros);
+
+    /* ---- Try NvIspProcessFrame (blob handles everything) ---- */
+    if (pProcessFrame && pSetConfig) {
+        printf("\n[4b] Trying NvIspProcessFrame...\n");
+
+        /* SetConfiguration type=2: enable output */
+        uint32_t enable = 1;
+        uint32_t sz2 = 4;
+        err = pSetConfig(isp_handle, 2, &enable, &sz2);
+        printf("  SetConfig(2): err=0x%x\n", err);
+
+        /* SetConfiguration type=1: pixel format */
+        uint8_t fmtcfg[0x40];
+        memset(fmtcfg, 0, sizeof(fmtcfg));
+        *(uint32_t*)&fmtcfg[0x00] = 2;   /* surface_type: reprocess */
+        *(uint32_t*)&fmtcfg[0x04] = 7;   /* in: Bayer10+ */
+        *(uint32_t*)&fmtcfg[0x08] = 10;  /* out: 8:8:8:8 */
+        *(uint32_t*)&fmtcfg[0x0C] = 0;   /* colorspace: Bayer */
+        uint32_t sz1 = 0x40;
+        err = pSetConfig(isp_handle, 1, fmtcfg, &sz1);
+        printf("  SetConfig(1): err=0x%x\n", err);
+
+        /* Re-apply after config */
+        setenv("NVRM_SHIM_STRIP", "1", 1);
+        pHwApply(hw_settings);
+        unsetenv("NVRM_SHIM_STRIP");
+
+        /* Build NvRmSurface for input (BG10 2592x1944) */
+        uint8_t in_surf[0x30];
+        memset(in_surf, 0, sizeof(in_surf));
+        *(uint32_t*)&in_surf[0x00] = W;
+        *(uint32_t*)&in_surf[0x04] = H;
+        *(uint32_t*)&in_surf[0x08] = 0x10A9200E; /* X6Bayer10BGGR */
+        *(uint32_t*)&in_surf[0x0C] = 1;  /* pitch layout */
+        *(uint32_t*)&in_surf[0x10] = W * 2; /* stride */
+        *(uint32_t*)&in_surf[0x14] = in_h; /* nvmap handle */
+
+        /* Build output config: NvRmSurface[3] + numPlanes + crop */
+        uint8_t out_cfg[0xA4];
+        memset(out_cfg, 0, sizeof(out_cfg));
+        /* Surface 0 (RGBA) */
+        *(uint32_t*)&out_cfg[0x00] = W;
+        *(uint32_t*)&out_cfg[0x04] = H;
+        *(uint32_t*)&out_cfg[0x08] = 0x2016881a; /* R8G8B8A8 */
+        *(uint32_t*)&out_cfg[0x0C] = 1;  /* pitch */
+        *(uint32_t*)&out_cfg[0x10] = (W * 4 + 63) & ~63; /* 64-aligned */
+        *(uint32_t*)&out_cfg[0x14] = out_h;
+        *(uint32_t*)&out_cfg[0x90] = 1;  /* numPlanes */
+
+        /* ProcessFrame args: mode=1 (reprocess), crops=0 */
+        uint32_t array[7] = {1, 0, 0, 0, 0, (uint32_t)(uintptr_t)in_surf, 0};
+        uint32_t status = 0;
+        uint32_t frame_count = 0;
+
+        /* Two-pass protocol */
+        printf("  ProcessFrame pass 1...\n");
+        err = pProcessFrame(isp_handle,
+            array[0], array[1], array[2], array[3], array[4],
+            array[5], array[6],
+            out_cfg, NULL, NULL, &status, &frame_count);
+        printf("  pass1: err=0x%x status=%u\n", err, status);
+
+        if (err == 0xa && status >= 1) {
+            printf("  ProcessFrame pass 2...\n");
+            err = pProcessFrame(isp_handle,
+                array[0], array[1], array[2], array[3], array[4],
+                array[5], array[6],
+                out_cfg, NULL, NULL, &status, &frame_count);
+            printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
+        }
+
+        /* Check output */
+        uint8_t check[64];
+        nvmap_read(out_h, 0, check, 64);
+        int nz = 0;
+        for (int i = 0; i < 64; i++) if (check[i]) nz++;
+        printf("  ProcessFrame output: %d/64 non-zero → ", nz);
+        for (int i = 0; i < 16; i++) printf("%02x ", check[i]);
+        printf("\n");
+    }
 
     /* ---- Step 5+6: Build and submit reprocess per strip ---- */
     /*
