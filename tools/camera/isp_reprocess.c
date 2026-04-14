@@ -387,8 +387,32 @@ int main(int argc, char **argv)
     free(zeros);
 
     /* ---- Try NvIspProcessFrame (blob handles everything) ---- */
+    /* SetConfig BEFORE ProcessFrame — gather should change */
+    if (pSetConfig) {
+        uint32_t enable = 1;
+        uint32_t sz2 = 4;
+        err = pSetConfig(isp_handle, 2, &enable, &sz2);
+        printf("  SetConfig(2): err=0x%x\n", err);
+
+        uint8_t fmtcfg[0x40];
+        memset(fmtcfg, 0, sizeof(fmtcfg));
+        *(uint32_t*)&fmtcfg[0x00] = 2;
+        *(uint32_t*)&fmtcfg[0x04] = 7;
+        *(uint32_t*)&fmtcfg[0x08] = 10;
+        *(uint32_t*)&fmtcfg[0x0C] = 0;
+        uint32_t sz1 = 0x40;
+        err = pSetConfig(isp_handle, 1, fmtcfg, &sz1);
+        printf("  SetConfig(1): err=0x%x\n", err);
+
+        /* Re-apply — shim will dump new gather */
+        setenv("NVRM_SHIM_STRIP", "1", 1);
+        err = pHwApply(hw_settings);
+        printf("  HwSettingsApply post-SetConfig: err=0x%x\n", err);
+        unsetenv("NVRM_SHIM_STRIP");
+    }
+
     if (pProcessFrame) {
-        printf("\n[4b] Trying NvIspProcessFrame (no SetConfig)...\n");
+        printf("\n[4b] Trying NvIspProcessFrame...\n");
 
         /* Build NvRmSurface for input (BG10 2592x1944) */
         uint8_t in_surf[0x30];
