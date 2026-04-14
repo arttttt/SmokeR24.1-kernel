@@ -548,6 +548,14 @@ static int isp_hw_setup(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	isp->in_stride = width * 2;
 	isp->in_format = ISP_IN_FORMAT_BG10;
 
+	/* Lazy channel init — not done at probe to avoid
+	 * blocking userspace ISP access */
+	if (!isp->channel) {
+		err = isp_t124_channel_init(isp);
+		if (err)
+			return err;
+	}
+
 	err = nvhost_module_busy(isp->pdev);
 	if (err)
 		return err;
@@ -1787,12 +1795,18 @@ int tegra_isp_t124_mc_init(struct platform_device *pdev)
 		return err;
 	}
 
+	/* channel_init disabled at probe — conflicts with userspace ISP.
+	 * Kernel ISP driver maps host1x channel + syncpoints at boot,
+	 * blocking userspace from using ISP. Will be called lazily
+	 * from stream_init when kernel ISP is actually needed. */
+#if 0
 	err = isp_t124_channel_init(isp);
 	if (err) {
 		dev_warn(&pdev->dev, "host1x channel failed: %d\n", err);
 	} else {
 		isp_t124_debugfs_init(isp, dbg_name);
 	}
+#endif
 
 	if (is_isp_b)
 		g_isp_b = isp;
