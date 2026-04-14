@@ -323,16 +323,20 @@ int main(int argc, char **argv)
 
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
-        uint32_t init_cmd[8];
+        uint32_t init_cmd[16];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
         /* Stock DMA values from SetConfig RE + 0x01C=2 for reprocess */
-        init_cmd[ini++] = OP_INCR(0x018, 5);
-        init_cmd[ini++] = 0x0A00500A;  /* 0x018 — from stock SetConfig */
+        /* Stock DMA values + 0x01E/0x01F/0x05F from MIUI gather #0 */
+        init_cmd[ini++] = OP_INCR(0x018, 8);
+        init_cmd[ini++] = 0x0A00500A;  /* 0x018 */
         init_cmd[ini++] = 0x00008089;  /* 0x019 */
         init_cmd[ini++] = 0x013645CB;  /* 0x01A */
         init_cmd[ini++] = 0x000001E7;  /* 0x01B */
-        init_cmd[ini++] = 0x00000002;  /* 0x01C — reprocess mode */
+        init_cmd[ini++] = 0x00000002;  /* 0x01C — reprocess */
+        init_cmd[ini++] = 0x00000000;  /* 0x01D */
+        init_cmd[ini++] = 0x00000000;  /* 0x01E */
+        init_cmd[ini++] = 0x00000001;  /* 0x01F */
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
