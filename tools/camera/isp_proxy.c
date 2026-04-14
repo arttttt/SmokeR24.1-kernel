@@ -79,10 +79,14 @@ uint32_t NvIspHwSettingsApply(void *s) {
     return ((FnHwApply)get_real("NvIspHwSettingsApply"))(s);
 }
 
-typedef uint32_t (*FnSetConfig)(void*, uint32_t, uint32_t, uint32_t);
-uint32_t NvIspSetConfiguration(void *h, uint32_t a, uint32_t b, uint32_t c) {
-    LOG("NvIspSetConfiguration(%p, %u, 0x%x, 0x%x)", h, a, b, c);
-    return ((FnSetConfig)get_real("NvIspSetConfiguration"))(h, a, b, c);
+typedef uint32_t (*FnSetConfig)(void*, uint32_t, void*, void*);
+uint32_t NvIspSetConfiguration(void *h, uint32_t type, void *data, void *data2) {
+    LOG("NvIspSetConfiguration(%p, type=%u, data=%p, data2=%p)", h, type, data, data2);
+    if (data) hexdump("SetConfig.data", data, 64);
+    if (data2) hexdump("SetConfig.data2", data2, 32);
+    uint32_t r = ((FnSetConfig)get_real("NvIspSetConfiguration"))(h, type, data, data2);
+    LOG("  SetConfig -> 0x%x", r);
+    return r;
 }
 
 /* ProcessFrame — the key function. Dump ALL args. */
