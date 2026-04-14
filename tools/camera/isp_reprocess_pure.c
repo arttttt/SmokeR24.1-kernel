@@ -144,11 +144,16 @@ static uint32_t nvmap_pin(uint32_t handle) {
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <raw_bayer_file> [format_hex]\n", argv[0]);
+        printf("Usage: %s <raw_bayer_file> [format_hex] [isp_enable_hex] [--miui]\n", argv[0]);
         return 1;
     }
 
-    printf("=== ISP Pure Reprocess (no blobs) ===\n");
+    int use_miui = 0;
+    for (int i = 1; i < argc; i++)
+        if (strcmp(argv[i], "--miui") == 0) use_miui = 1;
+
+    printf("=== ISP Pure Reprocess (no blobs)%s ===\n",
+           use_miui ? " + MIUI regs" : "");
 
     /* Open devices */
     nvmap_fd = open("/dev/nvmap", O_RDWR | O_SYNC);
@@ -459,6 +464,53 @@ int main(int argc, char **argv)
                 val = 0x3000;  /* 3.0 — highlights */
             cmd[n++] = val;
         }
+    }
+
+    /* === MIUI-only register blocks (from stock camera gather #8) === */
+    if (use_miui) {
+        printf("Adding MIUI blocks: 0x400, 0x800, 0xD20, 0x930\n");
+
+        /* 0x400-0x40A: unknown processing block */
+        cmd[n++] = OP_INCR(0x400, 11);
+        cmd[n++] = 0x00000001;  /* 0x400 */
+        cmd[n++] = 0x004B0000;  /* 0x401 */
+        cmd[n++] = 0x00930000;  /* 0x402 */
+        cmd[n++] = 0x00220000;  /* 0x403 */
+        cmd[n++] = 0x2FF01000;  /* 0x404 */
+        cmd[n++] = 0x2FF01000;  /* 0x405 */
+        cmd[n++] = 0x2FF01000;  /* 0x406 */
+        cmd[n++] = 0x2FF01000;  /* 0x407 */
+        cmd[n++] = 0x00030000;  /* 0x408 */
+        cmd[n++] = 0x00000000;  /* 0x409 */
+        cmd[n++] = 0x00020000;  /* 0x40A */
+
+        /* 0x800/0x820: black level */
+        cmd[n++] = OP_INCR(0x800, 1);
+        cmd[n++] = 0x85001000;
+        cmd[n++] = OP_INCR(0x820, 1);
+        cmd[n++] = 0x85001000;
+
+        /* 0xD20-0xD25: lens shading extra */
+        cmd[n++] = OP_INCR(0xD20, 6);
+        cmd[n++] = 0x00003101;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = 0x01EC0000;
+        cmd[n++] = 0x01EC0000;
+        cmd[n++] = 0x01EC0000;
+        cmd[n++] = 0x01EC0000;
+
+        /* 0x930-0x941: extended stats config */
+        cmd[n++] = OP_INCR(0x930, 16);
+        cmd[n++] = 0x0000001C; cmd[n++] = 0x88888888;
+        cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
+        cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
+        cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
+        cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
+        cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
+        cmd[n++] = 0x00000078; cmd[n++] = 0x3FC00000;
+        cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
+        cmd[n++] = OP_INCR(0x941, 1);
+        cmd[n++] = 0x00070000;
     }
 
     /* Output: dims + format */
