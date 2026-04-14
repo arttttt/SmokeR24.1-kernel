@@ -160,12 +160,26 @@ FWD(NvIspSetStats)
 FWD(NvIspUpdateEmcClock)
 FWD(PopulateIspHwFunctions_T12x)
 FWD(IsBayerColorFormat)
-FWD(NvCameraConvertDoubleToSFx)
-FWD(NvCameraConvertDoubleToUFx)
 FWD(NvCameraConvertRGrGbBToTlTrBlBr)
 FWD(NvCameraGetBayerComponent)
 FWD(NvCameraHwSettingsApply)
 FWD(NvCameraHwSettingsUpdateDirty)
 FWD(NvCameraMatMult3x3)
-FWD(NvSFxFixed2Float)
-FWD(NvSFxFloat2Fixed)
+
+/* Float/double functions — must preserve FPU calling convention */
+float NvCameraConvertDoubleToSFx(double a, double b) {
+    typedef float (*Fn)(double, double);
+    return ((Fn)get_real("NvCameraConvertDoubleToSFx"))(a, b);
+}
+float NvCameraConvertDoubleToUFx(double a, double b) {
+    typedef float (*Fn)(double, double);
+    return ((Fn)get_real("NvCameraConvertDoubleToUFx"))(a, b);
+}
+float NvSFxFixed2Float(uint32_t a) {
+    typedef float (*Fn)(uint32_t);
+    return ((Fn)get_real("NvSFxFixed2Float"))(a);
+}
+uint32_t NvSFxFloat2Fixed(float a) {
+    typedef uint32_t (*Fn)(float);
+    return ((Fn)get_real("NvSFxFloat2Fixed"))(a);
+}
