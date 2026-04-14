@@ -355,25 +355,7 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* ---- All S5 register blocks from stock streaming trace (ISP-B/OV5693) ---- */
-
-    /* 0x202: input config */
-    cmd[n++] = OP_INCR(0x202, 3);
-    cmd[n++] = 0x00000001;
-    cmd[n++] = 0x00780078;  /* ISP-B OV5693 */
-    cmd[n++] = 0x00780078;
-
-    /* 0x200: input enable */
-    cmd[n++] = OP_INCR(0x200, 2);
-    cmd[n++] = 0x00000001;
-    cmd[n++] = 0x00000000;
-
-    /* 0x205: input stride/format */
-    cmd[n++] = OP_INCR(0x205, 4);
-    cmd[n++] = 0x00000000;
-    cmd[n++] = 0x000600c8;
-    cmd[n++] = 0x000f000f;
-    cmd[n++] = 0x00000000;  /* ISP-B */
+    /* ---- S5 register blocks (input config 0x200 SKIPPED — streaming only) ---- */
 
     /* 0x700: processing channel A (16 words) */
     cmd[n++] = OP_INCR(0x700, 16);
