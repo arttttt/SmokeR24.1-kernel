@@ -495,6 +495,8 @@ int main(int argc, char **argv)
     if (argc > 2 && argv[2][0] != '-') out_fmt = strtoul(argv[2], NULL, 16);
     cmd[n++] = out_fmt;
     printf("Output format: 0x%08x%s\n", out_fmt, use_yuv ? " (YUV420)" : "");
+    cmd[n++] = OP_INCR(0xE03, 1);
+    cmd[n++] = 0x00000000;            /* output color config (stock=0) */
 
     /* Output Y surface */
     cmd[n++] = OP_INCR(0xE04, 3);
@@ -553,8 +555,10 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: 0x0B (verified reprocess sequence uses single trigger) */
+    /* Reprocess trigger: 0x09 (load input) + 0x0B (process) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+    cmd[n++] = OP_NONINCR(0x00C, 1);
+    cmd[n++] = 0x09;
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
