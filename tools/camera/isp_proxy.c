@@ -148,40 +148,6 @@ static void init_fwd_ptrs(void) __attribute__((constructor));
 
 #define INIT_FWD(name) _real_##name = get_real(#name);
 
-static void init_fwd_ptrs(void) {
-    INIT_FWD(NvIspCtrlCleanup)
-    INIT_FWD(NvIspCtrlInitialize)
-    INIT_FWD(NvIspFlush)
-    INIT_FWD(NvIspGetAttribute)
-    INIT_FWD(NvIspGetConfiguration)
-    INIT_FWD(NvIspGetStats)
-    INIT_FWD(NvIspGetStatus)
-    INIT_FWD(NvIspHwSettingsDestroy)
-    INIT_FWD(NvIspHwSettingsDestroyClientHwSettingsList)
-    INIT_FWD(NvIspHwSettingsGetAppliedSettings)
-    INIT_FWD(NvIspHwSettingsGetAttribute)
-    INIT_FWD(NvIspHwSettingsSetAttribute)
-    INIT_FWD(NvIspHwSettingsClone)
-    INIT_FWD(NvIspHwSettingsCopyBitwiseOperation)
-    INIT_FWD(NvIspHwSettingsCopyGpp)
-    INIT_FWD(NvIspHwSettingsCopyLensShading)
-    INIT_FWD(NvIspHwSettingsCopyLumaEnhancement)
-    INIT_FWD(NvIspHwSettingsCopyOutputDownScaler)
-    INIT_FWD(NvIspSetAttribute)
-    INIT_FWD(NvIspSetIspClockRate)
-    INIT_FWD(NvIspSetMemoryBandwidth)
-    INIT_FWD(NvIspSetStats)
-    INIT_FWD(NvIspUpdateEmcClock)
-    INIT_FWD(PopulateIspHwFunctions_T12x)
-    INIT_FWD(IsBayerColorFormat)
-    INIT_FWD(NvCameraConvertRGrGbBToTlTrBlBr)
-    INIT_FWD(NvCameraGetBayerComponent)
-    INIT_FWD(NvCameraHwSettingsApply)
-    INIT_FWD(NvCameraHwSettingsUpdateDirty)
-    INIT_FWD(NvCameraMatMult3x3)
-    LOG("init_fwd_ptrs done");
-}
-
 FWD(NvIspCtrlCleanup)
 FWD(NvIspCtrlInitialize)
 FWD(NvIspFlush)
@@ -212,6 +178,27 @@ FWD(NvCameraGetBayerComponent)
 FWD(NvCameraHwSettingsApply)
 FWD(NvCameraHwSettingsUpdateDirty)
 FWD(NvCameraMatMult3x3)
+
+static void init_fwd_ptrs(void) {
+    INIT_FWD(NvIspCtrlCleanup) INIT_FWD(NvIspCtrlInitialize)
+    INIT_FWD(NvIspFlush) INIT_FWD(NvIspGetAttribute)
+    INIT_FWD(NvIspGetConfiguration) INIT_FWD(NvIspGetStats)
+    INIT_FWD(NvIspGetStatus) INIT_FWD(NvIspHwSettingsDestroy)
+    INIT_FWD(NvIspHwSettingsDestroyClientHwSettingsList)
+    INIT_FWD(NvIspHwSettingsGetAppliedSettings)
+    INIT_FWD(NvIspHwSettingsGetAttribute) INIT_FWD(NvIspHwSettingsSetAttribute)
+    INIT_FWD(NvIspHwSettingsClone) INIT_FWD(NvIspHwSettingsCopyBitwiseOperation)
+    INIT_FWD(NvIspHwSettingsCopyGpp) INIT_FWD(NvIspHwSettingsCopyLensShading)
+    INIT_FWD(NvIspHwSettingsCopyLumaEnhancement)
+    INIT_FWD(NvIspHwSettingsCopyOutputDownScaler)
+    INIT_FWD(NvIspSetAttribute) INIT_FWD(NvIspSetIspClockRate)
+    INIT_FWD(NvIspSetMemoryBandwidth) INIT_FWD(NvIspSetStats)
+    INIT_FWD(NvIspUpdateEmcClock) INIT_FWD(PopulateIspHwFunctions_T12x)
+    INIT_FWD(IsBayerColorFormat) INIT_FWD(NvCameraConvertRGrGbBToTlTrBlBr)
+    INIT_FWD(NvCameraGetBayerComponent) INIT_FWD(NvCameraHwSettingsApply)
+    INIT_FWD(NvCameraHwSettingsUpdateDirty) INIT_FWD(NvCameraMatMult3x3)
+    LOG("init_fwd_ptrs done");
+}
 
 /* Float/double functions — must preserve FPU calling convention */
 float NvCameraConvertDoubleToSFx(double a, double b) {
