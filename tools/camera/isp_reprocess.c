@@ -403,14 +403,32 @@ int main(int argc, char **argv)
         /* Build output config: NvRmSurface[3] + numPlanes + crop */
         uint8_t out_cfg[0xA4];
         memset(out_cfg, 0, sizeof(out_cfg));
-        /* Surface 0 (RGBA) */
+        uint32_t y_stride = (W + 63) & ~63;      /* 2624 */
+        uint32_t uv_stride = ((W/2) + 63) & ~63; /* 1344 */
+        /* Surface 0: Y plane */
         *(uint32_t*)&out_cfg[0x00] = W;
         *(uint32_t*)&out_cfg[0x04] = H;
-        *(uint32_t*)&out_cfg[0x08] = 0x2016881a; /* R8G8B8A8 */
+        *(uint32_t*)&out_cfg[0x08] = 0x08592004; /* Y8 */
         *(uint32_t*)&out_cfg[0x0C] = 1;  /* pitch */
-        *(uint32_t*)&out_cfg[0x10] = (W * 4 + 63) & ~63; /* 64-aligned */
+        *(uint32_t*)&out_cfg[0x10] = y_stride;
         *(uint32_t*)&out_cfg[0x14] = out_h;
-        *(uint32_t*)&out_cfg[0x90] = 1;  /* numPlanes */
+        /* Surface 1: U plane */
+        *(uint32_t*)&out_cfg[0x30] = W/2;
+        *(uint32_t*)&out_cfg[0x34] = H/2;
+        *(uint32_t*)&out_cfg[0x38] = 0x08590404; /* U8 */
+        *(uint32_t*)&out_cfg[0x3C] = 1;
+        *(uint32_t*)&out_cfg[0x40] = uv_stride;
+        *(uint32_t*)&out_cfg[0x44] = out_h;
+        *(uint32_t*)&out_cfg[0x48] = y_stride * H; /* offset */
+        /* Surface 2: V plane */
+        *(uint32_t*)&out_cfg[0x60] = W/2;
+        *(uint32_t*)&out_cfg[0x64] = H/2;
+        *(uint32_t*)&out_cfg[0x68] = 0x08582404; /* V8 */
+        *(uint32_t*)&out_cfg[0x6C] = 1;
+        *(uint32_t*)&out_cfg[0x70] = uv_stride;
+        *(uint32_t*)&out_cfg[0x74] = out_h;
+        *(uint32_t*)&out_cfg[0x78] = y_stride * H + uv_stride * (H/2);
+        *(uint32_t*)&out_cfg[0x90] = 3;  /* numPlanes = 3 (Y+U+V) */
 
         /* ProcessFrame args: mode=1 (reprocess), crops=0 */
         uint32_t array[7] = {1, 0, 0, 0, 0, (uint32_t)(uintptr_t)in_surf, 0};
