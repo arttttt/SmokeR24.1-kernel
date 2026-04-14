@@ -207,19 +207,8 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
-    /* Enable streaming stripping in shim — removes trigger + conditional syncpts */
-    setenv("NVRM_SHIM_STRIP", "1", 1);
-
-    err = pHwApply(hw_settings);
-    printf("  HwSettingsApply: err=0x%x (streaming stripped by shim)\n", err);
-
-    /* Disable stripping for our own reprocess gather */
-    unsetenv("NVRM_SHIM_STRIP");
-
-    /* NvIspSetConfiguration — configures ISP pipeline mode.
-     * From Ghidra RE of NvIspSetConfiguration (0x1d06):
-     *   type=2: enable output surface. config={1}, size=4
-     *   type=1: pixel format config. 0x40-byte struct */
+    /* NvIspSetConfiguration BEFORE HwSettingsApply —
+     * configures ISP pipeline mode, Apply flushes to HW. */
     if (pSetConfig) {
         /* Type 2: enable output surface */
         uint32_t enable = 1;
@@ -237,13 +226,13 @@ int main(int argc, char **argv)
         uint32_t size1 = 0x40;
         err = pSetConfig(isp_handle, 1, fmt_config, &size1);
         printf("  SetConfiguration(type=1, reprocess Bayer→8888): err=0x%x\n", err);
-
-        /* Re-apply settings after SetConfiguration */
-        setenv("NVRM_SHIM_STRIP", "1", 1);
-        err = pHwApply(hw_settings);
-        printf("  HwSettingsApply (post-config): err=0x%x\n", err);
-        unsetenv("NVRM_SHIM_STRIP");
     }
+
+    /* HwSettingsApply — now includes SetConfiguration changes */
+    setenv("NVRM_SHIM_STRIP", "1", 1);
+    err = pHwApply(hw_settings);
+    printf("  HwSettingsApply: err=0x%x (streaming stripped by shim)\n", err);
+    unsetenv("NVRM_SHIM_STRIP");
 
     /* Scan push buffer and dump raw cal gather to file */
     printf("  Scanning calibration gather...\n");
