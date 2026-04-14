@@ -357,10 +357,6 @@ int main(int argc, char **argv)
 
     /* ---- S5 register blocks ---- */
 
-    /* 0x200: input enable — try just enable flag */
-    cmd[n++] = OP_INCR(0x200, 1);
-    cmd[n++] = 0x00000001;
-
     /* 0x700: processing channel A (16 words) */
     cmd[n++] = OP_INCR(0x700, 16);
     cmd[n++] = 0x00000001; cmd[n++] = 0x00000000;
