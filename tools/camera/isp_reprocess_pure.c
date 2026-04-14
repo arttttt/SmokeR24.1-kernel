@@ -295,14 +295,28 @@ int main(int argc, char **argv)
 
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
-        uint32_t init_cmd[8];
+        uint32_t init_cmd[16];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        init_cmd[ini++] = OP_INCR(0x019, 1);
-        init_cmd[ini++] = 0x00000400;
-        init_cmd[ini++] = OP_INCR(0x01B, 2);
-        init_cmd[ini++] = 0x00000200;
-        init_cmd[ini++] = 0x00000002;
+        if (use_miui) {
+            printf("Using MIUI init: 0x018-0x01C + 0x01F + 0x05F\n");
+            init_cmd[ini++] = OP_INCR(0x018, 5);
+            init_cmd[ini++] = 0x0A00500A;  /* 0x018 */
+            init_cmd[ini++] = 0x00008089;  /* 0x019 */
+            init_cmd[ini++] = 0x013645CB;  /* 0x01A */
+            init_cmd[ini++] = 0x000001E7;  /* 0x01B */
+            init_cmd[ini++] = 0x00000001;  /* 0x01C */
+            init_cmd[ini++] = OP_INCR(0x01F, 1);
+            init_cmd[ini++] = 0x00000001;
+            init_cmd[ini++] = OP_INCR(0x05F, 1);
+            init_cmd[ini++] = 0x00000010;
+        } else {
+            init_cmd[ini++] = OP_INCR(0x019, 1);
+            init_cmd[ini++] = 0x00000400;
+            init_cmd[ini++] = OP_INCR(0x01B, 2);
+            init_cmd[ini++] = 0x00000200;
+            init_cmd[ini++] = 0x00000002;
+        }
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
@@ -360,11 +374,24 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Zero 0x200 (reset from previous) */
+    /* 0x200 pipeline mode */
     cmd[n++] = OP_INCR(0x200, 9);
-    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
-    cmd[n++] = 0;
+    if (use_miui) {
+        printf("Using MIUI 0x200 block (pipeline mode)\n");
+        cmd[n++] = 0x00000001;  /* 0x200 */
+        cmd[n++] = 0x00000000;  /* 0x201 */
+        cmd[n++] = 0x00000001;  /* 0x202 */
+        cmd[n++] = 0x02000200;  /* 0x203 */
+        cmd[n++] = 0x02000200;  /* 0x204 */
+        cmd[n++] = 0x00000000;  /* 0x205 */
+        cmd[n++] = 0x000600C8;  /* 0x206 */
+        cmd[n++] = 0x000F000F;  /* 0x207 */
+        cmd[n++] = 0x00003333;  /* 0x208 */
+    } else {
+        cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+        cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+        cmd[n++] = 0;
+    }
 
     /* ---- S5 register blocks ---- */
 
