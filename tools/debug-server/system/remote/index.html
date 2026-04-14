@@ -83,7 +83,7 @@ body{font-family:-apple-system,system-ui,monospace;background:var(--bg);color:va
 
 .status{font-size:12px;color:var(--dim)}
 input[type=file]{display:none}
-select.input{appearance:auto;padding-right:24px}
+select.input{appearance:none;-webkit-appearance:none;padding-right:32px;padding-left:12px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23666' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
 </style>
 </head>
 <body>
@@ -94,30 +94,31 @@ select.input{appearance:auto;padding-right:24px}
 </div>
 
 <div class="tabs">
-<div class="tab active" onclick="showTab('terminal')">Terminal</div>
-<div class="tab" onclick="showTab('dmesg')">dmesg</div>
+<div class="tab active" onclick="showTab('dmesg')">dmesg</div>
+<div class="tab" onclick="showTab('terminal')">Terminal</div>
 <div class="tab" onclick="showTab('files')">Files</div>
 <div class="tab" onclick="showTab('boot')">Boot</div>
 <div class="tab" onclick="showTab('info')">Info</div>
 </div>
 
-<!-- Terminal -->
-<div id="terminal" class="panel active">
-<div id="terminal-output"></div>
-<form onsubmit="runCmd();return false">
-<input id="cmd-input" class="input" placeholder="$ enter command..." autofocus style="width:100%;font-family:monospace">
-</form>
-</div>
-
 <!-- dmesg -->
-<div id="dmesg" class="panel">
+<div id="dmesg" class="panel active">
 <div class="row">
 <button class="btn" onclick="loadDmesg()">Refresh</button>
 <button class="btn" onclick="tailDmesg()">Auto-refresh</button>
 <button class="btn" onclick="stopTail()">Stop</button>
-<input id="dmesg-filter" class="input flex1" placeholder="grep filter...">
+<button class="btn" onclick="clearDmesg()">Clear</button>
+<input id="dmesg-filter" class="input flex1" placeholder="grep filter..." oninput="filterDmesgLocal()">
 </div>
 <div id="dmesg-output" class="log"></div>
+</div>
+
+<!-- Terminal -->
+<div id="terminal" class="panel">
+<div id="terminal-output"></div>
+<form onsubmit="runCmd();return false">
+<input id="cmd-input" class="input" placeholder="$ enter command..." style="width:100%;font-family:monospace">
+</form>
 </div>
 
 <!-- Files -->
@@ -231,7 +232,7 @@ function upload(file,dest,cb,pcb){var x=new XMLHttpRequest();x.open('POST',BASE+
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
 
 function showTab(n){
-  var names=['terminal','dmesg','files','boot','info'];
+  var names=['dmesg','terminal','files','boot','info'];
   document.querySelectorAll('.tab').forEach(function(t,i){t.className='tab'+(names[i]===n?' active':'')});
   document.querySelectorAll('.panel').forEach(function(p){p.className='panel'+(p.id===n?' active':'')});
   if(n==='dmesg')loadDmesg();if(n==='info')loadInfo();if(n==='files')fmGo();
@@ -246,9 +247,12 @@ cmdInput.addEventListener('keydown',function(e){
 function runCmd(){var c=cmdInput.value;if(!c)return;cmdHistory.unshift(c);histIdx=-1;termOut.textContent+='$ '+c+'\n';cmdInput.value='';api(c,function(r){termOut.textContent+=r+'\n';termOut.scrollTop=termOut.scrollHeight})}
 
 // === dmesg ===
-function loadDmesg(){var f=document.getElementById('dmesg-filter').value;api(f?'dmesg|grep -i "'+f+'"':'dmesg',function(r){var el=document.getElementById('dmesg-output');el.textContent=r;el.scrollTop=el.scrollHeight})}
-function tailDmesg(){stopTail();tailTimer=setInterval(loadDmesg,2000)}
+var dmesgRaw='';
+function loadDmesg(){api('dmesg',function(r){dmesgRaw=r;filterDmesgLocal()})}
+function filterDmesgLocal(){var f=document.getElementById('dmesg-filter').value.toLowerCase();var el=document.getElementById('dmesg-output');if(!f){el.textContent=dmesgRaw}else{el.textContent=dmesgRaw.split('\n').filter(function(l){return l.toLowerCase().indexOf(f)!==-1}).join('\n')}el.scrollTop=el.scrollHeight}
+function tailDmesg(){stopTail();loadDmesg();tailTimer=setInterval(loadDmesg,2000)}
 function stopTail(){if(tailTimer){clearInterval(tailTimer);tailTimer=null}}
+function clearDmesg(){dmesgRaw='';document.getElementById('dmesg-output').textContent='';document.getElementById('dmesg-filter').value=''}
 
 // === Context Menu ===
 function ctxShow(x,y,items){
@@ -469,6 +473,7 @@ function loadInfo(){
 }
 
 api('uname -r',function(r){document.getElementById('dev-name').textContent=r.trim()});
+loadDmesg();
 </script>
 </body>
 </html>
