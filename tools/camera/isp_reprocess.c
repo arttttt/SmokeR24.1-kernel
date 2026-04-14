@@ -203,17 +203,42 @@ int main(int argc, char **argv)
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
-    /* SetConfiguration type=1 and type=2 (from stock proxy dump) */
+    /* SetConfiguration type=1 and type=2 (exact bytes from stock proxy dump)
+     * Stock stack layout: data2 at ptr, data at ptr±4.
+     * We replicate the exact byte sequences captured. */
     if (pSetConfig) {
-        /* Stock data: array of uint32 indices for pixel format mapping */
-        uint32_t cfg1[] = {1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
-        uint32_t cfg2[] = {2, 4, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
-        /* data2 from stock: {0x40, 1, 7, 9, 10, 3, 0, 6, ...} */
-        uint32_t cfg_d2[] = {0x40, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        /* Stock has one contiguous array, data and data2 point into it */
+        uint32_t cfg_buf[] = {
+            /* offset 0x00 */ 0x02,  /* used as data[0] for type=2 */
+            /* offset 0x04 */ 0x04,  /* data2[0] for type=2 / overlap */
+            /* offset 0x08 */ 0x01,  /* data[0] for type=1 */
+            /* offset 0x0C */ 0x07,
+            /* offset 0x10 */ 0x09,
+            /* offset 0x14 */ 0x0A,
+            /* offset 0x18 */ 0x03,
+            /* offset 0x1C */ 0x00,
+            /* offset 0x20 */ 0x06,
+            /* offset 0x24 */ 0x08,
+            /* offset 0x28 */ 0x11,
+            /* offset 0x2C */ 0x0F,
+            /* offset 0x30 */ 0x0C,
+            /* offset 0x34 */ 0x0E,
+            /* offset 0x38 */ 0x0B,
+            /* offset 0x3C */ 0x00,
+            /* offset 0x40 */ 0x10,
+            /* offset 0x44 */ 0x0D,
+        };
+        /* type=1: data=&cfg_buf[2], data2=&cfg_buf[1]
+         * Proxy showed: data2 starts with 0x40, but that was from different stack frame.
+         * Stock data2 for type=1 had first byte 0x40. Let's use the raw dump. */
+        uint32_t d1_data[] = {1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        uint32_t d1_data2[] = {0x40, 1, 7, 9, 10, 3, 0, 6};
+        uint32_t d2_data[] = {2, 4, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        uint32_t d2_data2[] = {4, 1, 7, 9, 10, 3, 0, 6};
 
-        err = pSetConfig(isp_handle, 1, cfg1, cfg_d2);
+        err = pSetConfig(isp_handle, 1, d1_data, d1_data2);
         printf("  SetConfig(1): err=0x%x\n", err);
-        err = pSetConfig(isp_handle, 2, cfg2, cfg_d2);
+        err = pSetConfig(isp_handle, 2, d2_data, d2_data2);
         printf("  SetConfig(2): err=0x%x\n", err);
     }
 
