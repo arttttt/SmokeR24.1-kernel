@@ -207,6 +207,17 @@ int main(int argc, char **argv)
     pHwCreate(isp_handle, &hw_settings);
     printf("  HwSettingsCreate: settings=%p\n", hw_settings);
 
+    /* Dump ISP context and settings objects */
+    {
+        printf("  Dumping ISP handle (%p, 0x1330 bytes)...\n", isp_handle);
+        FILE *df = fopen("/data/local/tmp/isp_handle_dump.bin", "wb");
+        if (df) { fwrite(isp_handle, 1, 0x1330, df); fclose(df); }
+
+        printf("  Dumping HW settings (%p, 0x4000 bytes)...\n", hw_settings);
+        FILE *sf = fopen("/data/local/tmp/isp_settings_dump.bin", "wb");
+        if (sf) { fwrite(hw_settings, 1, 0x4000, sf); fclose(sf); }
+    }
+
     /* HwSettingsApply */
     setenv("NVRM_SHIM_STRIP", "1", 1);
     err = pHwApply(hw_settings);
