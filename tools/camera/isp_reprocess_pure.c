@@ -468,7 +468,14 @@ int main(int argc, char **argv)
     }
 
     /* === MIUI-only register blocks (from stock camera gather #8) === */
-    /* (MIUI extra blocks removed — not needed for basic test) */
+    /* 0x500: processing block (from verified reprocess sequence) */
+    cmd[n++] = OP_INCR(0x500, 6);
+    cmd[n++] = 0x00000000;            /* flags = 0 */
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = (H << 16) | W;        /* 0x505: dims */
 
     /* Output: dims + format */
     cmd[n++] = OP_INCR(0xE00, 1);
@@ -539,14 +546,15 @@ int main(int argc, char **argv)
     cmd[n++] = OP_NONINCR(0x000, 1);
     cmd[n++] = (6 << 8) | sp_loadv;
 
-    /* Post-apply trigger: commit shadow registers to active pipeline */
-    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x0F;
+    /* 0x100: stats buffer (from verified reprocess sequence) */
+    cmd[n++] = OP_INCR(0x100, 4);
+    cmd[n++] = 0;  /* stats IOVA (not needed, but register must be written) */
+    cmd[n++] = 0;
+    cmd[n++] = 0;
+    cmd[n++] = 0;
 
-    /* Reprocess trigger: two-step 0x09 then 0x0B (from Ghidra RE) */
-    cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x09;
+    /* Reprocess trigger: 0x0B (verified reprocess sequence uses single trigger) */
+    cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
