@@ -355,7 +355,57 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Demosaic coefficients from stock streaming trace (0x506, 9 words) */
+    /* ---- All S5 register blocks from stock streaming trace (ISP-B/OV5693) ---- */
+
+    /* 0x202: input config */
+    cmd[n++] = OP_INCR(0x202, 3);
+    cmd[n++] = 0x00000001;
+    cmd[n++] = 0x00780078;  /* ISP-B OV5693 */
+    cmd[n++] = 0x00780078;
+
+    /* 0x200: input enable */
+    cmd[n++] = OP_INCR(0x200, 2);
+    cmd[n++] = 0x00000001;
+    cmd[n++] = 0x00000000;
+
+    /* 0x205: input stride/format */
+    cmd[n++] = OP_INCR(0x205, 4);
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x000600c8;
+    cmd[n++] = 0x000f000f;
+    cmd[n++] = 0x00000000;  /* ISP-B */
+
+    /* 0x700: processing channel A (16 words) */
+    cmd[n++] = OP_INCR(0x700, 16);
+    cmd[n++] = 0x00000001; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00001a40;  /* ISP-B stride */
+    cmd[n++] = 0x00000000; cmd[n++] = work_iova + 0x30000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00001000;
+    cmd[n++] = 0x00001a00;  /* ISP-B */
+    cmd[n++] = work_iova + 0x20000; cmd[n++] = work_iova + 0x20000;
+    cmd[n++] = work_iova + 0x20000; cmd[n++] = work_iova + 0x20000;
+
+    /* 0x750: processing channel B (16 words) */
+    cmd[n++] = OP_INCR(0x750, 16);
+    cmd[n++] = 0x00000003; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = work_iova + 0x20000; cmd[n++] = work_iova + 0x20000;
+    cmd[n++] = work_iova + 0x20000; cmd[n++] = work_iova + 0x20000;
+
+    /* 0xC00: extra config */
+    cmd[n++] = OP_INCR(0xC00, 3);
+    cmd[n++] = 0x00000101;
+    cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00100000;
+
+    /* 0x506: demosaic (9 words) */
     cmd[n++] = OP_INCR(0x506, 9);
     cmd[n++] = 0x3f3fcff3;
     cmd[n++] = 0x00000000;
@@ -366,6 +416,23 @@ int main(int argc, char **argv)
     cmd[n++] = 0x08621886;
     cmd[n++] = 0x01204812;
     cmd[n++] = 0x06e1b86e;
+
+    /* 0x600: GPP config (16 words) */
+    cmd[n++] = OP_INCR(0x600, 16);
+    cmd[n++] = 0x00000005; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x00000000; cmd[n++] = 0x00000000;
+    cmd[n++] = 0x3fff0000; cmd[n++] = 0x3fff0000;
+    cmd[n++] = 0x3fff0000; cmd[n++] = work_iova + 0x31000;
+
+    /* 0x650: tone curve enable */
+    cmd[n++] = OP_INCR(0x650, 1);
+    cmd[n++] = 0x00000003;
+
+    /* ---- End S5 blocks ---- */
 
     /* Lens shading enable (stock=0, but data present) */
     cmd[n++] = OP_INCR(0xD0A, 1);
