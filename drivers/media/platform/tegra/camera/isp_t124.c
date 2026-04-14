@@ -16,6 +16,8 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma-buf.h>
+#include <linux/scatterlist.h>
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/debugfs.h>
@@ -45,13 +47,14 @@
  * DMA buffer helpers
  * ---------------------------------------------------------------- */
 
-/* Allocate buffer via nvmap (same path as stock camera HAL).
- * IOVMM heap — SMMU-mapped, visible to all engines (VI, ISP, host1x). */
+/* Allocate buffer via nvmap and map into ISP device SMMU context.
+ * Userspace relocs do this via pin_job_mem → dev=isp.1.
+ * We use dma_buf_attach + dma_buf_map_attachment for the same effect. */
 int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
 			struct isp_dma_buf *buf, size_t size)
 {
 	struct nvmap_handle_ref *ref;
-	phys_addr_t phys;
+	struct dma_buf *dmabuf;
 	int err;
 
 	if (!isp->nvmap)
@@ -59,44 +62,59 @@ int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
 
 	buf->size = PAGE_ALIGN(size);
 
-	/* Create handle (like NVMAP_IOC_CREATE) */
 	ref = nvmap_create_handle(isp->nvmap, buf->size);
 	if (IS_ERR(ref))
 		return PTR_ERR(ref);
 
-	/* Allocate backing memory via IOVMM (SMMU-mapped).
-	 * Must use IOVMM (not carveout) so ISP DMA can access via SMMU.
-	 * Userspace test uses NVMAP_HEAP_IOVMM and works. */
 	err = nvmap_alloc_handle(isp->nvmap, ref->handle,
-				 NVMAP_HEAP_IOVMM, /* 1<<30 = SMMU-mapped */
-				 4096, /* align — match userspace */
-				 0,   /* kind */
+				 NVMAP_HEAP_IOVMM, 4096, 0,
 				 NVMAP_HANDLE_WRITE_COMBINE,
 				 NVMAP_IVM_INVALID_PEER);
-	if (err) {
-		nvmap_free_handle(isp->nvmap, ref->handle);
-		return err;
+	if (err)
+		goto free_handle;
+
+	dmabuf = ref->handle->dmabuf;
+	if (!dmabuf) {
+		err = -EINVAL;
+		goto free_handle;
 	}
 
-	/* Pin to get IOVA (like NVMAP_IOC_PIN) */
-	err = __nvmap_pin(ref, &phys);
-	if (err) {
-		nvmap_free_handle(isp->nvmap, ref->handle);
-		return err;
+	/* Attach to ISP device — creates SMMU mapping for ISP DMA */
+	buf->attach = dma_buf_attach(dmabuf, &isp->pdev->dev);
+	if (IS_ERR(buf->attach)) {
+		err = PTR_ERR(buf->attach);
+		buf->attach = NULL;
+		goto free_handle;
 	}
 
-	buf->dma = phys;
+	buf->sgt = dma_buf_map_attachment(buf->attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(buf->sgt)) {
+		err = PTR_ERR(buf->sgt);
+		buf->sgt = NULL;
+		goto detach;
+	}
+
+	buf->dma = sg_dma_address(buf->sgt->sgl);
 	buf->nvmap_ref = ref;
 
-	/* mmap for CPU access (kernel virtual address) */
-	buf->cpu = dma_buf_vmap(ref->handle->dmabuf);
+	/* CPU access */
+	buf->cpu = dma_buf_vmap(dmabuf);
 	if (!buf->cpu) {
-		__nvmap_unpin(ref);
-		nvmap_free_handle(isp->nvmap, ref->handle);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto unmap;
 	}
 
 	return 0;
+
+unmap:
+	dma_buf_unmap_attachment(buf->attach, buf->sgt, DMA_BIDIRECTIONAL);
+	buf->sgt = NULL;
+detach:
+	dma_buf_detach(dmabuf, buf->attach);
+	buf->attach = NULL;
+free_handle:
+	nvmap_free_handle(isp->nvmap, ref->handle);
+	return err;
 }
 
 EXPORT_SYMBOL(isp_nvmap_buf_alloc);
@@ -104,13 +122,20 @@ EXPORT_SYMBOL(isp_nvmap_buf_alloc);
 void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
 			struct isp_dma_buf *buf)
 {
+	struct dma_buf *dmabuf;
+
 	if (!buf->nvmap_ref)
 		return;
-	if (buf->cpu) {
-		dma_buf_vunmap(buf->nvmap_ref->handle->dmabuf, buf->cpu);
-		buf->cpu = NULL;
-	}
-	__nvmap_unpin(buf->nvmap_ref);
+
+	dmabuf = buf->nvmap_ref->handle->dmabuf;
+
+	if (buf->cpu)
+		dma_buf_vunmap(dmabuf, buf->cpu);
+	if (buf->sgt)
+		dma_buf_unmap_attachment(buf->attach, buf->sgt,
+					DMA_BIDIRECTIONAL);
+	if (buf->attach)
+		dma_buf_detach(dmabuf, buf->attach);
 	nvmap_free_handle(isp->nvmap, buf->nvmap_ref->handle);
 	memset(buf, 0, sizeof(*buf));
 }

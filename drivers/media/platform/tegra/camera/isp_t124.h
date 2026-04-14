@@ -17,12 +17,18 @@ struct dentry;
 struct nvmap_client;
 struct nvmap_handle_ref;
 
+struct dma_buf_attachment;
+struct sg_table;
+
 struct isp_dma_buf {
 	void *cpu;
 	dma_addr_t dma;
 	size_t size;
 	/* nvmap backing */
 	struct nvmap_handle_ref *nvmap_ref;
+	/* SMMU mapping for ISP device */
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
 };
 
 struct tegra_isp_t124 {
