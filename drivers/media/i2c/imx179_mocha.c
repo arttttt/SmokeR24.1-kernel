@@ -1404,10 +1404,10 @@ static int imx179_probe(struct i2c_client *client,
 		chip_id = (id_msb << 8) | id_lsb;
 	}
 
-	if (chip_id != IMX179_CHIP_ID) {
+	if (chip_id != IMX179_CHIP_ID && chip_id != IMX179_CHIP_ID_ALT) {
 		dev_err(&client->dev,
-			"Chip ID mismatch: expected 0x%04x, got 0x%04x\n",
-			IMX179_CHIP_ID, chip_id);
+			"Chip ID mismatch: expected 0x%04x or 0x%04x, got 0x%04x\n",
+			IMX179_CHIP_ID, IMX179_CHIP_ID_ALT, chip_id);
 		camera_common_s_power(priv->subdev, false);
 		err = -ENODEV;
 		goto error;
@@ -1426,7 +1426,8 @@ static int imx179_probe(struct i2c_client *client,
 error:
 	v4l2_ctrl_handler_free(&priv->ctrl_handler);
 	imx179_power_put(priv);
-	camera_common_remove_debugfs(common_data);
+	if (common_data->debugdir)
+		camera_common_remove_debugfs(common_data);
 	return err;
 }
 
