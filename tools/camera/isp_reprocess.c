@@ -434,12 +434,13 @@ int main(int argc, char **argv)
         uint32_t status = 0;
         uint32_t frame_count = 0;
 
-        /* Two-pass protocol */
+        /* Two-pass protocol — pass args as array pointer per RE */
         printf("  ProcessFrame pass 1...\n");
+        uint32_t flush_fence = 0, fence = 0;
         err = pProcessFrame(isp_handle,
             array[0], array[1], array[2], array[3], array[4],
             array[5], array[6],
-            out_cfg, NULL, NULL, &status, &frame_count);
+            out_cfg, &flush_fence, &fence, &status, &frame_count);
         printf("  pass1: err=0x%x status=%u\n", err, status);
 
         if (err == 0xa && status >= 1) {
@@ -447,7 +448,7 @@ int main(int argc, char **argv)
             err = pProcessFrame(isp_handle,
                 array[0], array[1], array[2], array[3], array[4],
                 array[5], array[6],
-                out_cfg, NULL, NULL, &status, &frame_count);
+                out_cfg, &flush_fence, &fence, &status, &frame_count);
             printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
         }
 
