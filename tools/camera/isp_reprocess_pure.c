@@ -355,17 +355,12 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* 0x200 experiments — try values one at a time */
+    /* First zero 0x200 block (reset from previous dirty state),
+     * then try specific values in SECOND gather invocation */
     cmd[n++] = OP_INCR(0x200, 9);
-    cmd[n++] = 0x00000000;  /* 0x200 */
-    cmd[n++] = 0x00000000;  /* 0x201 */
-    cmd[n++] = 0x00000001;  /* 0x202: try enable here */
-    cmd[n++] = 0x00000000;  /* 0x203 */
-    cmd[n++] = 0x00000000;  /* 0x204 */
-    cmd[n++] = 0x00000000;  /* 0x205 */
-    cmd[n++] = 0x00000000;  /* 0x206 */
-    cmd[n++] = 0x00000000;  /* 0x207 */
-    cmd[n++] = 0x00000000;  /* 0x208 */
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0; cmd[n++] = 0;
+    cmd[n++] = 0;
 
     /* ---- S5 register blocks ---- */
 
