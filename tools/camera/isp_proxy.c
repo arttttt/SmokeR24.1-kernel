@@ -125,62 +125,47 @@ uint32_t NvIspHwSettingsCopyDemosaic(void *dst, void *src) {
 
 /* ---- Pass-through for all other exports ---- */
 
-#define PASSTHROUGH(name, ret, ...) \
-    typedef ret (*Fn_##name)(__VA_ARGS__); \
-    ret name(__VA_ARGS__)
+/* Safe pass-through: always pass 8 args. ARM ABI: r0-r3 + stack.
+ * Extra args are ignored by callee. */
+typedef uint32_t (*FnGeneric)(uint32_t,uint32_t,uint32_t,uint32_t,
+                              uint32_t,uint32_t,uint32_t,uint32_t);
+#define FWD(name) \
+    uint32_t name(uint32_t a, uint32_t b, uint32_t c, uint32_t d, \
+                  uint32_t e, uint32_t f, uint32_t g, uint32_t h) { \
+        return ((FnGeneric)get_real(#name))(a,b,c,d,e,f,g,h); \
+    }
 
-#define FWD0(name) \
-    uint32_t name(void) { return ((uint32_t(*)(void))get_real(#name))(); }
-
-#define FWD1(name) \
-    uint32_t name(uint32_t a) { return ((uint32_t(*)(uint32_t))get_real(#name))(a); }
-
-#define FWD2(name) \
-    uint32_t name(uint32_t a, uint32_t b) { return ((uint32_t(*)(uint32_t,uint32_t))get_real(#name))(a,b); }
-
-#define FWD3(name) \
-    uint32_t name(uint32_t a, uint32_t b, uint32_t c) { return ((uint32_t(*)(uint32_t,uint32_t,uint32_t))get_real(#name))(a,b,c); }
-
-#define FWD4(name) \
-    uint32_t name(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return ((uint32_t(*)(uint32_t,uint32_t,uint32_t,uint32_t))get_real(#name))(a,b,c,d); }
-
-#define FWD5(name) \
-    uint32_t name(uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e) { return ((uint32_t(*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))get_real(#name))(a,b,c,d,e); }
-
-/* Pass-throughs (arg count from nm + ghidra) */
-FWD1(NvIspCtrlCleanup)
-FWD3(NvIspCtrlInitialize)
-FWD2(NvIspFlush)
-FWD3(NvIspGetAttribute)
-FWD4(NvIspGetConfiguration)
-FWD2(NvIspGetStats)
-FWD2(NvIspGetStatus)
-FWD1(NvIspHwSettingsDestroy)
-FWD1(NvIspHwSettingsDestroyClientHwSettingsList)
-FWD4(NvIspHwSettingsGetAppliedSettings)
-FWD4(NvIspHwSettingsGetAttribute)
-FWD4(NvIspHwSettingsSetAttribute)
-FWD2(NvIspHwSettingsClone)
-FWD2(NvIspHwSettingsCopyBitwiseOperation)
-FWD2(NvIspHwSettingsCopyGpp)
-FWD2(NvIspHwSettingsCopyLensShading)
-FWD2(NvIspHwSettingsCopyLumaEnhancement)
-FWD2(NvIspHwSettingsCopyOutputDownScaler)
-FWD3(NvIspSetAttribute)
-FWD2(NvIspSetIspClockRate)
-FWD2(NvIspSetMemoryBandwidth)
-FWD2(NvIspSetStats)
-FWD2(NvIspUpdateEmcClock)
-FWD1(PopulateIspHwFunctions_T12x)
-
-/* Utility functions — pass through */
-FWD1(IsBayerColorFormat)
-FWD2(NvCameraConvertDoubleToSFx)
-FWD2(NvCameraConvertDoubleToUFx)
-FWD2(NvCameraConvertRGrGbBToTlTrBlBr)
-FWD2(NvCameraGetBayerComponent)
-FWD5(NvCameraHwSettingsApply)
-FWD3(NvCameraHwSettingsUpdateDirty)
-FWD3(NvCameraMatMult3x3)
-FWD1(NvSFxFixed2Float)
-FWD1(NvSFxFloat2Fixed)
+FWD(NvIspCtrlCleanup)
+FWD(NvIspCtrlInitialize)
+FWD(NvIspFlush)
+FWD(NvIspGetAttribute)
+FWD(NvIspGetConfiguration)
+FWD(NvIspGetStats)
+FWD(NvIspGetStatus)
+FWD(NvIspHwSettingsDestroy)
+FWD(NvIspHwSettingsDestroyClientHwSettingsList)
+FWD(NvIspHwSettingsGetAppliedSettings)
+FWD(NvIspHwSettingsGetAttribute)
+FWD(NvIspHwSettingsSetAttribute)
+FWD(NvIspHwSettingsClone)
+FWD(NvIspHwSettingsCopyBitwiseOperation)
+FWD(NvIspHwSettingsCopyGpp)
+FWD(NvIspHwSettingsCopyLensShading)
+FWD(NvIspHwSettingsCopyLumaEnhancement)
+FWD(NvIspHwSettingsCopyOutputDownScaler)
+FWD(NvIspSetAttribute)
+FWD(NvIspSetIspClockRate)
+FWD(NvIspSetMemoryBandwidth)
+FWD(NvIspSetStats)
+FWD(NvIspUpdateEmcClock)
+FWD(PopulateIspHwFunctions_T12x)
+FWD(IsBayerColorFormat)
+FWD(NvCameraConvertDoubleToSFx)
+FWD(NvCameraConvertDoubleToUFx)
+FWD(NvCameraConvertRGrGbBToTlTrBlBr)
+FWD(NvCameraGetBayerComponent)
+FWD(NvCameraHwSettingsApply)
+FWD(NvCameraHwSettingsUpdateDirty)
+FWD(NvCameraMatMult3x3)
+FWD(NvSFxFixed2Float)
+FWD(NvSFxFloat2Fixed)
