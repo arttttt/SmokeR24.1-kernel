@@ -95,7 +95,15 @@ int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
 	}
 
 	buf->dma = sg_dma_address(buf->sgt->sgl);
+	if (!buf->dma)
+		buf->dma = sg_phys(buf->sgt->sgl);
 	buf->nvmap_ref = ref;
+
+	dev_info(&isp->pdev->dev,
+		 "nvmap buf: size=%zu dma=0x%pad sg_dma=0x%pad sg_phys=0x%lx\n",
+		 buf->size, &buf->dma,
+		 &sg_dma_address(buf->sgt->sgl),
+		 (unsigned long)sg_phys(buf->sgt->sgl));
 
 	/* CPU access */
 	buf->cpu = dma_buf_vmap(dmabuf);
