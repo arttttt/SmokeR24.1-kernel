@@ -393,36 +393,55 @@ int main(int argc, char **argv)
     printf("  NvIspHwSettingsCopyDemosaic=%p\n", pCopyDemosaic);
 
     if (pCopyDemosaic && hw_settings) {
-        /* Build demosaic config struct:
-         * [0x00] enable (byte) = 1
-         * [0x04] config (u32) — numLumaCoeffs or flags
-         * [0x08] luma_coeffs ptr → 9 x u32 (alloc 0x24)
-         * [0x18] chroma_enable (byte) = 1
-         * [0x1c] config2 (u32) — numChromaCoeffs or flags
-         * [0x20] chromaU ptr → 16 x u32 (alloc 0x40)
-         * [0x30] chromaV ptr → 16 x u32 (alloc 0x40)
-         * Total: 4 sets (R, Gr, Gb, B), 0x04 stride between sets
-         */
+        /* Demosaic struct (from disasm at 0x18248):
+         * [0x00] enable (byte)
+         * [0x04] numLumaCoeffs (u32)
+         * [0x08] luma_set0_ptr → 9 x u32 (0x24 bytes)
+         * [0x0C] luma_set1_ptr
+         * [0x10] luma_set2_ptr
+         * [0x14] luma_set3_ptr
+         * [0x18] chroma_enable (byte)
+         * [0x1C] numChromaCoeffs (u32)
+         * [0x20] chromaU_set0_ptr → 16 x u32 (0x40 bytes)
+         * [0x24-0x2C] chromaU_set1-3
+         * [0x30] chromaV_set0_ptr → 16 x u32 (0x40 bytes)
+         * [0x34-0x3C] chromaV_set1-3 */
 
-        /* Simple identity demosaic: just enable with zero coeffs */
-        uint8_t demosaic_src[0x40];
-        memset(demosaic_src, 0, sizeof(demosaic_src));
-        demosaic_src[0x00] = 1; /* enable */
-        demosaic_src[0x18] = 1; /* chroma enable */
-
-        /* 9 luma coeffs — identity-like from stock 0x506 */
-        uint32_t luma_coeffs[9] = {
+        /* Stock luma coeffs from 0x506 — same for all 4 sets */
+        uint32_t luma[9] = {
             0x3f3fcff3, 0x00000000, 0x04c1304c,
             0x08220882, 0x00000000, 0x03d0f43d,
             0x08621886, 0x01204812, 0x06e1b86e
         };
-        *(uint32_t*)&demosaic_src[0x08] = (uint32_t)(uintptr_t)luma_coeffs;
+        /* Zero chroma for now */
+        uint32_t chromaU[16] = {0};
+        uint32_t chromaV[16] = {0};
 
-        printf("  Calling CopyDemosaic...\n");
+        uint8_t demosaic_src[0x40];
+        memset(demosaic_src, 0, sizeof(demosaic_src));
+        demosaic_src[0x00] = 1; /* enable */
+        *(uint32_t*)&demosaic_src[0x04] = 9; /* numLumaCoeffs */
+        /* 4 luma sets — all point to same coeffs */
+        *(uint32_t*)&demosaic_src[0x08] = (uint32_t)(uintptr_t)luma;
+        *(uint32_t*)&demosaic_src[0x0C] = (uint32_t)(uintptr_t)luma;
+        *(uint32_t*)&demosaic_src[0x10] = (uint32_t)(uintptr_t)luma;
+        *(uint32_t*)&demosaic_src[0x14] = (uint32_t)(uintptr_t)luma;
+        demosaic_src[0x18] = 1; /* chroma enable */
+        *(uint32_t*)&demosaic_src[0x1C] = 16; /* numChromaCoeffs */
+        *(uint32_t*)&demosaic_src[0x20] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x24] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x28] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x2C] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x30] = (uint32_t)(uintptr_t)chromaV;
+        *(uint32_t*)&demosaic_src[0x34] = (uint32_t)(uintptr_t)chromaV;
+        *(uint32_t*)&demosaic_src[0x38] = (uint32_t)(uintptr_t)chromaV;
+        *(uint32_t*)&demosaic_src[0x3C] = (uint32_t)(uintptr_t)chromaV;
+
+        printf("  Calling CopyDemosaic (enable=1, 9 luma, 16 chroma)...\n");
         err = pCopyDemosaic(hw_settings, demosaic_src);
         printf("  CopyDemosaic: err=0x%x\n", err);
 
-        /* Re-apply with demosaic in settings */
+        /* Re-apply — gather should now include demosaic regs */
         setenv("NVRM_SHIM_STRIP", "1", 1);
         err = pHwApply(hw_settings);
         printf("  HwSettingsApply post-CopyDemosaic: err=0x%x\n", err);
