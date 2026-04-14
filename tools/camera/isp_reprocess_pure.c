@@ -108,7 +108,7 @@ static int isp_class = ISP_CLASS_B;  /* default ISP-B */
 #define H 1944
 #define BPP 2
 #define IN_SIZE  (W * H * BPP)
-#define OUT_SIZE (W * 4 * H)             /* 32bpp RGBA */
+#define OUT_SIZE (W * 4 * H)
 
 static int nvmap_fd = -1;
 
@@ -144,7 +144,7 @@ static uint32_t nvmap_pin(uint32_t handle) {
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <raw_bayer_file>\n", argv[0]);
+        printf("Usage: %s <raw_bayer_file> [format_hex]\n", argv[0]);
         return 1;
     }
 
@@ -158,11 +158,17 @@ int main(int argc, char **argv)
     int isp_ctrl_fd = open("/dev/nvhost-ctrl-isp", O_RDWR);
     if (isp_ctrl_fd < 0) perror("open isp ctrl (non-fatal)");
 
-    /* Open ISP-A channel */
-    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
-    if (isp_fd < 0) { perror("open isp-a"); return 1; }
-    printf("ISP-A fd=%d\n", isp_fd);
-    isp_class = ISP_CLASS_A;
+    /* Open ISP-B channel (ISP-B has demosaic, ISP-A may not) */
+    int isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
+    if (isp_fd >= 0) {
+        printf("ISP-B fd=%d\n", isp_fd);
+        isp_class = ISP_CLASS_B;
+    } else {
+        isp_fd = open("/dev/nvhost-isp", O_RDWR);
+        if (isp_fd < 0) { perror("open isp"); return 1; }
+        printf("ISP-A fd=%d (fallback)\n", isp_fd);
+        isp_class = ISP_CLASS_A;
+    }
 
     /* NOTE: CHANNEL_OPEN ioctl (NR=112) causes kernel panic on 24.1.
      * On 24.1, open() already creates hwctx via nvhost_channelopen().
@@ -249,7 +255,7 @@ int main(int argc, char **argv)
     uint32_t in_h = nvmap_create(IN_SIZE);
     uint32_t out_h = nvmap_create(OUT_SIZE);
     uint32_t work_h = nvmap_create(512 * 1024);  /* ISP work buffer */
-    uint32_t cmd_h = nvmap_create(4096);
+    uint32_t cmd_h = nvmap_create(32768);  /* larger for lens shading + tone curves */
     if (!in_h || !out_h || !work_h || !cmd_h) { printf("alloc failed\n"); return 1; }
     nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h);
 
@@ -333,8 +339,9 @@ int main(int argc, char **argv)
             printf("Init submit OK (0x019/0x01B/0x01C), fence=%u\n", isa.fence);
     }
 
-    /* Build minimal reprocess gather */
-    uint32_t cmd[64];
+    /* Build reprocess gather with ISP pipeline init */
+    #include "isp_lens_shading.h"
+    uint32_t cmd[2048];
     int n = 0;
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1;
     int work_reloc = -1;
@@ -348,21 +355,45 @@ int main(int argc, char **argv)
     cmd[n++] = 1;                         /* enable */
     cmd[n++] = 0;                         /* IOVA patched by reloc */
 
-    /* Output: dims + format (YUV420 planar — stock format) */
+    /* Replicate exact stock cal structure in per-frame gather:
+     * 0xD0A=0, 0xD0B=lens shading, tone curves identity, 0x053=work buf */
+
+    /* Lens shading enable (stock=0, but data present) */
+    cmd[n++] = OP_INCR(0xD0A, 1);
+    cmd[n++] = 0;
+
+    /* Lens shading table — 480 words from stock OV5693 */
+    cmd[n++] = OP_NONINCR(0xD0B, LS_DATA_WORDS);
+    for (int i = 0; i < LS_DATA_WORDS; i++)
+        cmd[n++] = ls_data[i];
+
+    /* Tone curves — identity (0x1000) × 4 channels × 257 entries */
+    for (int ch = 0; ch < 4; ch++) {
+        cmd[n++] = OP_INCR(0x651 + ch * 2, 1);
+        cmd[n++] = 0;  /* ctrl = 0 */
+        cmd[n++] = OP_NONINCR(0x652 + ch * 2, 257);
+        for (int i = 0; i < 257; i++)
+            cmd[n++] = 0x00001000;  /* identity */
+    }
+
+    /* Output: dims + format */
     cmd[n++] = OP_INCR(0xE00, 1);
     cmd[n++] = ((W - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE01, 1);
     cmd[n++] = ((H - 1) & 0x3FFF) << 16;
     cmd[n++] = OP_INCR(0xE02, 1);
-    cmd[n++] = 0x43;                      /* R8G8B8A8 — testing with full cal */
+    uint32_t out_fmt = 0x43;  /* default R8G8B8A8 */
+    if (argc > 2) out_fmt = strtoul(argv[2], NULL, 16);
+    cmd[n++] = out_fmt;
+    printf("Output format: 0x%08x\n", out_fmt);
 
-    /* Output Y surface — stride=W*4 (32bpp) */
+    /* Output Y surface */
     cmd[n++] = OP_INCR(0xE04, 3);
     y_reloc = n;
-    cmd[n++] = 0;                         /* IOVA patched by reloc */
+    cmd[n++] = 0;
     cmd[n++] = 0x00000000;
     cmd[n++] = W * 4;
-    /* U/V — same buffer to avoid MC errors */
+    /* U/V — same buffer */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
     cmd[n++] = 0;
@@ -479,7 +510,8 @@ int main(int argc, char **argv)
     printf("\n");
 
     /* Dump full output */
-    const char *outpath = "/data/local/tmp/isp_pure_out.rgba";
+    char outpath[128];
+    snprintf(outpath, sizeof(outpath), "/data/local/tmp/isp_fmt_%08x.bin", out_fmt);
     FILE *fp = fopen(outpath, "wb");
     if (fp) {
         uint8_t *buf = malloc(chunk);
