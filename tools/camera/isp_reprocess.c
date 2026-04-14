@@ -535,34 +535,56 @@ int main(int argc, char **argv)
         *(uint32_t*)&out_cfg[0x78] = y_stride * H + uv_stride * (H/2);
         *(uint32_t*)&out_cfg[0x90] = 3;  /* numPlanes = 3 (Y+U+V) */
 
-        /* ProcessFrame args: mode=1 (reprocess), crops=0 */
-        uint32_t array[7] = {1, 0, 0, 0, 0, (uint32_t)(uintptr_t)in_surf, 0};
+        /* ProcessFrame signature from Ghidra RE:
+         * NvIspProcessFrame(handle, mode, crop_x1, crop_y1,
+         *   stack: crop_x2, crop_y2, input_surf_ptr, 0,
+         *          output_cfg, fence_ptr, fence_val_ptr, status_ptr, count_ptr)
+         *
+         * validate reads: param_2[5] = input_surf when mode=1
+         * param_2 = &local_c = {mode, crop_x1, crop_y1} on stack
+         * param_2[5] = 6th word from &local_c = stack param #3 = input_surf_ptr
+         */
         uint32_t status = 0;
         uint32_t frame_count = 0;
-
-        /* Two-pass protocol — pass args as array pointer per RE */
-        /* Try different arg orders to find correct one */
-        printf("  ProcessFrame pass 1 (normal)...\n");
         uint32_t flush_fence = 0, fence_val = 0;
 
-        /* Print addresses for debug */
         printf("  in_surf=%p out_cfg=%p\n", in_surf, out_cfg);
-        printf("  in_surf[0x14]=0x%x (handle)\n", *(uint32_t*)&in_surf[0x14]);
-        printf("  out_cfg[0x14]=0x%x (handle) planes=%u\n",
-               *(uint32_t*)&out_cfg[0x14], *(uint32_t*)&out_cfg[0x90]);
+        printf("  in_surf: W=%u H=%u fmt=0x%x layout=%u pitch=%u hMem=0x%x\n",
+               *(uint32_t*)&in_surf[0], *(uint32_t*)&in_surf[4],
+               *(uint32_t*)&in_surf[8], *(uint32_t*)&in_surf[0xC],
+               *(uint32_t*)&in_surf[0x10], *(uint32_t*)&in_surf[0x14]);
+        printf("  out_cfg: W=%u H=%u fmt=0x%x layout=%u pitch=%u hMem=0x%x planes=%u\n",
+               *(uint32_t*)&out_cfg[0], *(uint32_t*)&out_cfg[4],
+               *(uint32_t*)&out_cfg[8], *(uint32_t*)&out_cfg[0xC],
+               *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
+               *(uint32_t*)&out_cfg[0x90]);
 
+        printf("  ProcessFrame (Ghidra RE signature)...\n");
         err = pProcessFrame(isp_handle,
-            1, 0, 0, 0, 0,     /* mode=reprocess, no crop */
-            in_surf, 0,         /* input surface, zero */
-            out_cfg, &flush_fence, &fence_val, &status, &frame_count);
-        printf("  pass1: err=0x%x status=%u\n", err, status);
+            1,                    /* mode=1 (reprocess) */
+            0, 0,                 /* crop_x1, crop_y1 */
+            /* stack params: */
+            0, 0,                 /* crop_x2, crop_y2 */
+            (uint32_t)(uintptr_t)in_surf,  /* input surface ptr */
+            0,                    /* reserved? */
+            (uint32_t)(uintptr_t)out_cfg,  /* output config ptr */
+            (uint32_t)(uintptr_t)&flush_fence,
+            (uint32_t)(uintptr_t)&fence_val,
+            (uint32_t)(uintptr_t)&status,
+            (uint32_t)(uintptr_t)&frame_count);
+        printf("  err=0x%x status=%u fence=%u frame=%u\n",
+               err, status, flush_fence, frame_count);
 
         if (err == 0xa && status >= 1) {
             printf("  ProcessFrame pass 2...\n");
             err = pProcessFrame(isp_handle,
                 1, 0, 0, 0, 0,
-                in_surf, 0,
-                out_cfg, &flush_fence, &fence_val, &status, &frame_count);
+                (uint32_t)(uintptr_t)in_surf, 0,
+                (uint32_t)(uintptr_t)out_cfg,
+                (uint32_t)(uintptr_t)&flush_fence,
+                (uint32_t)(uintptr_t)&fence_val,
+                (uint32_t)(uintptr_t)&status,
+                (uint32_t)(uintptr_t)&frame_count);
             printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
         }
 
