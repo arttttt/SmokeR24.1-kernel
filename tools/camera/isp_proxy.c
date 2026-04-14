@@ -104,11 +104,16 @@ uint32_t NvIspProcessFrame(void *handle, uint32_t mode,
     LOG("=== NvIspProcessFrame ===");
     LOG("  handle=%p mode=%u crop=(%u,%u,%u,%u)",
         handle, mode, crop_x1, crop_y1, crop_x2, crop_y2);
-    LOG("  input_surf=%p reserved=%u output_cfg=%p", input_surf, reserved, output_cfg);
+    if (mode == 1) {
+        LOG("  REPROCESS: input_surf=%p output_cfg=%p", input_surf, output_cfg);
+        if (input_surf) hexdump("INPUT_SURF", input_surf, 64);
+        if (output_cfg) hexdump("OUTPUT_CFG", output_cfg, 160);
+    } else {
+        LOG("  STREAMING: width=%u height=%u output_cfg=%p",
+            (uint32_t)(uintptr_t)input_surf, reserved, output_cfg);
+        if (output_cfg) hexdump("OUTPUT_CFG", output_cfg, 160);
+    }
     LOG("  fence=%p fence_val=%p status=%p count=%p", fence, fence_val, status, frame_count);
-
-    if (input_surf) hexdump("INPUT", input_surf, 64);
-    if (output_cfg) hexdump("OUTPUT", output_cfg, 160);
 
     uint32_t r = fn(handle, mode, crop_x1, crop_y1,
                     crop_x2, crop_y2, input_surf, reserved,
