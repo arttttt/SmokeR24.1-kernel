@@ -158,16 +158,16 @@ int main(int argc, char **argv)
     int isp_ctrl_fd = open("/dev/nvhost-ctrl-isp", O_RDWR);
     if (isp_ctrl_fd < 0) perror("open isp ctrl (non-fatal)");
 
-    /* Open ISP-B channel (ISP-B has demosaic, ISP-A may not) */
-    int isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
+    /* Open ISP-A first for testing, fallback to ISP-B */
+    int isp_fd = open("/dev/nvhost-isp", O_RDWR);
     if (isp_fd >= 0) {
-        printf("ISP-B fd=%d\n", isp_fd);
-        isp_class = ISP_CLASS_B;
-    } else {
-        isp_fd = open("/dev/nvhost-isp", O_RDWR);
-        if (isp_fd < 0) { perror("open isp"); return 1; }
-        printf("ISP-A fd=%d (fallback)\n", isp_fd);
+        printf("ISP-A fd=%d\n", isp_fd);
         isp_class = ISP_CLASS_A;
+    } else {
+        isp_fd = open("/dev/nvhost-isp.1", O_RDWR);
+        if (isp_fd < 0) { perror("open isp"); return 1; }
+        printf("ISP-B fd=%d (fallback)\n", isp_fd);
+        isp_class = ISP_CLASS_B;
     }
 
     /* NOTE: CHANNEL_OPEN ioctl (NR=112) causes kernel panic on 24.1.
