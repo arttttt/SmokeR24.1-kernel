@@ -123,6 +123,20 @@ static int nvmap_alloc(uint32_t handle) {
     if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah) < 0) { perror("nvmap alloc"); return -1; }
     return 0;
 }
+
+/* Alloc with blocklinear kind (0xFE) for ISP output */
+struct nvmap_alloc_kind_handle {
+    uint32_t handle; uint32_t heap_mask; uint32_t flags; uint32_t align;
+    uint8_t kind; uint8_t comp_tags;
+};
+#define NVMAP_IOC_ALLOC_KIND _IOW('N', 100, struct nvmap_alloc_kind_handle)
+
+static int nvmap_alloc_kind(uint32_t handle, uint8_t kind) {
+    struct nvmap_alloc_kind_handle ah = { .handle = handle, .heap_mask = NVMAP_HEAP_IOVMM,
+        .flags = NVMAP_HANDLE_WRITE_COMBINE, .align = 4096, .kind = kind, .comp_tags = 0 };
+    if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC_KIND, &ah) < 0) { perror("nvmap alloc_kind"); return -1; }
+    return 0;
+}
 static int nvmap_write(uint32_t handle, uint32_t offset, const void *data, uint32_t size) {
     struct nvmap_rw_handle rw = { .addr = (unsigned long)data, .handle = handle,
         .offset = offset, .elem_size = size, .hmem_stride = size, .user_stride = size, .count = 1 };
@@ -265,7 +279,18 @@ int main(int argc, char **argv)
     uint32_t work_h = nvmap_create(512 * 1024);  /* ISP work buffer */
     uint32_t cmd_h = nvmap_create(32768);  /* larger for lens shading + tone curves */
     if (!in_h || !out_h || !work_h || !cmd_h) { printf("alloc failed\n"); return 1; }
-    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h);
+    nvmap_alloc(in_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h);
+    /* Output buffer: use blocklinear kind=0xFE if --yuv (stock uses blocklinear) */
+    if (use_yuv) {
+        if (nvmap_alloc_kind(out_h, 0xFE) < 0) {
+            printf("blocklinear alloc failed, fallback to pitch\n");
+            nvmap_alloc(out_h);
+        } else {
+            printf("Output buffer: blocklinear kind=0xFE\n");
+        }
+    } else {
+        nvmap_alloc(out_h);
+    }
 
     uint32_t in_iova = nvmap_pin(in_h);
     uint32_t out_iova = nvmap_pin(out_h);
