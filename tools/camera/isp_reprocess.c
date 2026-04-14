@@ -598,20 +598,34 @@ int main(int argc, char **argv)
                *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
                *(uint32_t*)&out_cfg[0x90]);
 
-        printf("  ProcessFrame (Ghidra RE signature)...\n");
+        /* Try mode=2 first (streaming, like stock) to verify output config works */
+        printf("  ProcessFrame mode=2 (streaming, stock-style)...\n");
+        err = pProcessFrame(isp_handle,
+            2,                    /* mode=2 (streaming) */
+            0, 0,                 /* crop */
+            0, 0,                 /* crop */
+            W, H,                 /* width, height (not pointer for mode=2) */
+            (uint32_t)(uintptr_t)out_cfg,
+            (uint32_t)(uintptr_t)&flush_fence,
+            (uint32_t)(uintptr_t)&fence_val,
+            (uint32_t)(uintptr_t)&status,
+            (uint32_t)(uintptr_t)&frame_count);
+        printf("  mode=2: err=0x%x status=%u\n", err, status);
+
+        /* Now try mode=1 (reprocess) */
+        printf("  ProcessFrame mode=1 (reprocess)...\n");
         err = pProcessFrame(isp_handle,
             1,                    /* mode=1 (reprocess) */
             0, 0,                 /* crop_x1, crop_y1 */
-            /* stack params: */
             0, 0,                 /* crop_x2, crop_y2 */
             (uint32_t)(uintptr_t)in_surf,  /* input surface ptr */
-            0,                    /* reserved? */
+            0,                    /* reserved */
             (uint32_t)(uintptr_t)out_cfg,  /* output config ptr */
             (uint32_t)(uintptr_t)&flush_fence,
             (uint32_t)(uintptr_t)&fence_val,
             (uint32_t)(uintptr_t)&status,
             (uint32_t)(uintptr_t)&frame_count);
-        printf("  err=0x%x status=%u fence=%u frame=%u\n",
+        printf("  mode=1: err=0x%x status=%u fence=%u frame=%u\n",
                err, status, flush_fence, frame_count);
 
         if (err == 0xa && status >= 1) {
