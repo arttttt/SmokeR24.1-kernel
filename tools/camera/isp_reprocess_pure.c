@@ -148,9 +148,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int use_yuv = 0;
+    int use_yuv = 0, rgba_input = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--yuv") == 0) use_yuv = 1;
+        if (strcmp(argv[i], "--rgba-in") == 0) rgba_input = 1;
     }
 
     printf("=== ISP Pure Reprocess (no blobs)%s ===\n",
@@ -258,7 +259,8 @@ int main(int argc, char **argv)
            isp_fd, sp_memory, sp_stats, sp_loadv);
 
     /* Allocate buffers */
-    uint32_t in_h = nvmap_create(IN_SIZE);
+    uint32_t in_size = rgba_input ? OUT_SIZE : IN_SIZE;
+    uint32_t in_h = nvmap_create(in_size);
     uint32_t out_h = nvmap_create(OUT_SIZE);
     uint32_t work_h = nvmap_create(512 * 1024);  /* ISP work buffer */
     uint32_t cmd_h = nvmap_create(32768);  /* larger for lens shading + tone curves */
@@ -275,13 +277,13 @@ int main(int argc, char **argv)
     printf("Loading %s...\n", argv[1]);
     FILE *f = fopen(argv[1], "rb");
     if (!f) { perror("open raw"); return 1; }
-    uint8_t *raw_buf = malloc(IN_SIZE);
-    fread(raw_buf, 1, IN_SIZE, f);
+    uint8_t *raw_buf = malloc(in_size);
+    fread(raw_buf, 1, in_size, f);
     fclose(f);
 
     int chunk = 65536;
-    for (int off = 0; off < IN_SIZE; off += chunk) {
-        int sz = (IN_SIZE - off < chunk) ? IN_SIZE - off : chunk;
+    for (int off = 0; off < (int)in_size; off += chunk) {
+        int sz = ((int)in_size - off < chunk) ? (int)in_size - off : chunk;
         nvmap_write(in_h, off, raw_buf + off, sz);
     }
     free(raw_buf);
@@ -521,12 +523,14 @@ int main(int argc, char **argv)
     cmd[n++] = OP_INCR(0xE31, 1);
     cmd[n++] = (H << 16) | W;
     cmd[n++] = OP_INCR(0xE33, 1);
-    cmd[n++] = 0x10200024;                /* BG10 */
+    uint32_t in_fmt = rgba_input ? 0x43 : 0x10200024;
+    cmd[n++] = in_fmt;
+    printf("Input format: 0x%08x%s\n", in_fmt, rgba_input ? " (RGBA)" : " (BG10)");
     cmd[n++] = OP_INCR(0xE34, 3);
     in_reloc = n;
     cmd[n++] = 0;                         /* IOVA patched by reloc */
     cmd[n++] = 0x00000000;
-    cmd[n++] = W * BPP;                   /* input stride */
+    cmd[n++] = rgba_input ? W * 4 : W * BPP;  /* input stride */
     cmd[n++] = OP_INCR(0xE32, 1);
     cmd[n++] = W & 0x3FFF;                /* strip width */
     cmd[n++] = OP_INCR(0xE30, 1);
