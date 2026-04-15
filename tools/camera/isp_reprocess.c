@@ -399,42 +399,47 @@ int main(int argc, char **argv)
     printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
            pMemAlloc, pMemPin, pMemWrite, pMemRead);
 
-    /* Allocate via nvmap, get dmabuf fd, convert to NvRmMemHandle */
-    typedef uint32_t (*NvRmMemHandleFromFd_t)(uint32_t fd);
-    NvRmMemHandleFromFd_t pMemFromFd = dlsym(lib_nvrm, "NvRmMemHandleFromFd");
-    printf("  NvRmMemHandleFromFd=%p\n", pMemFromFd);
+    /* Allocate via NvRmMemHandleAllocAttr (from custom_tegra_camera) */
+    typedef int (*NvRmMemHandleAllocAttr_t)(void *hRm, void *attrs, void **phMem);
+    typedef uint32_t (*NvRmMemPin_t2)(void *hMem);
+    typedef void (*NvRmMemWrite_t2)(void *hMem, uint32_t offset, const void *src, uint32_t size);
+    typedef void (*NvRmMemRead_t2)(void *hMem, uint32_t offset, void *dst, uint32_t size);
 
-    uint32_t in_nvmap = nvmap_create(IN_SIZE); nvmap_alloc(in_nvmap);
-    uint32_t out_nvmap = nvmap_create(OUT_SIZE); nvmap_alloc(out_nvmap);
-    printf("  nvmap handles: in=0x%x out=0x%x\n", in_nvmap, out_nvmap);
+    NvRmMemHandleAllocAttr_t pAllocAttr = dlsym(lib_nvrm, "NvRmMemHandleAllocAttr");
+    NvRmMemPin_t2 pPin2 = dlsym(lib_nvrm, "NvRmMemPin");
+    NvRmMemWrite_t2 pWrite2 = dlsym(lib_nvrm, "NvRmMemWrite");
+    NvRmMemRead_t2 pRead2 = dlsym(lib_nvrm, "NvRmMemRead");
+    printf("  AllocAttr=%p Pin=%p Write=%p Read=%p\n", pAllocAttr, pPin2, pWrite2, pRead2);
 
-    /* Get dmabuf fd via NVMAP_IOC_GET_FD */
-    struct nvmap_create_handle gfd;
-    gfd.handle = in_nvmap;
-    int r = ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
-    uint32_t in_fd = gfd.fd;
-    printf("  GET_FD(in): r=%d fd=%d\n", r, in_fd);
-    gfd.handle = out_nvmap;
-    r = ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
-    uint32_t out_fd = gfd.fd;
-    printf("  GET_FD(out): r=%d fd=%d\n", r, out_fd);
+    uint32_t heaps[] = { 0x40000000 }; /* IOVMM */
+    struct {
+        const uint32_t *Heaps; uint32_t NumHeaps; uint32_t Alignment;
+        uint32_t Coherency; uint32_t Size; uint32_t Tags;
+        uint32_t Kind; uint32_t CompTags;
+    } attr;
 
-    /* Try dmabuf fd as hMem — some NVIDIA APIs accept fd directly */
-    uint32_t in_h, out_h;
-    if (in_fd > 0 && out_fd > 0) {
-        in_h = in_fd;
-        out_h = out_fd;
-        printf("  Using dmabuf fd as hMem: in=%u out=%u\n", in_h, out_h);
-    } else {
-        in_h = in_nvmap;
-        out_h = out_nvmap;
-        printf("  Using raw nvmap handles: in=0x%x out=0x%x\n", in_h, out_h);
-    }
+    void *in_h = NULL, *out_h = NULL;
+
+    memset(&attr, 0, sizeof(attr));
+    attr.Heaps = heaps; attr.NumHeaps = 1; attr.Alignment = 4096;
+    attr.Coherency = 2; attr.Size = IN_SIZE;
+    int merr = pAllocAttr(hRm, &attr, &in_h);
+    printf("  AllocAttr(in, %d): err=%d h=%p\n", IN_SIZE, merr, in_h);
+
+    memset(&attr, 0, sizeof(attr));
+    attr.Heaps = heaps; attr.NumHeaps = 1; attr.Alignment = 4096;
+    attr.Coherency = 2; attr.Size = OUT_SIZE;
+    merr = pAllocAttr(hRm, &attr, &out_h);
+    printf("  AllocAttr(out, %d): err=%d h=%p\n", OUT_SIZE, merr, out_h);
+
+    if (pPin2 && in_h) pPin2(in_h);
+    if (pPin2 && out_h) pPin2(out_h);
     printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
-    if (pMemPin) { pMemPin(in_h); pMemPin(out_h); }
-    uint32_t in_iova = pMemGetAddr ? pMemGetAddr(in_h, 0) : nvmap_pin(in_nvmap);
-    uint32_t out_iova = pMemGetAddr ? pMemGetAddr(out_h, 0) : nvmap_pin(out_nvmap);
+    typedef uint32_t (*NvRmMemGetAddr_t2)(void *hMem, uint32_t offset);
+    NvRmMemGetAddr_t2 pGetAddr2 = dlsym(lib_nvrm, "NvRmMemGetAddress");
+    uint32_t in_iova = pGetAddr2 ? pGetAddr2(in_h, 0) : 0;
+    uint32_t out_iova = pGetAddr2 ? pGetAddr2(out_h, 0) : 0;
     printf("  in_h=0x%x out_h=0x%x in_iova=0x%x out_iova=0x%x\n",
            in_h, out_h, in_iova, out_iova);
 
@@ -472,7 +477,7 @@ int main(int argc, char **argv)
     int chunk = 65536;
     for (int off = 0; off < IN_SIZE; off += chunk) {
         int sz = (IN_SIZE - off < chunk) ? IN_SIZE - off : chunk;
-        nvmap_write(in_nvmap, off, raw_buf + off, sz);
+        pWrite2(in_h, off, raw_buf + off, sz);
     }
     free(raw_buf);
     printf("  Uploaded to nvmap\n");
@@ -481,7 +486,7 @@ int main(int argc, char **argv)
     uint8_t *zeros = calloc(1, chunk);
     for (int off = 0; off < OUT_SIZE; off += chunk) {
         int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-        nvmap_write(out_nvmap, off, zeros, sz);
+        pWrite2(out_h, off, zeros, sz);
     }
     free(zeros);
 
@@ -699,7 +704,7 @@ int main(int argc, char **argv)
 
         /* Check output */
         uint8_t check[64];
-        nvmap_read(out_nvmap, 0, check, 64);
+        pRead2(out_h, 0, check, 64);
         int nz = 0;
         for (int i = 0; i < 64; i++) if (check[i]) nz++;
         printf("  ProcessFrame output: %d/64 non-zero → ", nz);
@@ -882,7 +887,7 @@ int main(int argc, char **argv)
         int offsets[] = { 0, Y_SIZE/2, Y_SIZE-4096, Y_SIZE, Y_SIZE+UV_SIZE };
         const char *names[] = { "Y start", "Y mid", "Y end", "U start", "V start" };
         for (int r = 0; r < 5; r++) {
-            nvmap_read(out_nvmap, offsets[r], check, 4096);
+            pRead2(out_h, offsets[r], check, 4096);
             int nonzero = 0;
             for (int i = 0; i < 4096; i++)
                 if (check[i] != 0) nonzero++;
@@ -903,7 +908,7 @@ int main(int argc, char **argv)
                 uint8_t *buf = malloc(chunk);
                 for (int off = 0; off < OUT_SIZE; off += chunk) {
                     int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-                    nvmap_read(out_nvmap, off, buf, sz);
+                    pRead2(out_h, off, buf, sz);
                     fwrite(buf, 1, sz, fp);
                 }
                 free(buf);
@@ -915,7 +920,7 @@ int main(int argc, char **argv)
             uint8_t scan[256];
             int first_nz = -1;
             for (int off = 0; off < Y_SIZE && first_nz < 0; off += 256) {
-                nvmap_read(out_nvmap, off, scan, 256);
+                pRead2(out_h, off, scan, 256);
                 for (int i = 0; i < 256; i++) {
                     if (scan[i] != 0) { first_nz = off + i; break; }
                 }
