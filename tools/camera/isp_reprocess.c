@@ -543,7 +543,7 @@ int main(int argc, char **argv)
         memset(in_surf, 0, sizeof(in_surf));
         *(uint32_t*)&in_surf[0x00] = W;
         *(uint32_t*)&in_surf[0x04] = H;
-        *(uint32_t*)&in_surf[0x08] = 0x10a92007; /* Bayer BGGR (from SETUP DAT, not validate DAT) */
+        *(uint32_t*)&in_surf[0x08] = 0x10a92087; /* Bayer BGGR 10-bit (cs=266=BGGR, dt=2, pk=7) */
         *(uint32_t*)&in_surf[0x0C] = 1;  /* pitch layout */
         *(uint32_t*)&in_surf[0x10] = W * 2; /* stride */
         *(uint32_t*)&in_surf[0x14] = in_h; /* nvmap handle */
