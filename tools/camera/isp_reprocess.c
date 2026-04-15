@@ -120,7 +120,9 @@ static uint32_t nvmap_create(uint32_t size) {
     return ch.handle;
 }
 static int nvmap_alloc(uint32_t handle) {
-    struct nvmap_alloc_handle ah = { .handle = handle, .heap_mask = NVMAP_HEAP_IOVMM,
+    /* Try IOVMM first, then carveout */
+    struct nvmap_alloc_handle ah = { .handle = handle,
+        .heap_mask = NVMAP_HEAP_IOVMM | (1 << 0), /* IOVMM + CARVEOUT_GENERIC */
         .flags = NVMAP_HANDLE_WRITE_COMBINE, .align = 4096 };
     if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah) < 0) { perror("nvmap alloc"); return -1; }
     return 0;
@@ -376,15 +378,30 @@ int main(int argc, char **argv)
     /* ---- Step 3: Allocate buffers ---- */
     printf("\n[3] Allocate buffers...\n");
 
+    /* Allocate buffers via NvRmMem (properly maps for ISP SMMU) */
+    typedef NvError (*NvRmMemHandleAlloc_t)(void *rm, void *heap, uint32_t size,
+        uint32_t align, uint32_t attr, uint32_t *handle);
+    typedef NvError (*NvRmMemPin_t)(uint32_t handle);
+    typedef uint32_t (*NvRmMemGetAddress_t)(uint32_t handle, uint32_t offset);
+    typedef NvError (*NvRmMemMap_t)(uint32_t handle, uint32_t offset, uint32_t size,
+        uint32_t flags, void **vaddr);
+    typedef NvError (*NvRmMemWr_t)(uint32_t handle, uint32_t offset,
+        const void *src, uint32_t size);
+    typedef NvError (*NvRmMemRd_t)(uint32_t handle, uint32_t offset,
+        void *dst, uint32_t size);
+
+    /* Use nvmap directly — simpler and we know it works for allocation */
     uint32_t in_h = nvmap_create(IN_SIZE);
     uint32_t out_h = nvmap_create(OUT_SIZE);
-    uint32_t stats_h = nvmap_create(262144);  /* 256KB stats buffer */
+    uint32_t stats_h = nvmap_create(262144);
     uint32_t cmd_h = nvmap_create(16384);
     if (!in_h || !out_h || !stats_h || !cmd_h) return 1;
     nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(stats_h); nvmap_alloc(cmd_h);
 
     uint32_t in_iova = nvmap_pin(in_h);
     uint32_t out_iova = nvmap_pin(out_h);
+    printf("in_h=0x%x out_h=0x%x in_iova=0x%x out_iova=0x%x\n",
+           in_h, out_h, in_iova, out_iova);
     uint32_t stats_iova = nvmap_pin(stats_h);
     printf("  in_iova=0x%08x out_iova=0x%08x stats_iova=0x%08x\n",
            in_iova, out_iova, stats_iova);
