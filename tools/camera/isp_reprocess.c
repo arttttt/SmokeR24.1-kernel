@@ -378,30 +378,47 @@ int main(int argc, char **argv)
     /* ---- Step 3: Allocate buffers ---- */
     printf("\n[3] Allocate buffers...\n");
 
-    /* Allocate buffers via NvRmMem (properly maps for ISP SMMU) */
-    typedef NvError (*NvRmMemHandleAlloc_t)(void *rm, void *heap, uint32_t size,
-        uint32_t align, uint32_t attr, uint32_t *handle);
-    typedef NvError (*NvRmMemPin_t)(uint32_t handle);
-    typedef uint32_t (*NvRmMemGetAddress_t)(uint32_t handle, uint32_t offset);
-    typedef NvError (*NvRmMemMap_t)(uint32_t handle, uint32_t offset, uint32_t size,
-        uint32_t flags, void **vaddr);
-    typedef NvError (*NvRmMemWr_t)(uint32_t handle, uint32_t offset,
+    /* Allocate via NvRmMem — creates proper NvRmMemHandle for ISP SMMU */
+    typedef uint32_t (*NvRmMemHandleAlloc_t)(void *rm, uint32_t *heap,
+        uint32_t numHeaps, uint32_t align, uint32_t coherency,
+        uint32_t size, uint16_t tag, uint32_t reclaimCache, uint32_t *phMem);
+    typedef uint32_t (*NvRmMemAlloc_t)(uint32_t hMem, uint32_t *heap,
+        uint32_t numHeaps, uint32_t align, uint32_t coherency);
+    typedef uint32_t (*NvRmMemPin_t)(uint32_t hMem);
+    typedef uint32_t (*NvRmMemGetAddress_t)(uint32_t hMem, uint32_t offset);
+    typedef uint32_t (*NvRmMemWrite_t)(uint32_t hMem, uint32_t offset,
         const void *src, uint32_t size);
-    typedef NvError (*NvRmMemRd_t)(uint32_t handle, uint32_t offset,
+    typedef uint32_t (*NvRmMemRead_t)(uint32_t hMem, uint32_t offset,
         void *dst, uint32_t size);
 
-    /* Use nvmap directly — simpler and we know it works for allocation */
-    uint32_t in_h = nvmap_create(IN_SIZE);
-    uint32_t out_h = nvmap_create(OUT_SIZE);
-    uint32_t stats_h = nvmap_create(262144);
-    uint32_t cmd_h = nvmap_create(16384);
-    if (!in_h || !out_h || !stats_h || !cmd_h) return 1;
-    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(stats_h); nvmap_alloc(cmd_h);
+    NvRmMemHandleAlloc_t pMemAlloc = dlsym(lib_nvrm, "NvRmMemHandleAlloc");
+    NvRmMemPin_t pMemPin = dlsym(lib_nvrm, "NvRmMemPin");
+    NvRmMemGetAddress_t pMemGetAddr = dlsym(lib_nvrm, "NvRmMemGetAddress");
+    NvRmMemWrite_t pMemWrite = dlsym(lib_nvrm, "NvRmMemWrite");
+    NvRmMemRead_t pMemRead = dlsym(lib_nvrm, "NvRmMemRead");
+    printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
+           pMemAlloc, pMemPin, pMemWrite, pMemRead);
 
-    uint32_t in_iova = nvmap_pin(in_h);
-    uint32_t out_iova = nvmap_pin(out_h);
-    printf("in_h=0x%x out_h=0x%x in_iova=0x%x out_iova=0x%x\n",
+    /* heap: IOVMM = 0x40000000 */
+    uint32_t heap = 0x40000000;
+    uint32_t in_h = 0, out_h = 0;
+
+    NvError merr;
+    merr = pMemAlloc(hRm, &heap, 1, 4096, 2, IN_SIZE, 0, 0, &in_h);
+    printf("  NvRmMemHandleAlloc(in, %d): err=0x%x h=0x%x\n", IN_SIZE, merr, in_h);
+    merr = pMemAlloc(hRm, &heap, 1, 4096, 2, OUT_SIZE, 0, 0, &out_h);
+    printf("  NvRmMemHandleAlloc(out, %d): err=0x%x h=0x%x\n", OUT_SIZE, merr, out_h);
+
+    pMemPin(in_h);
+    pMemPin(out_h);
+    uint32_t in_iova = pMemGetAddr(in_h, 0);
+    uint32_t out_iova = pMemGetAddr(out_h, 0);
+    printf("  in_h=0x%x out_h=0x%x in_iova=0x%x out_iova=0x%x\n",
            in_h, out_h, in_iova, out_iova);
+
+    /* stats/cmd still via raw nvmap */
+    uint32_t stats_h = nvmap_create(262144); nvmap_alloc(stats_h);
+    uint32_t cmd_h = nvmap_create(16384); nvmap_alloc(cmd_h);
     uint32_t stats_iova = nvmap_pin(stats_h);
     printf("  in_iova=0x%08x out_iova=0x%08x stats_iova=0x%08x\n",
            in_iova, out_iova, stats_iova);
@@ -433,7 +450,7 @@ int main(int argc, char **argv)
     int chunk = 65536;
     for (int off = 0; off < IN_SIZE; off += chunk) {
         int sz = (IN_SIZE - off < chunk) ? IN_SIZE - off : chunk;
-        nvmap_write(in_h, off, raw_buf + off, sz);
+        pMemWrite(in_h, off, raw_buf + off, sz);
     }
     free(raw_buf);
     printf("  Uploaded to nvmap\n");
@@ -442,7 +459,7 @@ int main(int argc, char **argv)
     uint8_t *zeros = calloc(1, chunk);
     for (int off = 0; off < OUT_SIZE; off += chunk) {
         int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-        nvmap_write(out_h, off, zeros, sz);
+        pMemWrite(out_h, off, zeros, sz);
     }
     free(zeros);
 
@@ -660,7 +677,7 @@ int main(int argc, char **argv)
 
         /* Check output */
         uint8_t check[64];
-        nvmap_read(out_h, 0, check, 64);
+        pMemRead(out_h, 0, check, 64);
         int nz = 0;
         for (int i = 0; i < 64; i++) if (check[i]) nz++;
         printf("  ProcessFrame output: %d/64 non-zero → ", nz);
@@ -843,7 +860,7 @@ int main(int argc, char **argv)
         int offsets[] = { 0, Y_SIZE/2, Y_SIZE-4096, Y_SIZE, Y_SIZE+UV_SIZE };
         const char *names[] = { "Y start", "Y mid", "Y end", "U start", "V start" };
         for (int r = 0; r < 5; r++) {
-            nvmap_read(out_h, offsets[r], check, 4096);
+            pMemRead(out_h, offsets[r], check, 4096);
             int nonzero = 0;
             for (int i = 0; i < 4096; i++)
                 if (check[i] != 0) nonzero++;
@@ -864,7 +881,7 @@ int main(int argc, char **argv)
                 uint8_t *buf = malloc(chunk);
                 for (int off = 0; off < OUT_SIZE; off += chunk) {
                     int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-                    nvmap_read(out_h, off, buf, sz);
+                    pMemRead(out_h, off, buf, sz);
                     fwrite(buf, 1, sz, fp);
                 }
                 free(buf);
@@ -876,7 +893,7 @@ int main(int argc, char **argv)
             uint8_t scan[256];
             int first_nz = -1;
             for (int off = 0; off < Y_SIZE && first_nz < 0; off += 256) {
-                nvmap_read(out_h, off, scan, 256);
+                pMemRead(out_h, off, scan, 256);
                 for (int i = 0; i < 256; i++) {
                     if (scan[i] != 0) { first_nz = off + i; break; }
                 }
