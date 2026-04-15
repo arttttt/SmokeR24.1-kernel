@@ -702,16 +702,21 @@ int main(int argc, char **argv)
             printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
         }
 
-        /* Check output — try both NvRmMem and nvmap read */
+        /* Cache sync before reading — ISP writes via DMA bypass CPU cache */
+        typedef void (*NvRmMemCacheSyncForCpu_t)(void *hMem, void *ptr, uint32_t size);
+        NvRmMemCacheSyncForCpu_t pCacheSync = dlsym(lib_nvrm, "NvRmMemCacheSyncForCpu");
+        if (pCacheSync && out_h) pCacheSync(out_h, NULL, OUT_SIZE);
+
+        /* Wait a bit for ISP to finish */
+        usleep(100000);
+
+        /* Read output */
         uint8_t check[64];
-        memset(check, 0xAA, 64); /* sentinel */
+        memset(check, 0xAA, 64);
         pRead2(out_h, 0, check, 64);
-        printf("  NvRmMemRead: %02x %02x %02x %02x\n", check[0], check[1], check[2], check[3]);
-        /* Also try nvmap read as fallback */
-        uint8_t check2[64];
-        memset(check2, 0xBB, 64);
-        nvmap_read((uint32_t)(uintptr_t)out_h, 0, check2, 64);
-        printf("  nvmap_read:  %02x %02x %02x %02x\n", check2[0], check2[1], check2[2], check2[3]);
+        printf("  Read[0]: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+               check[0], check[1], check[2], check[3],
+               check[4], check[5], check[6], check[7]);
         int nz = 0;
         for (int i = 0; i < 64; i++) if (check[i]) nz++;
         printf("  ProcessFrame output: %d/64 non-zero → ", nz);
