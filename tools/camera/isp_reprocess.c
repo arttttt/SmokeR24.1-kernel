@@ -242,9 +242,13 @@ int main(int argc, char **argv)
         printf("  SetConfig(2): err=0x%x\n", err);
     }
 
+    /* Stock does 2x HwCreate */
     void *hw_settings = NULL;
     pHwCreate(isp_handle, &hw_settings);
-    printf("  HwSettingsCreate: settings=%p\n", hw_settings);
+    printf("  HwSettingsCreate[0]: settings=%p\n", hw_settings);
+    void *hw_settings2 = NULL;
+    pHwCreate(isp_handle, &hw_settings2);
+    printf("  HwSettingsCreate[1]: settings=%p\n", hw_settings2);
 
     /* Try NvIspSetConfiguration + NvIspProcessFrame
      * SetConfiguration is REQUIRED before ProcessFrame (from RE) */
@@ -598,19 +602,32 @@ int main(int argc, char **argv)
                *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
                *(uint32_t*)&out_cfg[0x90]);
 
-        /* Try mode=2 first (streaming, like stock) to verify output config works */
-        printf("  ProcessFrame mode=2 (streaming, stock-style)...\n");
+        /* mode=2 (streaming, like stock) — two-pass protocol */
+        printf("  ProcessFrame mode=2 pass 1...\n");
         err = pProcessFrame(isp_handle,
-            2,                    /* mode=2 (streaming) */
-            0, 0,                 /* crop */
-            0, 0,                 /* crop */
-            W, H,                 /* width, height (not pointer for mode=2) */
+            2, 0, 0, 0, 0,
+            W, H,
             (uint32_t)(uintptr_t)out_cfg,
             (uint32_t)(uintptr_t)&flush_fence,
             (uint32_t)(uintptr_t)&fence_val,
             (uint32_t)(uintptr_t)&status,
             (uint32_t)(uintptr_t)&frame_count);
-        printf("  mode=2: err=0x%x status=%u\n", err, status);
+        printf("  pass1: err=0x%x status=%u fence=%u frame=%u\n",
+               err, status, flush_fence, frame_count);
+
+        if (err == 0xa) {
+            printf("  ProcessFrame mode=2 pass 2...\n");
+            err = pProcessFrame(isp_handle,
+                2, 0, 0, 0, 0,
+                W, H,
+                (uint32_t)(uintptr_t)out_cfg,
+                (uint32_t)(uintptr_t)&flush_fence,
+                (uint32_t)(uintptr_t)&fence_val,
+                (uint32_t)(uintptr_t)&status,
+                (uint32_t)(uintptr_t)&frame_count);
+            printf("  pass2: err=0x%x status=%u fence=%u frame=%u\n",
+                   err, status, flush_fence, frame_count);
+        }
 
         /* Now try mode=1 (reprocess) */
         printf("  ProcessFrame mode=1 (reprocess)...\n");
