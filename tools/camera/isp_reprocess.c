@@ -702,21 +702,39 @@ int main(int argc, char **argv)
             printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
         }
 
-        /* Cache sync before reading — ISP writes via DMA bypass CPU cache */
+        /* Wait for ISP, then mmap output and read directly */
+        usleep(200000);
+
+        /* mmap via NvRmMemMap */
+        typedef int (*NvRmMemMap_t2)(void *hMem, uint32_t offset, uint32_t size,
+            uint32_t flags, void **pVirtAddr);
+        NvRmMemMap_t2 pMap = dlsym(lib_nvrm, "NvRmMemMap");
+
+        void *out_ptr = NULL;
+        if (pMap) {
+            int mr = pMap(out_h, 0, OUT_SIZE, 0, &out_ptr);
+            printf("  NvRmMemMap: err=%d ptr=%p\n", mr, out_ptr);
+        }
+
+        /* Cache sync */
         typedef void (*NvRmMemCacheSyncForCpu_t)(void *hMem, void *ptr, uint32_t size);
         NvRmMemCacheSyncForCpu_t pCacheSync = dlsym(lib_nvrm, "NvRmMemCacheSyncForCpu");
-        if (pCacheSync && out_h) pCacheSync(out_h, NULL, OUT_SIZE);
+        if (pCacheSync && out_h && out_ptr) pCacheSync(out_h, out_ptr, OUT_SIZE);
 
-        /* Wait a bit for ISP to finish */
-        usleep(100000);
-
-        /* Read output */
+        /* Read from mmap'd pointer */
         uint8_t check[64];
-        memset(check, 0xAA, 64);
-        pRead2(out_h, 0, check, 64);
-        printf("  Read[0]: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-               check[0], check[1], check[2], check[3],
-               check[4], check[5], check[6], check[7]);
+        if (out_ptr) {
+            memcpy(check, out_ptr, 64);
+            printf("  mmap[0]: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                   check[0], check[1], check[2], check[3],
+                   check[4], check[5], check[6], check[7]);
+        } else {
+            memset(check, 0, 64);
+            pRead2(out_h, 0, check, 64);
+            printf("  Read[0]: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                   check[0], check[1], check[2], check[3],
+                   check[4], check[5], check[6], check[7]);
+        }
         int nz = 0;
         for (int i = 0; i < 64; i++) if (check[i]) nz++;
         printf("  ProcessFrame output: %d/64 non-zero → ", nz);
