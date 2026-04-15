@@ -602,12 +602,20 @@ int main(int argc, char **argv)
                *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
                *(uint32_t*)&out_cfg[0x90]);
 
-        /* Try different input formats */
-        uint32_t in_fmts[] = {0x1010d109, 0x10168811, 0x105a880d, 0x08592004};
-        for (int fi = 0; fi < 4; fi++) {
-            *(uint32_t*)&in_surf[0x08] = in_fmts[fi];
-            status = 0; flush_fence = 0; fence_val = 0; frame_count = 0;
-            printf("  mode=1 fmt=0x%08x...\n", in_fmts[fi]);
+        /* Two-pass mode=1: first pass sets up, second processes */
+        printf("  ProcessFrame mode=1 pass 1...\n");
+        err = pProcessFrame(isp_handle,
+            1, 0, 0, 0, 0,
+            (uint32_t)(uintptr_t)in_surf, 0,
+            (uint32_t)(uintptr_t)out_cfg,
+            (uint32_t)(uintptr_t)&flush_fence,
+            (uint32_t)(uintptr_t)&fence_val,
+            (uint32_t)(uintptr_t)&status,
+            (uint32_t)(uintptr_t)&frame_count);
+        printf("  pass1: err=0x%x status=%u fence=%u frame=%u\n",
+               err, status, flush_fence, frame_count);
+        if (err == 0xa) {
+            printf("  ProcessFrame mode=1 pass 2...\n");
             err = pProcessFrame(isp_handle,
                 1, 0, 0, 0, 0,
                 (uint32_t)(uintptr_t)in_surf, 0,
@@ -616,8 +624,8 @@ int main(int argc, char **argv)
                 (uint32_t)(uintptr_t)&fence_val,
                 (uint32_t)(uintptr_t)&status,
                 (uint32_t)(uintptr_t)&frame_count);
-            printf("    err=0x%x status=%u\n", err, status);
-            if (err != 2) break;
+            printf("  pass2: err=0x%x status=%u fence=%u frame=%u\n",
+                   err, status, flush_fence, frame_count);
         }
 
         if (err == 0xa && status >= 1) {
