@@ -543,7 +543,7 @@ int main(int argc, char **argv)
         memset(in_surf, 0, sizeof(in_surf));
         *(uint32_t*)&in_surf[0x00] = W;
         *(uint32_t*)&in_surf[0x04] = H;
-        *(uint32_t*)&in_surf[0x08] = 0x1010d109; /* BG10 (from Ghidra RE, maps to ISP 0x24) */
+        *(uint32_t*)&in_surf[0x08] = 0x1010d109; /* BG10 */
         *(uint32_t*)&in_surf[0x0C] = 1;  /* pitch layout */
         *(uint32_t*)&in_surf[0x10] = W * 2; /* stride */
         *(uint32_t*)&in_surf[0x14] = in_h; /* nvmap handle */
@@ -602,21 +602,23 @@ int main(int argc, char **argv)
                *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
                *(uint32_t*)&out_cfg[0x90]);
 
-        /* mode=1 (reprocess) only — mode=2 hangs ISP without VI */
-        printf("  ProcessFrame mode=1 (reprocess)...\n");
-        err = pProcessFrame(isp_handle,
-            1,                    /* mode=1 (reprocess) */
-            0, 0,                 /* crop_x1, crop_y1 */
-            0, 0,                 /* crop_x2, crop_y2 */
-            (uint32_t)(uintptr_t)in_surf,  /* input surface ptr */
-            0,                    /* reserved */
-            (uint32_t)(uintptr_t)out_cfg,  /* output config ptr */
-            (uint32_t)(uintptr_t)&flush_fence,
-            (uint32_t)(uintptr_t)&fence_val,
-            (uint32_t)(uintptr_t)&status,
-            (uint32_t)(uintptr_t)&frame_count);
-        printf("  mode=1: err=0x%x status=%u fence=%u frame=%u\n",
-               err, status, flush_fence, frame_count);
+        /* Try different input formats */
+        uint32_t in_fmts[] = {0x1010d109, 0x10168811, 0x105a880d, 0x08592004};
+        for (int fi = 0; fi < 4; fi++) {
+            *(uint32_t*)&in_surf[0x08] = in_fmts[fi];
+            status = 0; flush_fence = 0; fence_val = 0; frame_count = 0;
+            printf("  mode=1 fmt=0x%08x...\n", in_fmts[fi]);
+            err = pProcessFrame(isp_handle,
+                1, 0, 0, 0, 0,
+                (uint32_t)(uintptr_t)in_surf, 0,
+                (uint32_t)(uintptr_t)out_cfg,
+                (uint32_t)(uintptr_t)&flush_fence,
+                (uint32_t)(uintptr_t)&fence_val,
+                (uint32_t)(uintptr_t)&status,
+                (uint32_t)(uintptr_t)&frame_count);
+            printf("    err=0x%x status=%u\n", err, status);
+            if (err != 2) break;
+        }
 
         if (err == 0xa && status >= 1) {
             printf("  ProcessFrame pass 2...\n");
