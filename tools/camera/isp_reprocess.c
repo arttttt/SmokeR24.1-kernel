@@ -399,35 +399,23 @@ int main(int argc, char **argv)
     printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
            pMemAlloc, pMemPin, pMemWrite, pMemRead);
 
-    /* Create nvmap handles, get dmabuf fd, convert to NvRmMemHandle */
-    typedef uint32_t (*NvRmMemHandleFromFd_t)(uint32_t fd);
-    NvRmMemHandleFromFd_t pMemFromFd = dlsym(lib_nvrm, "NvRmMemHandleFromFd");
-    printf("  NvRmMemHandleFromFd=%p\n", pMemFromFd);
+    /* Allocate via nvmap, convert to NvRmMemHandle via FromId */
+    typedef uint32_t (*NvRmMemHandleFromId_t)(uint32_t id);
+    NvRmMemHandleFromId_t pMemFromId = dlsym(lib_nvrm, "NvRmMemHandleFromId");
+    printf("  NvRmMemHandleFromId=%p\n", pMemFromId);
 
-    /* Allocate via nvmap, get fd, convert to NvRmMemHandle */
     uint32_t in_nvmap = nvmap_create(IN_SIZE); nvmap_alloc(in_nvmap);
     uint32_t out_nvmap = nvmap_create(OUT_SIZE); nvmap_alloc(out_nvmap);
+    printf("  nvmap: in=0x%x out=0x%x\n", in_nvmap, out_nvmap);
 
-    /* Get dmabuf fd from nvmap handle */
-    struct nvmap_create_handle gfd;
-    gfd.handle = in_nvmap;
-    ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
-    uint32_t in_fd = gfd.id;
-    gfd.handle = out_nvmap;
-    ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
-    uint32_t out_fd = gfd.id;
-    printf("  in_nvmap=0x%x fd=%u, out_nvmap=0x%x fd=%u\n",
-           in_nvmap, in_fd, out_nvmap, out_fd);
-
-    /* Convert to NvRmMemHandle */
-    uint32_t in_h = pMemFromFd ? pMemFromFd(in_fd) : in_nvmap;
-    uint32_t out_h = pMemFromFd ? pMemFromFd(out_fd) : out_nvmap;
+    /* nvmap handle IS the id — FromId wraps it as NvRmMemHandle */
+    uint32_t in_h = pMemFromId ? pMemFromId(in_nvmap) : in_nvmap;
+    uint32_t out_h = pMemFromId ? pMemFromId(out_nvmap) : out_nvmap;
     printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
-    pMemPin(in_h);
-    pMemPin(out_h);
-    uint32_t in_iova = pMemGetAddr(in_h, 0);
-    uint32_t out_iova = pMemGetAddr(out_h, 0);
+    if (pMemPin) { pMemPin(in_h); pMemPin(out_h); }
+    uint32_t in_iova = pMemGetAddr ? pMemGetAddr(in_h, 0) : nvmap_pin(in_nvmap);
+    uint32_t out_iova = pMemGetAddr ? pMemGetAddr(out_h, 0) : nvmap_pin(out_nvmap);
     printf("  in_h=0x%x out_h=0x%x in_iova=0x%x out_iova=0x%x\n",
            in_h, out_h, in_iova, out_iova);
 
@@ -465,7 +453,7 @@ int main(int argc, char **argv)
     int chunk = 65536;
     for (int off = 0; off < IN_SIZE; off += chunk) {
         int sz = (IN_SIZE - off < chunk) ? IN_SIZE - off : chunk;
-        pMemWrite(in_h, off, raw_buf + off, sz);
+        nvmap_write(in_nvmap, off, raw_buf + off, sz);
     }
     free(raw_buf);
     printf("  Uploaded to nvmap\n");
@@ -474,7 +462,7 @@ int main(int argc, char **argv)
     uint8_t *zeros = calloc(1, chunk);
     for (int off = 0; off < OUT_SIZE; off += chunk) {
         int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-        pMemWrite(out_h, off, zeros, sz);
+        nvmap_write(out_nvmap, off, zeros, sz);
     }
     free(zeros);
 
@@ -692,7 +680,7 @@ int main(int argc, char **argv)
 
         /* Check output */
         uint8_t check[64];
-        pMemRead(out_h, 0, check, 64);
+        nvmap_read(out_nvmap, 0, check, 64);
         int nz = 0;
         for (int i = 0; i < 64; i++) if (check[i]) nz++;
         printf("  ProcessFrame output: %d/64 non-zero → ", nz);
@@ -875,7 +863,7 @@ int main(int argc, char **argv)
         int offsets[] = { 0, Y_SIZE/2, Y_SIZE-4096, Y_SIZE, Y_SIZE+UV_SIZE };
         const char *names[] = { "Y start", "Y mid", "Y end", "U start", "V start" };
         for (int r = 0; r < 5; r++) {
-            pMemRead(out_h, offsets[r], check, 4096);
+            nvmap_read(out_nvmap, offsets[r], check, 4096);
             int nonzero = 0;
             for (int i = 0; i < 4096; i++)
                 if (check[i] != 0) nonzero++;
@@ -896,7 +884,7 @@ int main(int argc, char **argv)
                 uint8_t *buf = malloc(chunk);
                 for (int off = 0; off < OUT_SIZE; off += chunk) {
                     int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-                    pMemRead(out_h, off, buf, sz);
+                    nvmap_read(out_nvmap, off, buf, sz);
                     fwrite(buf, 1, sz, fp);
                 }
                 free(buf);
@@ -908,7 +896,7 @@ int main(int argc, char **argv)
             uint8_t scan[256];
             int first_nz = -1;
             for (int off = 0; off < Y_SIZE && first_nz < 0; off += 256) {
-                pMemRead(out_h, off, scan, 256);
+                nvmap_read(out_nvmap, off, scan, 256);
                 for (int i = 0; i < 256; i++) {
                     if (scan[i] != 0) { first_nz = off + i; break; }
                 }
