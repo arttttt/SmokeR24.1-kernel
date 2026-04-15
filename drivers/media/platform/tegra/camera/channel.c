@@ -1236,7 +1236,6 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 		if (isp) {
 			size_t raw_size = chan->format.width *
 					  chan->format.height * 2;
-			size_t out_size;
 
 			/* Allocate raw buffer via nvmap IOVMM —
 			 * shared SMMU mapping visible to both VI and ISP */
@@ -1268,50 +1267,16 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 				goto isp_skip;
 			}
 
-			/* Output buffer via nvmap */
-			if (isp_reprocess) {
-				/* YUV420 planar output */
-				u32 y_sz = isp->y_stride * isp->height;
-				u32 uv_sz = isp->uv_stride *
-					    (isp->height / 2);
-				out_size = y_sz + 2 * uv_sz;
-			} else {
-				u32 y_sz = isp->y_stride * isp->height;
-				u32 uv_sz = isp->uv_stride * (isp->height / 2);
-				out_size = y_sz + 2 * uv_sz;
-			}
-
-			chan->isp_out_buf = kzalloc(sizeof(*chan->isp_out_buf),
-						    GFP_KERNEL);
-			if (!chan->isp_out_buf) {
-				isp_nvmap_buf_free(isp, chan->isp_raw_buf);
-				kfree(chan->isp_raw_buf);
-				chan->isp_raw_buf = NULL;
-				isp_t124_stream_stop(isp);
-				goto isp_skip;
-			}
-
-			ret = isp_nvmap_buf_alloc(isp, chan->isp_out_buf,
-						  out_size);
-			if (ret) {
-				dev_warn(&chan->video.dev,
-					 "ISP out buf alloc failed: %d\n", ret);
-				kfree(chan->isp_out_buf);
-				chan->isp_out_buf = NULL;
-				isp_nvmap_buf_free(isp, chan->isp_raw_buf);
-				kfree(chan->isp_raw_buf);
-				chan->isp_raw_buf = NULL;
-				isp_t124_stream_stop(isp);
-				goto isp_skip;
-			}
+			/* Reprocess: ISP writes directly to V4L2 buffer,
+			 * no separate output buffer needed.
+			 * Streaming: ISP also writes to V4L2 buffer. */
 
 			chan->isp = isp;
 			chan->use_isp = true;
 			dev_info(&chan->video.dev,
-				 "ISP pipeline active: %ux%u raw=0x%pad out=0x%pad\n",
+				 "ISP pipeline active: %ux%u raw=0x%pad\n",
 				 chan->format.width, chan->format.height,
-				 &chan->isp_raw_buf->dma,
-				 &chan->isp_out_buf->dma);
+				 &chan->isp_raw_buf->dma);
 isp_skip:
 			;
 		}

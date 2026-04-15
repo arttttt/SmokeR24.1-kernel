@@ -361,9 +361,10 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 				 nz, raw[0], raw[1], raw[2], raw[3]);
 		}
 		if (!err) {
+			/* ISP writes directly to V4L2 buffer (like streaming mode) */
 			err = isp_t124_process_frame_reprocess(chan->isp,
 					chan->isp_raw_buf->dma,
-					chan->isp_out_buf->dma, 0);
+					buf->addr, 0);
 			if (err) {
 				dev_err(&chan->video.dev,
 					"ISP reprocess failed: %d\n", err);
@@ -376,17 +377,6 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 				dev_err(&chan->video.dev,
 					"ISP wait_frame timeout\n");
 				state = VB2_BUF_STATE_ERROR;
-			}
-		}
-		/* Copy ISP output to V4L2 buffer */
-		if (!err && chan->isp_out_buf->cpu) {
-			void *dst = vb2_plane_vaddr(&buf->buf, 0);
-			if (dst) {
-				size_t sz = chan->isp_out_buf->size;
-				size_t vb_sz = vb2_plane_size(&buf->buf, 0);
-				if (sz > vb_sz)
-					sz = vb_sz;
-				memcpy(dst, chan->isp_out_buf->cpu, sz);
 			}
 		}
 	} else {
