@@ -666,11 +666,10 @@ int isp_t124_stream_init(struct tegra_isp_t124 *isp, u32 width, u32 height,
 {
 	int err;
 
-	if (!isp->channel || !isp->syncpt_stream)
-		return -ENODEV;
 	if (isp->streaming)
 		return -EBUSY;
 
+	/* isp_hw_setup does lazy channel_init — don't check channel before it */
 	err = isp_hw_setup(isp, width, height);
 	if (err)
 		return err;
