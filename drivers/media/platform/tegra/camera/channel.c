@@ -1269,9 +1269,13 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			}
 
 			/* Output buffer via nvmap */
-			if (isp_reprocess)
-				out_size = isp->width * 4 * isp->height;
-			else {
+			if (isp_reprocess) {
+				/* YUV420 planar output */
+				u32 y_sz = isp->y_stride * isp->height;
+				u32 uv_sz = isp->uv_stride *
+					    (isp->height / 2);
+				out_size = y_sz + 2 * uv_sz;
+			} else {
 				u32 y_sz = isp->y_stride * isp->height;
 				u32 uv_sz = isp->uv_stride * (isp->height / 2);
 				out_size = y_sz + 2 * uv_sz;

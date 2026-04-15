@@ -168,7 +168,8 @@ void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
 /* ---- Stock values (from cmdbuf capture) ---- */
 
 /* Output format codes (verified) */
-#define ISP_FORMAT_YUV420		0x04FE00E6  /* streaming only */
+#define ISP_FORMAT_YUV420		0x04FE00E6  /* streaming — blocklinear */
+#define ISP_FORMAT_YUV420_PITCH		0x010000E6  /* reprocess — pitch-linear */
 #define ISP_FORMAT_R8G8B8A8		0x43        /* reprocess — no W/2 */
 #define ISP_FORMAT_A8R8G8B8		0x41        /* reprocess — alt byte order */
 
