@@ -399,31 +399,30 @@ int main(int argc, char **argv)
     printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
            pMemAlloc, pMemPin, pMemWrite, pMemRead);
 
-    /* NvRmMemHandleCreate(hRm, size, &hMem) + NvRmMemAlloc(hMem, heaps, n, align, coherency) */
-    typedef uint32_t (*NvRmMemHandleCreate_t)(void *rm, uint32_t *phMem, uint32_t size);
-    typedef uint32_t (*NvRmMemAlloc2_t)(uint32_t hMem, uint32_t *heaps,
-        uint32_t numHeaps, uint32_t align, uint32_t coherency);
-    NvRmMemHandleCreate_t pMemCreate = dlsym(lib_nvrm, "NvRmMemHandleCreate");
-    NvRmMemAlloc2_t pMemAlloc2 = dlsym(lib_nvrm, "NvRmMemAlloc");
-    printf("  NvRmMemHandleCreate=%p NvRmMemAlloc=%p\n", pMemCreate, pMemAlloc2);
+    /* Create nvmap handles, get dmabuf fd, convert to NvRmMemHandle */
+    typedef uint32_t (*NvRmMemHandleFromFd_t)(uint32_t fd);
+    NvRmMemHandleFromFd_t pMemFromFd = dlsym(lib_nvrm, "NvRmMemHandleFromFd");
+    printf("  NvRmMemHandleFromFd=%p\n", pMemFromFd);
 
-    uint32_t heap = 0x40000000; /* IOVMM */
-    uint32_t in_h = 0, out_h = 0;
-    NvError merr;
+    /* Allocate via nvmap, get fd, convert to NvRmMemHandle */
+    uint32_t in_nvmap = nvmap_create(IN_SIZE); nvmap_alloc(in_nvmap);
+    uint32_t out_nvmap = nvmap_create(OUT_SIZE); nvmap_alloc(out_nvmap);
 
-    merr = pMemCreate(hRm, &in_h, IN_SIZE);
-    printf("  Create(in): err=0x%x h=0x%x\n", merr, in_h);
-    if (merr == 0) {
-        merr = pMemAlloc2(in_h, &heap, 1, 4096, 2);
-        printf("  Alloc(in): err=0x%x\n", merr);
-    }
+    /* Get dmabuf fd from nvmap handle */
+    struct nvmap_create_handle gfd;
+    gfd.handle = in_nvmap;
+    ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
+    uint32_t in_fd = gfd.id;
+    gfd.handle = out_nvmap;
+    ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
+    uint32_t out_fd = gfd.id;
+    printf("  in_nvmap=0x%x fd=%u, out_nvmap=0x%x fd=%u\n",
+           in_nvmap, in_fd, out_nvmap, out_fd);
 
-    merr = pMemCreate(hRm, &out_h, OUT_SIZE);
-    printf("  Create(out): err=0x%x h=0x%x\n", merr, out_h);
-    if (merr == 0) {
-        merr = pMemAlloc2(out_h, &heap, 1, 4096, 2);
-        printf("  Alloc(out): err=0x%x\n", merr);
-    }
+    /* Convert to NvRmMemHandle */
+    uint32_t in_h = pMemFromFd ? pMemFromFd(in_fd) : in_nvmap;
+    uint32_t out_h = pMemFromFd ? pMemFromFd(out_fd) : out_nvmap;
+    printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
     pMemPin(in_h);
     pMemPin(out_h);
