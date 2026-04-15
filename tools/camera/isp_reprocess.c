@@ -231,7 +231,7 @@ int main(int argc, char **argv)
         /* type=1: data=&cfg_buf[2], data2=&cfg_buf[1]
          * Proxy showed: data2 starts with 0x40, but that was from different stack frame.
          * Stock data2 for type=1 had first byte 0x40. Let's use the raw dump. */
-        uint32_t d1_data[] = {1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        uint32_t d1_data[] = {2, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13}; /* [0]=2 for reprocess */
         uint32_t d1_data2[] = {0x40, 1, 7, 9, 10, 3, 0, 6};
         uint32_t d2_data[] = {2, 4, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
         uint32_t d2_data2[] = {4, 1, 7, 9, 10, 3, 0, 6};
@@ -602,34 +602,7 @@ int main(int argc, char **argv)
                *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
                *(uint32_t*)&out_cfg[0x90]);
 
-        /* mode=2 (streaming, like stock) — two-pass protocol */
-        printf("  ProcessFrame mode=2 pass 1...\n");
-        err = pProcessFrame(isp_handle,
-            2, 0, 0, 0, 0,
-            W, H,
-            (uint32_t)(uintptr_t)out_cfg,
-            (uint32_t)(uintptr_t)&flush_fence,
-            (uint32_t)(uintptr_t)&fence_val,
-            (uint32_t)(uintptr_t)&status,
-            (uint32_t)(uintptr_t)&frame_count);
-        printf("  pass1: err=0x%x status=%u fence=%u frame=%u\n",
-               err, status, flush_fence, frame_count);
-
-        if (err == 0xa) {
-            printf("  ProcessFrame mode=2 pass 2...\n");
-            err = pProcessFrame(isp_handle,
-                2, 0, 0, 0, 0,
-                W, H,
-                (uint32_t)(uintptr_t)out_cfg,
-                (uint32_t)(uintptr_t)&flush_fence,
-                (uint32_t)(uintptr_t)&fence_val,
-                (uint32_t)(uintptr_t)&status,
-                (uint32_t)(uintptr_t)&frame_count);
-            printf("  pass2: err=0x%x status=%u fence=%u frame=%u\n",
-                   err, status, flush_fence, frame_count);
-        }
-
-        /* Now try mode=1 (reprocess) */
+        /* mode=1 (reprocess) only — mode=2 hangs ISP without VI */
         printf("  ProcessFrame mode=1 (reprocess)...\n");
         err = pProcessFrame(isp_handle,
             1,                    /* mode=1 (reprocess) */
