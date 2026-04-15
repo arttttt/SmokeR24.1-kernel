@@ -321,6 +321,13 @@ int main(int argc, char **argv)
     }
     free(zeros);
 
+    /* Get stream syncpt (used by init and cal submits) */
+    struct nvhost_get_param_arg gsp_s;
+    gsp_s.param = 2;
+    ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp_s);
+    uint32_t sp_stream = gsp_s.value;
+    printf("Stream syncpt=%u\n", sp_stream);
+
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
         uint32_t init_cmd[16];
@@ -339,11 +346,6 @@ int main(int argc, char **argv)
         nvmap_write(init_h, 0, init_cmd, ini * 4);
 
         /* G[1]: immediate syncpt incr */
-        struct nvhost_get_param_arg gsp_s;
-        gsp_s.param = 2;
-        ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp_s);
-        uint32_t sp_stream = gsp_s.value;
-        printf("Stream syncpt=%u\n", sp_stream);
 
         uint32_t g1_data[2];
         g1_data[0] = (4 << 28) | sp_stream;  /* IMM incr */
@@ -372,6 +374,101 @@ int main(int argc, char **argv)
             perror("init submit FAILED");
         else
             printf("Init submit OK (0x019/0x01B/0x01C), fence=%u\n", isa.fence);
+    }
+
+    /* Cal gather: initialize all shadow registers + post-apply trigger 0x0F
+     * Stock sends this as separate submit before per-frame */
+    {
+        uint32_t cal[2048];
+        int cn = 0;
+        cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+
+        /* 0x200-0x208: pipeline mode (zeros) */
+        cal[cn++] = OP_INCR(0x202, 3); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x200, 2); cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x205, 4); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+
+        /* 0x700-0x75F: NR (zeros) */
+        cal[cn++] = OP_INCR(0x700, 16);
+        for (int i=0;i<16;i++) cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x750, 16);
+        for (int i=0;i<16;i++) cal[cn++]=0;
+
+        /* 0xD00-0xD0B: lens shading (zeros) */
+        cal[cn++] = OP_INCR(0xD00, 10);
+        for (int i=0;i<10;i++) cal[cn++]=0;
+        cal[cn++] = OP_INCR(0xD0A, 1); cal[cn++]=0;
+        cal[cn++] = OP_NONINCR(0xD0B, 480);
+        for (int i=0;i<480;i++) cal[cn++]=0;
+        cal[cn++] = OP_INCR(0xD0C, 2); cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0xD20, 6);
+        for (int i=0;i<6;i++) cal[cn++]=0;
+
+        /* 0x506-0x50E: demosaic (zeros) */
+        cal[cn++] = OP_INCR(0x506, 9);
+        for (int i=0;i<9;i++) cal[cn++]=0;
+
+        /* 0x600-0x60F: GPP (zeros) */
+        cal[cn++] = OP_INCR(0x600, 16);
+        for (int i=0;i<16;i++) cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x650, 1); cal[cn++]=0;
+
+        /* Tone curves: identity */
+        for (int ch=0; ch<4; ch++) {
+            cal[cn++] = OP_INCR(0x651+ch*2, 1); cal[cn++]=0;
+            cal[cn++] = OP_NONINCR(0x652+ch*2, 257);
+            for (int i=0;i<257;i++) cal[cn++]=0;
+        }
+
+        /* 0x300-0x307: CCM (zeros) */
+        cal[cn++] = OP_INCR(0x300, 4);
+        cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x304, 4);
+        cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+
+        /* 0x053: work buffer */
+        cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
+
+        /* Post-apply trigger 0x0F */
+        cal[cn++] = OP_NONINCR(0x00C, 1); cal[cn++]=0x0F;
+
+        /* 0x01F, 0x05F */
+        cal[cn++] = OP_INCR(0x01F, 1); cal[cn++]=1;
+        cal[cn++] = OP_INCR(0x05F, 1); cal[cn++]=0x10;
+
+        printf("Cal gather: %d words\n", cn);
+
+        uint32_t cal_h = nvmap_create(cn*4+256);
+        nvmap_alloc(cal_h);
+        nvmap_write(cal_h, 0, cal, cn*4);
+
+        /* G[1]: syncpt incr */
+        uint32_t cg1[2] = { (4<<28)|sp_stream, 0 };
+        nvmap_write(cal_h, cn*4+128, cg1, 8);
+
+        struct nvhost_cmdbuf ccbs[2] = {
+            { .mem=cal_h, .offset=0, .words=cn },
+            { .mem=cal_h, .offset=cn*4+128, .words=2 }
+        };
+        struct nvhost_syncpt_incr csi = { .syncpt_id=sp_stream, .syncpt_incrs=1 };
+        uint32_t cclasses[2] = { ISP_CLASS, ISP_CLASS };
+        struct nvhost_fence cfence = {0,0};
+
+        struct nvhost32_submit_args csa;
+        memset(&csa, 0, sizeof(csa));
+        csa.submit_version = 0;
+        csa.num_syncpt_incrs = 1;
+        csa.num_cmdbufs = 2;
+        csa.timeout = 5000;
+        csa.syncpt_incrs = (uint32_t)(uintptr_t)&csi;
+        csa.cmdbufs = (uint32_t)(uintptr_t)ccbs;
+        csa.class_ids = (uint32_t)(uintptr_t)cclasses;
+        csa.fences = (uint32_t)(uintptr_t)&cfence;
+
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &csa) < 0)
+            perror("cal submit FAILED");
+        else
+            printf("Cal submit OK, fence=%u\n", csa.fence);
     }
 
     /* Build reprocess gather with ISP pipeline init */
