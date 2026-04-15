@@ -419,10 +419,20 @@ int main(int argc, char **argv)
     uint32_t out_fd = gfd.fd;
     printf("  GET_FD(out): r=%d fd=%d\n", r, out_fd);
 
-    /* Use raw nvmap handle directly — NvRmMemHandleFromFd crashes.
-     * The blob's reloc should still work with nvmap handles. */
-    uint32_t in_h = in_nvmap;
-    uint32_t out_h = out_nvmap;
+    /* Init NvRmMem vtable, then convert via FromFd */
+    typedef void (*NvRmMemConstructor_t)(void);
+    NvRmMemConstructor_t pMemCtor = dlsym(lib_nvrm, "NvRmMemConstructor");
+    printf("  NvRmMemConstructor=%p\n", pMemCtor);
+    if (pMemCtor) pMemCtor();
+
+    uint32_t in_h = in_nvmap, out_h = out_nvmap;
+    if (pMemFromFd && in_fd > 0 && out_fd > 0) {
+        in_h = pMemFromFd(in_fd);
+        out_h = pMemFromFd(out_fd);
+        printf("  FromFd: in=0x%x out=0x%x\n", in_h, out_h);
+    } else {
+        printf("  Using raw nvmap handles (FromFd unavailable)\n");
+    }
     printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
     if (pMemPin) { pMemPin(in_h); pMemPin(out_h); }
