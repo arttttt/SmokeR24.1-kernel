@@ -408,9 +408,19 @@ int main(int argc, char **argv)
     uint32_t out_nvmap = nvmap_create(OUT_SIZE); nvmap_alloc(out_nvmap);
     printf("  nvmap: in=0x%x out=0x%x\n", in_nvmap, out_nvmap);
 
-    /* nvmap handle IS the id — FromId wraps it as NvRmMemHandle */
-    uint32_t in_h = pMemFromId ? pMemFromId(in_nvmap) : in_nvmap;
-    uint32_t out_h = pMemFromId ? pMemFromId(out_nvmap) : out_nvmap;
+    /* Get global nvmap IDs, then convert to NvRmMemHandle */
+    #define NVMAP_IOC_GET_ID _IOWR('N', 13, struct nvmap_create_handle)
+    struct nvmap_create_handle gid;
+    gid.handle = in_nvmap;
+    ioctl(nvmap_fd, NVMAP_IOC_GET_ID, &gid);
+    uint32_t in_id = gid.id;
+    gid.handle = out_nvmap;
+    ioctl(nvmap_fd, NVMAP_IOC_GET_ID, &gid);
+    uint32_t out_id = gid.id;
+    printf("  nvmap IDs: in=%u out=%u\n", in_id, out_id);
+
+    uint32_t in_h = pMemFromId ? pMemFromId(in_id) : in_nvmap;
+    uint32_t out_h = pMemFromId ? pMemFromId(out_id) : out_nvmap;
     printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
     if (pMemPin) { pMemPin(in_h); pMemPin(out_h); }
