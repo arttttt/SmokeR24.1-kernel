@@ -411,7 +411,7 @@ int main(int argc, char **argv)
     NvRmMemRead_t2 pRead2 = dlsym(lib_nvrm, "NvRmMemRead");
     printf("  AllocAttr=%p Pin=%p Write=%p Read=%p\n", pAllocAttr, pPin2, pWrite2, pRead2);
 
-    uint32_t heaps[] = { 2 }; /* Carveout (from custom HAL) */
+    uint32_t heaps[] = { 2, 0x40000000 }; /* Carveout + IOVMM fallback */
     struct {
         const uint32_t *Heaps; uint32_t NumHeaps; uint32_t Alignment;
         uint32_t Coherency; uint32_t Size; uint32_t Tags;
@@ -421,13 +421,13 @@ int main(int argc, char **argv)
     void *in_h = NULL, *out_h = NULL;
 
     memset(&attr, 0, sizeof(attr));
-    attr.Heaps = heaps; attr.NumHeaps = 1; attr.Alignment = 4096;
+    attr.Heaps = heaps; attr.NumHeaps = 2; attr.Alignment = 4096;
     attr.Coherency = 2; attr.Size = IN_SIZE;
     int merr = pAllocAttr(hRm, &attr, &in_h);
     printf("  AllocAttr(in, %d): err=%d h=%p\n", IN_SIZE, merr, in_h);
 
     memset(&attr, 0, sizeof(attr));
-    attr.Heaps = heaps; attr.NumHeaps = 1; attr.Alignment = 4096;
+    attr.Heaps = heaps; attr.NumHeaps = 2; attr.Alignment = 4096;
     attr.Coherency = 2; attr.Size = OUT_SIZE;
     merr = pAllocAttr(hRm, &attr, &out_h);
     printf("  AllocAttr(out, %d): err=%d h=%p\n", OUT_SIZE, merr, out_h);
