@@ -399,28 +399,28 @@ int main(int argc, char **argv)
     printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
            pMemAlloc, pMemPin, pMemWrite, pMemRead);
 
-    /* Allocate via nvmap, convert to NvRmMemHandle via FromId */
-    typedef uint32_t (*NvRmMemHandleFromId_t)(uint32_t id);
-    NvRmMemHandleFromId_t pMemFromId = dlsym(lib_nvrm, "NvRmMemHandleFromId");
-    printf("  NvRmMemHandleFromId=%p\n", pMemFromId);
+    /* Allocate via nvmap, get dmabuf fd, convert to NvRmMemHandle */
+    typedef uint32_t (*NvRmMemHandleFromFd_t)(uint32_t fd);
+    NvRmMemHandleFromFd_t pMemFromFd = dlsym(lib_nvrm, "NvRmMemHandleFromFd");
+    printf("  NvRmMemHandleFromFd=%p\n", pMemFromFd);
 
     uint32_t in_nvmap = nvmap_create(IN_SIZE); nvmap_alloc(in_nvmap);
     uint32_t out_nvmap = nvmap_create(OUT_SIZE); nvmap_alloc(out_nvmap);
-    printf("  nvmap: in=0x%x out=0x%x\n", in_nvmap, out_nvmap);
+    printf("  nvmap handles: in=0x%x out=0x%x\n", in_nvmap, out_nvmap);
 
-    /* Get global nvmap IDs, then convert to NvRmMemHandle */
-    #define NVMAP_IOC_GET_ID _IOWR('N', 13, struct nvmap_create_handle)
-    struct nvmap_create_handle gid;
-    gid.handle = in_nvmap;
-    ioctl(nvmap_fd, NVMAP_IOC_GET_ID, &gid);
-    uint32_t in_id = gid.id;
-    gid.handle = out_nvmap;
-    ioctl(nvmap_fd, NVMAP_IOC_GET_ID, &gid);
-    uint32_t out_id = gid.id;
-    printf("  nvmap IDs: in=%u out=%u\n", in_id, out_id);
+    /* Get dmabuf fd via NVMAP_IOC_GET_FD */
+    struct nvmap_create_handle gfd;
+    gfd.handle = in_nvmap;
+    int r = ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
+    uint32_t in_fd = gfd.fd;
+    printf("  GET_FD(in): r=%d fd=%d\n", r, in_fd);
+    gfd.handle = out_nvmap;
+    r = ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &gfd);
+    uint32_t out_fd = gfd.fd;
+    printf("  GET_FD(out): r=%d fd=%d\n", r, out_fd);
 
-    uint32_t in_h = pMemFromId ? pMemFromId(in_id) : in_nvmap;
-    uint32_t out_h = pMemFromId ? pMemFromId(out_id) : out_nvmap;
+    uint32_t in_h = pMemFromFd ? pMemFromFd(in_fd) : in_nvmap;
+    uint32_t out_h = pMemFromFd ? pMemFromFd(out_fd) : out_nvmap;
     printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
     if (pMemPin) { pMemPin(in_h); pMemPin(out_h); }
