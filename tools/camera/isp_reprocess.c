@@ -667,10 +667,25 @@ int main(int argc, char **argv)
          * Instead, submit reprocess gather manually using blob's ISP channel.
          * Blob already set up ISP state via SetConfig + HwCreate + HwApply. */
 
-        /* Open ISP-A directly for our manual submit */
-        int isp_fd = open("/dev/nvhost-isp", O_RDWR);
-        if (isp_fd < 0) { perror("  open isp-a"); goto done; }
-        printf("  Opened ISP-A fd=%d\n", isp_fd);
+        /* Find blob's ISP-B channel fd (already init'd) */
+        int isp_fd = -1;
+        {
+            char linkbuf[256];
+            for (int fd = 3; fd < 100; fd++) {
+                char path[64];
+                snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+                int len = readlink(path, linkbuf, sizeof(linkbuf)-1);
+                if (len > 0) {
+                    linkbuf[len] = 0;
+                    if (strstr(linkbuf, "nvhost-isp")) {
+                        isp_fd = fd;
+                        printf("  Found ISP fd=%d → %s\n", fd, linkbuf);
+                        break;
+                    }
+                }
+            }
+        }
+        if (isp_fd < 0) { printf("  ISP fd not found!\n"); goto done; }
 
         /* Set nvmap fd for ISP channel */
         struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
@@ -687,7 +702,7 @@ int main(int argc, char **argv)
         printf("  ISP syncpts: mem=%u stats=%u loadv=%u\n", sp_mem, sp_stats2, sp_loadv);
 
         /* Build reprocess gather (same as pure test, matching gather #14) */
-        #define ISP_CLASS_A 0x32
+        #define ISP_CLASS_A 0x34  /* ISP-B — blob init'd this one */
         #define OP_SETCL(c,o,m) ((0<<28)|((o)<<16)|((c)<<6)|(m))
         #define OP_INCR2(o,n)   ((1<<28)|((o)<<16)|(n))
         #define OP_NONINCR2(o,n) ((2<<28)|((o)<<16)|(n))
