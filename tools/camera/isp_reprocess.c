@@ -411,7 +411,7 @@ int main(int argc, char **argv)
     NvRmMemRead_t2 pRead2 = dlsym(lib_nvrm, "NvRmMemRead");
     printf("  AllocAttr=%p Pin=%p Write=%p Read=%p\n", pAllocAttr, pPin2, pWrite2, pRead2);
 
-    uint32_t heaps[] = { 0x40000000 }; /* IOVMM */
+    uint32_t heaps[] = { 2 }; /* Carveout (from custom HAL) */
     struct {
         const uint32_t *Heaps; uint32_t NumHeaps; uint32_t Alignment;
         uint32_t Coherency; uint32_t Size; uint32_t Tags;
