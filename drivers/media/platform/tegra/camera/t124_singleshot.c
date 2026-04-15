@@ -378,6 +378,17 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 				state = VB2_BUF_STATE_ERROR;
 			}
 		}
+		/* Copy ISP output to V4L2 buffer */
+		if (!err && chan->isp_out_buf->cpu) {
+			void *dst = vb2_plane_vaddr(&buf->buf, 0);
+			if (dst) {
+				size_t sz = chan->isp_out_buf->size;
+				size_t vb_sz = vb2_plane_size(&buf->buf, 0);
+				if (sz > vb_sz)
+					sz = vb_sz;
+				memcpy(dst, chan->isp_out_buf->cpu, sz);
+			}
+		}
 	} else {
 		/* Normal: VI→memory, wait MW_ACK */
 		for (index = 0; index < chan->valid_ports; index++) {
