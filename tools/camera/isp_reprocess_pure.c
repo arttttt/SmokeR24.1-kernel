@@ -565,7 +565,7 @@ int main(int argc, char **argv)
 
     /* ISP_ENABLE — try different values */
     cmd[n++] = OP_INCR(0x015, 1);
-    uint32_t isp_enable = 0x04040007;
+    uint32_t isp_enable = 0x00000007;  /* from blob gather RE */
     if (argc > 3) isp_enable = strtoul(argv[3], NULL, 16);
     cmd[n++] = isp_enable;
     printf("ISP_ENABLE: 0x%08x\n", isp_enable);
@@ -586,10 +586,8 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: 0x09 (load input) + 0x0B (process) */
+    /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x09;
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
