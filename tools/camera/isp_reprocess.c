@@ -399,15 +399,31 @@ int main(int argc, char **argv)
     printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
            pMemAlloc, pMemPin, pMemWrite, pMemRead);
 
-    /* heap: IOVMM = 0x40000000 */
-    uint32_t heap = 0x40000000;
-    uint32_t in_h = 0, out_h = 0;
+    /* NvRmMemHandleCreate(hRm, size, &hMem) + NvRmMemAlloc(hMem, heaps, n, align, coherency) */
+    typedef uint32_t (*NvRmMemHandleCreate_t)(void *rm, uint32_t size, uint32_t *phMem);
+    typedef uint32_t (*NvRmMemAlloc2_t)(uint32_t hMem, uint32_t *heaps,
+        uint32_t numHeaps, uint32_t align, uint32_t coherency);
+    NvRmMemHandleCreate_t pMemCreate = dlsym(lib_nvrm, "NvRmMemHandleCreate");
+    NvRmMemAlloc2_t pMemAlloc2 = dlsym(lib_nvrm, "NvRmMemAlloc");
+    printf("  NvRmMemHandleCreate=%p NvRmMemAlloc=%p\n", pMemCreate, pMemAlloc2);
 
+    uint32_t heap = 0x40000000; /* IOVMM */
+    uint32_t in_h = 0, out_h = 0;
     NvError merr;
-    merr = pMemAlloc(hRm, &heap, 1, 4096, 2, IN_SIZE, 0, 0, &in_h);
-    printf("  NvRmMemHandleAlloc(in, %d): err=0x%x h=0x%x\n", IN_SIZE, merr, in_h);
-    merr = pMemAlloc(hRm, &heap, 1, 4096, 2, OUT_SIZE, 0, 0, &out_h);
-    printf("  NvRmMemHandleAlloc(out, %d): err=0x%x h=0x%x\n", OUT_SIZE, merr, out_h);
+
+    merr = pMemCreate(hRm, IN_SIZE, &in_h);
+    printf("  Create(in): err=0x%x h=0x%x\n", merr, in_h);
+    if (merr == 0) {
+        merr = pMemAlloc2(in_h, &heap, 1, 4096, 2);
+        printf("  Alloc(in): err=0x%x\n", merr);
+    }
+
+    merr = pMemCreate(hRm, OUT_SIZE, &out_h);
+    printf("  Create(out): err=0x%x h=0x%x\n", merr, out_h);
+    if (merr == 0) {
+        merr = pMemAlloc2(out_h, &heap, 1, 4096, 2);
+        printf("  Alloc(out): err=0x%x\n", merr);
+    }
 
     pMemPin(in_h);
     pMemPin(out_h);
