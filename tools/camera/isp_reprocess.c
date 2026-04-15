@@ -663,44 +663,162 @@ int main(int argc, char **argv)
                *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
                *(uint32_t*)&out_cfg[0x90]);
 
-        /* Two-pass mode=1: first pass sets up, second processes */
-        printf("  ProcessFrame mode=1 pass 1...\n");
-        err = pProcessFrame(isp_handle,
-            1, 0, 0, 0, 0,
-            (uint32_t)(uintptr_t)in_surf, 0,
-            (uint32_t)(uintptr_t)out_cfg,
-            (uint32_t)(uintptr_t)&flush_fence,
-            (uint32_t)(uintptr_t)&fence_val,
-            (uint32_t)(uintptr_t)&status,
-            (uint32_t)(uintptr_t)&frame_count);
-        printf("  pass1: err=0x%x status=%u fence=%u frame=%u\n",
-               err, status, flush_fence, frame_count);
-        if (err == 0xa) {
-            printf("  ProcessFrame mode=1 pass 2...\n");
-            err = pProcessFrame(isp_handle,
-                1, 0, 0, 0, 0,
-                (uint32_t)(uintptr_t)in_surf, 0,
-                (uint32_t)(uintptr_t)out_cfg,
-                (uint32_t)(uintptr_t)&flush_fence,
-                (uint32_t)(uintptr_t)&fence_val,
-                (uint32_t)(uintptr_t)&status,
-                (uint32_t)(uintptr_t)&frame_count);
-            printf("  pass2: err=0x%x status=%u fence=%u frame=%u\n",
-                   err, status, flush_fence, frame_count);
-        }
+        /* Skip ProcessFrame — it generates streaming gather that hangs ISP-B.
+         * Instead, submit reprocess gather manually using blob's ISP channel.
+         * Blob already set up ISP state via SetConfig + HwCreate + HwApply. */
 
-        if (err == 0xa && status >= 1) {
-            printf("  ProcessFrame pass 2...\n");
-            err = pProcessFrame(isp_handle,
-                1, 0, 0, 0, 0,
-                (uint32_t)(uintptr_t)in_surf, 0,
-                (uint32_t)(uintptr_t)out_cfg,
-                (uint32_t)(uintptr_t)&flush_fence,
-                (uint32_t)(uintptr_t)&fence_val,
-                (uint32_t)(uintptr_t)&status,
-                (uint32_t)(uintptr_t)&frame_count);
-            printf("  pass2: err=0x%x status=%u frame=%u\n", err, status, frame_count);
+        /* Find blob's ISP channel fd from /proc/self/fd */
+        int isp_fd = -1;
+        {
+            char linkbuf[256];
+            for (int fd = 3; fd < 100; fd++) {
+                char path[64];
+                snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+                int len = readlink(path, linkbuf, sizeof(linkbuf)-1);
+                if (len > 0) {
+                    linkbuf[len] = 0;
+                    if (strstr(linkbuf, "nvhost-isp")) {
+                        isp_fd = fd;
+                        printf("  Found ISP fd=%d → %s\n", fd, linkbuf);
+                        break;
+                    }
+                }
+            }
         }
+        if (isp_fd < 0) { printf("  ISP fd not found!\n"); goto done; }
+
+        /* Set nvmap fd for ISP channel */
+        struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
+        ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &snf);
+
+        /* Get syncpoints */
+        struct nvhost_get_param_arg gsp2;
+        gsp2.param = 0; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp2);
+        uint32_t sp_mem = gsp2.value;
+        gsp2.param = 1; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp2);
+        uint32_t sp_stats2 = gsp2.value;
+        gsp2.param = 2; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp2);
+        uint32_t sp_loadv = gsp2.value;
+        printf("  ISP syncpts: mem=%u stats=%u loadv=%u\n", sp_mem, sp_stats2, sp_loadv);
+
+        /* Build reprocess gather (same as pure test, matching gather #14) */
+        #define ISP_CLASS_A 0x32
+        #define OP_SETCL(c,o,m) ((0<<28)|((o)<<16)|((c)<<6)|(m))
+        #define OP_INCR2(o,n)   ((1<<28)|((o)<<16)|(n))
+        #define OP_NONINCR2(o,n) ((2<<28)|((o)<<16)|(n))
+
+        uint32_t gather[128];
+        int gn = 0;
+        int g_in_reloc = -1, g_out_reloc = -1;
+
+        gather[gn++] = OP_SETCL(ISP_CLASS_A, 0, 0);
+
+        /* Output config */
+        gather[gn++] = OP_INCR2(0xE00, 1); gather[gn++] = ((W-1) & 0x3FFF) << 16;
+        gather[gn++] = OP_INCR2(0xE01, 1); gather[gn++] = ((H-1) & 0x3FFF) << 16;
+        gather[gn++] = OP_INCR2(0xE02, 1); gather[gn++] = 0x010000E6; /* pitch YUV420 */
+        gather[gn++] = OP_INCR2(0xE03, 1); gather[gn++] = 0;
+        gather[gn++] = OP_INCR2(0xE04, 3);
+        g_out_reloc = gn;
+        gather[gn++] = 0; /* Y IOVA reloc */
+        gather[gn++] = 0;
+        gather[gn++] = (W + 63) & ~63; /* Y stride 2624 */
+        gather[gn++] = OP_INCR2(0xE07, 3);
+        gather[gn++] = 0; /* U — same buffer, reloc later */
+        gather[gn++] = 0;
+        gather[gn++] = ((W/2) + 63) & ~63; /* UV stride 1344 */
+        gather[gn++] = OP_INCR2(0xE0A, 3);
+        gather[gn++] = 0;
+        gather[gn++] = 0;
+        gather[gn++] = ((W/2) + 63) & ~63;
+
+        /* Processing dims */
+        gather[gn++] = OP_INCR2(0x500, 6);
+        gather[gn++] = 0; gather[gn++] = 0; gather[gn++] = 0;
+        gather[gn++] = 0; gather[gn++] = 0;
+        gather[gn++] = (H << 16) | W;
+
+        /* Input */
+        gather[gn++] = OP_INCR2(0xE31, 1); gather[gn++] = (H << 16) | W;
+        gather[gn++] = OP_INCR2(0xE33, 1); gather[gn++] = 0x10200024; /* BG10 */
+        gather[gn++] = OP_INCR2(0xE34, 3);
+        g_in_reloc = gn;
+        gather[gn++] = 0; /* input IOVA reloc */
+        gather[gn++] = 0;
+        gather[gn++] = W * 2; /* input stride */
+        gather[gn++] = OP_INCR2(0xE32, 1); gather[gn++] = W & 0x3FFF;
+        gather[gn++] = OP_INCR2(0xE30, 1); gather[gn++] = 1;
+
+        /* ISP_ENABLE */
+        gather[gn++] = OP_INCR2(0x015, 1); gather[gn++] = 0x07;
+
+        /* Syncpt incrs */
+        gather[gn++] = OP_SETCL(ISP_CLASS_A, 0, 0);
+        gather[gn++] = OP_NONINCR2(0x000, 1); gather[gn++] = (4 << 8) | sp_mem;
+        gather[gn++] = OP_NONINCR2(0x000, 1); gather[gn++] = (5 << 8) | sp_stats2;
+        gather[gn++] = OP_NONINCR2(0x000, 1); gather[gn++] = (6 << 8) | sp_loadv;
+
+        /* Trigger 0x0B */
+        gather[gn++] = OP_NONINCR2(0x00C, 1); gather[gn++] = 0x0B;
+
+        printf("  Manual gather: %d words\n", gn);
+
+        /* Write gather to nvmap */
+        uint32_t gcmd_h = nvmap_create(gn * 4 + 256);
+        nvmap_alloc(gcmd_h);
+        nvmap_write(gcmd_h, 0, gather, gn * 4);
+
+        /* Relocs */
+        struct nvhost_reloc relocs2[3];
+        struct nvhost_reloc_shift shifts2[3];
+        int nr2 = 0;
+        relocs2[nr2] = (struct nvhost_reloc){ gcmd_h, g_out_reloc*4, (uint32_t)(uintptr_t)out_h, 0 };
+        shifts2[nr2++].shift = 0;
+        relocs2[nr2] = (struct nvhost_reloc){ gcmd_h, (g_out_reloc+6)*4, (uint32_t)(uintptr_t)out_h, Y_SIZE };
+        shifts2[nr2++].shift = 0;
+        relocs2[nr2] = (struct nvhost_reloc){ gcmd_h, g_in_reloc*4, (uint32_t)(uintptr_t)in_h, 0 };
+        shifts2[nr2++].shift = 0;
+
+        /* Submit */
+        struct nvhost_ctrl_syncpt_waitex_args rd2 = { .id = sp_mem, .thresh = 0, .timeout = 0 };
+        int ctrl_fd2 = open("/dev/nvhost-ctrl", O_RDWR);
+        ioctl(ctrl_fd2, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd2);
+        printf("  Submit (sp %u cur=%u)...\n", sp_mem, rd2.value);
+
+        struct nvhost_cmdbuf cb2 = { .mem = gcmd_h, .offset = 0, .words = gn };
+        struct nvhost_syncpt_incr si2 = { .syncpt_id = sp_mem, .syncpt_incrs = 1 };
+        uint32_t cls2 = ISP_CLASS_A;
+        struct nvhost_fence fence2 = {0,0};
+
+        struct nvhost32_submit_args sa2;
+        memset(&sa2, 0, sizeof(sa2));
+        sa2.submit_version = 0;
+        sa2.num_syncpt_incrs = 1;
+        sa2.num_cmdbufs = 1;
+        sa2.num_relocs = nr2;
+        sa2.timeout = 5000;
+        sa2.syncpt_incrs = (uint32_t)(uintptr_t)&si2;
+        sa2.cmdbufs = (uint32_t)(uintptr_t)&cb2;
+        sa2.relocs = (uint32_t)(uintptr_t)relocs2;
+        sa2.reloc_shifts = (uint32_t)(uintptr_t)shifts2;
+        sa2.class_ids = (uint32_t)(uintptr_t)&cls2;
+        sa2.fences = (uint32_t)(uintptr_t)&fence2;
+
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa2) < 0) {
+            perror("  manual submit");
+        } else {
+            printf("  Manual submit OK, fence=%u\n", sa2.fence);
+            /* Wait */
+            struct nvhost_ctrl_syncpt_waitex_args wa2 = {
+                .id = sp_mem, .thresh = sa2.fence, .timeout = 5000
+            };
+            if (ioctl(ctrl_fd2, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa2) < 0)
+                printf("  TIMEOUT\n");
+            else
+                printf("  Done (sp=%u val=%u)\n", sp_mem, wa2.value);
+        }
+        close(ctrl_fd2);
+        done:
 
         /* Wait for ISP */
         usleep(200000);
