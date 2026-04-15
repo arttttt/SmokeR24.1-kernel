@@ -667,25 +667,10 @@ int main(int argc, char **argv)
          * Instead, submit reprocess gather manually using blob's ISP channel.
          * Blob already set up ISP state via SetConfig + HwCreate + HwApply. */
 
-        /* Find blob's ISP channel fd from /proc/self/fd */
-        int isp_fd = -1;
-        {
-            char linkbuf[256];
-            for (int fd = 3; fd < 100; fd++) {
-                char path[64];
-                snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
-                int len = readlink(path, linkbuf, sizeof(linkbuf)-1);
-                if (len > 0) {
-                    linkbuf[len] = 0;
-                    if (strstr(linkbuf, "nvhost-isp")) {
-                        isp_fd = fd;
-                        printf("  Found ISP fd=%d → %s\n", fd, linkbuf);
-                        break;
-                    }
-                }
-            }
-        }
-        if (isp_fd < 0) { printf("  ISP fd not found!\n"); goto done; }
+        /* Open ISP-A directly for our manual submit */
+        int isp_fd = open("/dev/nvhost-isp", O_RDWR);
+        if (isp_fd < 0) { perror("  open isp-a"); goto done; }
+        printf("  Opened ISP-A fd=%d\n", isp_fd);
 
         /* Set nvmap fd for ISP channel */
         struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
