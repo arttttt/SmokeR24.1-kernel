@@ -419,8 +419,10 @@ int main(int argc, char **argv)
     uint32_t out_fd = gfd.fd;
     printf("  GET_FD(out): r=%d fd=%d\n", r, out_fd);
 
-    uint32_t in_h = pMemFromFd ? pMemFromFd(in_fd) : in_nvmap;
-    uint32_t out_h = pMemFromFd ? pMemFromFd(out_fd) : out_nvmap;
+    /* Use raw nvmap handle directly — NvRmMemHandleFromFd crashes.
+     * The blob's reloc should still work with nvmap handles. */
+    uint32_t in_h = in_nvmap;
+    uint32_t out_h = out_nvmap;
     printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
 
     if (pMemPin) { pMemPin(in_h); pMemPin(out_h); }
