@@ -548,7 +548,7 @@ int main(int argc, char **argv)
 
     /* Build reprocess gather with ISP pipeline init */
     #include "isp_lens_shading.h"
-    uint32_t cmd[2048];
+    uint32_t cmd[4096];
     int n = 0;
     int y_reloc = -1, u_reloc = -1, v_reloc = -1, in_reloc = -1;
     int work_reloc = -1;
@@ -757,6 +757,22 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
     cmd[n++] = 0;
+
+    /* Demosaic in per-frame (test: maybe ISP resets between cal and frame) */
+    cmd[n++] = OP_INCR(0x900, 2);
+    cmd[n++] = 1; cmd[n++] = 1;
+    cmd[n++] = OP_INCR(0x904, 2);
+    cmd[n++] = 0x00005555; cmd[n++] = 0x00000001;
+    cmd[n++] = OP_INCR(0x908, 1);
+    cmd[n++] = 0x00005555;
+    cmd[n++] = OP_INCR(0x910, 9);
+    cmd[n++] = 0x00000001; cmd[n++] = 0x00000028;
+    cmd[n++] = 0x01480029; cmd[n++] = 0x0003030b;
+    cmd[n++] = 0x00990030; cmd[n++] = 0x00000800;
+    cmd[n++] = 0x007b0666; cmd[n++] = 0x00000036;
+    cmd[n++] = 0x00001f1f;
+    cmd[n++] = OP_INCR(0x91f, 1);
+    cmd[n++] = 0x00000032;
 
     /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
