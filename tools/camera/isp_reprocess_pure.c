@@ -328,6 +328,44 @@ int main(int argc, char **argv)
     uint32_t sp_stream = gsp_s.value;
     printf("Stream syncpt=%u\n", sp_stream);
 
+    /* Pipeline mode submit: 0x200=1 BEFORE DMA init */
+    {
+        uint32_t pipe_cmd[8];
+        int pi = 0;
+        pipe_cmd[pi++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+        pipe_cmd[pi++] = OP_INCR(0x200, 1);
+        pipe_cmd[pi++] = 0x00000001;  /* pipeline enable */
+
+        uint32_t pipe_h = nvmap_create(4096);
+        nvmap_alloc(pipe_h);
+        nvmap_write(pipe_h, 0, pipe_cmd, pi * 4);
+        uint32_t pg1[2] = { (4 << 28) | sp_stream, 0 };
+        nvmap_write(pipe_h, 256, pg1, 8);
+
+        struct nvhost_cmdbuf pcbs[2] = {
+            { .mem = pipe_h, .offset = 0, .words = pi },
+            { .mem = pipe_h, .offset = 256, .words = 2 }
+        };
+        struct nvhost_syncpt_incr psi = { .syncpt_id = sp_stream, .syncpt_incrs = 1 };
+        uint32_t pclasses[2] = { ISP_CLASS, ISP_CLASS };
+        struct nvhost_fence pfence = {0,0};
+        struct nvhost32_submit_args psa;
+        memset(&psa, 0, sizeof(psa));
+        psa.submit_version = 0;
+        psa.num_syncpt_incrs = 1;
+        psa.num_cmdbufs = 2;
+        psa.timeout = 5000;
+        psa.syncpt_incrs = (uint32_t)(uintptr_t)&psi;
+        psa.cmdbufs = (uint32_t)(uintptr_t)pcbs;
+        psa.class_ids = (uint32_t)(uintptr_t)pclasses;
+        psa.fences = (uint32_t)(uintptr_t)&pfence;
+
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &psa) < 0)
+            perror("pipeline submit FAILED");
+        else
+            printf("Pipeline 0x200=1 submit OK, fence=%u\n", psa.fence);
+    }
+
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
         uint32_t init_cmd[16];
@@ -757,10 +795,6 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
     cmd[n++] = 0;
-
-    /* 0x200=1 in per-frame (no POST_APPLY, direct before trigger) */
-    cmd[n++] = OP_INCR(0x200, 1);
-    cmd[n++] = 0x00000001;
 
     /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
