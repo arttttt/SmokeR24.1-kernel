@@ -383,19 +383,19 @@ int main(int argc, char **argv)
         int cn = 0;
         cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
 
-        /* 0x200-0x208: pipeline mode (stock streaming S5, OV5693 ISP-B) */
+        /* 0x200-0x208: pipeline mode — try 0x200=2 for reprocess */
         cal[cn++] = OP_INCR(0x202, 3);
-        cal[cn++] = 0x00000001;   /* 0x202: input config enable */
-        cal[cn++] = 0x00780078;   /* 0x203: sensor dims (OV5693) */
-        cal[cn++] = 0x00780078;   /* 0x204: sensor dims (OV5693) */
+        cal[cn++] = 0x00000000;   /* 0x202: keep zero (no VI input config) */
+        cal[cn++] = 0x00000000;   /* 0x203 */
+        cal[cn++] = 0x00000000;   /* 0x204 */
         cal[cn++] = OP_INCR(0x200, 2);
-        cal[cn++] = 0x00000001;   /* 0x200: pipeline enable! */
+        cal[cn++] = 0x00000002;   /* 0x200: try value 2 (reprocess pipeline?) */
         cal[cn++] = 0x00000000;   /* 0x201 */
         cal[cn++] = OP_INCR(0x205, 4);
         cal[cn++] = 0x00000000;   /* 0x205 */
-        cal[cn++] = 0x000600c8;   /* 0x206: stride/format */
-        cal[cn++] = 0x000f000f;   /* 0x207 */
-        cal[cn++] = 0x00000000;   /* 0x208 (OV5693=0, IMX179=0x3333) */
+        cal[cn++] = 0x00000000;   /* 0x206 */
+        cal[cn++] = 0x00000000;   /* 0x207 */
+        cal[cn++] = 0x00000000;   /* 0x208 */
 
         /* 0x700-0x75F: NR (zeros) */
         cal[cn++] = OP_INCR(0x700, 16);
