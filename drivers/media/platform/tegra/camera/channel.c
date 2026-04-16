@@ -66,7 +66,7 @@ MODULE_PARM_DESC(t124_single_shot, "Single-shot capture (default: 1, no tearing)
 #endif
 
 
-#define FRAMERATE	120
+#define FRAMERATE	60
 #define BPP_MEM		2
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
