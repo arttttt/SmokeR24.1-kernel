@@ -442,17 +442,6 @@ int main(int argc, char **argv)
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
 
-        /* 0x018-0x01C: pixel format pipeline config
-         * From RE of FUN_00015e7a in libnvisp_v3 — NvIspSetConfiguration(type=1)
-         * with d1_data for reprocess produces these exact values. Blob writes
-         * them via HwSettingsApply cal gather (same trigger 0x0F context). */
-        cal[cn++] = OP_INCR(0x018, 5);
-        cal[cn++] = 0x0A00500A;
-        cal[cn++] = 0x00008089;
-        cal[cn++] = 0x013645CB;
-        cal[cn++] = 0x000001E7;
-        cal[cn++] = 0x00000002;  /* reprocess surface_type */
-
         /* Post-apply trigger 0x0F */
         cal[cn++] = OP_NONINCR(0x00C, 1); cal[cn++]=0x0F;
 
@@ -710,10 +699,8 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: 0x09 + 0x0B (stock SUBMIT mode==1) */
+    /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x09;
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
