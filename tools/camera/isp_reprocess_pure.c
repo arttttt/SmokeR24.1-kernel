@@ -757,10 +757,8 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: two-pass 0x09 then 0x0B (stock ProcessFrame) */
+    /* Reprocess trigger: single 0x0B */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-    cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x09;
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
