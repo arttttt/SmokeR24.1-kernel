@@ -383,19 +383,10 @@ int main(int argc, char **argv)
         int cn = 0;
         cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
 
-        /* 0x200-0x208: pipeline mode — try 0x200=2 for reprocess */
-        cal[cn++] = OP_INCR(0x202, 3);
-        cal[cn++] = 0x00000000;   /* 0x202: keep zero (no VI input config) */
-        cal[cn++] = 0x00000000;   /* 0x203 */
-        cal[cn++] = 0x00000000;   /* 0x204 */
-        cal[cn++] = OP_INCR(0x200, 2);
-        cal[cn++] = 0x00000002;   /* 0x200: try value 2 (reprocess pipeline?) */
-        cal[cn++] = 0x00000000;   /* 0x201 */
-        cal[cn++] = OP_INCR(0x205, 4);
-        cal[cn++] = 0x00000000;   /* 0x205 */
-        cal[cn++] = 0x00000000;   /* 0x206 */
-        cal[cn++] = 0x00000000;   /* 0x207 */
-        cal[cn++] = 0x00000000;   /* 0x208 */
+        /* 0x200-0x208: zeros in cal (non-zero 0x200 + POST_APPLY = CDMA hang) */
+        cal[cn++] = OP_INCR(0x202, 3); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x200, 2); cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x205, 4); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
 
         /* 0x700-0x75F: NR (zeros) */
         cal[cn++] = OP_INCR(0x700, 16);
@@ -766,6 +757,10 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
     cmd[n++] = 0;
+
+    /* 0x200=1 in per-frame (no POST_APPLY, direct before trigger) */
+    cmd[n++] = OP_INCR(0x200, 1);
+    cmd[n++] = 0x00000001;
 
     /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
