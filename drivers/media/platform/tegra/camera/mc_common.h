@@ -60,9 +60,6 @@ struct tegra_channel_buffer {
 	struct tegra_channel *chan;
 
 	dma_addr_t addr;
-	/* MW_ACK_DONE threshold armed when DMA starts, awaited at frame end.
-	 * Per-buffer to survive concurrent in-flight frames. */
-	u32 mw_ack_thresh[2];	/* TEGRA_CSI_BLOCKS */
 };
 
 #define to_tegra_channel_buffer(vb) \
