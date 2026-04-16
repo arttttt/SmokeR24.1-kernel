@@ -994,122 +994,9 @@ static int isp_streaming_init(struct tegra_isp_t124 *isp)
 	if (err)
 		return err;
 
-	/* S6+S7: Only for streaming mode (warmup needs ISP pipeline active).
-	 *
-	 * NOTE: Stock trace shows exactly 5 ISP submits (S1-S5) from
-	 * userspace HAL. However, stock may do S6/S7-equivalent via
-	 * a different mechanism. Without warmup, ISP OP_DONE fires
-	 * but output is black — ISP pipeline may need priming.
-	 *
-	 * EXPERIMENT LOG (2026-04-10):
-	 * - Without S6/S7: ISP init OK, per-frame OK, output black
-	 * - With S6/S7: ISP init OK, S7 warmup timeout (no VI pixels yet)
-	 * - TPG + ISP works regardless of S6/S7
-	 * - Problem is VI→ISP pixel routing, not ISP processing itself
-	 */
-	/* S6: Histogram config + ISP enable */
-	n = 0;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(0x930, 18);
-	cmd[n++] = 0x0000001d; cmd[n++] = 0x88888888;
-	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
-	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
-	cmd[n++] = 0x00000078; cmd[n++] = 0x88888888;
-	cmd[n++] = 0x78787800; cmd[n++] = 0x00000078;
-	cmd[n++] = 0x88888888; cmd[n++] = 0x78787800;
-	cmd[n++] = 0x00000078; cmd[n++] = 0x3fc00000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
-	cmd[n++] = 0x00000000; cmd[n++] = 0x00070000;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(0x053, 2);
-	cmd[n++] = 0x00000001;
-	cmd[n++] = 0x00000000;
-	n = isp_append_syncpt(isp, cmd, n);
-	err = isp_submit_and_wait(isp, cmd, cmd_phys, n, "S6-hist");
-	if (err)
-		return err;
-
-	/* S7: Warmup 8×8 frame — primes ISP processing pipeline */
-	n = 0;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_WIDTH, 1);
-	cmd[n++] = 0x00070000;
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
-	cmd[n++] = 0x00070000;
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = 0x010000c9;
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
-	cmd[n++] = 0x00000000;
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_SURF_Y, 3);
-	cmd[n++] = (u32)isp->work_buf.dma + 0x40000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000100;
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_PROCESSING, 6);
-	cmd[n++] = 0x00000003;
-	cmd[n++] = 0x00000ca4;
-	cmd[n++] = 0x14400000;
-	cmd[n++] = 0x0f300000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00080008;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_ENABLE, 1);
-	cmd[n++] = 0x04040007;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_STATS_BUF, 4);
-	cmd[n++] = (u32)isp->stats_buf.dma;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = 0x00000000;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_OP_DONE << 8) | isp->syncpt_memory;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_STATS_DONE << 8) | isp->syncpt_stats;
-	cmd[n++] = nvhost_opcode_nonincr(0x000, 1);
-	cmd[n++] = (ISP_SYNCPT_COND_RD_DONE << 8) | isp->syncpt_loadv;
-	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
-	cmd[n++] = nvhost_opcode_nonincr(ISP_METHOD_CONTROL, 1);
-	cmd[n++] = ISP_TRIGGER_RUNTIME;
-	{
-		int g1w = n;
-		int g2_off = n;
-		struct nvhost_job *wjob;
-		cmd[n++] = nvhost_opcode_imm_incr_syncpt(
-			host1x_uclass_incr_syncpt_cond_immediate_v(),
-			isp->syncpt_stream);
-		cmd[n++] = NVHOST_OPCODE_NOOP;
-		wjob = nvhost_job_alloc(isp->channel, 2, 0, 0, 4);
-		if (!wjob) { err = -ENOMEM; return err; }
-		wjob->sp[0].id = isp->syncpt_memory;
-		wjob->sp[0].incrs = 1;
-		wjob->sp[1].id = isp->syncpt_stats;
-		wjob->sp[1].incrs = 1;
-		wjob->sp[2].id = isp->syncpt_loadv;
-		wjob->sp[2].incrs = 1;
-		wjob->sp[3].id = isp->syncpt_stream;
-		wjob->sp[3].incrs = 1;
-		wjob->num_syncpts = 4;
-		nvhost_job_add_gather(wjob, 0, g1w, 0, isp->class_id, 0);
-		wjob->gathers[0].mem_base = cmd_phys;
-		nvhost_job_add_gather(wjob, 0, 2, 0, isp->class_id, 0);
-		wjob->gathers[1].mem_base = cmd_phys + g2_off * 4;
-		err = nvhost_channel_submit(wjob);
-		if (err) {
-			dev_err(dev, "ISP warmup submit failed: %d\n", err);
-			nvhost_job_put(wjob);
-			return err;
-		}
-		err = nvhost_syncpt_wait_timeout_ext(isp->pdev,
-				isp->syncpt_memory, wjob->sp[0].fence,
-				msecs_to_jiffies(500), NULL, NULL);
-		if (err)
-			dev_warn(dev, "ISP warmup timeout: %d (expected without VI pixel data)\n", err);
-		else
-			dev_info(dev, "ISP S7-warmup OK\n");
-		nvhost_job_put(wjob);
-	}
+	/* S6/S7 REMOVED — stock trace shows exactly 5 submits (S1-S5).
+	 * S7 warmup caused SMMU faults (U/V surfaces = 0x0) and left ISP
+	 * in broken state (subsequent trigger 0x05 timed out). */
 
 	dev_info(dev, "ISP streaming init OK: %ux%u class=0x%02x\n",
 		 isp->width, isp->height, isp->class_id);
@@ -1175,9 +1062,11 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	u32 uv_stride = isp->uv_stride;
 	size_t y_size = (size_t)y_stride * H;
 	size_t uv_size = (size_t)uv_stride * (H / 2);
+	/* Stock uses 0x540000 U offset (64KB-aligned), not raw y_size */
+	size_t u_offset = (y_size + 0xFFFF) & ~(size_t)0xFFFF;
 	dma_addr_t out_y = out_dma;
-	dma_addr_t out_u = out_dma + y_size;
-	dma_addr_t out_v = out_dma + y_size + uv_size;
+	dma_addr_t out_u = out_dma + u_offset;
+	dma_addr_t out_v = out_dma + u_offset + uv_size;
 
 	if (!isp->streaming || !isp->cmdbuf)
 		return -ENODEV;
@@ -1436,9 +1325,11 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 	u32 uv_stride = isp->uv_stride;
 	size_t y_size = (size_t)y_stride * H;
 	size_t uv_size = (size_t)uv_stride * (H / 2);
+	/* Stock uses 0x540000 U offset (64KB-aligned), not raw y_size */
+	size_t u_offset = (y_size + 0xFFFF) & ~(size_t)0xFFFF;
 	dma_addr_t out_y = out_dma;
-	dma_addr_t out_u = out_dma + y_size;
-	dma_addr_t out_v = out_dma + y_size + uv_size;
+	dma_addr_t out_u = out_dma + u_offset;
+	dma_addr_t out_v = out_dma + u_offset + uv_size;
 	bool is_b = (isp->class_id == ISP_B_CLASS_ID);
 
 	if (!isp->streaming || !isp->cmdbuf)
