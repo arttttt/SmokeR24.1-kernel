@@ -13,7 +13,8 @@
 **Hardware Composer** — see [graphics/hwc/](graphics/hwc/README.md) for the full index:
 - [HWC1 Architecture Analysis](graphics/hwc/hwc1-architecture.md) — Full analysis of the existing HWC1 implementation from JXD source leak
 - [HWC1 vs HWC2 API Differences](graphics/hwc/hwc1-vs-hwc2.md) — Detailed comparison of HAL versions and fence semantics
-- [HWC2 Implementation Plan](graphics/hwc/hwc2-implementation-plan.md) — Plan for writing a native HWC2 to replace hwc2on1 adapter
+- [HWC2 Implementation Plan](graphics/hwc/hwc2-implementation-plan.md) — Original from-scratch native HWC2 plan
+- [drm-hwcomposer Soft Fork + Abstraction Plan](graphics/hwc/drm-hwcomposer-fork-plan.md) — **Chosen strategy:** fork upstream, introduce pipeline abstraction, add Tegra backend
 - [HWC2 vs HWC3](graphics/hwc/hwc2-vs-hwc3.md) — AIDL composer3 differences and what stays the same
 - [Shared-Core HWC2 + HWC3 Architecture](graphics/hwc/shared-core-hwc2-hwc3.md) — How to serve both transports from one backend
 - [drm-hwcomposer as Reference](graphics/hwc/drm-hwcomposer-reference.md) — What's reusable from the upstream project, what's not

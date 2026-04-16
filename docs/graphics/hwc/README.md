@@ -13,7 +13,8 @@ Gralloc is covered separately in [`../gralloc-buffer-management.md`](../gralloc-
 
 ### Implementation Plan
 
-- **[HWC2 Implementation Plan](hwc2-implementation-plan.md)** — Phased plan for a native HWC2: file structure, R24.1 kernel API adaptations (tegra_timespec, flip_3 flags, event bitmasks), incremental bring-up order.
+- **[HWC2 Implementation Plan](hwc2-implementation-plan.md)** — Original from-scratch phased plan: file structure, R24.1 kernel API adaptations (tegra_timespec, flip_3 flags, event bitmasks), incremental bring-up order.
+- **[drm-hwcomposer Soft Fork + Abstraction Plan](drm-hwcomposer-fork-plan.md)** — **Chosen strategy.** Fork upstream, introduce `HwcDisplayPipeline` abstraction, keep DRM backend as reference, add Tegra backend. Reuses ~3000 lines of proven core, writes ~1100 lines new. First frame in ~2 weeks.
 - **[Shared-Core Architecture for HWC2 + HWC3](shared-core-hwc2-hwc3.md)** — How to structure the backend so a future HWC3 (AIDL) shim is a few hundred lines, not a rewrite. Reference: Google's `libhwc2.1`.
 
 ### Future: HWC3
@@ -22,7 +23,7 @@ Gralloc is covered separately in [`../gralloc-buffer-management.md`](../gralloc-
 
 ### External Reference
 
-- **[drm-hwcomposer as Reference](drm-hwcomposer-reference.md)** — Why the upstream [drm-hwcomposer](https://gitlab.freedesktop.org/drm-hwcomposer/drm-hwcomposer) cannot be ported as-is (no DRM/KMS in R24.1 kernel, no PRIME path), and which of its ~15 000 lines are reusable as architectural patterns: `hwc2_device/`, backend planning, fence discipline, VSyncWorker.
+- **[drm-hwcomposer as Reference](drm-hwcomposer-reference.md)** — Why the upstream [drm-hwcomposer](https://gitlab.freedesktop.org/drm-hwcomposer/drm-hwcomposer) cannot be ported as-is (no DRM/KMS in R24.1 kernel, no PRIME path), and which of its ~15 000 lines are reusable as architectural patterns. See [fork plan](drm-hwcomposer-fork-plan.md) for how these findings are operationalized.
 
 ### Backend (Kernel & Engines)
 
@@ -35,7 +36,8 @@ Gralloc is covered separately in [`../gralloc-buffer-management.md`](../gralloc-
 2. [Display Controller Kernel Interface](display-controller-interface.md) — understand the backend
 3. [HWC1 vs HWC2](hwc1-vs-hwc2.md) — understand why migration is needed
 4. [HWC2 Implementation Plan](hwc2-implementation-plan.md) — understand the target
-5. [Shared-Core Architecture](shared-core-hwc2-hwc3.md) — understand the layering that keeps HWC3 affordable
-6. [Composition Engines](composition-engines.md) — understand the dispatch behavior
-7. [drm-hwcomposer Reference](drm-hwcomposer-reference.md) — understand what to borrow from upstream
-8. [HWC2 vs HWC3](hwc2-vs-hwc3.md) — understand the future transport
+5. [drm-hwcomposer Reference](drm-hwcomposer-reference.md) — understand what to borrow from upstream
+6. [drm-hwcomposer Fork + Abstraction Plan](drm-hwcomposer-fork-plan.md) — the chosen implementation strategy
+7. [Shared-Core Architecture](shared-core-hwc2-hwc3.md) — layering that keeps HWC3 affordable
+8. [Composition Engines](composition-engines.md) — dispatch behavior for `TegraCompositor`
+9. [HWC2 vs HWC3](hwc2-vs-hwc3.md) — future transport
