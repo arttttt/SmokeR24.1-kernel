@@ -352,7 +352,7 @@ int main(int argc, char **argv)
         init_cmd[ini++] = 0x00000400;  /* 0x019 */
         init_cmd[ini++] = OP_INCR(0x01B, 2);
         init_cmd[ini++] = 0x00000200;  /* 0x01B */
-        init_cmd[ini++] = 0x00000002;  /* 0x01C */
+        init_cmd[ini++] = 0x00000001;  /* 0x01C = streaming DMA + trigger 0x05 */
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
