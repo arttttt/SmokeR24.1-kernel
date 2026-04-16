@@ -675,7 +675,7 @@ int main(int argc, char **argv)
 
     /* ISP_ENABLE — try different values */
     cmd[n++] = OP_INCR(0x015, 1);
-    uint32_t isp_enable = 0x00000007;  /* from blob gather RE */
+    uint32_t isp_enable = 0x04040007;  /* stock reprocess SETUP: includes stats enable bits */
     if (argc > 3) isp_enable = strtoul(argv[3], NULL, 16);
     cmd[n++] = isp_enable;
     printf("ISP_ENABLE: 0x%08x\n", isp_enable);
