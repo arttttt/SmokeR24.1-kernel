@@ -57,18 +57,24 @@ static int wait_syncpt(struct tegra_channel *chan,
 		chan->syncpt[index], thresh, chan->timeout, NULL, ts);
 }
 
-static int arm_wait_mw_ack(struct tegra_channel *chan,
-			   int index, struct timespec *ts)
+/* Arm MW_ACK_DONE syncpt BEFORE DMA starts so we don't race the ACK.
+ * VI_CFG_VI_INCR_SYNCPT is a FIFO — each write queues one cond+syncpt
+ * pair. We queue MW_ACK_DONE here, then FRAME_START separately.
+ * Returns threshold to later wait on. */
+static void arm_mw_ack(struct tegra_channel *chan, int index, u32 *thresh)
 {
 	u32 cond = (chan->port[index] == 0) ?
 		T124_MWA_ACK_DONE : T124_MWB_ACK_DONE;
-	u32 thresh;
 
-	thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
-					    chan->syncpt_mw[index], 1);
+	*thresh = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
+					     chan->syncpt_mw[index], 1);
 	tegra_channel_write(chan, TEGRA_VI_CFG_VI_INCR_SYNCPT,
 		VI_CFG_VI_INCR_SYNCPT_COND(cond) | chan->syncpt_mw[index]);
+}
 
+static int wait_mw_ack(struct tegra_channel *chan, int index, u32 thresh,
+		       struct timespec *ts)
+{
 	return nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
 		chan->syncpt_mw[index], thresh, chan->timeout, NULL, ts);
 }
@@ -105,6 +111,9 @@ static void prequeue_next(struct tegra_channel *chan)
 			surface_setup(chan, index,
 				      next->addr + chan->buffer_offset[index],
 				      bpl);
+			/* Arm MW_ACK_DONE BEFORE FRAME_START so syncpt is
+			 * primed for the coming ACK (race-free). */
+			arm_mw_ack(chan, index, &next->mw_ack_thresh[index]);
 			arm_frame_start(chan, index,
 					&chan->next_thresh[index]);
 		}
@@ -194,9 +203,11 @@ static int t124_capture_start(struct tegra_channel *chan,
 		}
 		chan->bfirst_fstart = true;
 
-		/* Arm + wait for first frame */
-		for (index = 0; index < chan->valid_ports; index++)
+		/* Arm MW_ACK_DONE first, then FRAME_START (must be before DMA) */
+		for (index = 0; index < chan->valid_ports; index++) {
+			arm_mw_ack(chan, index, &buf->mw_ack_thresh[index]);
 			arm_frame_start(chan, index, &thresh[index]);
+		}
 
 		if (t124_single_shot)
 			for (index = 0; index < chan->valid_ports; index++)
@@ -214,6 +225,7 @@ static int t124_capture_start(struct tegra_channel *chan,
 			surface_setup(chan, index,
 				      buf->addr + chan->buffer_offset[index],
 				      bpl);
+			arm_mw_ack(chan, index, &buf->mw_ack_thresh[index]);
 			arm_frame_start(chan, index, &thresh[index]);
 		}
 
@@ -263,7 +275,9 @@ static void t124_capture_done(struct tegra_channel *chan,
 	int state = VB2_BUF_STATE_DONE;
 
 	for (index = 0; index < chan->valid_ports; index++) {
-		err = arm_wait_mw_ack(chan, index, &ts);
+		/* Syncpt was armed BEFORE DMA (in capture_start/prequeue_next),
+		 * just wait for the threshold stored in the buffer. */
+		err = wait_mw_ack(chan, index, buf->mw_ack_thresh[index], &ts);
 		if (err) {
 			dev_err(&chan->video.dev,
 				"MW_ACK_DONE timeout port %d\n", index);
