@@ -329,6 +329,18 @@ static int kthread_done(void *data)
 		list_del_init(&buf->queue);
 		spin_unlock(&chan->done_lock);
 
+		/* On STREAMOFF, CSI has been stopped — pending frames will
+		 * never emit MW_ACK_DONE. Skip the ACK wait and error the
+		 * buffer directly to avoid the 2-second timeout spam. */
+		if (kthread_should_stop()) {
+			struct timespec ts;
+			getnstimeofday(&ts);
+			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
+			atomic_set(&chan->dma_active, 0);
+			wake_up_interruptible(&chan->dma_wait);
+			continue;
+		}
+
 		t124_capture_done(chan, buf);
 	}
 	return 0;
