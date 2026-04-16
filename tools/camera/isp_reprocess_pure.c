@@ -341,6 +341,24 @@ int main(int argc, char **argv)
     uint32_t sp_stream = gsp_s.value;
     printf("Stream syncpt=%u\n", sp_stream);
 
+    /* PIO: 0x200=1 pipeline mode (before DMA init, before POST_APPLY) */
+    {
+        uint32_t offset = 0x200 * 4;
+        uint32_t value = 0x00000001;
+        struct nvhost32_ctrl_module_regrdwr_args rw;
+        memset(&rw, 0, sizeof(rw));
+        rw.id = 0x0B;
+        rw.num_offsets = 1;
+        rw.block_size = 4;
+        rw.offsets = (uint32_t)(uintptr_t)&offset;
+        rw.values = (uint32_t)(uintptr_t)&value;
+        rw.write = 1;
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_MODULE_REGRDWR, &rw) == 0)
+            printf("PIO: 0x200=1 OK\n");
+        else
+            perror("PIO 0x200 FAILED");
+    }
+
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
         uint32_t init_cmd[16];
@@ -396,10 +414,7 @@ int main(int argc, char **argv)
         int cn = 0;
         cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
 
-        /* 0x200-0x208: pipeline mode (zeros) */
-        cal[cn++] = OP_INCR(0x202, 3); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
-        cal[cn++] = OP_INCR(0x200, 2); cal[cn++]=0; cal[cn++]=0;
-        cal[cn++] = OP_INCR(0x205, 4); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        /* 0x200-0x208: SKIPPED — will use PIO for 0x200=1 */
 
         /* 0x700-0x75F: NR (zeros) */
         cal[cn++] = OP_INCR(0x700, 16);
