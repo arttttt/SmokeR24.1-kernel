@@ -341,31 +341,18 @@ int main(int argc, char **argv)
     uint32_t sp_stream = gsp_s.value;
     printf("Stream syncpt=%u\n", sp_stream);
 
-    /* Init gather: pixel format pipeline config (0x018-0x01C).
-     *
-     * These values are what NvIspSetConfiguration(type=1) + NvIspHwSettingsApply
-     * write to hardware for reprocess (surface_type=2). Derived from RE of
-     * FUN_00015e7a (post-handler decoder in libnvisp_v3.so) with d1_data
-     * from isp_reprocess.c:236 {2,7,9,10,3,0,6,8,17,15,12,14,11,0,16,13}.
-     *
-     * Verified against live MMIO dump (isp-reverse-engineering-status.md):
-     * streaming shows 0x018=0x0A00500A, 0x019=0x8089, 0x01A=0x013645CB,
-     * 0x01B=0x1E7, 0x01C=1. For reprocess only 0x01C differs (=2).
-     *
-     * Previous values (0x019=0x400, 0x01B=0x200) were wrong — treated as
-     * "DMA thresholds" but actually this block is pixel format pipeline
-     * config (format decode, channel mapping) without which ISP doesn't
-     * demosaic. */
+    /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
         uint32_t init_cmd[16];
         int ini = 0;
         init_cmd[ini++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        init_cmd[ini++] = OP_INCR(0x018, 5);
-        init_cmd[ini++] = 0x0A00500A;  /* 0x018 */
-        init_cmd[ini++] = 0x00008089;  /* 0x019 */
-        init_cmd[ini++] = 0x013645CB;  /* 0x01A */
-        init_cmd[ini++] = 0x000001E7;  /* 0x01B */
-        init_cmd[ini++] = 0x00000002;  /* 0x01C: 2=reprocess (1=streaming) */
+        /* Stock DMA values from SetConfig RE + 0x01C=2 for reprocess */
+        /* Original working DMA values (give luma output) */
+        init_cmd[ini++] = OP_INCR(0x019, 1);
+        init_cmd[ini++] = 0x00000400;  /* 0x019 */
+        init_cmd[ini++] = OP_INCR(0x01B, 2);
+        init_cmd[ini++] = 0x00000200;  /* 0x01B */
+        init_cmd[ini++] = 0x00000002;  /* 0x01C */
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
@@ -399,7 +386,7 @@ int main(int argc, char **argv)
         if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &isa) < 0)
             perror("init submit FAILED");
         else
-            printf("Init submit OK (0x018-0x01C pipeline config), fence=%u\n", isa.fence);
+            printf("Init submit OK (0x019/0x01B/0x01C), fence=%u\n", isa.fence);
     }
 
     /* Cal gather: initialize all shadow registers + post-apply trigger 0x0F
@@ -454,6 +441,17 @@ int main(int argc, char **argv)
 
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
+
+        /* 0x018-0x01C: pixel format pipeline config
+         * From RE of FUN_00015e7a in libnvisp_v3 — NvIspSetConfiguration(type=1)
+         * with d1_data for reprocess produces these exact values. Blob writes
+         * them via HwSettingsApply cal gather (same trigger 0x0F context). */
+        cal[cn++] = OP_INCR(0x018, 5);
+        cal[cn++] = 0x0A00500A;
+        cal[cn++] = 0x00008089;
+        cal[cn++] = 0x013645CB;
+        cal[cn++] = 0x000001E7;
+        cal[cn++] = 0x00000002;  /* reprocess surface_type */
 
         /* Post-apply trigger 0x0F */
         cal[cn++] = OP_NONINCR(0x00C, 1); cal[cn++]=0x0F;
