@@ -40,7 +40,7 @@ extern int t124_csi_tpg;
 
 /* Submit VI ISP config via host1x cmdbuf (matches stock VI init).
  * Stock configures VI for ISP routing via host1x methods, not MMIO. */
-static int __maybe_unused vi_submit_isp_config(struct tegra_channel *chan)
+static int vi_submit_isp_config(struct tegra_channel *chan)
 {
 	struct nvhost_device_data *pdata;
 	struct nvhost_channel *ch = NULL;
@@ -221,12 +221,8 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	 * vi_submit_isp_config() kept for future use (__maybe_unused).
 	 */
 	if (!chan->bfirst_fstart) {
-		err = tegra_channel_enable_stream(chan);
-		if (err) {
-			chan->capture_state = CAPTURE_ERROR;
-			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
-			return err;
-		}
+		/* Set IMAGE_DEF routing BEFORE enabling stream —
+		 * pixel path must be configured before sensor starts */
 		for (index = 0; index < chan->valid_ports; index++) {
 			u32 val = csi_read(chan, index,
 					   TEGRA_VI_CSI_IMAGE_DEF);
@@ -240,6 +236,16 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 				csi_write(chan, index,
 					  TEGRA_VI_CSI_IMAGE_DEF,
 					  val | IMAGE_DEF_DEST_MEM);
+		}
+		/* Host1x VI→ISP routing (before sensor start) */
+		if (chan->use_isp && !isp_reprocess)
+			vi_submit_isp_config(chan);
+
+		err = tegra_channel_enable_stream(chan);
+		if (err) {
+			chan->capture_state = CAPTURE_ERROR;
+			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
+			return err;
 		}
 		chan->bfirst_fstart = true;
 	}
