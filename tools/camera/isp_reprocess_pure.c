@@ -401,10 +401,7 @@ int main(int argc, char **argv)
         int cn = 0;
         cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
 
-        /* 0x200-0x208: zeros in cal (non-zero 0x200 + POST_APPLY = CDMA hang) */
-        cal[cn++] = OP_INCR(0x202, 3); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
-        cal[cn++] = OP_INCR(0x200, 2); cal[cn++]=0; cal[cn++]=0;
-        cal[cn++] = OP_INCR(0x205, 4); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        /* 0x200-0x208: SKIPPED — PIO sets 0x200=1, writing here causes POST_APPLY hang */
 
         /* 0x700-0x75F: NR (zeros) */
         cal[cn++] = OP_INCR(0x700, 16);
