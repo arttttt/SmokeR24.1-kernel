@@ -426,22 +426,80 @@ int main(int argc, char **argv)
         cal[cn++] = OP_INCR(0x304, 4);
         cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
 
-        /* 0x900: demosaic enable */
+        /* Full demosaic block 0x900-0x91F from streaming S5 (OV5693 ISP-B) */
         cal[cn++] = OP_INCR(0x900, 2);
-        cal[cn++] = 0x00000001;  /* demosaic luma enable */
-        cal[cn++] = 0x00000001;  /* extended mode enable */
+        cal[cn++] = 0x00000001;  /* demosaic enable */
+        cal[cn++] = 0x00000001;  /* extended enable */
 
-        /* 0x910: demosaic mode + coefficients (from streaming S5) */
+        cal[cn++] = OP_INCR(0x902, 1);
+        cal[cn++] = 0x00000000;
+        cal[cn++] = OP_NONINCR(0x903, 64);
+        for (int i = 0; i < 64; i++) cal[cn++] = 0;
+
+        cal[cn++] = OP_INCR(0x904, 2);
+        cal[cn++] = 0x00005555;
+        cal[cn++] = 0x00000001;
+
+        cal[cn++] = OP_INCR(0x906, 1);
+        cal[cn++] = 0x00000000;
+        cal[cn++] = OP_NONINCR(0x907, 36);
+        for (int i = 0; i < 36; i++) cal[cn++] = 0;
+
+        cal[cn++] = OP_INCR(0x908, 1);
+        cal[cn++] = 0x00005555;
+
+        cal[cn++] = OP_INCR(0x909, 7);
+        cal[cn++] = 0x00000001; cal[cn++] = 0xfc000f00;
+        cal[cn++] = 0xf680f320; cal[cn++] = 0x0d80fde0;
+        cal[cn++] = 0x00000030;  /* OV5693 */
+        cal[cn++] = 0x1400002a;
+        cal[cn++] = 0x3c00002b;
+
         cal[cn++] = OP_INCR(0x910, 9);
-        cal[cn++] = 0x00000003;  /* mode=3 (enhanced) */
-        cal[cn++] = 0x00000028;  /* precision packed */
-        cal[cn++] = 0x01480029;  /* edge strength + chroma weight */
-        cal[cn++] = 0x0003030b;  /* direction (OV5693 ISP-B) */
-        cal[cn++] = 0x00990030;  /* precision + mode */
-        cal[cn++] = 0x00000800;  /* weight + threshold */
-        cal[cn++] = 0x007b0666;  /* value fields */
-        cal[cn++] = 0x00000036;  /* direction precision (OV5693) */
-        cal[cn++] = 0x00001f1f;  /* additional precision (OV5693) */
+        cal[cn++] = 0x00000003;  /* mode=3 enhanced */
+        cal[cn++] = 0x00000028;
+        cal[cn++] = 0x01480029;
+        cal[cn++] = 0x0003030b;  /* OV5693 */
+        cal[cn++] = 0x00990030;
+        cal[cn++] = 0x00000800;
+        cal[cn++] = 0x007b0666;
+        cal[cn++] = 0x00000036;  /* OV5693 */
+        cal[cn++] = 0x00001f1f;  /* OV5693 */
+
+        cal[cn++] = OP_INCR(0x919, 1);
+        cal[cn++] = 0x00000000;
+
+        cal[cn++] = OP_NONINCR(0x91a, 9);
+        for (int i = 0; i < 8; i++) cal[cn++] = 0;
+        cal[cn++] = 0x00000200;
+
+        cal[cn++] = OP_INCR(0x91b, 1);
+        cal[cn++] = 0x00000000;
+        cal[cn++] = OP_NONINCR(0x91c, 9);
+        cal[cn++] = 0; cal[cn++] = 0; cal[cn++] = 0; cal[cn++] = 0;
+        cal[cn++] = 0x00000001;
+        cal[cn++] = 0x00000025;  /* OV5693 */
+        cal[cn++] = 0x00000000;
+        cal[cn++] = 0x00000026;
+        cal[cn++] = 0x00000361;
+
+        cal[cn++] = OP_INCR(0x91d, 1);
+        cal[cn++] = 0x00000000;
+        cal[cn++] = OP_NONINCR(0x91e, 9);
+        cal[cn++] = 0; cal[cn++] = 0; cal[cn++] = 0; cal[cn++] = 0;
+        cal[cn++] = 0x00000000; cal[cn++] = 0x00000780;
+        cal[cn++] = 0x00000000; cal[cn++] = 0x00000780;
+        cal[cn++] = 0x00000200;
+
+        cal[cn++] = OP_INCR(0x91f, 1);
+        cal[cn++] = 0x00000032;
+
+        cal[cn++] = OP_INCR(0x920, 10);
+        cal[cn++] = 0x00000002; cal[cn++] = work_iova + 0x31660;
+        cal[cn++] = 0x00000000; cal[cn++] = work_iova + 0x3f4a0;
+        cal[cn++] = 0x0000fa80; cal[cn++] = work_iova + 0x30000;
+        cal[cn++] = 0x00001c50; cal[cn++] = work_iova + 0x20000;
+        cal[cn++] = work_iova + 0x20000; cal[cn++] = work_iova + 0x20000;
 
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
