@@ -732,9 +732,13 @@ static int isp_streaming_init(struct tegra_isp_t124 *isp)
 	cmd[n++] = 0x00000010;
 	n = isp_append_zero_block(isp, cmd, n);
 	cmd[n++] = nvhost_opcode_setclass(isp->class_id, 0, 0);
+	/* DMA config: pitch-linear streaming (V4L2 buffers are pitch-linear).
+	 * Stock uses blocklinear [0x0a00500a, 0x8089, 0x13645cb, 0x1e7, 1]
+	 * but that requires kind=0xFE buffer allocation.
+	 * Pitch-linear = same thresholds as reprocess + 0x01C=1 (streaming). */
 	cmd[n++] = nvhost_opcode_incr(0x018, 5);
-	cmd[n++] = 0x0a00500a; cmd[n++] = 0x00008089;
-	cmd[n++] = 0x013645cb; cmd[n++] = 0x000001e7;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000400;
+	cmd[n++] = 0x00000000; cmd[n++] = 0x00000200;
 	cmd[n++] = 0x00000001;
 	n = isp_append_syncpt(isp, cmd, n);
 	dev_info(dev, "S1: %d words\n", n);
@@ -1154,7 +1158,7 @@ int isp_t124_process_frame(struct tegra_isp_t124 *isp,
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_HEIGHT, 1);
 	cmd[n++] = ((H - 1) & 0x3FFF) << 16;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_FORMAT, 1);
-	cmd[n++] = ISP_FORMAT_YUV420;
+	cmd[n++] = ISP_FORMAT_YUV420_PITCH;
 	cmd[n++] = nvhost_opcode_incr(ISP_METHOD_OUT_COLOR, 1);
 	cmd[n++] = 0;
 
