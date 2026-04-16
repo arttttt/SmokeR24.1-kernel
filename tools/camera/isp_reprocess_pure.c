@@ -710,8 +710,10 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: single 0x0B (from blob gather RE) */
+    /* Reprocess trigger: 0x09 + 0x0B (stock SUBMIT mode==1) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
+    cmd[n++] = OP_NONINCR(0x00C, 1);
+    cmd[n++] = 0x09;
     cmd[n++] = OP_NONINCR(0x00C, 1);
     cmd[n++] = 0x0B;
 
