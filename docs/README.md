@@ -9,12 +9,19 @@
 ## Documentation Structure
 
 ### Graphics & Display
-- [HWC1 Architecture Analysis](graphics/hwc1-architecture.md) — Full analysis of the existing HWC1 implementation from JXD source leak
-- [HWC2 Implementation Plan](graphics/hwc2-implementation-plan.md) — Plan for writing a native HWC2 to replace hwc2on1 adapter
-- [HWC1 vs HWC2 API Differences](graphics/hwc1-vs-hwc2.md) — Detailed comparison of HAL versions and fence semantics
-- [Display Controller Kernel Interface](graphics/display-controller-interface.md) — tegra_dc_ext ioctls, structs, and kernel UAPI
+
+**Hardware Composer** — see [graphics/hwc/](graphics/hwc/README.md) for the full index:
+- [HWC1 Architecture Analysis](graphics/hwc/hwc1-architecture.md) — Full analysis of the existing HWC1 implementation from JXD source leak
+- [HWC1 vs HWC2 API Differences](graphics/hwc/hwc1-vs-hwc2.md) — Detailed comparison of HAL versions and fence semantics
+- [HWC2 Implementation Plan](graphics/hwc/hwc2-implementation-plan.md) — Plan for writing a native HWC2 to replace hwc2on1 adapter
+- [HWC2 vs HWC3](graphics/hwc/hwc2-vs-hwc3.md) — AIDL composer3 differences and what stays the same
+- [Shared-Core HWC2 + HWC3 Architecture](graphics/hwc/shared-core-hwc2-hwc3.md) — How to serve both transports from one backend
+- [drm-hwcomposer as Reference](graphics/hwc/drm-hwcomposer-reference.md) — What's reusable from the upstream project, what's not
+- [Display Controller Kernel Interface](graphics/hwc/display-controller-interface.md) — tegra_dc_ext ioctls, structs, and kernel UAPI
+- [Composition Engines (2D/VIC/GL)](graphics/hwc/composition-engines.md) — What each engine provides, fallback behavior, losses without hardware engines
+
+**Buffer Management**:
 - [Gralloc & Buffer Management](graphics/gralloc-buffer-management.md) — NvNativeHandle, NvRmSurface, fence primitives
-- [Composition Engines (2D/VIC/GL)](graphics/composition-engines.md) — What each engine provides, fallback behavior, losses without hardware engines
 
 ### Proprietary Blobs
 - [Blob Inventory & Dependency Map](blobs/blob-inventory.md) — Complete list of all proprietary .so files, sizes, dependencies
