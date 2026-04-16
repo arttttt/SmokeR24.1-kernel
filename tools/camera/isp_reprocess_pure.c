@@ -426,10 +426,22 @@ int main(int argc, char **argv)
         cal[cn++] = OP_INCR(0x304, 4);
         cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
 
-        /* 0x900: demosaic enable (from streaming S5) */
+        /* 0x900: demosaic enable */
         cal[cn++] = OP_INCR(0x900, 2);
         cal[cn++] = 0x00000001;  /* demosaic luma enable */
-        cal[cn++] = 0x00000001;  /* demosaic secondary enable */
+        cal[cn++] = 0x00000001;  /* extended mode enable */
+
+        /* 0x910: demosaic mode + coefficients (from streaming S5) */
+        cal[cn++] = OP_INCR(0x910, 9);
+        cal[cn++] = 0x00000003;  /* mode=3 (enhanced) */
+        cal[cn++] = 0x00000028;  /* precision packed */
+        cal[cn++] = 0x01480029;  /* edge strength + chroma weight */
+        cal[cn++] = 0x0003030b;  /* direction (OV5693 ISP-B) */
+        cal[cn++] = 0x00990030;  /* precision + mode */
+        cal[cn++] = 0x00000800;  /* weight + threshold */
+        cal[cn++] = 0x007b0666;  /* value fields */
+        cal[cn++] = 0x00000036;  /* direction precision (OV5693) */
+        cal[cn++] = 0x00001f1f;  /* additional precision (OV5693) */
 
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
