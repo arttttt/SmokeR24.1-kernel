@@ -278,8 +278,9 @@ int main(int argc, char **argv)
     uint32_t out_h = nvmap_create(OUT_SIZE);
     uint32_t work_h = nvmap_create(512 * 1024);  /* ISP work buffer */
     uint32_t cmd_h = nvmap_create(32768);  /* larger for lens shading + tone curves */
-    if (!in_h || !out_h || !work_h || !cmd_h) { printf("alloc failed\n"); return 1; }
-    nvmap_alloc(in_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h);
+    uint32_t param_h = nvmap_create(4096); /* ISP demosaic parameter block */
+    if (!in_h || !out_h || !work_h || !cmd_h || !param_h) { printf("alloc failed\n"); return 1; }
+    nvmap_alloc(in_h); nvmap_alloc(work_h); nvmap_alloc(cmd_h); nvmap_alloc(param_h);
     /* Output buffer: use blocklinear kind=0xFE if --yuv (stock uses blocklinear) */
     if (use_yuv) {
         if (nvmap_alloc_kind(out_h, 0xFE) < 0) {
@@ -295,8 +296,20 @@ int main(int argc, char **argv)
     uint32_t in_iova = nvmap_pin(in_h);
     uint32_t out_iova = nvmap_pin(out_h);
     uint32_t work_iova = nvmap_pin(work_h);
-    printf("in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x\n",
-           in_iova, out_iova, work_iova);
+    uint32_t param_iova = nvmap_pin(param_h);
+    printf("in_iova=0x%08x out_iova=0x%08x work_iova=0x%08x param_iova=0x%08x\n",
+           in_iova, out_iova, work_iova, param_iova);
+
+    /* Fill ISP parameter block with identity/zero coefficients.
+     * Stock uses 592-byte slots: 104-byte + 260-byte + 4x36-byte.
+     * ISP reads demosaic/color-correction data from this address via reg 0x100.
+     * For initial test: zero-fill (identity). */
+    {
+        uint8_t zeros[4096];
+        memset(zeros, 0, sizeof(zeros));
+        nvmap_write(param_h, 0, zeros, 4096);
+        printf("Param block: zeroed 4096 bytes at IOVA 0x%08x\n", param_iova);
+    }
 
     /* Load raw frame */
     printf("Loading %s...\n", argv[1]);
@@ -676,9 +689,12 @@ int main(int argc, char **argv)
     cmd[n++] = OP_NONINCR(0x000, 1);
     cmd[n++] = (6 << 8) | sp_loadv;
 
-    /* 0x100: stats buffer (from verified reprocess sequence) */
+    /* 0x100: ISP parameter block POINTER (not stats buffer!)
+     * ISP reads demosaic/color-correction coefficients from this DMA address.
+     * Stock uses RELOC to a ring-buffer slot. We use param_h. */
     cmd[n++] = OP_INCR(0x100, 4);
-    cmd[n++] = 0;  /* stats IOVA (not needed, but register must be written) */
+    int param_reloc = n;
+    cmd[n++] = 0;  /* IOVA patched by reloc → param_h */
     cmd[n++] = 0;
     cmd[n++] = 0;
     cmd[n++] = 0;
@@ -692,8 +708,8 @@ int main(int argc, char **argv)
     nvmap_write(cmd_h, 0, cmd, n * 4);
 
     /* Relocs */
-    struct nvhost_reloc relocs[5];
-    struct nvhost_reloc_shift shifts[5];
+    struct nvhost_reloc relocs[8];
+    struct nvhost_reloc_shift shifts[8];
     int nr = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, (work_reloc+1)*4, work_h, 0 };
     shifts[nr++].shift = 0;
@@ -705,6 +721,9 @@ int main(int argc, char **argv)
     relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, use_yuv ? (0x540000 + U_SIZE) : 0 };
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
+    shifts[nr++].shift = 0;
+    /* 0x100 → param block (ISP reads demosaic coefficients from here) */
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, param_reloc*4, param_h, 0 };
     shifts[nr++].shift = 0;
 
     /* Submit */
