@@ -191,7 +191,7 @@ void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
 #define ISP_DMA_OUT_THRESHOLD		0x00000400
 #define ISP_METHOD_DMA_INPUT		0x01B
 #define ISP_DMA_IN_THRESHOLD		0x00000200
-#define ISP_DMA_ENABLE			0x00000001
+#define ISP_DMA_ENABLE			0x00000002
 
 /* Syncpoint increment condition values */
 #define ISP_SYNCPT_COND_OP_DONE		4
