@@ -328,42 +328,22 @@ int main(int argc, char **argv)
     uint32_t sp_stream = gsp_s.value;
     printf("Stream syncpt=%u\n", sp_stream);
 
-    /* Pipeline mode submit: 0x200=1 BEFORE DMA init */
+    /* PIO write: 0x200=1 (pipeline mode) — bypasses CDMA, direct MMIO */
     {
-        uint32_t pipe_cmd[8];
-        int pi = 0;
-        pipe_cmd[pi++] = OP_SETCLASS(ISP_CLASS, 0, 0);
-        pipe_cmd[pi++] = OP_INCR(0x200, 1);
-        pipe_cmd[pi++] = 0x00000001;  /* pipeline enable */
-
-        uint32_t pipe_h = nvmap_create(4096);
-        nvmap_alloc(pipe_h);
-        nvmap_write(pipe_h, 0, pipe_cmd, pi * 4);
-        uint32_t pg1[2] = { (4 << 28) | sp_stream, 0 };
-        nvmap_write(pipe_h, 256, pg1, 8);
-
-        struct nvhost_cmdbuf pcbs[2] = {
-            { .mem = pipe_h, .offset = 0, .words = pi },
-            { .mem = pipe_h, .offset = 256, .words = 2 }
-        };
-        struct nvhost_syncpt_incr psi = { .syncpt_id = sp_stream, .syncpt_incrs = 1 };
-        uint32_t pclasses[2] = { ISP_CLASS, ISP_CLASS };
-        struct nvhost_fence pfence = {0,0};
-        struct nvhost32_submit_args psa;
-        memset(&psa, 0, sizeof(psa));
-        psa.submit_version = 0;
-        psa.num_syncpt_incrs = 1;
-        psa.num_cmdbufs = 2;
-        psa.timeout = 5000;
-        psa.syncpt_incrs = (uint32_t)(uintptr_t)&psi;
-        psa.cmdbufs = (uint32_t)(uintptr_t)pcbs;
-        psa.class_ids = (uint32_t)(uintptr_t)pclasses;
-        psa.fences = (uint32_t)(uintptr_t)&pfence;
-
-        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &psa) < 0)
-            perror("pipeline submit FAILED");
+        uint32_t offset = 0x200 * 4;  /* method 0x200 -> byte offset 0x800 */
+        uint32_t value = 0x00000001;
+        struct nvhost32_ctrl_module_regrdwr_args rw;
+        memset(&rw, 0, sizeof(rw));
+        rw.id = 0x0B;           /* ISP module id */
+        rw.num_offsets = 1;
+        rw.block_size = 4;
+        rw.offsets = (uint32_t)(uintptr_t)&offset;
+        rw.values = (uint32_t)(uintptr_t)&value;
+        rw.write = 1;
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_MODULE_REGRDWR, &rw) == 0)
+            printf("PIO write: ISP reg 0x200 (offset 0x%x) = 1 OK\n", offset);
         else
-            printf("Pipeline 0x200=1 submit OK, fence=%u\n", psa.fence);
+            perror("PIO write 0x200 FAILED");
     }
 
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
