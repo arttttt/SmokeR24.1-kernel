@@ -456,7 +456,7 @@ int main(int argc, char **argv)
         cal[cn++] = 0x3c00002b;
 
         cal[cn++] = OP_INCR(0x910, 9);
-        cal[cn++] = 0x00000003;  /* mode=3 enhanced */
+        cal[cn++] = 0x00000001;  /* mode=1 normal (was 3=enhanced) */
         cal[cn++] = 0x00000028;
         cal[cn++] = 0x01480029;
         cal[cn++] = 0x0003030b;  /* OV5693 */
