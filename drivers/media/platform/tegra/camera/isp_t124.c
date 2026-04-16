@@ -570,8 +570,13 @@ static int isp_hw_setup(struct tegra_isp_t124 *isp, u32 width, u32 height)
 	if (clk_err)
 		dev_warn(dev, "ISP EMC set_rate failed: %d\n", clk_err);
 
-	/* PIO write: ISP top-level enable */
+	/* PIO writes: ISP top-level enable + pipeline enable.
+	 * Stock NvIspOpen does both via NvRmHostModuleRegWr.
+	 * 0xFC=0x20: ISP hardware enable/reset
+	 * 0x54=ISP_ENABLE (method 0x015): pipeline mode
+	 *   0x04040007 = streaming+stats, 0x07 = full pipeline */
 	host1x_writel(isp->pdev, 0x00fc, 0x00000020);
+	host1x_writel(isp->pdev, 0x0054, 0x04040007);
 
 	if (!isp->nvmap) {
 		isp->nvmap = __nvmap_create_client(nvmap_dev, "isp_t124");
