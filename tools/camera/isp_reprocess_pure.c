@@ -426,6 +426,11 @@ int main(int argc, char **argv)
         cal[cn++] = OP_INCR(0x304, 4);
         cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
 
+        /* 0x900: demosaic enable (from streaming S5) */
+        cal[cn++] = OP_INCR(0x900, 2);
+        cal[cn++] = 0x00000001;  /* demosaic luma enable */
+        cal[cn++] = 0x00000001;  /* demosaic secondary enable */
+
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
 
