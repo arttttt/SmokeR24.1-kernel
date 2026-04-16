@@ -328,23 +328,7 @@ int main(int argc, char **argv)
     uint32_t sp_stream = gsp_s.value;
     printf("Stream syncpt=%u\n", sp_stream);
 
-    /* PIO write: 0x200=1 (pipeline mode) — bypasses CDMA, direct MMIO */
-    {
-        uint32_t offset = 0x200 * 4;  /* method 0x200 -> byte offset 0x800 */
-        uint32_t value = 0x00000001;
-        struct nvhost32_ctrl_module_regrdwr_args rw;
-        memset(&rw, 0, sizeof(rw));
-        rw.id = 0x0B;           /* ISP module id */
-        rw.num_offsets = 1;
-        rw.block_size = 4;
-        rw.offsets = (uint32_t)(uintptr_t)&offset;
-        rw.values = (uint32_t)(uintptr_t)&value;
-        rw.write = 1;
-        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_MODULE_REGRDWR, &rw) == 0)
-            printf("PIO write: ISP reg 0x200 (offset 0x%x) = 1 OK\n", offset);
-        else
-            perror("PIO write 0x200 FAILED");
-    }
+    /* PIO write: 0x200 DISABLED — testing two-pass trigger without pipeline mode */
 
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
