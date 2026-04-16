@@ -341,24 +341,6 @@ int main(int argc, char **argv)
     uint32_t sp_stream = gsp_s.value;
     printf("Stream syncpt=%u\n", sp_stream);
 
-    /* PIO: 0x200=1 pipeline mode (before DMA init, before POST_APPLY) */
-    {
-        uint32_t offset = 0x200 * 4;
-        uint32_t value = 0x00000001;
-        struct nvhost32_ctrl_module_regrdwr_args rw;
-        memset(&rw, 0, sizeof(rw));
-        rw.id = 0x0B;
-        rw.num_offsets = 1;
-        rw.block_size = 4;
-        rw.offsets = (uint32_t)(uintptr_t)&offset;
-        rw.values = (uint32_t)(uintptr_t)&value;
-        rw.write = 1;
-        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_MODULE_REGRDWR, &rw) == 0)
-            printf("PIO: 0x200=1 OK\n");
-        else
-            perror("PIO 0x200 FAILED");
-    }
-
     /* Init gather: configure ISP DMA pipeline (required for pixel output) */
     {
         uint32_t init_cmd[16];
@@ -414,7 +396,10 @@ int main(int argc, char **argv)
         int cn = 0;
         cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
 
-        /* 0x200-0x208: SKIPPED — will use PIO for 0x200=1 */
+        /* 0x200-0x208: pipeline mode (zeros) */
+        cal[cn++] = OP_INCR(0x202, 3); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x200, 2); cal[cn++]=0; cal[cn++]=0;
+        cal[cn++] = OP_INCR(0x205, 4); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
 
         /* 0x700-0x75F: NR (zeros) */
         cal[cn++] = OP_INCR(0x700, 16);
@@ -453,21 +438,6 @@ int main(int argc, char **argv)
         cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
         cal[cn++] = OP_INCR(0x304, 4);
         cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
-
-        /* 0x900: demosaic enable + 0x910 mode (with 0x100 param pointer) */
-        cal[cn++] = OP_INCR(0x900, 2);
-        cal[cn++] = 0x00000001;  /* demosaic enable */
-        cal[cn++] = 0x00000001;  /* extended enable */
-        cal[cn++] = OP_INCR(0x910, 9);
-        cal[cn++] = 0x00000001;  /* mode=1 normal */
-        cal[cn++] = 0x00000028;
-        cal[cn++] = 0x01480029;
-        cal[cn++] = 0x0003030b;
-        cal[cn++] = 0x00990030;
-        cal[cn++] = 0x00000800;
-        cal[cn++] = 0x007b0666;
-        cal[cn++] = 0x00000036;
-        cal[cn++] = 0x00001f1f;
 
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
@@ -729,10 +699,10 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: single 0x0B (from blob gather RE) */
+    /* Reprocess trigger: 0x05 (from Ghidra RE — stock reprocess = 4|1 = 5) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
     cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x0B;
+    cmd[n++] = 0x05;
 
     printf("Gather: %d words\n", n);
     nvmap_write(cmd_h, 0, cmd, n * 4);
