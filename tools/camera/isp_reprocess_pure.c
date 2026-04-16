@@ -162,10 +162,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int use_yuv = 0, rgba_input = 0;
+    int use_yuv = 0, rgba_input = 0, nv12_mode = 0, nv12_layout = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--yuv") == 0) use_yuv = 1;
         if (strcmp(argv[i], "--rgba-in") == 0) rgba_input = 1;
+        /* --nv12 = format 0xE7 + 2 planes, same UV_STRIDE buffer */
+        if (strcmp(argv[i], "--nv12") == 0) { use_yuv = 1; nv12_mode = 1; }
+        /* --nv12-layout = format 0xE7 + 2 planes + UV stride=Y_STRIDE */
+        if (strcmp(argv[i], "--nv12-layout") == 0) { use_yuv = 1; nv12_mode = 1; nv12_layout = 1; }
     }
 
     printf("=== ISP Pure Reprocess (no blobs)%s ===\n",
@@ -630,12 +634,21 @@ int main(int argc, char **argv)
     #define U_SIZE    (UV_STRIDE * (H / 2))     /* 1306368 */
     #define V_SIZE    U_SIZE
 
-    uint32_t out_fmt = use_yuv ? 0x010000E6 : 0x43; /* pitch YUV420 */
+    uint32_t out_fmt;
+    if (nv12_mode)         out_fmt = 0x010000E7;   /* NV12 (2-plane interleaved) */
+    else if (use_yuv)      out_fmt = 0x010000E6;   /* YUV420P (3-plane) */
+    else                   out_fmt = 0x43;          /* R8G8B8A8 */
     if (argc > 2 && argv[2][0] != '-') out_fmt = strtoul(argv[2], NULL, 16);
     cmd[n++] = out_fmt;
-    printf("Output format: 0x%08x%s\n", out_fmt, use_yuv ? " (YUV420)" : "");
+    printf("Output format: 0x%08x%s\n", out_fmt,
+           nv12_mode ? " (NV12)" : (use_yuv ? " (YUV420P)" : ""));
     cmd[n++] = OP_INCR(0xE03, 1);
     cmd[n++] = 0x00000000;            /* output color config (stock=0) */
+
+    /* UV layout: NV12 has interleaved UV at stride Y_STRIDE (W bytes per row),
+     * YUV420P has separate U+V planes at UV_STRIDE (W/2 aligned 64). */
+    uint32_t uv_stride_used = nv12_layout ? Y_STRIDE : UV_STRIDE;
+    uint32_t uv_offset_used = nv12_layout ? Y_SIZE : 0x540000;
 
     /* Output Y surface */
     cmd[n++] = OP_INCR(0xE04, 3);
@@ -643,18 +656,20 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0x00000000;
     cmd[n++] = use_yuv ? Y_STRIDE : W * 4;
-    /* U surface */
+    /* U surface (in NV12 this is UV interleaved plane) */
     cmd[n++] = OP_INCR(0xE07, 3);
     u_reloc = n;
     cmd[n++] = 0;
     cmd[n++] = 0x00000000;
-    cmd[n++] = use_yuv ? UV_STRIDE : W * 4;
-    /* V surface */
-    cmd[n++] = OP_INCR(0xE0A, 3);
-    v_reloc = n;
-    cmd[n++] = 0;
-    cmd[n++] = 0x00000000;
-    cmd[n++] = use_yuv ? UV_STRIDE : W * 4;
+    cmd[n++] = use_yuv ? uv_stride_used : W * 4;
+    /* V surface — skip in NV12 (2-plane format, no separate V) */
+    if (!nv12_mode) {
+        cmd[n++] = OP_INCR(0xE0A, 3);
+        v_reloc = n;
+        cmd[n++] = 0;
+        cmd[n++] = 0x00000000;
+        cmd[n++] = use_yuv ? UV_STRIDE : W * 4;
+    }
 
     /* Input: dims + format + surface + strip + trigger */
     cmd[n++] = OP_INCR(0xE31, 1);
@@ -715,11 +730,12 @@ int main(int argc, char **argv)
     shifts[nr++].shift = 0;
     relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, 0 };
     shifts[nr++].shift = 0;
-    /* Stock uses U offset 0x540000 within output buffer (not Y_SIZE) */
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, use_yuv ? 0x540000 : 0 };
+    relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, use_yuv ? uv_offset_used : 0 };
     shifts[nr++].shift = 0;
-    relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, use_yuv ? (0x540000 + U_SIZE) : 0 };
-    shifts[nr++].shift = 0;
+    if (!nv12_mode) {
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, use_yuv ? (0x540000 + U_SIZE) : 0 };
+        shifts[nr++].shift = 0;
+    }
     relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, 0 };
     shifts[nr++].shift = 0;
     /* 0x100 → param block (ISP reads demosaic coefficients from here) */
