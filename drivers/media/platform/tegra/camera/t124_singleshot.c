@@ -269,7 +269,8 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	 * ISP needs output surfaces configured before receiving pixels.
 	 * Stock does: ISP submit → VI trigger → ISP wait. */
 	if (chan->use_isp && !isp_reprocess) {
-		err = isp_t124_process_frame(chan->isp, buf->addr, 0);
+		err = isp_t124_process_frame(chan->isp, buf->addr,
+						    chan->isp->stats_buf.dma);
 		if (err) {
 			dev_err(&chan->video.dev,
 				"ISP pre-frame submit failed: %d\n", err);
@@ -364,7 +365,8 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 			/* ISP writes directly to V4L2 buffer (like streaming mode) */
 			err = isp_t124_process_frame_reprocess(chan->isp,
 					chan->isp_raw_buf->dma,
-					buf->addr, 0);
+					buf->addr,
+					chan->isp->stats_buf.dma);
 			if (err) {
 				dev_err(&chan->video.dev,
 					"ISP reprocess failed: %d\n", err);
