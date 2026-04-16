@@ -439,6 +439,21 @@ int main(int argc, char **argv)
         cal[cn++] = OP_INCR(0x304, 4);
         cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
 
+        /* 0x900: demosaic enable + 0x910 mode (with 0x100 param pointer) */
+        cal[cn++] = OP_INCR(0x900, 2);
+        cal[cn++] = 0x00000001;  /* demosaic enable */
+        cal[cn++] = 0x00000001;  /* extended enable */
+        cal[cn++] = OP_INCR(0x910, 9);
+        cal[cn++] = 0x00000001;  /* mode=1 normal */
+        cal[cn++] = 0x00000028;
+        cal[cn++] = 0x01480029;
+        cal[cn++] = 0x0003030b;
+        cal[cn++] = 0x00990030;
+        cal[cn++] = 0x00000800;
+        cal[cn++] = 0x007b0666;
+        cal[cn++] = 0x00000036;
+        cal[cn++] = 0x00001f1f;
+
         /* 0x053: work buffer */
         cal[cn++] = OP_INCR(0x053, 2); cal[cn++]=0; cal[cn++]=0;
 
