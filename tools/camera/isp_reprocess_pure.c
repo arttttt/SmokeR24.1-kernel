@@ -383,10 +383,19 @@ int main(int argc, char **argv)
         int cn = 0;
         cal[cn++] = OP_SETCLASS(ISP_CLASS, 0, 0);
 
-        /* 0x200-0x208: pipeline mode (zeros) */
-        cal[cn++] = OP_INCR(0x202, 3); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
-        cal[cn++] = OP_INCR(0x200, 2); cal[cn++]=0; cal[cn++]=0;
-        cal[cn++] = OP_INCR(0x205, 4); cal[cn++]=0; cal[cn++]=0; cal[cn++]=0; cal[cn++]=0;
+        /* 0x200-0x208: pipeline mode (stock streaming S5, OV5693 ISP-B) */
+        cal[cn++] = OP_INCR(0x202, 3);
+        cal[cn++] = 0x00000001;   /* 0x202: input config enable */
+        cal[cn++] = 0x00780078;   /* 0x203: sensor dims (OV5693) */
+        cal[cn++] = 0x00780078;   /* 0x204: sensor dims (OV5693) */
+        cal[cn++] = OP_INCR(0x200, 2);
+        cal[cn++] = 0x00000001;   /* 0x200: pipeline enable! */
+        cal[cn++] = 0x00000000;   /* 0x201 */
+        cal[cn++] = OP_INCR(0x205, 4);
+        cal[cn++] = 0x00000000;   /* 0x205 */
+        cal[cn++] = 0x000600c8;   /* 0x206: stride/format */
+        cal[cn++] = 0x000f000f;   /* 0x207 */
+        cal[cn++] = 0x00000000;   /* 0x208 (OV5693=0, IMX179=0x3333) */
 
         /* 0x700-0x75F: NR (zeros) */
         cal[cn++] = OP_INCR(0x700, 16);
@@ -757,22 +766,6 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
     cmd[n++] = 0;
-
-    /* Demosaic in per-frame (test: maybe ISP resets between cal and frame) */
-    cmd[n++] = OP_INCR(0x900, 2);
-    cmd[n++] = 1; cmd[n++] = 1;
-    cmd[n++] = OP_INCR(0x904, 2);
-    cmd[n++] = 0x00005555; cmd[n++] = 0x00000001;
-    cmd[n++] = OP_INCR(0x908, 1);
-    cmd[n++] = 0x00005555;
-    cmd[n++] = OP_INCR(0x910, 9);
-    cmd[n++] = 0x00000001; cmd[n++] = 0x00000028;
-    cmd[n++] = 0x01480029; cmd[n++] = 0x0003030b;
-    cmd[n++] = 0x00990030; cmd[n++] = 0x00000800;
-    cmd[n++] = 0x007b0666; cmd[n++] = 0x00000036;
-    cmd[n++] = 0x00001f1f;
-    cmd[n++] = OP_INCR(0x91f, 1);
-    cmd[n++] = 0x00000032;
 
     /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
