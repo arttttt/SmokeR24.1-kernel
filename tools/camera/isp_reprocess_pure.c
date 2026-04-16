@@ -352,7 +352,7 @@ int main(int argc, char **argv)
         init_cmd[ini++] = 0x00000400;  /* 0x019 */
         init_cmd[ini++] = OP_INCR(0x01B, 2);
         init_cmd[ini++] = 0x00000200;  /* 0x01B */
-        init_cmd[ini++] = 0x00000001;  /* 0x01C = streaming DMA + trigger 0x05 */
+        init_cmd[ini++] = 0x00000002;  /* 0x01C */
 
         uint32_t init_h = nvmap_create(4096);
         nvmap_alloc(init_h);
@@ -675,7 +675,7 @@ int main(int argc, char **argv)
 
     /* ISP_ENABLE — try different values */
     cmd[n++] = OP_INCR(0x015, 1);
-    uint32_t isp_enable = 0x04040007;  /* stock reprocess SETUP: includes stats enable bits */
+    uint32_t isp_enable = 0x00000007;  /* from blob gather RE */
     if (argc > 3) isp_enable = strtoul(argv[3], NULL, 16);
     cmd[n++] = isp_enable;
     printf("ISP_ENABLE: 0x%08x\n", isp_enable);
@@ -699,10 +699,10 @@ int main(int argc, char **argv)
     cmd[n++] = 0;
     cmd[n++] = 0;
 
-    /* Reprocess trigger: 0x05 (from Ghidra RE — stock reprocess = 4|1 = 5) */
+    /* Reprocess trigger: single 0x0B (from blob gather RE) */
     cmd[n++] = OP_SETCLASS(ISP_CLASS, 0, 0);
     cmd[n++] = OP_NONINCR(0x00C, 1);
-    cmd[n++] = 0x05;
+    cmd[n++] = 0x0B;
 
     printf("Gather: %d words\n", n);
     nvmap_write(cmd_h, 0, cmd, n * 4);
