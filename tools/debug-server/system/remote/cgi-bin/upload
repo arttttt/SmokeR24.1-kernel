@@ -1,0 +1,16 @@
+#!/system/bin/sh
+# Upload a file to the device via HTTP POST.
+#
+# Usage (via httpd):
+#   POST /cgi-bin/upload?path=/sdcard/tmp/boot.img
+#   Request body = raw file contents
+
+BB=/system/remote/busybox
+
+echo "Content-Type: text/plain"
+echo ""
+DEST=$(echo "$QUERY_STRING" | $BB sed 's/path=//;s/%2F/\//g;s/%20/ /g')
+[ -z "$DEST" ] && { echo "ERROR: specify ?path=/tmp/boot.img"; exit 1; }
+$BB cat > "$DEST"
+SIZE=$($BB ls -l "$DEST" | $BB awk '{print $5}')
+echo "OK: $DEST ($SIZE bytes)"

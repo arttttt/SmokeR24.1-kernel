@@ -40,7 +40,7 @@ extern int t124_csi_tpg;
 
 /* Submit VI ISP config via host1x cmdbuf (matches stock VI init).
  * Stock configures VI for ISP routing via host1x methods, not MMIO. */
-static int __maybe_unused vi_submit_isp_config(struct tegra_channel *chan)
+static int vi_submit_isp_config(struct tegra_channel *chan)
 {
 	struct nvhost_device_data *pdata;
 	struct nvhost_channel *ch = NULL;
@@ -221,12 +221,8 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	 * vi_submit_isp_config() kept for future use (__maybe_unused).
 	 */
 	if (!chan->bfirst_fstart) {
-		err = tegra_channel_enable_stream(chan);
-		if (err) {
-			chan->capture_state = CAPTURE_ERROR;
-			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
-			return err;
-		}
+		/* Set IMAGE_DEF routing BEFORE enabling stream —
+		 * pixel path must be configured before sensor starts */
 		for (index = 0; index < chan->valid_ports; index++) {
 			u32 val = csi_read(chan, index,
 					   TEGRA_VI_CSI_IMAGE_DEF);
@@ -240,6 +236,16 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 				csi_write(chan, index,
 					  TEGRA_VI_CSI_IMAGE_DEF,
 					  val | IMAGE_DEF_DEST_MEM);
+		}
+		/* Host1x VI→ISP routing (before sensor start) */
+		if (chan->use_isp && !isp_reprocess)
+			vi_submit_isp_config(chan);
+
+		err = tegra_channel_enable_stream(chan);
+		if (err) {
+			chan->capture_state = CAPTURE_ERROR;
+			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
+			return err;
 		}
 		chan->bfirst_fstart = true;
 	}
@@ -255,8 +261,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			stride = 0;
 		} else if (chan->use_isp) {
 			/* ISP reprocess: VI writes raw — use VI-side IOVA */
-			addr = chan->vi_raw_dma ? chan->vi_raw_dma :
-						  chan->isp_raw_dma;
+			addr = chan->isp_raw_buf ? chan->isp_raw_buf->dma : 0;
 			stride = chan->format.width * 2;
 		} else {
 			/* Normal: VI writes to V4L2 buffer */
@@ -270,7 +275,8 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	 * ISP needs output surfaces configured before receiving pixels.
 	 * Stock does: ISP submit → VI trigger → ISP wait. */
 	if (chan->use_isp && !isp_reprocess) {
-		err = isp_t124_process_frame(chan->isp, buf->addr, 0);
+		err = isp_t124_process_frame(chan->isp, buf->addr,
+						    chan->isp->stats_buf.dma);
 		if (err) {
 			dev_err(&chan->video.dev,
 				"ISP pre-frame submit failed: %d\n", err);
@@ -340,7 +346,7 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 		}
 	} else if (chan->use_isp && isp_reprocess) {
 		/* ISP reprocess: VI→memory→ISP.
-		 * First wait MW_ACK (VI write to isp_raw_dma),
+		 * First wait MW_ACK (VI write to isp_raw_buf),
 		 * then submit ISP reprocess job. */
 		for (index = 0; index < chan->valid_ports; index++) {
 			err = arm_wait_mw_ack(chan, index, &ts);
@@ -352,10 +358,21 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 				break;
 			}
 		}
+		if (!err && chan->isp_raw_buf->cpu) {
+			u32 *raw = chan->isp_raw_buf->cpu;
+			int nz = 0, i;
+			for (i = 0; i < 256; i++)
+				if (raw[i]) nz++;
+			dev_info(&chan->video.dev,
+				 "ISP raw buf check: %d/256 non-zero, first=0x%08x 0x%08x 0x%08x 0x%08x\n",
+				 nz, raw[0], raw[1], raw[2], raw[3]);
+		}
 		if (!err) {
+			/* ISP writes directly to V4L2 buffer (like streaming mode) */
 			err = isp_t124_process_frame_reprocess(chan->isp,
-					chan->isp_raw_dma,
-					chan->isp_out_dma, 0);
+					chan->isp_raw_buf->dma,
+					buf->addr,
+					chan->isp->stats_buf.dma);
 			if (err) {
 				dev_err(&chan->video.dev,
 					"ISP reprocess failed: %d\n", err);

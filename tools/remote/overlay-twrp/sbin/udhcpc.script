@@ -1,0 +1,15 @@
+#!/sbin/sh
+#
+# Minimal udhcpc default script for TWRP recovery.
+# Called by busybox udhcpc on lease events.
+
+case "$1" in
+    bound|renew)
+        ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}"
+        [ -n "$router" ] && route add default gw "$router" dev "$interface"
+        [ -n "$dns" ] && echo "nameserver $dns" > /etc/resolv.conf
+        ;;
+    deconfig)
+        ifconfig "$interface" 0.0.0.0
+        ;;
+esac

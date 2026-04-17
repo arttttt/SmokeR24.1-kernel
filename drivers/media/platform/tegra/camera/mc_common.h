@@ -201,14 +201,8 @@ struct tegra_channel {
 	/* ISP pipeline integration */
 	bool use_isp;			/* true = VI→ISP pipeline active */
 	struct tegra_isp_t124 *isp;	/* ISP instance (A or B) */
-	void *isp_raw_cpu;		/* internal raw buffer for VI output */
-	dma_addr_t isp_raw_dma;		/* ISP-side IOVA (for ISP read) */
-	dma_addr_t vi_raw_dma;		/* VI-side IOVA (for VI write) */
-	size_t isp_raw_size;
-	void *isp_out_cpu;		/* ISP output buffer (ISP device IOVA) */
-	dma_addr_t isp_out_dma;
-	size_t isp_out_size;
-	struct page *isp_out_page;	/* backing pages for isp_out */
+	struct isp_dma_buf *isp_raw_buf; /* nvmap: VI writes raw, ISP reads */
+	struct isp_dma_buf *isp_out_buf; /* nvmap: ISP writes processed output */
 };
 
 #define to_tegra_channel(vdev) \

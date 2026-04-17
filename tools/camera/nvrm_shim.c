@@ -255,6 +255,38 @@ int ioctl(int fd, int request, ...) {
          * Setting num_syncpt_incrs=0 prevents kernel from waiting. */
         int found_trigger = 0;
 
+        /* Dump gather contents to file for analysis */
+        {
+            static int dump_count = 0;
+            struct { uint32_t mem; uint32_t offset; uint32_t words; } *dump_cbs =
+                (void *)(uintptr_t)sa->cmdbufs;
+            for (uint32_t dg = 0; dg < sa->num_cmdbufs; dg++) {
+                for (int dm = 0; dm < num_mapped; dm++) {
+                    /* Each mapped region corresponds to a dmabuf.
+                     * The cmdbuf mem handle may not match directly,
+                     * but all push bufs are mapped. Try each. */
+                    uint32_t *pb = (uint32_t *)mapped[dm].addr;
+                    uint32_t pb_bytes = mapped[dm].length;
+                    if (dump_cbs[dg].offset + dump_cbs[dg].words * 4 <= pb_bytes) {
+                        uint32_t *gather = pb + dump_cbs[dg].offset / 4;
+                        char fname[128];
+                        snprintf(fname, sizeof(fname),
+                                 "/data/local/tmp/gather_%d_%d.bin",
+                                 dump_count, dg);
+                        FILE *gf = fopen(fname, "wb");
+                        if (gf) {
+                            fwrite(gather, 4, dump_cbs[dg].words, gf);
+                            fclose(gf);
+                            fprintf(stderr, "nvrm_shim: dumped G[%d] %u words to %s\n",
+                                    dg, dump_cbs[dg].words, fname);
+                        }
+                        break;
+                    }
+                }
+            }
+            dump_count++;
+        }
+
         for (uint32_t g = 0; g < sa->num_cmdbufs; g++) {
             /* Find the gather in our mapped push buffers */
             for (int m = 0; m < num_mapped; m++) {

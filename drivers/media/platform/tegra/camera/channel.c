@@ -66,7 +66,7 @@ MODULE_PARM_DESC(t124_single_shot, "Single-shot capture (default: 1, no tearing)
 #endif
 
 
-#define FRAMERATE	120
+#define FRAMERATE	60
 #define BPP_MEM		2
 
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
@@ -1234,67 +1234,51 @@ static int tegra_channel_start_streaming(struct vb2_queue *vq, u32 count)
 			 isp_class);
 
 		if (isp) {
-			u32 raw_bpp = 2; /* RAW10 = 2 bytes/pixel */
-			chan->isp_raw_size = chan->format.width *
-					    chan->format.height * raw_bpp;
-			/* Allocate raw buffer through ISP device (ISP reads it).
-			 * Then map same pages into VI SMMU for VI write. */
-			chan->isp_raw_cpu = dma_alloc_coherent(
-					&isp->pdev->dev,
-					PAGE_ALIGN(chan->isp_raw_size),
-					&chan->isp_raw_dma, GFP_KERNEL);
-			if (chan->isp_raw_cpu) {
-				ret = isp_t124_stream_init(isp,
-						chan->format.width,
-						chan->format.height,
-						isp_reprocess);
-				if (ret) {
-					dev_warn(&chan->video.dev,
-						 "ISP init failed: %d\n", ret);
-					dma_free_coherent(
-						&isp->pdev->dev,
-						PAGE_ALIGN(chan->isp_raw_size),
-						chan->isp_raw_cpu,
-						chan->isp_raw_dma);
-					chan->isp_raw_cpu = NULL;
-				} else {
-					chan->isp = isp;
-					chan->use_isp = true;
-					/* Allocate ISP output buffer —
-					 * uses sensor resolution (set by stream_init).
-					 * ISP writes beyond calculated NV12 size
-					 * (SMMU faults at ~13.5MB for 3280x2464).
-					 * Use 2x safety margin. */
-					{
-						u32 y_sz = isp->y_stride * isp->height;
-						u32 uv_sz = isp->uv_stride * (isp->height / 2);
-						chan->isp_out_size = (y_sz + 2 * uv_sz) * 2;
-						chan->isp_out_cpu = dma_alloc_coherent(
-							&isp->pdev->dev,
-							PAGE_ALIGN(chan->isp_out_size),
-							&chan->isp_out_dma,
-							GFP_KERNEL);
-						if (!chan->isp_out_cpu) {
-							dev_warn(&chan->video.dev,
-								 "ISP out buf alloc failed\n");
-							chan->use_isp = false;
-							isp_t124_stream_stop(isp);
-							dma_free_coherent(&isp->pdev->dev,
-								PAGE_ALIGN(chan->isp_raw_size),
-								chan->isp_raw_cpu,
-								chan->isp_raw_dma);
-							chan->isp_raw_cpu = NULL;
-						}
-					}
-					if (chan->use_isp)
-						dev_info(&chan->video.dev,
-							 "ISP pipeline active: %ux%u out_dma=0x%pad raw_dma=0x%pad\n",
-							 chan->format.width,
-							 chan->format.height,
-							 &chan->isp_out_dma,
-							 &chan->isp_raw_dma);
-				}
+			size_t raw_size = chan->format.width *
+					  chan->format.height * 2;
+
+			/* Allocate raw buffer via nvmap IOVMM —
+			 * shared SMMU mapping visible to both VI and ISP */
+			chan->isp_raw_buf = kzalloc(sizeof(*chan->isp_raw_buf),
+						    GFP_KERNEL);
+			if (!chan->isp_raw_buf)
+				goto isp_skip;
+
+			ret = isp_t124_stream_init(isp,
+					chan->format.width,
+					chan->format.height,
+					isp_reprocess);
+			if (ret) {
+				dev_warn(&chan->video.dev,
+					 "ISP init failed: %d\n", ret);
+				kfree(chan->isp_raw_buf);
+				chan->isp_raw_buf = NULL;
+				goto isp_skip;
 			}
+
+			ret = isp_nvmap_buf_alloc(isp, chan->isp_raw_buf,
+						  raw_size);
+			if (ret) {
+				dev_warn(&chan->video.dev,
+					 "ISP raw buf alloc failed: %d\n", ret);
+				isp_t124_stream_stop(isp);
+				kfree(chan->isp_raw_buf);
+				chan->isp_raw_buf = NULL;
+				goto isp_skip;
+			}
+
+			/* Reprocess: ISP writes directly to V4L2 buffer,
+			 * no separate output buffer needed.
+			 * Streaming: ISP also writes to V4L2 buffer. */
+
+			chan->isp = isp;
+			chan->use_isp = true;
+			dev_info(&chan->video.dev,
+				 "ISP pipeline active: %ux%u raw=0x%pad\n",
+				 chan->format.width, chan->format.height,
+				 &chan->isp_raw_buf->dma);
+isp_skip:
+			;
 		}
 	}
 #endif
@@ -1381,19 +1365,17 @@ static int tegra_channel_stop_streaming(struct vb2_queue *vq)
 		tegra_channel_update_clknbw(chan, 0);
 
 	/* ISP pipeline cleanup */
-	if (chan->isp_out_cpu && chan->isp) {
-		dma_free_coherent(&chan->isp->pdev->dev,
-				  PAGE_ALIGN(chan->isp_out_size),
-				  chan->isp_out_cpu, chan->isp_out_dma);
-		chan->isp_out_cpu = NULL;
-	}
-	if (chan->isp_raw_cpu && chan->isp) {
-		dma_free_coherent(&chan->isp->pdev->dev,
-				  PAGE_ALIGN(chan->isp_raw_size),
-				  chan->isp_raw_cpu, chan->isp_raw_dma);
-		chan->isp_raw_cpu = NULL;
-	}
-	if (chan->use_isp) {
+	if (chan->use_isp && chan->isp) {
+		if (chan->isp_out_buf) {
+			isp_nvmap_buf_free(chan->isp, chan->isp_out_buf);
+			kfree(chan->isp_out_buf);
+			chan->isp_out_buf = NULL;
+		}
+		if (chan->isp_raw_buf) {
+			isp_nvmap_buf_free(chan->isp, chan->isp_raw_buf);
+			kfree(chan->isp_raw_buf);
+			chan->isp_raw_buf = NULL;
+		}
 		isp_t124_stream_stop(chan->isp);
 		chan->use_isp = false;
 		chan->isp = NULL;

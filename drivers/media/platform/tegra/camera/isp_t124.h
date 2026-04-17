@@ -17,12 +17,18 @@ struct dentry;
 struct nvmap_client;
 struct nvmap_handle_ref;
 
+struct dma_buf_attachment;
+struct sg_table;
+
 struct isp_dma_buf {
 	void *cpu;
 	dma_addr_t dma;
 	size_t size;
 	/* nvmap backing */
 	struct nvmap_handle_ref *nvmap_ref;
+	/* SMMU mapping for ISP device */
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
 };
 
 struct tegra_isp_t124 {
@@ -91,6 +97,12 @@ int isp_t124_process_frame_reprocess(struct tegra_isp_t124 *isp,
 				     dma_addr_t stats_dma);
 int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 
+/* nvmap buffer alloc/free — IOVMM heap, shared SMMU mapping */
+int isp_nvmap_buf_alloc(struct tegra_isp_t124 *isp,
+			struct isp_dma_buf *buf, size_t size);
+void isp_nvmap_buf_free(struct tegra_isp_t124 *isp,
+			struct isp_dma_buf *buf);
+
 /* ---- ISP method offsets (from stock cmdbuf capture) ---- */
 
 /* Control */
@@ -155,11 +167,31 @@ int isp_t124_wait_frame(struct tegra_isp_t124 *isp);
 
 /* ---- Stock values (from cmdbuf capture) ---- */
 
-#define ISP_FORMAT_STOCK		0x04FE00E6
-#define ISP_TRIGGER_RUNTIME		0x05
-#define ISP_TRIGGER_POST_APPLY		0x0F
-#define ISP_ENABLE_FULL_PIPELINE		0x07
+/* Output format codes (verified) */
+#define ISP_FORMAT_YUV420		0x04FE00E6  /* streaming — blocklinear */
+#define ISP_FORMAT_YUV420_PITCH		0x010000E6  /* reprocess — pitch-linear */
+#define ISP_FORMAT_R8G8B8A8		0x43        /* reprocess — no W/2 */
+#define ISP_FORMAT_A8R8G8B8		0x41        /* reprocess — alt byte order */
+
+/* Trigger values for ISP_METHOD_CONTROL (0x00C) */
+#define ISP_TRIGGER_RUNTIME		0x05  /* streaming — waits for VI */
+#define ISP_TRIGGER_REPROCESS_A		0x09  /* reprocess step 1 */
+#define ISP_TRIGGER_REPROCESS_B		0x0B  /* reprocess step 2 */
+#define ISP_TRIGGER_POST_APPLY		0x0F  /* calibration apply */
+
+/* ISP_ENABLE values for ISP_METHOD_ENABLE (0x015) */
+#define ISP_ENABLE_FULL_PIPELINE	0x07
 #define ISP_ENABLE_STATS_STREAMING	0x04040007
+
+/* Input format */
+#define ISP_IN_FORMAT_BG10		0x10200024  /* 10-bit Bayer BGGR */
+
+/* ISP DMA pipeline init registers (required for pixel output) */
+#define ISP_METHOD_DMA_CONFIG		0x019
+#define ISP_DMA_OUT_THRESHOLD		0x00000400
+#define ISP_METHOD_DMA_INPUT		0x01B
+#define ISP_DMA_IN_THRESHOLD		0x00000200
+#define ISP_DMA_ENABLE			0x00000002
 
 /* Syncpoint increment condition values */
 #define ISP_SYNCPT_COND_OP_DONE		4

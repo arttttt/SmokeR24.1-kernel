@@ -1,0 +1,31 @@
+#!/system/bin/sh
+# Dump a device partition via HTTP GET (download or save to file).
+#
+# Usage (via httpd):
+#   GET /cgi-bin/dump?part=LNX              — stream partition as binary download
+#   GET /cgi-bin/dump?part=LNX&save=/sdcard/dump.img — save to file on device
+
+BB=/system/remote/busybox
+
+PARTNAME=$(echo "$QUERY_STRING" | $BB sed 's/.*part=//;s/&.*//')
+SAVE=$(echo "$QUERY_STRING" | $BB sed -n 's/.*save=//p' | $BB sed 's/&.*//;s/%2F/\//g;s/%20/ /g;s/%3A/:/g')
+[ -z "$PARTNAME" ] && PARTNAME=LNX
+PART="/dev/block/platform/sdhci-tegra.3/by-name/$PARTNAME"
+[ ! -e "$PART" ] && { echo "Content-Type: text/plain"; echo ""; echo "ERROR: partition $PARTNAME not found"; exit 1; }
+
+if [ -n "$SAVE" ]; then
+    echo "Content-Type: text/plain"
+    echo ""
+    dd if=$PART of="$SAVE" bs=4096 2>&1
+    sync
+    SIZE=$($BB stat -c%s "$SAVE")
+    echo "OK: $SAVE ($SIZE bytes)"
+else
+    SIZE=$($BB blockdev --getsize64 $PART 2>/dev/null)
+    [ -z "$SIZE" ] && SIZE=$($BB stat -c%s $PART 2>/dev/null)
+    echo "Content-Type: application/octet-stream"
+    echo "Content-Disposition: attachment; filename=${PARTNAME}.img"
+    [ -n "$SIZE" ] && echo "Content-Length: $SIZE"
+    echo ""
+    dd if=$PART bs=4096 2>/dev/null
+fi

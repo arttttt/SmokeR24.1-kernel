@@ -845,6 +845,17 @@ void dhd_wifi_platform_unregister_drv(void)
 		wifi_ctrlfunc_unregister_drv();
 }
 
+/*
+ * Retry WiFi platform load without re-registering the driver.
+ * Used by sysfs reinit trigger when firmware_path was set after
+ * initial boot failed to find firmware.
+ */
+int dhd_wifi_platform_load_retry(void)
+{
+	return dhd_wifi_platform_load();
+}
+EXPORT_SYMBOL(dhd_wifi_platform_load_retry);
+
 extern int dhd_watchdog_prio;
 extern int dhd_dpc_prio;
 extern uint dhd_deferred_tx;

@@ -120,7 +120,9 @@ static uint32_t nvmap_create(uint32_t size) {
     return ch.handle;
 }
 static int nvmap_alloc(uint32_t handle) {
-    struct nvmap_alloc_handle ah = { .handle = handle, .heap_mask = NVMAP_HEAP_IOVMM,
+    /* Try IOVMM first, then carveout */
+    struct nvmap_alloc_handle ah = { .handle = handle,
+        .heap_mask = NVMAP_HEAP_IOVMM | (1 << 0), /* IOVMM + CARVEOUT_GENERIC */
         .flags = NVMAP_HANDLE_WRITE_COMBINE, .align = 4096 };
     if (ioctl(nvmap_fd, NVMAP_IOC_ALLOC, &ah) < 0) { perror("nvmap alloc"); return -1; }
     return 0;
@@ -199,29 +201,78 @@ int main(int argc, char **argv)
     printf("  hRm=%p\n", hRm);
 
     void *isp_handle = NULL;
-    NvError err = pIspOpen(hRm, 1, &isp_handle); /* ISP-A = 1 for MIUI */
+    NvError err = pIspOpen(hRm, 2, &isp_handle); /* ISP-B = 2 (stock uses ISP-B) */
     printf("  NvIspOpen: err=0x%x handle=%p\n", err, isp_handle);
     if (err || !isp_handle) return 1;
 
+    /* SetConfiguration type=1 and type=2 (exact bytes from stock proxy dump)
+     * Stock stack layout: data2 at ptr, data at ptr±4.
+     * We replicate the exact byte sequences captured. */
+    if (pSetConfig) {
+        /* Stock has one contiguous array, data and data2 point into it */
+        uint32_t cfg_buf[] = {
+            /* offset 0x00 */ 0x02,  /* used as data[0] for type=2 */
+            /* offset 0x04 */ 0x04,  /* data2[0] for type=2 / overlap */
+            /* offset 0x08 */ 0x01,  /* data[0] for type=1 */
+            /* offset 0x0C */ 0x07,
+            /* offset 0x10 */ 0x09,
+            /* offset 0x14 */ 0x0A,
+            /* offset 0x18 */ 0x03,
+            /* offset 0x1C */ 0x00,
+            /* offset 0x20 */ 0x06,
+            /* offset 0x24 */ 0x08,
+            /* offset 0x28 */ 0x11,
+            /* offset 0x2C */ 0x0F,
+            /* offset 0x30 */ 0x0C,
+            /* offset 0x34 */ 0x0E,
+            /* offset 0x38 */ 0x0B,
+            /* offset 0x3C */ 0x00,
+            /* offset 0x40 */ 0x10,
+            /* offset 0x44 */ 0x0D,
+        };
+        /* type=1: data=&cfg_buf[2], data2=&cfg_buf[1]
+         * Proxy showed: data2 starts with 0x40, but that was from different stack frame.
+         * Stock data2 for type=1 had first byte 0x40. Let's use the raw dump. */
+        uint32_t d1_data[] = {2, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13}; /* [0]=2 for reprocess */
+        uint32_t d1_data2[] = {0x40, 1, 7, 9, 10, 3, 0, 6};
+        uint32_t d2_data[] = {2, 4, 1, 7, 9, 10, 3, 0, 6, 8, 17, 15, 12, 14, 11, 0, 16, 13};
+        uint32_t d2_data2[] = {4, 1, 7, 9, 10, 3, 0, 6};
+
+        err = pSetConfig(isp_handle, 1, d1_data, d1_data2);
+        printf("  SetConfig(1): err=0x%x\n", err);
+        err = pSetConfig(isp_handle, 2, d2_data, d2_data2);
+        printf("  SetConfig(2): err=0x%x\n", err);
+    }
+
+    /* Stock does 2x HwCreate */
     void *hw_settings = NULL;
     pHwCreate(isp_handle, &hw_settings);
-    printf("  HwSettingsCreate: settings=%p\n", hw_settings);
+    printf("  HwSettingsCreate[0]: settings=%p\n", hw_settings);
+    void *hw_settings2 = NULL;
+    pHwCreate(isp_handle, &hw_settings2);
+    printf("  HwSettingsCreate[1]: settings=%p\n", hw_settings2);
 
-    /* Enable streaming stripping in shim — removes trigger + conditional syncpts */
+    /* Try NvIspSetConfiguration + NvIspProcessFrame
+     * SetConfiguration is REQUIRED before ProcessFrame (from RE) */
+    typedef NvError (*NvIspProcessFrame_t)(void *handle,
+        uint32_t mode, uint32_t crop_l, uint32_t crop_t,
+        uint32_t crop_r, uint32_t crop_b,
+        void *in_surf, uint32_t zero,
+        void *out_cfg, void *flush_fence, void *fence,
+        uint32_t *status, uint32_t *frame_count);
+    NvIspProcessFrame_t pProcessFrame = dlsym(lib_isp, "NvIspProcessFrame");
+    printf("  NvIspProcessFrame=%p\n", pProcessFrame);
+
+    /* HwSettingsApply */
     setenv("NVRM_SHIM_STRIP", "1", 1);
-
     err = pHwApply(hw_settings);
     printf("  HwSettingsApply: err=0x%x (streaming stripped by shim)\n", err);
-
-    /* Disable stripping for our own reprocess gather */
     unsetenv("NVRM_SHIM_STRIP");
 
-    /* TODO: NvIspSetConfiguration needs proper args, skipping for now */
-
-    /* Scan push buffer for output format (method 0xE02) set by calibration.
-     * Push buffers are mmap'd by our shim — scan /proc/self/maps for them */
-    printf("  Scanning calibration gather for output format (0xE02)...\n");
+    /* Scan push buffer and dump raw cal gather to file */
+    printf("  Scanning calibration gather...\n");
     {
+        int pb_dumped = 0;
         /* The blob's push buffer is at the shim mmap'd address.
          * Shim maps 16KB push buffers via dmabuf. Scan for INCR(0xE02,1) opcode. */
         FILE *maps = fopen("/proc/self/maps", "r");
@@ -234,60 +285,46 @@ int main(int argc, char **argv)
                     if (size == 16384 || size == 32768) { /* push buffer size */
                         uint32_t *pb = (uint32_t *)start;
                         uint32_t words = size / 4;
-                        for (uint32_t j = 0; j < words - 1; j++) {
+                        /* Dump raw push buffer to file */
+                        if (!pb_dumped) {
+                            FILE *df = fopen("/data/local/tmp/cal_pushbuf.bin", "wb");
+                            if (df) {
+                                /* Find last non-zero word */
+                                uint32_t last_nz = 0;
+                                for (uint32_t j = 0; j < words; j++)
+                                    if (pb[j]) last_nz = j;
+                                fwrite(pb, 4, last_nz + 1, df);
+                                fclose(df);
+                                printf("    Raw pushbuf dumped: %u words\n", last_nz + 1);
+                                pb_dumped = 1;
+                            }
+                        }
+                        for (uint32_t j = 0; j < words; j++) {
                             uint32_t op = pb[j];
-                            /* INCR(0xE02, 1) = 0x1E020001 */
-                            if (op == 0x1E020001) {
-                                printf("    Found 0xE02 output format = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
+                            uint32_t opcode = op >> 28;
+                            uint32_t method = (op >> 16) & 0xFFF;
+                            uint32_t count = op & 0xFFFF;
+
+                            /* Dump all INCR/NONINCR opcodes with method and data */
+                            if ((opcode == 1 || opcode == 2) && count > 0 && count < 256) {
+                                const char *type = (opcode == 1) ? "INCR" : "NONINCR";
+                                printf("    [%4u] %s(0x%03x, %u):", j, type, method, count);
+                                for (uint32_t k = 0; k < count && j+1+k < words; k++) {
+                                    if (k < 8) printf(" %08x", pb[j+1+k]);
+                                }
+                                if (count > 8) printf(" ...");
+                                printf("\n");
+                                j += count; /* skip data words */
                             }
-                            /* INCR(0xE00, 1) = output width */
-                            if (op == 0x1E000001) {
-                                printf("    Found 0xE00 output width = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
+                            /* IMM opcode */
+                            else if (opcode == 4) {
+                                uint32_t val = op & 0xFFFF;
+                                printf("    [%4u] IMM(0x%03x) = 0x%04x\n", j, method, val);
                             }
-                            /* INCR(0xE01, 1) = output height */
-                            if (op == 0x1E010001) {
-                                printf("    Found 0xE01 output height = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0xE31, 1) = input dims */
-                            if (op == 0x1E310001) {
-                                printf("    Found 0xE31 input dims = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0xE33, 1) = input format */
-                            if (op == 0x1E330001) {
-                                printf("    Found 0xE33 input format = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0x015, 1) = ISP_ENABLE */
-                            if (op == 0x10150001) {
-                                printf("    Found 0x015 ISP_ENABLE = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0xE32, 1) = strip config */
-                            if (op == 0x1E320001) {
-                                printf("    Found 0xE32 strip config = 0x%08x at pb+%u\n",
-                                       pb[j+1], j);
-                            }
-                            /* INCR(0x500, 6) = processing block */
-                            if (op == 0x15000006) {
-                                printf("    Found 0x500 processing = %08x %08x %08x %08x %08x %08x\n",
-                                       pb[j+1], pb[j+2], pb[j+3], pb[j+4], pb[j+5], pb[j+6]);
-                            }
-                            /* INCR(0xE04, 3) = Y output surface */
-                            if (op == 0x1E040003) {
-                                printf("    Found 0xE04 Y surface = [%08x, %08x, stride=%u]\n",
-                                       pb[j+1], pb[j+2], pb[j+3]);
-                            }
-                            /* INCR(0xE30, 1) = input trigger */
-                            if (op == 0x1E300001) {
-                                printf("    Found 0xE30 input trigger = %u\n", pb[j+1]);
-                            }
-                            /* NONINCR(0x00C, 1) = ISP control */
-                            if (op == 0x200C0001) {
-                                printf("    Found 0x00C ISP_CONTROL = 0x%02x\n", pb[j+1]);
+                            /* SETCLASS */
+                            else if (opcode == 0) {
+                                uint32_t cls = (op >> 6) & 0x3FF;
+                                printf("    [%4u] SETCLASS(0x%02x)\n", j, cls);
                             }
                         }
                     }
@@ -341,15 +378,74 @@ int main(int argc, char **argv)
     /* ---- Step 3: Allocate buffers ---- */
     printf("\n[3] Allocate buffers...\n");
 
-    uint32_t in_h = nvmap_create(IN_SIZE);
-    uint32_t out_h = nvmap_create(OUT_SIZE);
-    uint32_t stats_h = nvmap_create(262144);  /* 256KB stats buffer */
-    uint32_t cmd_h = nvmap_create(16384);
-    if (!in_h || !out_h || !stats_h || !cmd_h) return 1;
-    nvmap_alloc(in_h); nvmap_alloc(out_h); nvmap_alloc(stats_h); nvmap_alloc(cmd_h);
+    /* Allocate via NvRmMem — creates proper NvRmMemHandle for ISP SMMU */
+    typedef uint32_t (*NvRmMemHandleAlloc_t)(void *rm, uint32_t *heap,
+        uint32_t numHeaps, uint32_t align, uint32_t coherency,
+        uint32_t size, uint16_t tag, uint32_t reclaimCache, uint32_t *phMem);
+    typedef uint32_t (*NvRmMemAlloc_t)(uint32_t hMem, uint32_t *heap,
+        uint32_t numHeaps, uint32_t align, uint32_t coherency);
+    typedef uint32_t (*NvRmMemPin_t)(uint32_t hMem);
+    typedef uint32_t (*NvRmMemGetAddress_t)(uint32_t hMem, uint32_t offset);
+    typedef uint32_t (*NvRmMemWrite_t)(uint32_t hMem, uint32_t offset,
+        const void *src, uint32_t size);
+    typedef uint32_t (*NvRmMemRead_t)(uint32_t hMem, uint32_t offset,
+        void *dst, uint32_t size);
 
-    uint32_t in_iova = nvmap_pin(in_h);
-    uint32_t out_iova = nvmap_pin(out_h);
+    NvRmMemHandleAlloc_t pMemAlloc = dlsym(lib_nvrm, "NvRmMemHandleAlloc");
+    NvRmMemPin_t pMemPin = dlsym(lib_nvrm, "NvRmMemPin");
+    NvRmMemGetAddress_t pMemGetAddr = dlsym(lib_nvrm, "NvRmMemGetAddress");
+    NvRmMemWrite_t pMemWrite = dlsym(lib_nvrm, "NvRmMemWrite");
+    NvRmMemRead_t pMemRead = dlsym(lib_nvrm, "NvRmMemRead");
+    printf("  NvRmMem: alloc=%p pin=%p write=%p read=%p\n",
+           pMemAlloc, pMemPin, pMemWrite, pMemRead);
+
+    /* Allocate via NvRmMemHandleAllocAttr (from custom_tegra_camera) */
+    typedef int (*NvRmMemHandleAllocAttr_t)(void *hRm, void *attrs, void **phMem);
+    typedef uint32_t (*NvRmMemPin_t2)(void *hMem);
+    typedef void (*NvRmMemWrite_t2)(void *hMem, uint32_t offset, const void *src, uint32_t size);
+    typedef void (*NvRmMemRead_t2)(void *hMem, uint32_t offset, void *dst, uint32_t size);
+
+    NvRmMemHandleAllocAttr_t pAllocAttr = dlsym(lib_nvrm, "NvRmMemHandleAllocAttr");
+    NvRmMemPin_t2 pPin2 = dlsym(lib_nvrm, "NvRmMemPin");
+    NvRmMemWrite_t2 pWrite2 = dlsym(lib_nvrm, "NvRmMemWrite");
+    NvRmMemRead_t2 pRead2 = dlsym(lib_nvrm, "NvRmMemRead");
+    printf("  AllocAttr=%p Pin=%p Write=%p Read=%p\n", pAllocAttr, pPin2, pWrite2, pRead2);
+
+    uint32_t heaps[] = { 2, 0x40000000 }; /* Carveout + IOVMM fallback */
+    struct {
+        const uint32_t *Heaps; uint32_t NumHeaps; uint32_t Alignment;
+        uint32_t Coherency; uint32_t Size; uint32_t Tags;
+        uint32_t Kind; uint32_t CompTags;
+    } attr;
+
+    void *in_h = NULL, *out_h = NULL;
+
+    memset(&attr, 0, sizeof(attr));
+    attr.Heaps = heaps; attr.NumHeaps = 2; attr.Alignment = 4096;
+    attr.Coherency = 2; attr.Size = IN_SIZE;
+    int merr = pAllocAttr(hRm, &attr, &in_h);
+    printf("  AllocAttr(in, %d): err=%d h=%p\n", IN_SIZE, merr, in_h);
+
+    memset(&attr, 0, sizeof(attr));
+    attr.Heaps = heaps; attr.NumHeaps = 2; attr.Alignment = 4096;
+    attr.Coherency = 2; attr.Size = OUT_SIZE;
+    merr = pAllocAttr(hRm, &attr, &out_h);
+    printf("  AllocAttr(out, %d): err=%d h=%p\n", OUT_SIZE, merr, out_h);
+
+    if (pPin2 && in_h) pPin2(in_h);
+    if (pPin2 && out_h) pPin2(out_h);
+    printf("  NvRmMemHandle: in=0x%x out=0x%x\n", in_h, out_h);
+
+    typedef uint32_t (*NvRmMemGetAddr_t2)(void *hMem, uint32_t offset);
+    NvRmMemGetAddr_t2 pGetAddr2 = dlsym(lib_nvrm, "NvRmMemGetAddress");
+    uint32_t in_iova = pGetAddr2 ? pGetAddr2(in_h, 0) : 0;
+    uint32_t out_iova = pGetAddr2 ? pGetAddr2(out_h, 0) : 0;
+    printf("  in_h=0x%x out_h=0x%x in_iova=0x%x out_iova=0x%x\n",
+           in_h, out_h, in_iova, out_iova);
+
+    /* stats/cmd still via raw nvmap */
+    uint32_t stats_h = nvmap_create(262144); nvmap_alloc(stats_h);
+    uint32_t cmd_h = nvmap_create(16384); nvmap_alloc(cmd_h);
     uint32_t stats_iova = nvmap_pin(stats_h);
     printf("  in_iova=0x%08x out_iova=0x%08x stats_iova=0x%08x\n",
            in_iova, out_iova, stats_iova);
@@ -381,7 +477,7 @@ int main(int argc, char **argv)
     int chunk = 65536;
     for (int off = 0; off < IN_SIZE; off += chunk) {
         int sz = (IN_SIZE - off < chunk) ? IN_SIZE - off : chunk;
-        nvmap_write(in_h, off, raw_buf + off, sz);
+        pWrite2(in_h, off, raw_buf + off, sz);
     }
     free(raw_buf);
     printf("  Uploaded to nvmap\n");
@@ -390,9 +486,374 @@ int main(int argc, char **argv)
     uint8_t *zeros = calloc(1, chunk);
     for (int off = 0; off < OUT_SIZE; off += chunk) {
         int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-        nvmap_write(out_h, off, zeros, sz);
+        pWrite2(out_h, off, zeros, sz);
     }
     free(zeros);
+
+    /* ---- Try NvIspProcessFrame (blob handles everything) ---- */
+    /* Try CopyDemosaic to force demosaic coefficients into settings */
+    typedef NvError (*CopyDemosaic_t)(void *dst, void *src);
+    CopyDemosaic_t pCopyDemosaic = dlsym(lib_isp, "NvIspHwSettingsCopyDemosaic");
+    printf("  NvIspHwSettingsCopyDemosaic=%p\n", pCopyDemosaic);
+
+    /* Follow settings[0x18] → register descriptor array.
+     * Search for method 0x506 (demosaic) and set dirty flag. */
+    {
+        uint32_t *sp = (uint32_t *)hw_settings;
+        uint8_t *desc_base = (uint8_t *)(uintptr_t)sp[6]; /* settings[0x18] */
+        printf("  settings[0x18] = %p (descriptor array)\n", desc_base);
+
+        if (desc_base) {
+            /* Dump first 256 bytes of descriptor array */
+            printf("  descriptor array hex:\n");
+            for (int i = 0; i < 256; i += 16) {
+                printf("  %04x:", i);
+                for (int j = 0; j < 16; j++) printf(" %02x", desc_base[i+j]);
+                printf("\n");
+            }
+
+            /* From HwSettingsApply: descriptor format:
+             * [0] method (u32), [4] count (u16), [6] dirty (u8), [7] nonincr (u8),
+             * [8] end_marker (u8), [0xC] data or reloc, [0x10+] values
+             * Iterate looking for method=0x506 or scan for patterns */
+            printf("  Scanning for ISP methods in descriptors...\n");
+            for (int i = 0; i < 8192; i += 4) {
+                uint32_t method = *(uint32_t *)(desc_base + i);
+                uint16_t count = *(uint16_t *)(desc_base + i + 4);
+                uint8_t dirty = desc_base[i + 6];
+                uint8_t nonincr = desc_base[i + 7];
+                uint8_t end = desc_base[i + 8];
+
+                /* Valid descriptor: method < 0x1000, count < 1000, end=0 or 1 */
+                if (method > 0 && method < 0x1000 && count > 0 && count < 1000) {
+                    printf("    off=0x%04x: method=0x%03x count=%u dirty=%u nonincr=%u end=%u\n",
+                           i, method, count, dirty, nonincr, end);
+                    if (method == 0x506) {
+                        printf("    *** FOUND DEMOSAIC at offset 0x%04x! ***\n", i);
+                    }
+                }
+                if (end == 1) {
+                    printf("    END marker at 0x%04x\n", i);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (0 && pCopyDemosaic && hw_settings) { /* DISABLED — crashes */
+        /* Demosaic struct (from disasm at 0x18248):
+         * [0x00] enable (byte)
+         * [0x04] numLumaCoeffs (u32)
+         * [0x08] luma_set0_ptr → 9 x u32 (0x24 bytes)
+         * [0x0C] luma_set1_ptr
+         * [0x10] luma_set2_ptr
+         * [0x14] luma_set3_ptr
+         * [0x18] chroma_enable (byte)
+         * [0x1C] numChromaCoeffs (u32)
+         * [0x20] chromaU_set0_ptr → 16 x u32 (0x40 bytes)
+         * [0x24-0x2C] chromaU_set1-3
+         * [0x30] chromaV_set0_ptr → 16 x u32 (0x40 bytes)
+         * [0x34-0x3C] chromaV_set1-3 */
+
+        /* Stock luma coeffs from 0x506 — same for all 4 sets */
+        uint32_t luma[9] = {
+            0x3f3fcff3, 0x00000000, 0x04c1304c,
+            0x08220882, 0x00000000, 0x03d0f43d,
+            0x08621886, 0x01204812, 0x06e1b86e
+        };
+        /* Zero chroma for now */
+        uint32_t chromaU[16] = {0};
+        uint32_t chromaV[16] = {0};
+
+        uint8_t demosaic_src[0x40];
+        memset(demosaic_src, 0, sizeof(demosaic_src));
+        demosaic_src[0x00] = 1; /* enable */
+        *(uint32_t*)&demosaic_src[0x04] = 9; /* numLumaCoeffs */
+        /* 4 luma sets — all point to same coeffs */
+        *(uint32_t*)&demosaic_src[0x08] = (uint32_t)(uintptr_t)luma;
+        *(uint32_t*)&demosaic_src[0x0C] = (uint32_t)(uintptr_t)luma;
+        *(uint32_t*)&demosaic_src[0x10] = (uint32_t)(uintptr_t)luma;
+        *(uint32_t*)&demosaic_src[0x14] = (uint32_t)(uintptr_t)luma;
+        demosaic_src[0x18] = 1; /* chroma enable */
+        *(uint32_t*)&demosaic_src[0x1C] = 16; /* numChromaCoeffs */
+        *(uint32_t*)&demosaic_src[0x20] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x24] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x28] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x2C] = (uint32_t)(uintptr_t)chromaU;
+        *(uint32_t*)&demosaic_src[0x30] = (uint32_t)(uintptr_t)chromaV;
+        *(uint32_t*)&demosaic_src[0x34] = (uint32_t)(uintptr_t)chromaV;
+        *(uint32_t*)&demosaic_src[0x38] = (uint32_t)(uintptr_t)chromaV;
+        *(uint32_t*)&demosaic_src[0x3C] = (uint32_t)(uintptr_t)chromaV;
+
+        printf("  Calling CopyDemosaic (enable=1, 9 luma, 16 chroma)...\n");
+        err = pCopyDemosaic(hw_settings, demosaic_src);
+        printf("  CopyDemosaic: err=0x%x\n", err);
+
+        /* Re-apply — gather should now include demosaic regs */
+        setenv("NVRM_SHIM_STRIP", "1", 1);
+        err = pHwApply(hw_settings);
+        printf("  HwSettingsApply post-CopyDemosaic: err=0x%x\n", err);
+        unsetenv("NVRM_SHIM_STRIP");
+    }
+
+    if (pProcessFrame) {
+        printf("\n[4b] Trying NvIspProcessFrame...\n");
+
+        /* Build NvRmSurface for input (BG10 2592x1944) */
+        uint8_t in_surf[0x30];
+        memset(in_surf, 0, sizeof(in_surf));
+        *(uint32_t*)&in_surf[0x00] = W;
+        *(uint32_t*)&in_surf[0x04] = H;
+        *(uint32_t*)&in_surf[0x08] = 0x10a92087; /* Bayer BGGR 10-bit (cs=266=BGGR, dt=2, pk=7) */
+        *(uint32_t*)&in_surf[0x0C] = 1;  /* pitch layout */
+        *(uint32_t*)&in_surf[0x10] = W * 2; /* stride */
+        *(uint32_t*)&in_surf[0x14] = in_h; /* nvmap handle */
+
+        /* Build output config: NvRmSurface[3] + numPlanes + crop */
+        uint8_t out_cfg[0xA4];
+        memset(out_cfg, 0, sizeof(out_cfg));
+        uint32_t y_stride = (W + 63) & ~63;      /* 2624 */
+        uint32_t uv_stride = ((W/2) + 63) & ~63; /* 1344 */
+        /* Surface 0: Y plane — pitch layout */
+        *(uint32_t*)&out_cfg[0x00] = W;
+        *(uint32_t*)&out_cfg[0x04] = H;
+        *(uint32_t*)&out_cfg[0x08] = 0x08592004; /* Y8 */
+        *(uint32_t*)&out_cfg[0x0C] = 1;  /* pitch layout */
+        *(uint32_t*)&out_cfg[0x10] = y_stride;
+        *(uint32_t*)&out_cfg[0x14] = out_h;
+        /* Surface 1: U plane */
+        *(uint32_t*)&out_cfg[0x30] = W/2;
+        *(uint32_t*)&out_cfg[0x34] = H/2;
+        *(uint32_t*)&out_cfg[0x38] = 0x08590404; /* U8 */
+        *(uint32_t*)&out_cfg[0x3C] = 1;
+        *(uint32_t*)&out_cfg[0x40] = uv_stride;
+        *(uint32_t*)&out_cfg[0x44] = out_h;
+        *(uint32_t*)&out_cfg[0x48] = y_stride * H;
+        /* Surface 2: V plane */
+        *(uint32_t*)&out_cfg[0x60] = W/2;
+        *(uint32_t*)&out_cfg[0x64] = H/2;
+        *(uint32_t*)&out_cfg[0x68] = 0x08582404; /* V8 */
+        *(uint32_t*)&out_cfg[0x6C] = 1;
+        *(uint32_t*)&out_cfg[0x70] = uv_stride;
+        *(uint32_t*)&out_cfg[0x74] = out_h;
+        *(uint32_t*)&out_cfg[0x78] = y_stride * H + uv_stride * (H/2);
+        *(uint32_t*)&out_cfg[0x90] = 3;  /* numPlanes */
+
+        /* ProcessFrame signature from Ghidra RE:
+         * NvIspProcessFrame(handle, mode, crop_x1, crop_y1,
+         *   stack: crop_x2, crop_y2, input_surf_ptr, 0,
+         *          output_cfg, fence_ptr, fence_val_ptr, status_ptr, count_ptr)
+         *
+         * validate reads: param_2[5] = input_surf when mode=1
+         * param_2 = &local_c = {mode, crop_x1, crop_y1} on stack
+         * param_2[5] = 6th word from &local_c = stack param #3 = input_surf_ptr
+         */
+        uint32_t status = 0;
+        uint32_t frame_count = 0;
+        uint32_t flush_fence = 0, fence_val = 0;
+
+        printf("  in_surf=%p out_cfg=%p\n", in_surf, out_cfg);
+        printf("  in_surf: W=%u H=%u fmt=0x%x layout=%u pitch=%u hMem=0x%x\n",
+               *(uint32_t*)&in_surf[0], *(uint32_t*)&in_surf[4],
+               *(uint32_t*)&in_surf[8], *(uint32_t*)&in_surf[0xC],
+               *(uint32_t*)&in_surf[0x10], *(uint32_t*)&in_surf[0x14]);
+        printf("  out_cfg: W=%u H=%u fmt=0x%x layout=%u pitch=%u hMem=0x%x planes=%u\n",
+               *(uint32_t*)&out_cfg[0], *(uint32_t*)&out_cfg[4],
+               *(uint32_t*)&out_cfg[8], *(uint32_t*)&out_cfg[0xC],
+               *(uint32_t*)&out_cfg[0x10], *(uint32_t*)&out_cfg[0x14],
+               *(uint32_t*)&out_cfg[0x90]);
+
+        /* Skip ProcessFrame — it generates streaming gather that hangs ISP-B.
+         * Instead, submit reprocess gather manually using blob's ISP channel.
+         * Blob already set up ISP state via SetConfig + HwCreate + HwApply. */
+
+        /* Find blob's ISP-B channel fd (already init'd) */
+        int isp_fd = -1;
+        {
+            char linkbuf[256];
+            for (int fd = 3; fd < 100; fd++) {
+                char path[64];
+                snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+                int len = readlink(path, linkbuf, sizeof(linkbuf)-1);
+                if (len > 0) {
+                    linkbuf[len] = 0;
+                    if (strstr(linkbuf, "nvhost-isp")) {
+                        isp_fd = fd;
+                        printf("  Found ISP fd=%d → %s\n", fd, linkbuf);
+                        break;
+                    }
+                }
+            }
+        }
+        if (isp_fd < 0) { printf("  ISP fd not found!\n"); goto done; }
+
+        /* Set nvmap fd for ISP channel */
+        struct nvhost_set_nvmap_fd_args snf = { .fd = nvmap_fd };
+        ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_SET_NVMAP_FD, &snf);
+
+        /* Get syncpoints */
+        struct nvhost_get_param_arg gsp2;
+        gsp2.param = 0; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp2);
+        uint32_t sp_mem = gsp2.value;
+        gsp2.param = 1; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp2);
+        uint32_t sp_stats2 = gsp2.value;
+        gsp2.param = 2; ioctl(isp_fd, NVHOST_IOCTL_CHANNEL_GET_SYNCPOINT, &gsp2);
+        uint32_t sp_loadv = gsp2.value;
+        printf("  ISP syncpts: mem=%u stats=%u loadv=%u\n", sp_mem, sp_stats2, sp_loadv);
+
+        /* Build reprocess gather (same as pure test, matching gather #14) */
+        #define ISP_CLASS_A 0x34  /* ISP-B — blob init'd this one */
+        #define OP_SETCL(c,o,m) ((0<<28)|((o)<<16)|((c)<<6)|(m))
+        #define OP_INCR2(o,n)   ((1<<28)|((o)<<16)|(n))
+        #define OP_NONINCR2(o,n) ((2<<28)|((o)<<16)|(n))
+
+        uint32_t gather[128];
+        int gn = 0;
+        int g_in_reloc = -1, g_out_reloc = -1;
+
+        gather[gn++] = OP_SETCL(ISP_CLASS_A, 0, 0);
+
+        /* Output config */
+        gather[gn++] = OP_INCR2(0xE00, 1); gather[gn++] = ((W-1) & 0x3FFF) << 16;
+        gather[gn++] = OP_INCR2(0xE01, 1); gather[gn++] = ((H-1) & 0x3FFF) << 16;
+        gather[gn++] = OP_INCR2(0xE02, 1); gather[gn++] = 0x010000E6; /* pitch YUV420 */
+        gather[gn++] = OP_INCR2(0xE03, 1); gather[gn++] = 0;
+        gather[gn++] = OP_INCR2(0xE04, 3);
+        g_out_reloc = gn;
+        gather[gn++] = 0; /* Y IOVA reloc */
+        gather[gn++] = 0;
+        gather[gn++] = (W + 63) & ~63; /* Y stride 2624 */
+        gather[gn++] = OP_INCR2(0xE07, 3);
+        gather[gn++] = 0; /* U — same buffer, reloc later */
+        gather[gn++] = 0;
+        gather[gn++] = ((W/2) + 63) & ~63; /* UV stride 1344 */
+        gather[gn++] = OP_INCR2(0xE0A, 3);
+        gather[gn++] = 0;
+        gather[gn++] = 0;
+        gather[gn++] = ((W/2) + 63) & ~63;
+
+        /* Processing dims */
+        gather[gn++] = OP_INCR2(0x500, 6);
+        gather[gn++] = 0; gather[gn++] = 0; gather[gn++] = 0;
+        gather[gn++] = 0; gather[gn++] = 0;
+        gather[gn++] = (H << 16) | W;
+
+        /* Input */
+        gather[gn++] = OP_INCR2(0xE31, 1); gather[gn++] = (H << 16) | W;
+        gather[gn++] = OP_INCR2(0xE33, 1); gather[gn++] = 0x10200024; /* BG10 */
+        gather[gn++] = OP_INCR2(0xE34, 3);
+        g_in_reloc = gn;
+        gather[gn++] = 0; /* input IOVA reloc */
+        gather[gn++] = 0;
+        gather[gn++] = W * 2; /* input stride */
+        gather[gn++] = OP_INCR2(0xE32, 1); gather[gn++] = W & 0x3FFF;
+        gather[gn++] = OP_INCR2(0xE30, 1); gather[gn++] = 1;
+
+        /* ISP_ENABLE */
+        gather[gn++] = OP_INCR2(0x015, 1); gather[gn++] = 0x07;
+
+        /* Syncpt incrs */
+        gather[gn++] = OP_SETCL(ISP_CLASS_A, 0, 0);
+        gather[gn++] = OP_NONINCR2(0x000, 1); gather[gn++] = (4 << 8) | sp_mem;
+        gather[gn++] = OP_NONINCR2(0x000, 1); gather[gn++] = (5 << 8) | sp_stats2;
+        gather[gn++] = OP_NONINCR2(0x000, 1); gather[gn++] = (6 << 8) | sp_loadv;
+
+        /* Trigger 0x0B */
+        gather[gn++] = OP_NONINCR2(0x00C, 1); gather[gn++] = 0x0B;
+
+        printf("  Manual gather: %d words\n", gn);
+
+        /* Write gather to nvmap */
+        uint32_t gcmd_h = nvmap_create(gn * 4 + 256);
+        nvmap_alloc(gcmd_h);
+        nvmap_write(gcmd_h, 0, gather, gn * 4);
+
+        /* Relocs */
+        struct nvhost_reloc relocs2[3];
+        struct nvhost_reloc_shift shifts2[3];
+        int nr2 = 0;
+        relocs2[nr2] = (struct nvhost_reloc){ gcmd_h, g_out_reloc*4, (uint32_t)(uintptr_t)out_h, 0 };
+        shifts2[nr2++].shift = 0;
+        relocs2[nr2] = (struct nvhost_reloc){ gcmd_h, (g_out_reloc+6)*4, (uint32_t)(uintptr_t)out_h, Y_SIZE };
+        shifts2[nr2++].shift = 0;
+        relocs2[nr2] = (struct nvhost_reloc){ gcmd_h, g_in_reloc*4, (uint32_t)(uintptr_t)in_h, 0 };
+        shifts2[nr2++].shift = 0;
+
+        /* Submit */
+        struct nvhost_ctrl_syncpt_waitex_args rd2 = { .id = sp_mem, .thresh = 0, .timeout = 0 };
+        int ctrl_fd2 = open("/dev/nvhost-ctrl", O_RDWR);
+        ioctl(ctrl_fd2, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &rd2);
+        printf("  Submit (sp %u cur=%u)...\n", sp_mem, rd2.value);
+
+        struct nvhost_cmdbuf cb2 = { .mem = gcmd_h, .offset = 0, .words = gn };
+        struct nvhost_syncpt_incr si2 = { .syncpt_id = sp_mem, .syncpt_incrs = 1 };
+        uint32_t cls2 = ISP_CLASS_A;
+        struct nvhost_fence fence2 = {0,0};
+
+        struct nvhost32_submit_args sa2;
+        memset(&sa2, 0, sizeof(sa2));
+        sa2.submit_version = 0;
+        sa2.num_syncpt_incrs = 1;
+        sa2.num_cmdbufs = 1;
+        sa2.num_relocs = nr2;
+        sa2.timeout = 5000;
+        sa2.syncpt_incrs = (uint32_t)(uintptr_t)&si2;
+        sa2.cmdbufs = (uint32_t)(uintptr_t)&cb2;
+        sa2.relocs = (uint32_t)(uintptr_t)relocs2;
+        sa2.reloc_shifts = (uint32_t)(uintptr_t)shifts2;
+        sa2.class_ids = (uint32_t)(uintptr_t)&cls2;
+        sa2.fences = (uint32_t)(uintptr_t)&fence2;
+
+        if (ioctl(isp_fd, NVHOST32_IOCTL_CHANNEL_SUBMIT, &sa2) < 0) {
+            perror("  manual submit");
+        } else {
+            printf("  Manual submit OK, fence=%u\n", sa2.fence);
+            /* Wait */
+            struct nvhost_ctrl_syncpt_waitex_args wa2 = {
+                .id = sp_mem, .thresh = sa2.fence, .timeout = 5000
+            };
+            if (ioctl(ctrl_fd2, NVHOST_IOCTL_CTRL_SYNCPT_WAITEX, &wa2) < 0)
+                printf("  TIMEOUT\n");
+            else
+                printf("  Done (sp=%u val=%u)\n", sp_mem, wa2.value);
+        }
+        close(ctrl_fd2);
+        done:
+
+        /* Wait for ISP */
+        usleep(200000);
+
+        /* Read via nvmap — get dmabuf fd, mmap it */
+        struct nvmap_create_handle ofd;
+        ofd.handle = (uint32_t)(uintptr_t)out_h;
+        ioctl(nvmap_fd, NVMAP_IOC_GET_FD, &ofd);
+        printf("  out dmabuf fd=%d\n", ofd.fd);
+
+        void *out_ptr = NULL;
+        if ((int)ofd.fd > 0) {
+            out_ptr = mmap(NULL, OUT_SIZE, PROT_READ, MAP_SHARED, ofd.fd, 0);
+            if (out_ptr == MAP_FAILED) { out_ptr = NULL; perror("mmap"); }
+        }
+
+        uint8_t check[64];
+        if (out_ptr) {
+            memcpy(check, out_ptr, 64);
+            printf("  mmap[0]: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                   check[0], check[1], check[2], check[3],
+                   check[4], check[5], check[6], check[7]);
+        } else {
+            /* fallback nvmap read */
+            nvmap_read((uint32_t)(uintptr_t)out_h, 0, check, 64);
+            printf("  nvmap[0]: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                   check[0], check[1], check[2], check[3],
+                   check[4], check[5], check[6], check[7]);
+        }
+        int nz = 0;
+        for (int i = 0; i < 64; i++) if (check[i]) nz++;
+        printf("  ProcessFrame output: %d/64 non-zero → ", nz);
+        for (int i = 0; i < 16; i++) printf("%02x ", check[i]);
+        printf("\n");
+    }
 
     /* ---- Step 5+6: Build and submit reprocess per strip ---- */
     /*
@@ -426,7 +887,7 @@ int main(int argc, char **argv)
         cmd[n++] = OP_INCR(0xE01, 1);
         cmd[n++] = ((H - 1) & 0x3FFF) << 16;
         cmd[n++] = OP_INCR(0xE02, 1);
-        cmd[n++] = 0x010000C9;
+        cmd[n++] = 0x43;                  /* R8G8B8A8 (ISP code 0x43) */
         cmd[n++] = OP_INCR(0xE03, 1);
         cmd[n++] = 0x00000000;
 
@@ -435,18 +896,18 @@ int main(int argc, char **argv)
         y_reloc = n;
         cmd[n++] = 0;                     /* patched by reloc → out_iova + out_off */
         cmd[n++] = 0x00000000;
-        cmd[n++] = W * 4;                 /* full row stride for interleaved output */
-        /* U/V planes (unused for 32bpp but keep for HW) */
+        cmd[n++] = W * 4;                 /* 32bpp stride */
+        /* U/V planes — point to same buffer with valid stride to avoid MC errors */
         cmd[n++] = OP_INCR(0xE07, 3);
         u_reloc = n;
         cmd[n++] = 0;
         cmd[n++] = 0x00000000;
-        cmd[n++] = 0x00000540;
+        cmd[n++] = W * 4;
         cmd[n++] = OP_INCR(0xE0A, 3);
         v_reloc = n;
         cmd[n++] = 0;
         cmd[n++] = 0x00000000;
-        cmd[n++] = 0x00000540;
+        cmd[n++] = W * 4;
 
         /* Processing block — full dimensions */
         cmd[n++] = OP_INCR(0x500, 6);
@@ -509,9 +970,9 @@ int main(int argc, char **argv)
 
         relocs[nr] = (struct nvhost_reloc){ cmd_h, y_reloc*4, out_h, out_off };
         shifts[nr++].shift = 0;
-        relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, Y_SIZE };
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, u_reloc*4, out_h, 0 };
         shifts[nr++].shift = 0;
-        relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, Y_SIZE + UV_SIZE };
+        relocs[nr] = (struct nvhost_reloc){ cmd_h, v_reloc*4, out_h, 0 };
         shifts[nr++].shift = 0;
         relocs[nr] = (struct nvhost_reloc){ cmd_h, in_reloc*4, in_h, in_off };
         shifts[nr++].shift = 0;
@@ -569,7 +1030,7 @@ int main(int argc, char **argv)
         int offsets[] = { 0, Y_SIZE/2, Y_SIZE-4096, Y_SIZE, Y_SIZE+UV_SIZE };
         const char *names[] = { "Y start", "Y mid", "Y end", "U start", "V start" };
         for (int r = 0; r < 5; r++) {
-            nvmap_read(out_h, offsets[r], check, 4096);
+            pRead2(out_h, offsets[r], check, 4096);
             int nonzero = 0;
             for (int i = 0; i < 4096; i++)
                 if (check[i] != 0) nonzero++;
@@ -590,7 +1051,7 @@ int main(int argc, char **argv)
                 uint8_t *buf = malloc(chunk);
                 for (int off = 0; off < OUT_SIZE; off += chunk) {
                     int sz = (OUT_SIZE - off < chunk) ? OUT_SIZE - off : chunk;
-                    nvmap_read(out_h, off, buf, sz);
+                    pRead2(out_h, off, buf, sz);
                     fwrite(buf, 1, sz, fp);
                 }
                 free(buf);
@@ -602,7 +1063,7 @@ int main(int argc, char **argv)
             uint8_t scan[256];
             int first_nz = -1;
             for (int off = 0; off < Y_SIZE && first_nz < 0; off += 256) {
-                nvmap_read(out_h, off, scan, 256);
+                pRead2(out_h, off, scan, 256);
                 for (int i = 0; i < 256; i++) {
                     if (scan[i] != 0) { first_nz = off + i; break; }
                 }

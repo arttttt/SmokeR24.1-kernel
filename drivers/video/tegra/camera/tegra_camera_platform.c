@@ -30,7 +30,7 @@
 #define CAMDEV_NAME "tegra_camera_ctrl"
 
 /* Peak BPP for any of the YUV/Bayer formats */
-#define CAMERA_PEAK_BPP 2
+#define CAMERA_PEAK_BPP 5
 
 #define LANE_SPEED_1_GBPS 1000000000
 #define LANE_SPEED_1_5_GBPS 1500000000

@@ -1,0 +1,20 @@
+# Android init service definitions for WiFi remote debug.
+# Auto-loaded from /system/etc/init/ on Android 7+ (LOS 14.1).
+#
+# Starts after boot_completed:
+#   - telnetd on port 2323 (interactive shell)
+#   - remotehttpd on port 8080 (CGI server for cmd/upload/flash/kexec/dump)
+
+service remote_telnetd /system/remote/busybox telnetd -l /system/bin/sh -b 0.0.0.0 -p 2323 -F
+    disabled
+    oneshot
+    seclabel u:r:init:s0
+
+service remote_httpd /system/bin/sh /system/remote/server.sh
+    disabled
+    oneshot
+    seclabel u:r:init:s0
+
+on property:sys.boot_completed=1
+    start remote_telnetd
+    start remote_httpd

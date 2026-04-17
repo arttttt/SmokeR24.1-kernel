@@ -5,6 +5,8 @@
 *.dsp
 ihex2fw
 *.dffs
+!0104_lgc.dffs
+!0204_atl.dffs
 *.config
 *.speaker
 *.eq
