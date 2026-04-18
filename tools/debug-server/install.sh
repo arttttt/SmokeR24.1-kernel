@@ -61,10 +61,12 @@ prepare_bin() {
 
     # Check kexec + micropython from old tools/remote/bin/
     local old_bin="${SCRIPT_DIR}/../remote/bin"
-    [ ! -f "$BIN_DIR/kexec" ] && [ -f "$old_bin/kexec-armv7l" ] && \
+    if [ ! -f "$BIN_DIR/kexec" ] && [ -f "$old_bin/kexec-armv7l" ]; then
         cp "$old_bin/kexec-armv7l" "$BIN_DIR/kexec"
-    [ ! -f "$BIN_DIR/micropython" ] && [ -f "$old_bin/micropython-armv7l" ] && \
+    fi
+    if [ ! -f "$BIN_DIR/micropython" ] && [ -f "$old_bin/micropython-armv7l" ]; then
         cp "$old_bin/micropython-armv7l" "$BIN_DIR/micropython"
+    fi
 }
 
 # --- Install ---
@@ -88,7 +90,7 @@ install() {
     _push "${SYSTEM_DIR}/remote/server.sh"      "/system/remote/server.sh"
     _push "${SYSTEM_DIR}/remote/index.html"     "/system/remote/index.html"
     _push "${SYSTEM_DIR}/remote/rebuild_boot.py" "/system/remote/rebuild_boot.py"
-    for cgi in cmd upload flash kexec dump; do
+    for cgi in cmd upload download flash kexec dump; do
         _push "${SYSTEM_DIR}/remote/cgi-bin/${cgi}" "/system/remote/cgi-bin/${cgi}"
     done
 
@@ -103,7 +105,7 @@ install() {
     # Permissions
     echo "[*] Setting permissions..."
     _cmd "chmod 755 /system/remote/busybox /system/remote/server.sh /system/remote/rebuild_boot.py"
-    _cmd "chmod 755 /system/remote/cgi-bin/cmd /system/remote/cgi-bin/upload /system/remote/cgi-bin/flash /system/remote/cgi-bin/kexec /system/remote/cgi-bin/dump"
+    _cmd "chmod 755 /system/remote/cgi-bin/cmd /system/remote/cgi-bin/upload /system/remote/cgi-bin/download /system/remote/cgi-bin/flash /system/remote/cgi-bin/kexec /system/remote/cgi-bin/dump"
     _cmd "chmod 755 /system/etc/init.d/99remote"
     _cmd "[ -f /system/remote/kexec ] && chmod 755 /system/remote/kexec || true"
     _cmd "[ -f /system/remote/micropython ] && chmod 755 /system/remote/micropython || true"

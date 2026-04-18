@@ -8,6 +8,7 @@
 #   mocha-remote flash boot.img LNX          — flash image to partition (LNX=boot, SOS=recovery)
 #   mocha-remote kexec boot.img            — kexec boot (no flash, like fastboot boot)
 #   mocha-remote push local.file /tmp/     — upload file to device
+#   mocha-remote pull /remote/file [dest]  — download file from device
 #   mocha-remote shell                     — interactive shell (telnet)
 #   mocha-remote wait                      — wait for device to come online
 #
@@ -66,6 +67,16 @@ remote_upload() {
     encoded_dest=$(printf '%s' "$dest" | sed 's/ /%20/g;s/!/%21/g;s/#/%23/g;s/&/%26/g;s/=/%3D/g')
     curl -s --fail -X POST --data-binary "@${src}" \
         "$(url /cgi-bin/upload?path=${encoded_dest})" || die "Upload failed"
+}
+
+# Download file from device via /cgi-bin/download
+# Usage: remote_download /remote/path /local/path
+remote_download() {
+    local src="$1" dest="$2"
+    local encoded_src
+    encoded_src=$(printf '%s' "$src" | sed 's/ /%20/g;s/!/%21/g;s/#/%23/g;s/&/%26/g;s/=/%3D/g')
+    curl -s --fail --max-time 600 -o "$dest" \
+        "$(url /cgi-bin/download?path=${encoded_src})" || return 1
 }
 
 # Detect remote paths (busybox, kexec, cgi-bin, micropython, rebuild_boot.py)
@@ -134,6 +145,28 @@ cmd_push() {
     [[ "$dest" == */ ]] && dest="${dest}$(basename "$src")"
     echo "[*] Uploading $(basename "$src") -> $dest"
     remote_upload "$src" "$dest"
+}
+
+# Download file from device
+# Usage: cmd_pull <remote-path> [local-path]
+# If local-path is omitted, uses cwd. If it's a directory or ends with /,
+# appends remote basename.
+cmd_pull() {
+    [ $# -ge 1 ] || die "Usage: mocha-remote pull <remote-path> [local-path]"
+    local src="$1"
+    local dest="${2:-.}"
+    if [ -d "$dest" ] || [[ "$dest" == */ ]]; then
+        dest="${dest%/}/$(basename "$src")"
+    fi
+    echo "[*] Downloading $src -> $dest"
+    remote_download "$src" "$dest" || {
+        [ -f "$dest" ] && cat "$dest" >&2
+        rm -f "$dest"
+        die "Download failed"
+    }
+    local size
+    size=$(stat -f%z "$dest" 2>/dev/null || stat -c%s "$dest" 2>/dev/null)
+    echo "[+] Done: $dest ($size bytes)"
 }
 
 # Flash image to a partition + multirom trampoline inject + reboot
@@ -318,6 +351,7 @@ Commands:
   cmd <command>       Execute shell command on device
   dmesg [flags]       Show kernel log
   push <file> <path>  Upload file to device
+  pull <path> [dest]  Download file from device
   flash <img> <part>  Flash image to partition (LNX=boot, SOS=recovery)
   kexec <boot.img>    Kexec boot (like fastboot boot, no flash)
   shell               Interactive telnet shell
@@ -333,6 +367,7 @@ case "$CMD" in
     cmd)    cmd_exec "$@" ;;
     dmesg)  cmd_dmesg "$@" ;;
     push)   cmd_push "$@" ;;
+    pull)   cmd_pull "$@" ;;
     flash)  cmd_flash "$@" ;;
     kexec)  cmd_kexec "$@" ;;
     shell)  cmd_shell ;;

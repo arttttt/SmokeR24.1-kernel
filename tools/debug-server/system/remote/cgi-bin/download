@@ -1,0 +1,39 @@
+#!/system/bin/sh
+# Download a file from the device via HTTP GET.
+#
+# Usage (via httpd):
+#   GET /cgi-bin/download?path=/path/to/file
+#   Response body = raw file contents
+
+BB=/system/remote/busybox
+
+SRC=$(echo "$QUERY_STRING" | $BB sed 's/path=//;s/%2F/\//g;s/%20/ /g')
+if [ -z "$SRC" ]; then
+    echo "Status: 400 Bad Request"
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "ERROR: specify ?path=/path/to/file"
+    exit 0
+fi
+if [ ! -e "$SRC" ]; then
+    echo "Status: 404 Not Found"
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "ERROR: not found: $SRC"
+    exit 0
+fi
+if [ -d "$SRC" ]; then
+    echo "Status: 400 Bad Request"
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "ERROR: is a directory: $SRC"
+    exit 0
+fi
+
+SIZE=$($BB stat -c%s "$SRC" 2>/dev/null)
+NAME=$($BB basename "$SRC")
+echo "Content-Type: application/octet-stream"
+echo "Content-Disposition: attachment; filename=${NAME}"
+[ -n "$SIZE" ] && echo "Content-Length: $SIZE"
+echo ""
+cat "$SRC"
