@@ -488,10 +488,11 @@ static void show_capabilities(int fd)
 		memset(&frmsize, 0, sizeof(frmsize));
 		frmsize.pixel_format = fmtdesc.pixelformat;
 		while (xioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) == 0) {
+			unsigned w = 0, h = 0;
 			if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
-				printf("    %ux%u\n",
-					frmsize.discrete.width,
-					frmsize.discrete.height);
+				w = frmsize.discrete.width;
+				h = frmsize.discrete.height;
+				printf("    %ux%u\n", w, h);
 			} else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE ||
 				   frmsize.type == V4L2_FRMSIZE_TYPE_CONTINUOUS) {
 				printf("    %u-%ux%u-%u (step %ux%u)\n",
@@ -503,6 +504,36 @@ static void show_capabilities(int fd)
 					frmsize.stepwise.step_height);
 				break;
 			}
+
+			struct v4l2_frmivalenum ival;
+			memset(&ival, 0, sizeof(ival));
+			ival.pixel_format = fmtdesc.pixelformat;
+			ival.width = w;
+			ival.height = h;
+			while (xioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, &ival) == 0) {
+				if (ival.type == V4L2_FRMIVAL_TYPE_DISCRETE) {
+					double fps = (double)ival.discrete.denominator
+						/ ival.discrete.numerator;
+					long long ns = (long long)ival.discrete.numerator
+						* 1000000000LL / ival.discrete.denominator;
+					printf("      %u/%u s  (%.2f fps, min_frame_duration=%lld ns)\n",
+						ival.discrete.numerator, ival.discrete.denominator,
+						fps, ns);
+				} else {
+					const struct v4l2_fract *mn = &ival.stepwise.min;
+					const struct v4l2_fract *mx = &ival.stepwise.max;
+					double fmn = (double)mx->denominator / mx->numerator;
+					double fmx = (double)mn->denominator / mn->numerator;
+					long long ns = (long long)mn->numerator
+						* 1000000000LL / mn->denominator;
+					printf("      stepwise/continuous: %.2f..%.2f fps, "
+						"min_frame_duration=%lld ns\n",
+						fmn, fmx, ns);
+					break;
+				}
+				ival.index++;
+			}
+
 			frmsize.index++;
 		}
 		fmtdesc.index++;
