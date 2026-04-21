@@ -331,8 +331,17 @@ static int do_bringup(const char *fw_name, const char *bdaddr)
      *    post-patchram HCI_VSC_UPDATE_BAUDRATE (FC18) command is sent with a
      *    baud of 0 ("Baudrate not supported!" + response timeout), which
      *    aborts the whole attach. Stock NVIDIA libbt-vendor uses 3 Mbaud;
-     *    the kernel baud_rates[] table has B3000000 ready to go. */
-    if (sysfs_write("vendor_params", "custom_baudrate=3000000") < 0)
+     *    the kernel baud_rates[] table has B3000000 ready to go.
+     *
+     *    ldisc_dbg_param / fm_dbg_param enable BT_LDISC_DBG / V4L2_FM_DRV_DBG
+     *    output in dmesg (bit mask over V4L2_DBG_INIT/TX/RX/...). 0x1F =
+     *    INIT+OPEN+CLOSE+TX+RX, which is what we want while bringing FM up on
+     *    new hardware. The logs are loud but harmless; can be revisited once
+     *    FM is actually playing. */
+    if (sysfs_write("vendor_params",
+                    "custom_baudrate=3000000 "
+                    "ldisc_dbg_param=31 "
+                    "fm_dbg_param=31") < 0)
         return 1;
 
     /* 5. Fork the UIM-mock child. */
