@@ -194,10 +194,11 @@ int ant_prepare(struct antdrv_ops *antdev)
     else {
         _ale("Failed to get shared ldisc write func pointer");
         ret = brcm_sh_ldisc_unregister(PROTO_SH_ANT);
-        if (ret < 0)
+        if (ret < 0) {
             _ale(": brcm_sh_ldisc_unregister failed %d", ret);
-            ret = -EAGAIN;
-            return ret;
+        }
+        ret = -EAGAIN;
+        return ret;
     }
 
     /* Initialize RX Queue */
