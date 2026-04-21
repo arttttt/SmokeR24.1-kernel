@@ -325,7 +325,17 @@ static int do_bringup(const char *fw_name, const char *bdaddr)
     if (bdaddr && sysfs_write("bdaddr", bdaddr) < 0)
         return 1;
 
-    /* 4. Fork the UIM-mock child. */
+    /* 4. Vendor parameters. brcm_sh_ldisc parses space-separated key=value
+     *    pairs out of this attribute (parse_vendor_params). The one that
+     *    matters for us is custom_baudrate — if left at its 0 default, the
+     *    post-patchram HCI_VSC_UPDATE_BAUDRATE (FC18) command is sent with a
+     *    baud of 0 ("Baudrate not supported!" + response timeout), which
+     *    aborts the whole attach. Stock NVIDIA libbt-vendor uses 3 Mbaud;
+     *    the kernel baud_rates[] table has B3000000 ready to go. */
+    if (sysfs_write("vendor_params", "custom_baudrate=3000000") < 0)
+        return 1;
+
+    /* 5. Fork the UIM-mock child. */
     fflush(stdout);
     pid_t child = fork();
     if (child < 0) {
