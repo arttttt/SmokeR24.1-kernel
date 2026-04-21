@@ -51,6 +51,16 @@
 #define LDISC_OFF               '0'  /* V4L2_STATUS_OFF */
 #define LDISC_ERR               '2'  /* V4L2_STATUS_ERR */
 
+/* Broadcom hci_uart proto id — see drivers/bluetooth/broadcom/
+ * line_discipline_driver/brcm_hci_uart.h (HCI_UART_BRCM=0) and brcm_hci.c
+ * where brcmp.id = HCI_UART_BRCM. After TIOCSETD installs the ldisc,
+ * HCIUARTSETPROTO sets HCI_UART_PROTO_SET in hu->flags — without this
+ * flag brcm_hci_uart_tty_receive() drops every byte from the chip,
+ * wait_for_completion(cmd_rcvd) times out in download_patchram, and we
+ * look like the chip never answered. */
+#define HCI_UART_BRCM           0
+#define HCIUARTSETPROTO         _IOW('U', 200, int)
+
 #define RADIO_DEV "/dev/radio0"
 
 static int radio_fd = -1;
@@ -248,7 +258,9 @@ static int ldisc_child(void)
                 tty = open(TTY_DEV, O_RDWR | O_NOCTTY);
                 if (tty >= 0) {
                     int ldisc = N_BRCM_HCI;
-                    if (ioctl(tty, TIOCSETD, &ldisc) < 0) {
+                    int proto = HCI_UART_BRCM;
+                    if (ioctl(tty, TIOCSETD, &ldisc) < 0 ||
+                        ioctl(tty, HCIUARTSETPROTO, proto) < 0) {
                         close(tty);
                         tty = -1;
                     }
