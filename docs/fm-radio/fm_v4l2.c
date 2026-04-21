@@ -5,11 +5,14 @@
  *   arm-linux-gnueabihf-gcc -static -o fm_v4l2 fm_v4l2.c
  *
  * Usage:
- *   fm_v4l2 bringup [fw_path] [bdaddr]  Attach N_BRCM_HCI ldisc to /dev/ttyTHS2,
- *                                       program firmware via sysfs, wait for install=1.
- *                                       Holds tty fd in a background child; pidfile
- *                                       written to /data/local/tmp/fm_v4l2_ldisc.pid.
- *                                       Requires bluedroid stopped and UART free.
+ *   fm_v4l2 bringup [fw_name] [bdaddr]  Power on BCM4354 via rfkill, program
+ *                                       firmware name into bcm_ldisc sysfs,
+ *                                       fork UIM-mock helper that attaches
+ *                                       N_BRCM_HCI on demand. Requires
+ *                                       bluedroid stopped and UART free.
+ *                                       fw_name is looked up by request_firmware
+ *                                       in /vendor/firmware,/etc/firmware,... —
+ *                                       do not pass an absolute path.
  *   fm_v4l2 teardown                    Kill ldisc holder child (releases tty, ldisc resets).
  *   fm_v4l2 on [freq_mhz*10]            Turn on, tune to freq (default 1000=100.0MHz)
  *   fm_v4l2 off                         Turn off
@@ -28,6 +31,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <dirent.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/ioctl.h>
@@ -40,7 +44,8 @@
 #define N_BRCM_HCI              26
 #define SYSFS_BASE              "/sys/devices/platform/bcm_ldisc"
 #define PIDFILE                 "/data/local/tmp/fm_v4l2_ldisc.pid"
-#define DEFAULT_FW_PATH         "/vendor/firmware/mocha_bcm4350.hcd"
+#define DEFAULT_FW_NAME         "mocha_bcm4350.hcd"
+#define RFKILL_NAME             "bluedroid_pm"
 #define BRINGUP_TIMEOUT_MS      10000
 #define LDISC_ON                '1'  /* V4L2_STATUS_ON  */
 #define LDISC_OFF               '0'  /* V4L2_STATUS_OFF */
@@ -119,6 +124,81 @@ static int sysfs_read_install(char *out)
     return (n == 1) ? 0 : -1;
 }
 
+/* Find /sys/class/rfkill/rfkillN whose "name" matches `name`.
+ * Returns 0 on success and copies the dir name into `out` (caller buffer). */
+static int rfkill_find(const char *name, char *out, size_t out_sz)
+{
+    DIR *d = opendir("/sys/class/rfkill");
+    if (!d)
+        return -1;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strncmp(e->d_name, "rfkill", 6) != 0)
+            continue;
+        char namepath[256];
+        snprintf(namepath, sizeof(namepath),
+                 "/sys/class/rfkill/%s/name", e->d_name);
+        FILE *f = fopen(namepath, "r");
+        if (!f)
+            continue;
+        char buf[64] = {0};
+        if (fgets(buf, sizeof(buf), f)) {
+            char *nl = strchr(buf, '\n');
+            if (nl)
+                *nl = 0;
+            if (strcmp(buf, name) == 0) {
+                snprintf(out, out_sz, "%s", e->d_name);
+                fclose(f);
+                closedir(d);
+                return 0;
+            }
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return -1;
+}
+
+/* Power-cycle the named rfkill to give the chip a clean POR. Writing '1' to
+ * state un-blocks (powers on); '0' blocks (powers off). Kernel combo-chip
+ * GPIOs toggle on the state edge, so an off→on sequence is the safest. */
+static int rfkill_power_on(const char *name)
+{
+    char rk[32];
+    if (rfkill_find(name, rk, sizeof(rk)) < 0) {
+        fprintf(stderr, "ERROR rfkill: no device named '%s'\n", name);
+        return -1;
+    }
+    char path[256];
+    snprintf(path, sizeof(path), "/sys/class/rfkill/%s/state", rk);
+
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) {
+        fprintf(stderr, "ERROR open(%s): %s\n", path, strerror(errno));
+        return -1;
+    }
+    /* Power off first — if something else left it on, we still want a clean
+     * edge. Ignore errors on the off write (permission races, etc.). */
+    (void)write(fd, "0", 1);
+    close(fd);
+    usleep(100 * 1000);
+
+    fd = open(path, O_WRONLY);
+    if (fd < 0) {
+        fprintf(stderr, "ERROR open(%s): %s\n", path, strerror(errno));
+        return -1;
+    }
+    if (write(fd, "1", 1) != 1) {
+        fprintf(stderr, "ERROR write state=1: %s\n", strerror(errno));
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    /* GPIO reset line takes a moment to settle. */
+    usleep(200 * 1000);
+    return 0;
+}
+
 /* UIM mock — runs in child, never returns.
  *
  * Holds two fds: sysfs "install" (for POLLPRI notify) and, once the kernel
@@ -187,10 +267,10 @@ static int ldisc_child(void)
     return 0;
 }
 
-static int do_bringup(const char *fw_path, const char *bdaddr)
+static int do_bringup(const char *fw_name, const char *bdaddr)
 {
     printf("=== Broadcom ldisc bringup (UIM mock) ===\n");
-    printf("Firmware: %s\n", fw_path);
+    printf("Firmware: %s\n", fw_name);
     if (bdaddr)
         printf("BDA:      %s\n", bdaddr);
 
@@ -208,15 +288,20 @@ static int do_bringup(const char *fw_path, const char *bdaddr)
         unlink(PIDFILE);
     }
 
-    /* 1. Firmware path — download_patchram() reads it via request_firmware(). */
-    if (sysfs_write("fw_patchfile", fw_path) < 0)
+    /* 1. Power the BCM4354 via rfkill. Without this the chip ignores HCI. */
+    if (rfkill_power_on(RFKILL_NAME) < 0)
         return 1;
 
-    /* 2. Optional BD address (only needed for BT, but harmless here). */
+    /* 2. Firmware name — download_patchram() loads it via request_firmware(),
+     *    which searches /vendor/firmware, /etc/firmware, /lib/firmware. */
+    if (sysfs_write("fw_patchfile", fw_name) < 0)
+        return 1;
+
+    /* 3. Optional BD address (only needed for BT, but harmless here). */
     if (bdaddr && sysfs_write("bdaddr", bdaddr) < 0)
         return 1;
 
-    /* 3. Fork the UIM-mock child. */
+    /* 4. Fork the UIM-mock child. */
     fflush(stdout);
     pid_t child = fork();
     if (child < 0) {
@@ -447,7 +532,7 @@ static void usage(void)
         "  fm_v4l2 bringup [fw] [bda]  Attach N_BRCM_HCI to /dev/ttyTHS2, load\n"
         "                              patchram, wait for ready. Requires bluedroid\n"
         "                              stopped (svc bluetooth disable). Default fw:\n"
-        "                              " DEFAULT_FW_PATH "\n"
+        "                              " DEFAULT_FW_NAME "\n"
         "  fm_v4l2 teardown        Kill ldisc helper, release tty\n"
         "  fm_v4l2 on [freq]       Open radio, tune (default 1000=100.0MHz)\n"
         "  fm_v4l2 off             Close radio\n"
@@ -470,7 +555,7 @@ int main(int argc, char *argv[])
 
     /* Subcommands that don't need /dev/radio0 open. */
     if (strcmp(argv[1], "bringup") == 0) {
-        const char *fw  = (argc > 2) ? argv[2] : DEFAULT_FW_PATH;
+        const char *fw  = (argc > 2) ? argv[2] : DEFAULT_FW_NAME;
         const char *bda = (argc > 3) ? argv[3] : NULL;
         return do_bringup(fw, bda);
     }
