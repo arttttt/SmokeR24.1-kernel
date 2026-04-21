@@ -159,9 +159,17 @@ static int rfkill_find(const char *name, char *out, size_t out_sz)
     return -1;
 }
 
-/* Power-cycle the named rfkill to give the chip a clean POR. Writing '1' to
- * state un-blocks (powers on); '0' blocks (powers off). Kernel combo-chip
- * GPIOs toggle on the state edge, so an off→on sequence is the safest. */
+/* Ensure the named rfkill is unblocked (state=1), without cycling it.
+ *
+ * BCM4354 is a combo WiFi/BT/FM chip. On mocha the bluedroid_pm GPIO
+ * (BT_REG_ON) resets the *whole* chip on every 0→1 edge, which takes WiFi
+ * down with it. A previous version of this helper did an off→on toggle to
+ * guarantee a clean POR; that killed the live WiFi link, netd/system_server
+ * cascaded, and the UI crashed back to the bootanimation.
+ *
+ * Safe rule: only write '1' if the state currently reads '0'. If the chip is
+ * already powered (BT on before or left on by a previous session), do nothing
+ * — there is nothing to toggle. */
 static int rfkill_power_on(const char *name)
 {
     char rk[32];
@@ -172,20 +180,25 @@ static int rfkill_power_on(const char *name)
     char path[256];
     snprintf(path, sizeof(path), "/sys/class/rfkill/%s/state", rk);
 
-    int fd = open(path, O_WRONLY);
-    if (fd < 0) {
-        fprintf(stderr, "ERROR open(%s): %s\n", path, strerror(errno));
+    /* Check current state first. */
+    int rfd = open(path, O_RDONLY);
+    if (rfd < 0) {
+        fprintf(stderr, "ERROR open(%s) RO: %s\n", path, strerror(errno));
         return -1;
     }
-    /* Power off first — if something else left it on, we still want a clean
-     * edge. Ignore errors on the off write (permission races, etc.). */
-    (void)write(fd, "0", 1);
-    close(fd);
-    usleep(100 * 1000);
+    char cur = 0;
+    (void)read(rfd, &cur, 1);
+    close(rfd);
 
-    fd = open(path, O_WRONLY);
+    if (cur == '1') {
+        printf("rfkill %s already on, skipping\n", name);
+        return 0;
+    }
+
+    /* state was '0' (or unknown) — power on. */
+    int fd = open(path, O_WRONLY);
     if (fd < 0) {
-        fprintf(stderr, "ERROR open(%s): %s\n", path, strerror(errno));
+        fprintf(stderr, "ERROR open(%s) WO: %s\n", path, strerror(errno));
         return -1;
     }
     if (write(fd, "1", 1) != 1) {
@@ -194,7 +207,6 @@ static int rfkill_power_on(const char *name)
         return -1;
     }
     close(fd);
-    /* GPIO reset line takes a moment to settle. */
     usleep(200 * 1000);
     return 0;
 }
