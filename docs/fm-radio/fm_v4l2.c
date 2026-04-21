@@ -312,11 +312,20 @@ static int do_bringup(const char *fw_name, const char *bdaddr)
         unlink(PIDFILE);
     }
 
-    /* 1. Power the BCM4354 via rfkill. Without this the chip ignores HCI. */
-    if (rfkill_power_on(RFKILL_NAME) < 0)
-        return 1;
-
-    /* 2. Firmware name — download_patchram() loads it via request_firmware(),
+    /* Intentionally NOT calling rfkill_power_on() here. On mocha the
+     * bluedroid_pm GPIO (R.1) is electrically entangled with the WiFi side
+     * of the BCM4354 combo chip — every 0→1 edge we've done from here
+     * glitches WiFi, brcmfmac re-inits, and netd/system_server fall over
+     * during the reinit window, leaving Android in bootanimation. Stock
+     * bluedroid can toggle the same rfkill without that fallout because
+     * it starts banging HCI on the line immediately and holds the chip
+     * busy through the transient. Replicating that timing from here is
+     * brittle; it's simpler to require the chip to be powered by other
+     * means (e.g. user toggles BT via Settings first) and make bringup a
+     * pure ldisc-attach operation. The rfkill_power_on() helper is kept
+     * in the tool for manual use when it's known to be safe.
+     *
+     * 1. Firmware name — download_patchram() loads it via request_firmware(),
      *    which searches /vendor/firmware, /etc/firmware, /lib/firmware. */
     if (sysfs_write("fw_patchfile", fw_name) < 0)
         return 1;
