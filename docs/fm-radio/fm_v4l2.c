@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -50,17 +51,39 @@
 static int radio_fd = -1;
 
 /* ========================================================================
- * Broadcom ldisc bringup/teardown
+ * Broadcom ldisc bringup/teardown — UIM daemon behaviour
  *
- * Protocol (see drivers/bluetooth/broadcom/line_discipline_driver/brcm_sh_ldisc.c):
- *   1. Write fw_patchfile sysfs so ldisc knows which patchram to load.
- *   2. Optionally write bdaddr sysfs.
- *   3. open(ttyTHS2) + ioctl(TIOCSETD, N_BRCM_HCI=26) triggers ldisc open callback,
- *      which runs: HCI reset -> hci_download_minidriver -> request_firmware(fw_name)
- *      -> patchram upload -> baudrate switch. On success, ldisc_install becomes
- *      V4L2_STATUS_ON ('1') and sysfs_notify fires.
- *   4. Userspace polls /sys/.../install for '1'.
- *   5. The tty fd must stay open — when it closes, kernel tears the ldisc down.
+ * The real sequence (see brcm_sh_ldisc_start() + brcm_hci_uart_tty_open() +
+ * download_patchram() in drivers/bluetooth/broadcom/line_discipline_driver/
+ * brcm_sh_ldisc.c) is driven by the kernel side, not by userspace:
+ *
+ *   1. Something opens /dev/radio0 (or /dev/brcm_bt_drv). The protocol driver
+ *      calls fmc_prepare() / brcm_sh_ldisc_register(PROTO_SH_FM).
+ *   2. brcm_sh_ldisc_start() sets ldisc_install = V4L2_STATUS_ON ('1') and
+ *      fires sysfs_notify("install"), then wait_for_completion(ldisc_installed,
+ *      1500 ms).
+ *   3. A userspace daemon (classically UIM) must be polling the sysfs file
+ *      /sys/.../install for POLLPRI; on seeing '1' it does:
+ *         fd = open("/dev/ttyTHS2", ...); ioctl(fd, TIOCSETD, N_BRCM_HCI);
+ *      and keeps the fd open.
+ *   4. The kernel fires the ldisc ops->open callback
+ *      (brcm_hci_uart_tty_open), which calls sh_ldisc_complete() — that
+ *      wakes the wait_for_completion on the kernel side.
+ *   5. brcm_sh_ldisc_start() proceeds: HCI reset, hci_download_minidriver,
+ *      request_firmware(fw_name) — loads the patchram from the path we wrote
+ *      to fw_patchfile — patchram upload, baudrate switch.
+ *   6. Control returns to /dev/radio0 open(); V4L2 ioctls now work.
+ *
+ * So "bringup" here has two phases:
+ *   (a) Program fw_patchfile and bdaddr into sysfs *before* anybody triggers
+ *       step 1.
+ *   (b) Fork a UIM-mock child that polls /sys/.../install indefinitely and
+ *       attaches N_BRCM_HCI on demand. The child holds the tty fd for as
+ *       long as install stays '1'; when install goes back to '0' (driver
+ *       unregistered) it closes the tty, letting the kernel reset the ldisc.
+ * "on" then opens /dev/radio0 and the whole dance runs synchronously.
+ * "teardown" SIGTERMs the child; closing the tty tears the ldisc down
+ * automatically (the close path at line 2044 of brcm_sh_ldisc.c).
  * ======================================================================== */
 
 static int sysfs_write(const char *attr, const char *value)
@@ -96,27 +119,19 @@ static int sysfs_read_install(char *out)
     return (n == 1) ? 0 : -1;
 }
 
-/* Child: takes ownership of ttyTHS2, installs N_BRCM_HCI ldisc, sleeps forever.
- * When this process exits (or is killed), the kernel closes the tty and ldisc
- * resets automatically — that is the teardown mechanism. */
+/* UIM mock — runs in child, never returns.
+ *
+ * Holds two fds: sysfs "install" (for POLLPRI notify) and, once the kernel
+ * asks for attach by setting install='1', the tty fd with N_BRCM_HCI ldisc.
+ * Closing the tty fd tears the ldisc down; we do that when install goes back
+ * to '0'. Exits on SIGTERM (kernel auto-cleans fds on exit). */
 static int ldisc_child(void)
 {
     if (setsid() < 0) {
         /* non-fatal */
     }
-    int tty = open(TTY_DEV, O_RDWR | O_NOCTTY);
-    if (tty < 0) {
-        fprintf(stderr, "ERROR child open(%s): %s\n", TTY_DEV, strerror(errno));
-        return 2;
-    }
-    int ldisc = N_BRCM_HCI;
-    if (ioctl(tty, TIOCSETD, &ldisc) < 0) {
-        fprintf(stderr, "ERROR child TIOCSETD(%d): %s\n",
-                N_BRCM_HCI, strerror(errno));
-        close(tty);
-        return 3;
-    }
-    /* Detach stdio so shell doesn't hang waiting on us. */
+
+    /* Detach stdio so parent's shell doesn't hang on us. */
     int devnull = open("/dev/null", O_RDWR);
     if (devnull >= 0) {
         dup2(devnull, STDIN_FILENO);
@@ -125,35 +140,83 @@ static int ldisc_child(void)
         if (devnull > 2)
             close(devnull);
     }
-    for (;;)
-        pause();
-    /* not reached */
+
+    char sysfs_path[256];
+    snprintf(sysfs_path, sizeof(sysfs_path), "%s/install", SYSFS_BASE);
+    int sfd = open(sysfs_path, O_RDONLY);
+    if (sfd < 0)
+        return 2;
+
+    int tty = -1;
+    /* First pass: consume the initial sysfs value so future POLLPRI edges fire. */
+    for (;;) {
+        char c = 0;
+        if (lseek(sfd, 0, SEEK_SET) >= 0 && read(sfd, &c, 1) == 1) {
+            if (c == LDISC_ON && tty < 0) {
+                tty = open(TTY_DEV, O_RDWR | O_NOCTTY);
+                if (tty >= 0) {
+                    int ldisc = N_BRCM_HCI;
+                    if (ioctl(tty, TIOCSETD, &ldisc) < 0) {
+                        close(tty);
+                        tty = -1;
+                    }
+                }
+            } else if (c != LDISC_ON && tty >= 0) {
+                /* Driver unregistered — let the kernel close the ldisc. */
+                close(tty);
+                tty = -1;
+            }
+        }
+
+        /* Wait for the next sysfs_notify on install. POLLPRI fires on notify. */
+        struct pollfd pfd;
+        pfd.fd = sfd;
+        pfd.events = POLLPRI | POLLERR;
+        pfd.revents = 0;
+        int pr = poll(&pfd, 1, -1);
+        if (pr < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+    }
+
+    if (tty >= 0)
+        close(tty);
+    close(sfd);
     return 0;
 }
 
 static int do_bringup(const char *fw_path, const char *bdaddr)
 {
-    printf("=== Broadcom ldisc bringup ===\n");
+    printf("=== Broadcom ldisc bringup (UIM mock) ===\n");
     printf("Firmware: %s\n", fw_path);
     if (bdaddr)
         printf("BDA:      %s\n", bdaddr);
 
-    /* Skip if already up. */
-    char state = 0;
-    if (sysfs_read_install(&state) == 0 && state == LDISC_ON) {
-        printf("ldisc already attached (install='1'), skipping\n");
-        return 0;
+    /* Refuse to start a second helper. */
+    FILE *pf = fopen(PIDFILE, "r");
+    if (pf) {
+        int existing = 0;
+        if (fscanf(pf, "%d", &existing) == 1 && existing > 0 &&
+            kill(existing, 0) == 0) {
+            fclose(pf);
+            printf("Helper already running (pid=%d), skipping\n", existing);
+            return 0;
+        }
+        fclose(pf);
+        unlink(PIDFILE);
     }
 
-    /* 1. Firmware path — ldisc callback reads this via request_firmware(). */
+    /* 1. Firmware path — download_patchram() reads it via request_firmware(). */
     if (sysfs_write("fw_patchfile", fw_path) < 0)
         return 1;
 
-    /* 2. Optional BD address. */
+    /* 2. Optional BD address (only needed for BT, but harmless here). */
     if (bdaddr && sysfs_write("bdaddr", bdaddr) < 0)
         return 1;
 
-    /* 3. Fork helper that holds the tty fd open with N_BRCM_HCI ldisc. */
+    /* 3. Fork the UIM-mock child. */
     fflush(stdout);
     pid_t child = fork();
     if (child < 0) {
@@ -163,45 +226,25 @@ static int do_bringup(const char *fw_path, const char *bdaddr)
     if (child == 0)
         _exit(ldisc_child());
 
-    /* Parent: record pid for teardown, then poll install sysfs. */
+    /* Parent: let child settle, then verify it's still alive. */
+    usleep(200 * 1000);
+    int status;
+    pid_t w = waitpid(child, &status, WNOHANG);
+    if (w == child) {
+        fprintf(stderr, "ERROR helper exited during startup (status=0x%x)\n",
+                status);
+        return 1;
+    }
+
     FILE *f = fopen(PIDFILE, "w");
     if (f) {
         fprintf(f, "%d\n", (int)child);
         fclose(f);
     }
-    printf("ldisc helper pid=%d, polling install (timeout %dms)\n",
-           (int)child, BRINGUP_TIMEOUT_MS);
-
-    int elapsed;
-    for (elapsed = 0; elapsed < BRINGUP_TIMEOUT_MS; elapsed += 100) {
-        usleep(100 * 1000);
-        char c = 0;
-        if (sysfs_read_install(&c) == 0) {
-            if (c == LDISC_ON) {
-                printf("install='1' (ready) after %d ms\n", elapsed + 100);
-                printf("OK — %s ready for V4L2 ioctls\n", RADIO_DEV);
-                return 0;
-            }
-            if (c == LDISC_ERR) {
-                fprintf(stderr, "ERROR install='2' — ldisc reported error\n");
-                break;
-            }
-        }
-        /* Did child die? */
-        int status;
-        pid_t w = waitpid(child, &status, WNOHANG);
-        if (w == child) {
-            fprintf(stderr, "ERROR helper exited early (status=0x%x)\n",
-                    status);
-            unlink(PIDFILE);
-            return 1;
-        }
-    }
-
-    fprintf(stderr, "ERROR bringup timed out, killing helper\n");
-    kill(child, SIGTERM);
-    unlink(PIDFILE);
-    return 1;
+    printf("UIM helper pid=%d running; attach triggers on /dev/radio0 open\n",
+           (int)child);
+    printf("OK — now run: fm_v4l2 on [freq]\n");
+    return 0;
 }
 
 static int do_teardown(void)
