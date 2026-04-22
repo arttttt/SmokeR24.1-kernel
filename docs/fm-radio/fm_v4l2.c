@@ -15,6 +15,12 @@
  *                                       do not pass an absolute path.
  *   fm_v4l2 teardown                    Kill ldisc holder child (releases tty, ldisc resets).
  *   fm_v4l2 on [freq_mhz*10]            Turn on, tune to freq (default 1000=100.0MHz)
+ *                                       NOTE: closes /dev/radio0 at exit, which
+ *                                       makes the kernel FM driver turn the chip
+ *                                       off. Use 'hold' if you actually want to
+ *                                       listen.
+ *   fm_v4l2 hold [freq_mhz*10]          Like 'on', then keep /dev/radio0 open
+ *                                       (and FM powered) until SIGTERM.
  *   fm_v4l2 off                         Turn off
  *   fm_v4l2 tune <freq_mhz*10>          Tune to frequency
  *   fm_v4l2 status                      Show tuner info
@@ -595,6 +601,8 @@ static void usage(void)
         "                              " DEFAULT_FW_NAME "\n"
         "  fm_v4l2 teardown        Kill ldisc helper, release tty\n"
         "  fm_v4l2 on [freq]       Open radio, tune (default 1000=100.0MHz)\n"
+        "                          (one-shot; closes radio at exit -> chip off)\n"
+        "  fm_v4l2 hold [freq]     Open+tune, keep /dev/radio0 open until SIGTERM\n"
         "  fm_v4l2 off             Close radio\n"
         "  fm_v4l2 tune <freq>     Tune to freq (MHz*10, e.g. 1000=100.0)\n"
         "  fm_v4l2 status          Show tuner status\n"
@@ -627,7 +635,8 @@ int main(int argc, char *argv[])
 
     int ret = 0;
 
-    if (strcmp(argv[1], "on") == 0) {
+    if (strcmp(argv[1], "on") == 0 || strcmp(argv[1], "hold") == 0) {
+        int hold = (strcmp(argv[1], "hold") == 0);
         int freq = (argc > 2) ? atoi(argv[2]) : 1000;
         printf("=== FM Radio ON ===\n");
         ret = do_tune(freq);
@@ -635,6 +644,13 @@ int main(int argc, char *argv[])
             /* Set moderate volume (not loud!) */
             do_volume(8000);
             do_status();
+        }
+        if (ret == 0 && hold) {
+            printf("Holding /dev/radio0 open; chip stays tuned. "
+                   "Send SIGTERM (e.g. kill %d) to stop.\n", getpid());
+            fflush(stdout);
+            for (;;)
+                pause();
         }
     }
     else if (strcmp(argv[1], "off") == 0) {
