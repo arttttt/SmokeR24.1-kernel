@@ -347,8 +347,15 @@ static int do_bringup(const char *fw_name, const char *bdaddr)
      *    INIT+OPEN+CLOSE+TX+RX, which is what we want while bringing FM up on
      *    new hardware. The logs are loud but harmless; can be revisited once
      *    FM is actually playing. */
+    /* skip_patchram=1 tells the kernel download_patchram() to bypass the
+     * HCI_VSC_DOWNLOAD_MINIDRV + FC4C patchram upload, just set host tty
+     * to custom_baudrate, and let the rest of brcm_sh_ldisc_start run
+     * against the already-initialised chip. This is what allows hooking
+     * up on top of stock bluedroid's init without re-POR'ing the combo
+     * chip (which would kill WiFi). */
     if (sysfs_write("vendor_params",
                     "custom_baudrate=3000000 "
+                    "skip_patchram=1 "
                     "ldisc_dbg_param=31 "
                     "fm_dbg_param=31") < 0)
         return 1;
