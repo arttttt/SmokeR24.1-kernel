@@ -436,16 +436,17 @@ static void radio_close(void)
 
 /* V4L2 frequency is in units of 62.5 Hz when V4L2_TUNER_CAP_LOW is set.
  * freq_mhz10 = MHz * 10 (e.g. 1000 = 100.0 MHz)
- * V4L2 freq = freq_mhz10 * 100000 / 62.5 = freq_mhz10 * 16000
+ * freq_Hz   = freq_mhz10 * 100000         (because *1e5 == *1e6/10)
+ * V4L2 freq = freq_Hz / 62.5 = freq_mhz10 * 100000 / 62.5 = freq_mhz10 * 1600
  */
 static unsigned int freq_to_v4l2(int freq_mhz10)
 {
-    return (unsigned int)(freq_mhz10 * 16000);
+    return (unsigned int)(freq_mhz10 * 1600);
 }
 
 static int v4l2_to_freq_mhz10(unsigned int v4l2_freq)
 {
-    return (int)(v4l2_freq / 16000);
+    return (int)(v4l2_freq / 1600);
 }
 
 static void print_freq(int freq_mhz10)
