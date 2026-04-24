@@ -58,16 +58,15 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_OTP_SIZE			803
 #define IMX179_OTP_STR_SIZE		(IMX179_OTP_SIZE * 2)
 
-#define IMX179_GAIN_SHIFT		0
-#define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)
-/* Hardware register 0x0205 takes 0..255 via reg = 256 - 256/val,
- * giving a real gain range of 1x..256x. The previous (16 << ...)
- * ceiling was an arbitrary clamp — userspace could never pull more
- * than 16x analog gain even when low-light stats needed it. 64x is
- * ~6 stops above unity, enough for typical indoor scenes without
- * walking into the 128x/256x region where the register quantisation
- * (integer 256/val) collapses and noise dominates the signal. */
-#define IMX179_MAX_GAIN			(64 << IMX179_GAIN_SHIFT)
+/* Gain is advertised as a Q8 linear multiplier (256 = 1.00x, 512 =
+ * 2.00x) so userspace can request sub-integer gains without the
+ * 1→2→3 stops-per-click quantisation the old "integer multiplier"
+ * semantic produced. The hardware register still has 256 discrete
+ * levels via reg = 256 - 256/multiplier; picking the closest level
+ * for an arbitrary Q8 gain is done inside imx179_set_gain. */
+#define IMX179_GAIN_SHIFT		8
+#define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)   /* 256 = 1x */
+#define IMX179_MAX_GAIN			(64 << IMX179_GAIN_SHIFT)  /* 16384 = 64x */
 #define IMX179_MIN_FRAME_LENGTH		(0x0)
 #define IMX179_MAX_FRAME_LENGTH		(0x7fff)
 #define IMX179_MIN_EXPOSURE_COARSE	(0x0002)
@@ -834,17 +833,20 @@ static int imx179_set_gain(struct imx179 *priv, s32 val)
 	if (!priv->group_hold_prev)
 		imx179_set_group_hold(priv);
 
-	/* IMX179 gain: real_gain = 256/(256-reg), so reg = 256 - 256/gain
-	 * V4L2 gain value is a linear multiplier (1=1x, 64=64x). The
-	 * advertised V4L2_CID_GAIN max is 64; higher register values (up
-	 * to 255) are clamped by the register cap below for safety even
-	 * if a caller bypasses the control range. */
-	if (val <= 1)
+	/* IMX179 register 0x0205 encodes analog gain as
+	 *    actual_gain = 256 / (256 - reg).
+	 * V4L2_CID_GAIN is advertised in Q8 (256 = 1.00x), so the
+	 * register value for any advertised multiplier m = val_Q8 / 256
+	 * is reg = 256 - 256 / m = 256 - 65536 / val_Q8.
+	 * Keeping the divide in integer arithmetic on val_Q8 avoids the
+	 * fractional-gain step-loss the old integer-multiplier semantic
+	 * had (val=1→2 meant a literal 2x jump at the sensor). */
+	if (val <= (1 << IMX179_GAIN_SHIFT))
 		gain = 0;
-	else if (val >= 256)
+	else if (val >= (256 << IMX179_GAIN_SHIFT))
 		gain = 255;
 	else
-		gain = (u16)(256 - 256 / val);
+		gain = (u16)(256 - 65536 / val);
 
 	imx179_get_gain_reg(&reg_list, gain);
 	dev_dbg(&priv->i2c_client->dev,
