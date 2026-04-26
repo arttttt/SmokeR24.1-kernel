@@ -169,6 +169,7 @@ static const ov5693_reg tp_colorbars[] = {
 	{OV5693_TABLE_END, 0x00}
 };
 
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 static const ov5693_reg mode_2592x1944[] = {
 	{0x0100, 0x00},/* Including sw reset */
 	{0x3001, 0x0a},
@@ -441,7 +442,9 @@ static const ov5693_reg mode_2592x1944[] = {
 	{0x380d, 0x00},
 	{OV5693_TABLE_END, 0x0000}
 };
+#endif /* disabled mode_2592x1944 */
 
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 static const ov5693_reg mode_2592x1458[] = {
 	{0x0100, 0x00},/* Including sw reset */
 	{0x3001, 0x0a},
@@ -706,6 +709,7 @@ static const ov5693_reg mode_2592x1458[] = {
 	{0x380d, 0x00},
 	{OV5693_TABLE_END, 0x0000}
 };
+#endif /* disabled mode_2592x1458 */
 
 static const ov5693_reg mode_1920x1080[] = {
 	{0x0100, 0x00},/*, 0xIncluding, 0xsw, 0xreset, 0x*/
@@ -2026,6 +2030,7 @@ static const ov5693_reg mode_1280x720_120fps_safe[] = {
 };
 #endif /* disabled 90fps/120fps modes */
 
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 static const ov5693_reg mode_2592x1944_HDR_24fps[] = {
 	{0x0100, 0x00},/* Including sw reset */
 	{0x0103, 0x01},
@@ -2273,6 +2278,7 @@ static const ov5693_reg mode_2592x1944_HDR_24fps[] = {
 	{0x5e10, 0x0c},
 	{OV5693_TABLE_END, 0x0000}
 };
+#endif /* disabled mode_2592x1944_HDR_24fps */
 
 static const ov5693_reg mode_1920x1080_HDR_30fps[] = {
 	{0x0100, 0x00},/* Including sw reset */
@@ -2771,11 +2777,15 @@ static const ov5693_reg mode_1280x720_HDR_60fps[] = {
 };
 
 enum {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	OV5693_MODE_2592X1944,
 	OV5693_MODE_2592X1458,
+#endif
 	OV5693_MODE_1920X1080,
 	OV5693_MODE_1280X720_60FPS,
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	OV5693_MODE_2592X1944_HDR,
+#endif
 	OV5693_MODE_1920X1080_HDR,
 
 	OV5693_MODE_START_STREAM,
@@ -2784,11 +2794,15 @@ enum {
 };
 
 static const ov5693_reg *mode_table[] = {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	[OV5693_MODE_2592X1944]			= mode_2592x1944,
 	[OV5693_MODE_2592X1458]			= mode_2592x1458,
+#endif
 	[OV5693_MODE_1920X1080]			= mode_1920x1080,
 	[OV5693_MODE_1280X720_60FPS]		= mode_1280x720_60fps,
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	[OV5693_MODE_2592X1944_HDR]		= mode_2592x1944_HDR_24fps,
+#endif
 	[OV5693_MODE_1920X1080_HDR]		= mode_1920x1080_HDR_30fps,
 
 	[OV5693_MODE_START_STREAM]		= ov5693_start,
@@ -2818,11 +2832,15 @@ static const int ov5693_120fps[] = {
 
 /* Per-mode VTS from register tables (0x380e:0x380f) */
 static const u32 ov5693_mode_frame_length[] = {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	[OV5693_MODE_2592X1944]            = 0x07C0,  /* 1984 — 30fps */
 	[OV5693_MODE_2592X1458]            = 0x07C0,  /* 1984 — 30fps */
+#endif
 	[OV5693_MODE_1920X1080]            = 0x0676,  /* 1654 — 24fps */
 	[OV5693_MODE_1280X720_60FPS]       = 0x03E0,  /* 992  — 60fps */
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	[OV5693_MODE_2592X1944_HDR]        = 0x07C0,  /* 1984 — 24fps HDR */
+#endif
 	[OV5693_MODE_1920X1080_HDR]        = 0x073A,  /* 1850 — 30fps HDR */
 };
 
@@ -2831,11 +2849,15 @@ static const u32 ov5693_mode_frame_length[] = {
 #define OV5693_LINE_LENGTH_720P		1752
 
 static const struct camera_common_frmfmt ov5693_frmfmt[] = {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	{{2592, 1944},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1944,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 	{{2592, 1458},	ov5693_30fps,	1, 0,	OV5693_MODE_2592X1458,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
+#endif
 	{{1920, 1080},	ov5693_24fps,	1, 0,	OV5693_MODE_1920X1080,		OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 	{{1280, 720},	ov5693_60fps,	1, 0,	OV5693_MODE_1280X720_60FPS,	OV5693_LINE_LENGTH_720P, OV5693_PIX_CLK_HZ},
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	{{2592, 1944},	ov5693_24fps,	1, 1,	OV5693_MODE_2592X1944_HDR,	OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
+#endif
 	{{1920, 1080},	ov5693_30fps,	1, 1,	OV5693_MODE_1920X1080_HDR,	OV5693_LINE_LENGTH_FULL, OV5693_PIX_CLK_HZ},
 };
 #endif  /* __OV5693_MOCHA_TABLES__ */
