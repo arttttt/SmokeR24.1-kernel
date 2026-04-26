@@ -54,7 +54,8 @@ static int wait_syncpt(struct tegra_channel *chan,
 		       int index, u32 thresh, struct timespec *ts)
 {
 	return nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
-		chan->syncpt[index], thresh, chan->timeout, NULL, ts);
+		chan->syncpt[index], thresh,
+		tegra_channel_capture_timeout_jiffies(chan), NULL, ts);
 }
 
 static int arm_wait_mw_ack(struct tegra_channel *chan,
@@ -70,7 +71,8 @@ static int arm_wait_mw_ack(struct tegra_channel *chan,
 		VI_CFG_VI_INCR_SYNCPT_COND(cond) | chan->syncpt_mw[index]);
 
 	return nvhost_syncpt_wait_timeout_ext(chan->vi->ndev,
-		chan->syncpt_mw[index], thresh, chan->timeout, NULL, ts);
+		chan->syncpt_mw[index], thresh,
+		tegra_channel_capture_timeout_jiffies(chan), NULL, ts);
 }
 
 static void buffer_done(struct tegra_channel *chan, struct vb2_buffer *vb,

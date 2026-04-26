@@ -290,4 +290,5 @@ int tegra_vi_media_controller_init(struct tegra_mc_vi *mc_vi,
 void tegra_vi_media_controller_cleanup(struct tegra_mc_vi *mc_vi);
 void tegra_channel_query_hdmiin_unplug(struct tegra_channel *chan,
 		struct v4l2_event *event);
+unsigned long tegra_channel_capture_timeout_jiffies(struct tegra_channel *chan);
 #endif
