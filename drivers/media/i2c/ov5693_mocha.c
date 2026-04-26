@@ -55,7 +55,7 @@ static struct tegra_io_dpd csie_io = {
 #define OV5693_MAX_GAIN		(16 << OV5693_GAIN_SHIFT)
 #define OV5693_MAX_UNREAL_GAIN	(0x0F80)
 #define OV5693_MIN_FRAME_LENGTH	(0x0)
-#define OV5693_MAX_FRAME_LENGTH	(0x7fff)
+#define OV5693_MAX_FRAME_LENGTH	(0xffff)
 #define OV5693_MIN_EXPOSURE_COARSE	(0x0002)
 #define OV5693_MAX_EXPOSURE_COARSE	\
 	(OV5693_MAX_FRAME_LENGTH-OV5693_MAX_COARSE_DIFF)
@@ -663,10 +663,14 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 	}
 
 	/* Override gain, frame_length, coarse_time after mode table.
-	 * Use per-mode frame_length — never go below mode default. */
+	 * Auto-extend frame_length to fit requested CID_EXPOSURE so the
+	 * first frame already has the long-exposure FL. */
 	{
 		u32 mode_fl = ov5693_mode_frame_length[s_data->mode];
+		const struct camera_common_frmfmt *fmt =
+			&s_data->frmfmt[s_data->mode];
 		u32 frame_length, max_coarse;
+		u32 desired_coarse = 0;
 
 		control.id = V4L2_CID_GAIN;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
@@ -676,9 +680,28 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 				"%s: warning gain override failed\n",
 				__func__);
 
-		/* Always use per-mode VTS from register tables.
-		 * Control default doesn't reset on mode change. */
-		frame_length = mode_fl;
+		/* Resolve desired coarse_time. CID_EXPOSURE (µs) takes
+		 * priority over the raw CID_COARSE_TIME (lines). */
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		if (!err && control.value > 0) {
+			desired_coarse = (u32)div_u64(
+				(u64)control.value * fmt->pix_clk_hz,
+				(u64)fmt->line_length * 1000000ULL);
+		} else {
+			control.id = V4L2_CID_COARSE_TIME;
+			err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+			if (!err && control.value > 0)
+				desired_coarse = (u32)control.value;
+		}
+
+		/* Auto-extend frame_length to fit requested exposure;
+		 * never below mode default, never above register cap. */
+		frame_length = desired_coarse + OV5693_MAX_COARSE_DIFF;
+		if (frame_length < mode_fl)
+			frame_length = mode_fl;
+		if (frame_length > OV5693_MAX_FRAME_LENGTH)
+			frame_length = OV5693_MAX_FRAME_LENGTH;
 		err = ov5693_set_frame_length(priv, frame_length);
 		if (err)
 			dev_dbg(&client->dev,
@@ -687,10 +710,11 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 
 		max_coarse = frame_length - OV5693_MAX_COARSE_DIFF;
 
-		control.id = V4L2_CID_COARSE_TIME;
-		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		err |= ov5693_set_coarse_time(priv,
-			min((u32)control.value, max_coarse));
+		if (desired_coarse > max_coarse)
+			desired_coarse = max_coarse;
+		if (desired_coarse == 0)
+			desired_coarse = max_coarse;
+		err = ov5693_set_coarse_time(priv, desired_coarse);
 		if (err)
 			dev_dbg(&client->dev,
 				"%s: warning coarse time override failed\n",
@@ -705,24 +729,11 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 				"%s: warning coarse time short override "
 				"failed\n", __func__);
 
-		/* V4L2_CID_EXPOSURE (µs → coarse_time) */
-		control.id = V4L2_CID_EXPOSURE;
-		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		if (!err && control.value > 0) {
-			const struct camera_common_frmfmt *fmt =
-				&s_data->frmfmt[s_data->mode];
-			u32 coarse = (u32)div_u64(
-				(u64)control.value * fmt->pix_clk_hz,
-				(u64)fmt->line_length * 1000000ULL);
-			if (coarse > max_coarse)
-				coarse = max_coarse;
-			if (coarse > 0)
-				ov5693_set_coarse_time(priv, coarse);
-		}
-
 		dev_info(&client->dev,
-			 "%s: mode=%d frame_len=%u (mode_default=%u)\n",
-			 __func__, s_data->mode, frame_length, mode_fl);
+			 "%s: mode=%d frame_len=%u (mode_default=%u) "
+			 "coarse=%u\n",
+			 __func__, s_data->mode, frame_length, mode_fl,
+			 desired_coarse);
 	}
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
@@ -1359,18 +1370,29 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 		err = ov5693_set_frame_length(priv, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE: {
-		/* Convert microseconds to coarse_time.
-		 * OV5693 coarse_time is in sensor lines (NOT shifted). */
+		/* µs → coarse_time (sensor lines, not shifted on OV5693).
+		 * Auto-extend frame_length when requested exposure exceeds
+		 * mode default. Shrinks back to mode_fl when exposure fits.
+		 * Drops fps only on the long-exposure frame; restored once
+		 * exposure shrinks. */
 		struct camera_common_data *s_data = priv->s_data;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
-		u32 fl = priv->cur_frame_length ?
-			 priv->cur_frame_length : OV5693_DEFAULT_FRAME_LENGTH;
+		u32 mode_fl = ov5693_mode_frame_length[s_data->mode];
 		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
-		u32 max_coarse = fl - OV5693_MAX_COARSE_DIFF;
-		if (coarse > max_coarse)
-			coarse = max_coarse;
+		u32 needed_fl = coarse + OV5693_MAX_COARSE_DIFF;
+		if (needed_fl < mode_fl)
+			needed_fl = mode_fl;
+		if (needed_fl > OV5693_MAX_FRAME_LENGTH)
+			needed_fl = OV5693_MAX_FRAME_LENGTH;
+		if (coarse > needed_fl - OV5693_MAX_COARSE_DIFF)
+			coarse = needed_fl - OV5693_MAX_COARSE_DIFF;
+		if (needed_fl != priv->cur_frame_length) {
+			err = ov5693_set_frame_length(priv, needed_fl);
+			if (err)
+				break;
+		}
 		err = ov5693_set_coarse_time(priv, coarse);
 		break;
 	}
