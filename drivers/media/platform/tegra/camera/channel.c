@@ -650,7 +650,6 @@ static void tegra_channel_capture_error(struct tegra_channel *chan)
 
 static void tegra_channel_ec_init(struct tegra_channel *chan)
 {
-	chan->timeout = 200;
 	tegra_channel_write(chan, TEGRA_VI_CFG_VI_INCR_SYNCPT_CNTRL, 0x100);
 }
 
