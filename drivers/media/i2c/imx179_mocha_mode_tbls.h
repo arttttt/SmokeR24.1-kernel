@@ -51,6 +51,7 @@ static const imx179_reg imx179_stop[] = {
 	{IMX179_TABLE_END, 0x00}
 };
 
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 /* Mode 0: 3280x2460 @ 30fps - Full resolution */
 static const imx179_reg mode_3280x2460[] = {
 	/* software reset */
@@ -123,6 +124,7 @@ static const imx179_reg mode_3280x2460[] = {
 	 * allow exposure/gain overrides before streaming */
 	{IMX179_TABLE_END, 0x00}
 };
+#endif /* disabled mode_3280x2460 */
 
 /* Mode 1: 1920x1080 @ 30fps - 1080p cropped */
 static const imx179_reg mode_1920x1080[] = {
@@ -195,6 +197,7 @@ static const imx179_reg mode_1920x1080[] = {
 	{IMX179_TABLE_END, 0x00}
 };
 
+#if 0 /* disabled — SW ISP in HAL can't handle >60fps */
 /* Mode 2: 1280x720 @ 90fps - High speed mode with binning */
 static const imx179_reg mode_1280x720_90fps[] = {
 	/* software reset */
@@ -265,6 +268,7 @@ static const imx179_reg mode_1280x720_90fps[] = {
 
 	{IMX179_TABLE_END, 0x00}
 };
+#endif /* disabled mode_1280x720_90fps */
 
 /* Mode 3: 1920x1080 @ 60fps — same crop as 30fps, reduced frame_length */
 static const imx179_reg mode_1920x1080_60fps[] = {
@@ -402,18 +406,26 @@ static const imx179_reg mode_1280x720_120fps[] = {
 #endif /* disabled 720p@120fps */
 
 enum {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	IMX179_MODE_3280X2460,
+#endif
 	IMX179_MODE_1920X1080,
+#if 0 /* disabled — SW ISP in HAL can't handle >60fps */
 	IMX179_MODE_1280X720_90FPS,
+#endif
 	IMX179_MODE_1920X1080_60FPS,
 	IMX179_MODE_START_STREAM,
 	IMX179_MODE_STOP_STREAM,
 };
 
 static const imx179_reg *mode_table[] = {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	[IMX179_MODE_3280X2460] = mode_3280x2460,
+#endif
 	[IMX179_MODE_1920X1080] = mode_1920x1080,
+#if 0 /* disabled — SW ISP in HAL can't handle >60fps */
 	[IMX179_MODE_1280X720_90FPS] = mode_1280x720_90fps,
+#endif
 	[IMX179_MODE_1920X1080_60FPS] = mode_1920x1080_60fps,
 	[IMX179_MODE_START_STREAM] = imx179_start,
 	[IMX179_MODE_STOP_STREAM] = imx179_stop,
@@ -421,9 +433,13 @@ static const imx179_reg *mode_table[] = {
 
 /* Per-mode frame_length from register tables (0x0340:0x0341) */
 static const u32 imx179_mode_frame_length[] = {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	[IMX179_MODE_3280X2460]       = 0x09CE,  /* 2510 — 30fps */
+#endif
 	[IMX179_MODE_1920X1080]       = 0x09CE,  /* 2510 — 30fps */
+#if 0 /* disabled — SW ISP in HAL can't handle >60fps */
 	[IMX179_MODE_1280X720_90FPS]  = 0x0345,  /* 837  — 90fps */
+#endif
 	[IMX179_MODE_1920X1080_60FPS] = 0x04E8,  /* 1256 — 60fps */
 };
 
@@ -437,10 +453,14 @@ static const int imx179_90fps[] = {90};
 #define IMX179_PIX_CLK_HZ	259200000ULL
 
 static const struct camera_common_frmfmt imx179_frmfmt[] = {
+#if 0 /* disabled — SW ISP in HAL can't handle >1080p */
 	{{3264, 2448},	imx179_30fps,	1, 0,	IMX179_MODE_3280X2460,		IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
+#endif
 	{{1920, 1080},	imx179_30fps,	1, 0,	IMX179_MODE_1920X1080,		IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
 	{{1920, 1080},	imx179_60fps,	1, 0,	IMX179_MODE_1920X1080_60FPS,	IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
+#if 0 /* disabled — SW ISP in HAL can't handle >60fps */
 	{{1280, 720},	imx179_90fps,	1, 0,	IMX179_MODE_1280X720_90FPS,	IMX179_LINE_LENGTH, IMX179_PIX_CLK_HZ},
+#endif
 };
 
 #endif /* __IMX179_MOCHA_TABLES__ */
