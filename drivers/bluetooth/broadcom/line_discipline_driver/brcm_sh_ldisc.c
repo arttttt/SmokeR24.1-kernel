@@ -175,6 +175,11 @@ static int patchram_settlement_delay = 0;
 static int ControllerAddrRead = 0;
 static int LpmUseBluesleep = 0;
 static enum sleep_type sleep = SLEEP_DEFAULT;
+/* When non-zero, skip the whole HCI_VSC_DOWNLOAD_MINIDRV + patchram block
+ * in download_patchram() — the chip is assumed to already be running with
+ * firmware loaded (e.g. stock bluedroid just initialised it). Host baud is
+ * set to custom_baudrate directly. Set via vendor_params. */
+static int skip_patchram = 0;
 
 #if V4L2_SNOOP_ENABLE
 /* HCI snoop and netlink socket related variables */
@@ -222,6 +227,13 @@ int parse_custom_baudrate(char *p_conf_name, char *p_conf_value)
 {
     pr_info("%s = %s\n", p_conf_name, p_conf_value);
     sscanf(p_conf_value, "%ld", &custom_baudrate);
+    return 0;
+}
+
+int parse_skip_patchram(char *p_conf_name, char *p_conf_value)
+{
+    pr_info("%s = %s\n", p_conf_name, p_conf_value);
+    sscanf(p_conf_value, "%d", &skip_patchram);
     return 0;
 }
 
@@ -291,6 +303,7 @@ static const conf_entry_t conf_table[] = {
     {"ControllerAddrRead", parse_ControllerAddrRead, 0},
     {"ldisc_snoop_enable_param", parse_ldisc_snoop_enable_param, 0},
     {"lpm_param" , parse_lpm_param, 0},
+    {"skip_patchram", parse_skip_patchram, 0},
     {"ldisc_dbg_param",dbg_ldisc_drv},
     {"bt_dbg_param",dbg_bt_drv},
     {"fm_dbg_param",dbg_fm_drv},
@@ -1490,6 +1503,25 @@ static long download_patchram(struct hci_uart *hu)
 
     BT_LDISC_DBG(V4L2_DBG_INIT, "tty = %p hu = %p", tty,hu);
 
+    /* skip_patchram: chip is assumed already initialised elsewhere (e.g.
+     * stock bluedroid just ran). Jump straight to setting host baud to
+     * custom_baudrate — chip is presumed to be there already, no HCI Reset,
+     * no patchram, no baudrate negotiation. */
+    if (skip_patchram) {
+        BT_LDISC_DBG(V4L2_DBG_INIT,
+            "skip_patchram=1, assume chip initialised; set host baud to %ld",
+            custom_baudrate);
+        if (custom_baudrate > 0) {
+            ktermios.c_cflag = (ktermios.c_cflag & ~CBAUD) |
+                (baud_rates[lookup_baudrate(custom_baudrate)].termios_value
+                 & CBAUD);
+            tty_set_termios(tty, &ktermios);
+            msleep(20);
+        }
+        err = 0;
+        goto end_download;
+    }
+
     /* request_firmware searches for patchram file. only in /vendor/firmware OR /etc/firmware */
     BT_LDISC_DBG(V4L2_DBG_INIT, "firmware patchram file: %s", fw_name);
     err = request_firmware(&hu->fw_entry, fw_name,
@@ -1507,6 +1539,22 @@ static long download_patchram(struct hci_uart *hu)
 
         BT_LDISC_DBG(V4L2_DBG_INIT, " with header patchram data ptr %p, \
             len %ld ",ptr,len);
+
+        /* BCM4354 comes out of power-on-reset expecting 115200 baud, regardless
+         * of what baudrate the tty was left at by a previous session or by the
+         * tegra uart default. The rest of this function (and the original code)
+         * only touches c_cflag after patchram download — meaning the minidriver
+         * and every FC4c WRITE_RAM frame went out at whatever baud happened to
+         * be set, and the chip never answered. Force POR-default before any HCI
+         * command touches the wire. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,7,0)
+        memcpy(&ktermios, tty->termios, sizeof(ktermios));
+#else
+        memcpy(&ktermios, &(tty->termios), sizeof(ktermios));
+#endif
+        ktermios.c_cflag = (ktermios.c_cflag & ~CBAUD) | (B115200 & CBAUD);
+        tty_set_termios(tty, &ktermios);
+        msleep(20);
 
         /* write command for hci_download_minidriver. Perform this before patchram download */
         BT_LDISC_DBG(V4L2_DBG_INIT, "writing hci_download_minidriver");
@@ -1675,6 +1723,7 @@ static long download_patchram(struct hci_uart *hu)
 
     err = 0;
 
+end_download:
 error_state:
     if (buf != NULL) kfree(buf);
     return err;

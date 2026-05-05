@@ -1537,10 +1537,11 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
     else {
         V4L2_FM_DRV_ERR("(fmdrv): Failed to get shared ldisc write func pointer");
         ret = brcm_sh_ldisc_unregister(PROTO_SH_FM);
-        if (ret < 0)
+        if (ret < 0) {
             V4L2_FM_DRV_ERR("(fmdrv): brcm_sh_ldisc_unregister failed %d", ret);
-            ret = -EAGAIN;
-            return ret;
+        }
+        ret = -EAGAIN;
+        return ret;
     }
 
     spin_lock_init(&fmdev->resp_skb_lock);

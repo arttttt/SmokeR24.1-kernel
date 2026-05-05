@@ -650,8 +650,32 @@ static void tegra_channel_capture_error(struct tegra_channel *chan)
 
 static void tegra_channel_ec_init(struct tegra_channel *chan)
 {
-	chan->timeout = 200;
 	tegra_channel_write(chan, TEGRA_VI_CFG_VI_INCR_SYNCPT_CNTRL, 0x100);
+}
+
+/* Per-capture syncpt timeout. Baseline covers the default ~33 ms
+ * exposure; long exposures stretch the wait window so VI doesn't
+ * give up before the sensor releases the frame.
+ *
+ * Reads V4L2_CID_EXPOSURE (µs) from the sensor subdev — populated by
+ * the HAL's ExposureControl path. The HAL-side raw V4L2_CID_COARSE_TIME
+ * path leaves CID_EXPOSURE at its default and falls back to baseline,
+ * which is fine because that path is only used at default exposure
+ * lengths where 200 ms is plenty. */
+unsigned long tegra_channel_capture_timeout_jiffies(struct tegra_channel *chan)
+{
+	struct v4l2_subdev *sd = chan->subdev_on_csi;
+	struct v4l2_control ctrl = { .id = V4L2_CID_EXPOSURE };
+	unsigned long timeout_ms = 200;
+
+	if (sd && sd->ctrl_handler &&
+	    !v4l2_g_ctrl(sd->ctrl_handler, &ctrl) && ctrl.value > 0) {
+		unsigned long t = (unsigned long)ctrl.value / 1000 + 200;
+		if (t > timeout_ms)
+			timeout_ms = t;
+	}
+
+	return msecs_to_jiffies(timeout_ms);
 }
 
 static void tegra_channel_clear_singleshot(struct tegra_channel *chan,

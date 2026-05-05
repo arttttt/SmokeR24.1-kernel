@@ -58,11 +58,17 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_OTP_SIZE			803
 #define IMX179_OTP_STR_SIZE		(IMX179_OTP_SIZE * 2)
 
-#define IMX179_GAIN_SHIFT		0
-#define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)
-#define IMX179_MAX_GAIN			(16 << IMX179_GAIN_SHIFT)
+/* Gain is advertised as a Q8 linear multiplier (256 = 1.00x, 512 =
+ * 2.00x) so userspace can request sub-integer gains without the
+ * 1→2→3 stops-per-click quantisation the old "integer multiplier"
+ * semantic produced. The hardware register still has 256 discrete
+ * levels via reg = 256 - 256/multiplier; picking the closest level
+ * for an arbitrary Q8 gain is done inside imx179_set_gain. */
+#define IMX179_GAIN_SHIFT		8
+#define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)   /* 256 = 1x */
+#define IMX179_MAX_GAIN			(64 << IMX179_GAIN_SHIFT)  /* 16384 = 64x */
 #define IMX179_MIN_FRAME_LENGTH		(0x0)
-#define IMX179_MAX_FRAME_LENGTH		(0x7fff)
+#define IMX179_MAX_FRAME_LENGTH		(0xffff)
 #define IMX179_MIN_EXPOSURE_COARSE	(0x0002)
 #define IMX179_MAX_EXPOSURE_COARSE	\
 	(IMX179_MAX_FRAME_LENGTH - IMX179_MAX_COARSE_DIFF)
@@ -72,9 +78,9 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_DEFAULT_EXPOSURE_COARSE	\
 	(IMX179_DEFAULT_FRAME_LENGTH - IMX179_MAX_COARSE_DIFF)
 
-#define IMX179_DEFAULT_MODE		IMX179_MODE_3280X2460
-#define IMX179_DEFAULT_WIDTH		3264
-#define IMX179_DEFAULT_HEIGHT		2448
+#define IMX179_DEFAULT_MODE		IMX179_MODE_1920X1080
+#define IMX179_DEFAULT_WIDTH		1920
+#define IMX179_DEFAULT_HEIGHT		1080
 #define IMX179_DEFAULT_DATAFMT		V4L2_MBUS_FMT_SRGGB10_1X10
 
 static const struct camera_common_colorfmt imx179_color_fmts[] = {
@@ -610,33 +616,39 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 	 * so they take effect BEFORE stream starts */
 	{
 		imx179_reg overrides[5]; /* 2 frame_length + 2 coarse + 1 gain */
-		u32 frame_length, coarse_time, gain, max_coarse;
+		u32 frame_length, coarse_time, gain;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
-
-		/* Always use per-mode frame_length from register tables.
-		 * The V4L2_CID_FRAME_LENGTH control default doesn't reset
-		 * on mode change, so we can't trust it — use mode table. */
 		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
-		frame_length = mode_fl;
+		u32 desired_coarse = 0;
 
-		max_coarse = frame_length - IMX179_MAX_COARSE_DIFF;
-
-		control.id = V4L2_CID_COARSE_TIME;
-		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		coarse_time = err ? max_coarse : min((u32)control.value,
-						     max_coarse);
-
-		/* V4L2_CID_EXPOSURE overrides COARSE_TIME if set */
+		/* Resolve desired coarse_time. V4L2_CID_EXPOSURE (µs) takes
+		 * priority over the raw V4L2_CID_COARSE_TIME (lines). */
 		control.id = V4L2_CID_EXPOSURE;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
 		if (!err && control.value > 0) {
-			coarse_time = (u32)div_u64(
+			desired_coarse = (u32)div_u64(
 				(u64)control.value * fmt->pix_clk_hz,
 				(u64)fmt->line_length * 1000000ULL);
-			if (coarse_time > max_coarse)
-				coarse_time = max_coarse;
+		} else {
+			control.id = V4L2_CID_COARSE_TIME;
+			err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+			if (!err && control.value > 0)
+				desired_coarse = (u32)control.value;
 		}
+
+		/* Auto-extend frame_length to fit requested exposure;
+		 * never shrink below mode default, never exceed register cap. */
+		frame_length = desired_coarse + IMX179_MAX_COARSE_DIFF;
+		if (frame_length < mode_fl)
+			frame_length = mode_fl;
+		if (frame_length > IMX179_MAX_FRAME_LENGTH)
+			frame_length = IMX179_MAX_FRAME_LENGTH;
+		coarse_time = desired_coarse;
+		if (coarse_time > frame_length - IMX179_MAX_COARSE_DIFF)
+			coarse_time = frame_length - IMX179_MAX_COARSE_DIFF;
+		if (coarse_time == 0)
+			coarse_time = frame_length - IMX179_MAX_COARSE_DIFF;
 
 		control.id = V4L2_CID_GAIN;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
@@ -652,6 +664,10 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 		imx179_get_frame_length_regs(overrides, frame_length);
 		imx179_get_coarse_time_regs(overrides + 2, coarse_time);
 		imx179_get_gain_reg(overrides + 4, gain);
+
+		/* Track current FL so post-stream s_ctrl auto-extend
+		 * computes against the actual programmed value. */
+		priv->cur_frame_length = frame_length;
 
 		/* Write mode table with overrides (like stock driver) */
 		err = imx179_write_table_with_overrides(priv,
@@ -827,14 +843,20 @@ static int imx179_set_gain(struct imx179 *priv, s32 val)
 	if (!priv->group_hold_prev)
 		imx179_set_group_hold(priv);
 
-	/* IMX179 gain: real_gain = 256/(256-reg), so reg = 256 - 256/gain
-	 * V4L2 gain value is linear multiplier (1=1x, 16=16x) */
-	if (val <= 1)
+	/* IMX179 register 0x0205 encodes analog gain as
+	 *    actual_gain = 256 / (256 - reg).
+	 * V4L2_CID_GAIN is advertised in Q8 (256 = 1.00x), so the
+	 * register value for any advertised multiplier m = val_Q8 / 256
+	 * is reg = 256 - 256 / m = 256 - 65536 / val_Q8.
+	 * Keeping the divide in integer arithmetic on val_Q8 avoids the
+	 * fractional-gain step-loss the old integer-multiplier semantic
+	 * had (val=1→2 meant a literal 2x jump at the sensor). */
+	if (val <= (1 << IMX179_GAIN_SHIFT))
 		gain = 0;
-	else if (val >= 256)
+	else if (val >= (256 << IMX179_GAIN_SHIFT))
 		gain = 255;
 	else
-		gain = (u16)(256 - 256 / val);
+		gain = (u16)(256 - 65536 / val);
 
 	imx179_get_gain_reg(&reg_list, gain);
 	dev_dbg(&priv->i2c_client->dev,
@@ -950,17 +972,29 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 		err = imx179_set_frame_length(priv, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE: {
-		/* Convert microseconds to coarse_time (sensor lines) */
+		/* µs → coarse_time (sensor lines).
+		 * Auto-extend frame_length when requested exposure exceeds
+		 * mode default. Shrinks back to mode_fl when exposure fits.
+		 * Drops fps only on the long-exposure frame; restored once
+		 * exposure shrinks. */
 		struct camera_common_data *s_data = priv->s_data;
 		const struct camera_common_frmfmt *fmt =
 			&s_data->frmfmt[s_data->mode];
-		u32 fl = priv->cur_frame_length ?
-			 priv->cur_frame_length : IMX179_DEFAULT_FRAME_LENGTH;
-		u32 max_coarse = fl - IMX179_MAX_COARSE_DIFF;
+		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
 		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
 					  (u64)fmt->line_length * 1000000ULL);
-		if (coarse > max_coarse)
-			coarse = max_coarse;
+		u32 needed_fl = coarse + IMX179_MAX_COARSE_DIFF;
+		if (needed_fl < mode_fl)
+			needed_fl = mode_fl;
+		if (needed_fl > IMX179_MAX_FRAME_LENGTH)
+			needed_fl = IMX179_MAX_FRAME_LENGTH;
+		if (coarse > needed_fl - IMX179_MAX_COARSE_DIFF)
+			coarse = needed_fl - IMX179_MAX_COARSE_DIFF;
+		if (needed_fl != priv->cur_frame_length) {
+			err = imx179_set_frame_length(priv, needed_fl);
+			if (err)
+				break;
+		}
 		err = imx179_set_coarse_time(priv, coarse);
 		break;
 	}

@@ -137,7 +137,6 @@ struct tegra_channel {
 	unsigned int buffer_offset[TEGRA_CSI_BLOCKS];
 	unsigned int buffer_state[QUEUED_BUFFERS];
 	struct vb2_buffer *buffers[QUEUED_BUFFERS];
-	unsigned int timeout;
 	unsigned int save_index;
 	unsigned int free_index;
 	unsigned int num_buffers;
@@ -290,4 +289,5 @@ int tegra_vi_media_controller_init(struct tegra_mc_vi *mc_vi,
 void tegra_vi_media_controller_cleanup(struct tegra_mc_vi *mc_vi);
 void tegra_channel_query_hdmiin_unplug(struct tegra_channel *chan,
 		struct v4l2_event *event);
+unsigned long tegra_channel_capture_timeout_jiffies(struct tegra_channel *chan);
 #endif

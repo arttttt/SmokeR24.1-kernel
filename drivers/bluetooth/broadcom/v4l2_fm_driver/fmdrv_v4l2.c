@@ -584,7 +584,8 @@ static int fm_v4l2_fops_open(struct file *file)
 
     if (radio_disconnected) {
         V4L2_FM_DRV_ERR("(fmdrv): FM device is already opened\n");
-        return  -EBUSY;
+        ret = -EBUSY;
+        goto err_inc_avail;
     }
 
     fmdev = video_drvdata(file);
@@ -592,7 +593,7 @@ static int fm_v4l2_fops_open(struct file *file)
     ret = fmc_prepare(fmdev);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Unable to prepare FM CORE");
-        return ret;
+        goto err_inc_avail;
     }
 
     radio_disconnected = 1;
@@ -614,7 +615,7 @@ static int fm_v4l2_fops_open(struct file *file)
     ret = fmc_enable(fmdev, option);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Unable to enable FM");
-        return ret;
+        goto err_clear_disconnect;
     }
 
     /* Set Audio mode */
@@ -622,7 +623,7 @@ static int fm_v4l2_fops_open(struct file *file)
     ret = fmc_set_audio_mode(fmdev, DEF_V4L2_FM_AUDIO_MODE);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting Audio mode during FM enable operation");
-        return ret;
+        goto err_clear_disconnect;
     }
 
     /* Register sysfs entries */
@@ -630,7 +631,7 @@ static int fm_v4l2_fops_open(struct file *file)
             &v4l2_fm_attr_grp);
     if (ret) {
         V4L2_FM_DRV_ERR("failed to create sysfs entries");
-        return ret;
+        goto err_clear_disconnect;
     }
 
     /* Set Audio path */
@@ -638,7 +639,7 @@ static int fm_v4l2_fops_open(struct file *file)
     ret = fm_rx_config_audio_path(fmdev, DEF_V4L2_FM_AUDIO_PATH);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting Audio path during FM enable operation");
-        return ret;
+        goto err_remove_sysfs;
     }
 
 #if ROUTE_FM_I2S_MASTER_TO_PCM_PINS
@@ -646,7 +647,7 @@ static int fm_v4l2_fops_open(struct file *file)
     ret = fmc_send_cmd(fmdev, 0, i2s_master_on_pcm_pins, 5, VSC_HCI_CMD, &fmdev->maintask_completion, NULL, NULL);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting switch I2s path to PCM pins as a master");
-        return ret;
+        goto err_remove_sysfs;
     }
 #endif
 
@@ -656,11 +657,19 @@ static int fm_v4l2_fops_open(struct file *file)
     if (ret < 0)
     {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting switch I2s path to PCM pins as a slave");
-        return ret;
+        goto err_remove_sysfs;
     }
 #endif
 
     return 0;
+
+err_remove_sysfs:
+    sysfs_remove_group(&fmdev->radio_dev->dev.kobj, &v4l2_fm_attr_grp);
+err_clear_disconnect:
+    radio_disconnected = 0;
+err_inc_avail:
+    atomic_inc(&v4l2_device_available);
+    return ret;
 }
 
 /* Handle close request for "/dev/radioX" device.
