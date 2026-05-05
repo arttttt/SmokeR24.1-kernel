@@ -11,10 +11,11 @@ fw-external-y := $(subst ",,$(CONFIG_EXTRA_FIRMWARE))
 
 # Out-of-tree builds (make O=...) run `as` from $(objtree), so .incbin in the
 # generated *.gen.S can't find shipped firmware that lives only in $(srctree)
-# (e.g. plain-binary blobs with no .ihex/.HEX/.H16 intermediate). Add srctree's
-# firmware dir to the assembler's search path. No-op for in-tree builds where
-# $(srctree) == ".".
-asflags-y += -I$(srctree)/$(src)
+# (e.g. plain-binary blobs with no .ihex/.HEX/.H16 intermediate). The .incbin
+# paths already include the "firmware/" prefix, so add $(srctree) (kernel
+# root) to the assembler's search path -- not $(srctree)/$(src), which would
+# duplicate the prefix. No-op for in-tree builds where $(srctree) == ".".
+asflags-y += -I$(srctree)
 
 # There are three cases to care about:
 # 1. Building kernel with CONFIG_FIRMWARE_IN_KERNEL=y -- $(fw-shipped-y) should
