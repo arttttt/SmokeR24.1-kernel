@@ -9,6 +9,13 @@ fwabs := $(addprefix $(srctree)/,$(filter-out /%,$(fwdir)))$(filter /%,$(fwdir))
 
 fw-external-y := $(subst ",,$(CONFIG_EXTRA_FIRMWARE))
 
+# Out-of-tree builds (make O=...) run `as` from $(objtree), so .incbin in the
+# generated *.gen.S can't find shipped firmware that lives only in $(srctree)
+# (e.g. plain-binary blobs with no .ihex/.HEX/.H16 intermediate). Add srctree's
+# firmware dir to the assembler's search path. No-op for in-tree builds where
+# $(srctree) == ".".
+asflags-y += -I$(srctree)/$(src)
+
 # There are three cases to care about:
 # 1. Building kernel with CONFIG_FIRMWARE_IN_KERNEL=y -- $(fw-shipped-y) should
 #    include the firmware files to include, according to .config
@@ -231,13 +238,6 @@ $(patsubst %,$(obj)/%.gen.o, $(fw-external-y)): $(obj)/%.gen.o: $(fwdir)/%
 # where binaries are frowned upon. They are directly converted with objcopy.
 $(obj)/%: $(obj)/%.ihex | $(objtree)/$(obj)/$$(dir %)
 	$(call cmd,ihex)
-
-# Plain-binary shipped firmware committed in $(srctree)/firmware/ (no .ihex/
-# .HEX/.H16 intermediate) needs to be copied to $(objtree)/firmware/ so the
-# assembler's .incbin in the generated .gen.S can find it via its CWD-relative
-# path.
-$(obj)/%.dffs: $(srctree)/$(src)/%.dffs | $(objtree)/$(obj)/$$(dir %)
-	$(Q)cp -f $< $@
 
 # Don't depend on ihex2fw if we're installing and it already exists.
 # Putting it after | in the dependencies doesn't seem sufficient when
