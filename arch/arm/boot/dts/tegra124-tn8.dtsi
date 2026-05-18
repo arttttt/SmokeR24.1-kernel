@@ -39,7 +39,7 @@
 	};
 
 	serial@70006300 {
-		compatible = "nvidia,tegra20-uart", "nvidia,tegra114-hsuart";
+		compatible = "nvidia,tegra20-uart";
 		console-port;
 		sqa-automation-port;
 		status = "okay";
