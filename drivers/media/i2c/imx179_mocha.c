@@ -93,7 +93,13 @@ struct imx179 {
 	struct v4l2_ctrl_handler	ctrl_handler;
 	struct i2c_client		*i2c_client;
 	struct v4l2_subdev		*subdev;
-	struct media_pad		pad;
+	/* pad[0] = SOURCE — image data flow toward VI/ISP.
+	 * pad[1] = SINK   — ancillary control link from the paired
+	 *                   focuser entity (AD5823), created by
+	 *                   tegra_vi_graph code so userspace can
+	 *                   discover the sensor↔lens pairing via
+	 *                   MEDIA_IOC_ENUM_LINKS. */
+	struct media_pad		pads[2];
 
 	s32				group_hold_prev;
 	bool				group_hold_en;
@@ -1408,10 +1414,12 @@ static int imx179_probe(struct i2c_client *client,
 			       V4L2_SUBDEV_FL_HAS_EVENTS;
 
 #if defined(CONFIG_MEDIA_CONTROLLER)
-	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
+	priv->pads[0].flags = MEDIA_PAD_FL_SOURCE;
+	priv->pads[1].flags = MEDIA_PAD_FL_SINK;
 	priv->subdev->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
 	priv->subdev->entity.ops = &imx179_media_ops;
-	err = media_entity_init(&priv->subdev->entity, 1, &priv->pad, 0);
+	err = media_entity_init(&priv->subdev->entity,
+				ARRAY_SIZE(priv->pads), priv->pads, 0);
 	if (err < 0) {
 		dev_err(&client->dev, "unable to init media entity\n");
 		return err;

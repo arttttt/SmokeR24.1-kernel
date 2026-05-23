@@ -258,6 +258,7 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 			if (sensor_node) {
 				for (j = 0; j < vi->num_channels; j++) {
 					struct tegra_channel *cap = &vi->chans[j];
+					int link_ret;
 					if (cap->is_lens_channel || !cap->subdev_on_csi)
 						continue;
 					if (cap->subdev_on_csi->dev &&
@@ -267,6 +268,20 @@ static int tegra_vi_graph_build_links(struct tegra_mc_vi *vi)
 							"lens %s -> sensor %s\n",
 							source->name,
 							cap->video.name);
+						/* Expose the pairing as a media controller
+						 * link so userspace can discover it via
+						 * MEDIA_IOC_ENUM_LINKS. Source is the lens
+						 * (control flow toward sensor), sink is the
+						 * sensor's pad[1] reserved for this. */
+						link_ret = media_entity_create_link(
+							&chan->subdev_on_csi->entity, 0,
+							&cap->subdev_on_csi->entity, 1,
+							MEDIA_LNK_FL_ENABLED |
+							MEDIA_LNK_FL_IMMUTABLE);
+						if (link_ret < 0)
+							dev_warn(vi->dev,
+								"failed to expose lens-sensor media link: %d\n",
+								link_ret);
 						break;
 					}
 				}
