@@ -539,8 +539,14 @@ static struct snd_soc_dai_link tegra_rt5671_dai[NUM_DAI_LINKS] = {
 		.codec_name = "rt5671.0-001c",
 		.cpu_name = "spdif-dit.3",
 		.codec_dai_name = "rt5671-aif4",
+		/* BCM4354 drives the FM I2S clock as master; configure the
+		 * codec side as bit-slave / frame-slave (CBS_CFS) so AIF4
+		 * follows the chip's BCLK/LRCLK. With CBM_CFM both sides
+		 * tried to drive the clock and the codec received garbage,
+		 * which presented as constant hiss even though RDS came
+		 * through fine (RDS lives in HCI events, not the audio I2S). */
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-				SND_SOC_DAIFMT_CBM_CFM,
+				SND_SOC_DAIFMT_CBS_CFS,
 		.params = &tegra_rt5671_fm_params,
 		.ignore_pmdown_time = 1,
 	},
