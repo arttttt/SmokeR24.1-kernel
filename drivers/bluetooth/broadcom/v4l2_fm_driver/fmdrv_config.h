@@ -41,8 +41,17 @@
 /* Set default World region */
 #define DEF_V4L2_FM_WORLD_REGION FM_REGION_NA
 
-/* Set default Audio mode */
-#define DEF_V4L2_FM_AUDIO_MODE FM_AUTO_MODE
+/* Set default Audio mode.
+ *
+ * Was FM_AUTO_MODE (chip-side stereo<->mono auto-blend based on RSSI/SNR).
+ * On mocha that produced an audible "loud for the first second, then drops
+ * to steady-state quieter" transition each time the app powers up FM —
+ * the chip starts at full separation, evaluates the signal and engages
+ * the blend, attenuating the per-channel level in the process. FM_STEREO_MODE
+ * pins the demodulator at manual stereo with no blend so the audio level is
+ * constant from the first tuned frame. V4L2 has no separate constant for
+ * forced stereo, so this is the only place to express it. */
+#define DEF_V4L2_FM_AUDIO_MODE FM_STEREO_MODE
 
 /* Set default Audio path */
 #ifndef DEF_V4L2_FM_AUDIO_PATH
