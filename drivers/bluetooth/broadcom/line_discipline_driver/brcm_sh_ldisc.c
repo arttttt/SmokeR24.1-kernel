@@ -1540,21 +1540,12 @@ static long download_patchram(struct hci_uart *hu)
         BT_LDISC_DBG(V4L2_DBG_INIT, " with header patchram data ptr %p, \
             len %ld ",ptr,len);
 
-        /* BCM4354 comes out of power-on-reset expecting 115200 baud, regardless
-         * of what baudrate the tty was left at by a previous session or by the
-         * tegra uart default. The rest of this function (and the original code)
-         * only touches c_cflag after patchram download — meaning the minidriver
-         * and every FC4c WRITE_RAM frame went out at whatever baud happened to
-         * be set, and the chip never answered. Force POR-default before any HCI
-         * command touches the wire. */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,7,0)
-        memcpy(&ktermios, tty->termios, sizeof(ktermios));
-#else
-        memcpy(&ktermios, &(tty->termios), sizeof(ktermios));
-#endif
-        ktermios.c_cflag = (ktermios.c_cflag & ~CBAUD) | (B115200 & CBAUD);
-        tty_set_termios(tty, &ktermios);
-        msleep(20);
+        /* Host/chip baud was already synchronised by brcm-uim-sysfs
+         * (HCI_RESET at POR 115200 → FC18 UPDATE_BAUDRATE → tcsetattr to
+         * custom_baudrate) before it issued TIOCSETD N_BRCM_HCI. The chip is
+         * at custom_baudrate and so is the tty; do not overwrite tty baud
+         * here or the minidriver and patchram frames go out on a mismatched
+         * line speed and the chip never answers. */
 
         /* write command for hci_download_minidriver. Perform this before patchram download */
         BT_LDISC_DBG(V4L2_DBG_INIT, "writing hci_download_minidriver");
