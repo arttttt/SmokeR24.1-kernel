@@ -211,15 +211,14 @@ static int ad5823_load_config(struct camera_common_focuser_data *s_data)
 
 static int ad5823_power_off(struct camera_common_focuser_data *s_data)
 {
-	struct ad5823 *priv = (struct ad5823 *)s_data->priv;
-
 	dev_dbg(&s_data->i2c_client->dev, "%s++\n", __func__);
 
-	/* Move to default (infinity) position before power off */
-	ad5823_set_position(priv, s_data->def_position);
+	/* No lens-position write here. The chip is about to lose
+	 * register state on the next power_on/init pair anyway,
+	 * and the userspace HAL owns the focus position — it will
+	 * re-issue V4L2_CID_FOCUS_ABSOLUTE on its next frame. */
 
 	s_data->pwr_dev = AD5823_PWR_DEV_OFF;
-
 	return 0;
 }
 
@@ -234,8 +233,9 @@ static int ad5823_power_on(struct camera_common_focuser_data *s_data)
 	if (err)
 		return err;
 
-	/* Park lens at infinity after init */
-	ad5823_set_position(priv, AD5823_FOCUS_INFINITY);
+	/* No lens-position write here either. ad5823_init resets
+	 * the chip; the HAL re-applies the focus position via
+	 * V4L2_CID_FOCUS_ABSOLUTE on the next frame. */
 
 	s_data->pwr_dev = AD5823_PWR_DEV_ON;
 	dev_info(&s_data->i2c_client->dev, "focuser powered on\n");
