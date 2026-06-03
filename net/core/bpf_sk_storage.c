@@ -763,3 +763,15 @@ const struct bpf_func_proto bpf_sk_storage_delete_proto = {
 	.arg1_type	= ARG_CONST_MAP_PTR,
 	.arg2_type	= ARG_PTR_TO_SOCKET,
 };
+
+static struct bpf_map_type_list sk_storage_map_type __read_mostly = {
+	.ops = &sk_storage_map_ops,
+	.type = BPF_MAP_TYPE_SK_STORAGE,
+};
+
+static int __init register_sk_storage_map(void)
+{
+	bpf_register_map_type(&sk_storage_map_type);
+	return 0;
+}
+late_initcall(register_sk_storage_map);
