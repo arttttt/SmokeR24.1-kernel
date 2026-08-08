@@ -321,10 +321,15 @@ static ssize_t brcm_bt_drv_read(struct file *f, char __user *buf, size_t
         goto exit;
     }
     else {
-        skb_size = skb->len;
+        /* Hand back at most what was asked for. read(2) must never write past
+         * buf[len-1], and callers are entitled to read a packet piecemeal --
+         * the HIDL Bluetooth HAL reads the H4 type byte on its own, with a
+         * one-byte buffer on the stack. Copying a whole skb there corrupts the
+         * caller's stack and returns more than it requested. */
+        skb_size = min(len, (size_t) skb->len);
 
          /* copy packet to user-space */
-         if(copy_to_user(buf, skb->data, sizeof(char) * skb_size)){
+         if(copy_to_user(buf, skb->data, skb_size)){
             /* free the skb */
             /*kfree_skb(skb);*/
             printk("copy to user failed\n");
@@ -332,9 +337,14 @@ static ssize_t brcm_bt_drv_read(struct file *f, char __user *buf, size_t
             return -EFAULT;
          }
          else {
-            /* free the skb after copying to user space. Return the size of skb */
-            skb = skb_dequeue(&bt_dev_p->rx_q);
-            kfree_skb(skb);
+            /* Consume what was handed over; anything left stays at the head of
+             * the queue for the next read, so a packet split across several
+             * reads is still delivered in order. */
+            skb_pull(skb, skb_size);
+            if (!skb->len) {
+                skb = skb_dequeue(&bt_dev_p->rx_q);
+                kfree_skb(skb);
+            }
             spin_unlock_irqrestore(&bt_dev_p->rx_q_lock, flags);
             return skb_size;
          }
