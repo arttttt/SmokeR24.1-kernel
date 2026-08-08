@@ -2490,6 +2490,17 @@ module_exit(bcmbt_ldisc_exit);
 
 MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
 
+/* Writable, so verbosity can be raised on a running device:
+ *   echo 31 > /sys/module/brcm_hci_ldisc/parameters/ldisc_dbg_param
+ * brcm_hci.c shares this variable, so one knob covers the line discipline and
+ * the H4 receive state machine. The only other way in is the "ldisc_dbg_param"
+ * key of the vendor_params sysfs entry, which brcm-uim-sysfs only emits when
+ * built with DBG_V4L2_DRIVERS -- and it is not. */
+module_param(ldisc_dbg_param, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(ldisc_dbg_param, \
+               "Set to integer value from 1 to 31 for enabling/disabling" \
+               " specific categories of logs");
+
 MODULE_AUTHOR("Broadcom");
 MODULE_DESCRIPTION("Line Discipline Driver for Shared Transport" \
                                                       "over UART ver ");

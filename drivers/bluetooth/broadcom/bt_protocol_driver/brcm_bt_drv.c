@@ -705,8 +705,14 @@ static void __exit brcm_bt_drv_exit(void) /* Destructor */
 module_init(brcm_bt_drv_init);
 module_exit(brcm_bt_drv_exit);
 
-module_param(bt_dbg_param, int, S_IRUGO);
-MODULE_PARM_DESC(ldisc_dbg_param, \
+/* Writable, so verbosity can be raised on a running device:
+ *   echo 31 > /sys/module/brcm_bt_drv/parameters/bt_dbg_param
+ * The driver is built into the kernel, so there is no insmod to pass this at,
+ * and the vendor_params route never reaches it -- the line discipline parses a
+ * "bt_dbg_param" key but its handler only prints the value. Read-only here
+ * meant none of the logs in this driver could be turned on at all. */
+module_param(bt_dbg_param, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(bt_dbg_param, \
                "Set to integer value from 1 to 31 for enabling/disabling" \
                " specific categories of logs");
 
