@@ -35,7 +35,6 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/poll.h>
-#include <net/bluetooth/hci.h>
 #include "../include/v4l2_target.h"
 #include "../include/brcm_ldisc_sh.h"
 #include "../include/v4l2_logs.h"

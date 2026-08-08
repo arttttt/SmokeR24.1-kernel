@@ -29,6 +29,9 @@
 #ifndef _BT_DRV_H
 #define _BT_DRV_H
 #include <net/bluetooth/bluetooth.h>
+/* HCI_COMMAND_PKT and friends. Must follow bluetooth.h, which defines the
+ * bdaddr_t that hci.h uses throughout. */
+#include <net/bluetooth/hci.h>
 #include <linux/interrupt.h>
 
 #define TRUE   1
