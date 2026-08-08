@@ -87,6 +87,11 @@ struct brcm_bt_dev {
     unsigned long last_tx_jiffies;       /* Timestamp of last pkt sent */
     atomic_t tx_cnt;                     /* Number of packets in tx queue */
 
+    /* H4 type of the packet currently being written. Userspace may split one
+     * packet across several write() calls, and only the first fragment carries
+     * the type byte; the rest are tagged with this. */
+    unsigned char last_pkt_type;
+
     /* queue for polling table */
     wait_queue_head_t inq;
 

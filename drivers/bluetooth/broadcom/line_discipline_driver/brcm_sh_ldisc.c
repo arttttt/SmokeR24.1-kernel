@@ -1870,7 +1870,12 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
             break;
     }
 
-    if (unlikely(hu->list[protoid] == NULL))
+    /* protoid stays PROTO_SH_MAX when the packet type matches nothing above,
+     * and list[] has exactly PROTO_SH_MAX entries -- reading list[PROTO_SH_MAX]
+     * runs off the end into is_registered[0], which is true whenever any
+     * protocol is attached, so the guard below passed on garbage instead of
+     * rejecting the frame. Reject an unresolved protocol explicitly. */
+    if (unlikely(protoid == PROTO_SH_MAX || hu->list[protoid] == NULL))
     {
         pr_err(" protocol %d not registered, and writing? ",
                             protoid);

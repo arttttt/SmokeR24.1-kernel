@@ -35,6 +35,7 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/poll.h>
+#include <net/bluetooth/hci.h>
 #include "../include/v4l2_target.h"
 #include "../include/brcm_ldisc_sh.h"
 #include "../include/v4l2_logs.h"
@@ -245,6 +246,11 @@ static void brcm_bt_drv_prepare(struct brcm_bt_dev* bt_dev)
     spin_lock_init(&bt_dev->rx_q_lock);
 
     atomic_set(&bt_dev->tx_cnt, 0);
+
+    /* The device is kmalloc'd, not zeroed, and a fresh open starts a fresh
+     * packet stream. The first fragment written always carries a type byte, so
+     * this is only a safe default, never the value actually used. */
+    bt_dev->last_pkt_type = HCI_COMMAND_PKT;
 
     init_waitqueue_head(&bt_dev->inq);
 
@@ -523,10 +529,26 @@ static void bt_send_data_ldisc(struct work_struct *w)
             break;
         }
 
-        sh_ldisc_cb(skb)->pkt_type = skb->data[0];
-        /* st_write takes ownership of the skb, so read anything needed for
-         * logging before handing it over. */
+        /* Only a fragment that starts a packet carries the H4 type byte. The
+         * HIDL HAL writes that byte on its own, so tagging every skb with its
+         * first byte labelled each command body with whatever its first byte
+         * happened to be -- 0x05 for "05 10 00" -- which matches no protocol
+         * in the line discipline and made it index its proto list one past the
+         * end. Remember the type across fragments instead.
+         *
+         * A body whose first byte is itself 0x01/0x02/0x03 is misread as a
+         * packet start, but all three map to the same protocol, so the
+         * routing this tag drives is unaffected. */
         pkt_type = skb->data[0];
+        if (pkt_type == HCI_COMMAND_PKT || pkt_type == HCI_ACLDATA_PKT ||
+            pkt_type == HCI_SCODATA_PKT)
+            bt_dev_p->last_pkt_type = pkt_type;
+        else
+            pkt_type = bt_dev_p->last_pkt_type;
+
+        /* st_write takes ownership of the skb, so this must be set, and
+         * anything needed for logging read, before handing it over. */
+        sh_ldisc_cb(skb)->pkt_type = pkt_type;
 
         if(bt_dev_p->st_write != NULL){
             len = bt_dev_p->st_write(skb);
