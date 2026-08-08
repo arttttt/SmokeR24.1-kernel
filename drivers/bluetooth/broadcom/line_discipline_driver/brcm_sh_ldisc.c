@@ -2134,8 +2134,20 @@ static void brcm_hci_uart_tty_receive(struct tty_struct *tty,
     if (!hu || tty != hu->tty)
         return;
 
-    if (!test_bit(HCI_UART_PROTO_SET, &hu->flags))
+    if (!test_bit(HCI_UART_PROTO_SET, &hu->flags)) {
+        /* Bytes arrived before a protocol was attached. They are dropped here
+         * without a trace, which from the stack's point of view is
+         * indistinguishable from a chip that never answered. */
+        BT_LDISC_DBG(V4L2_DBG_RX, "dropping %d bytes: no proto set", count);
         return;
+    }
+
+    /* Everything the chip sends passes through here. If a command from the
+     * stack times out and this stays quiet, the chip said nothing -- look at
+     * power, patchram and baud rate. If it fires but the frame never reaches
+     * the BT driver, the fault is in routing below. */
+    BT_LDISC_DBG(V4L2_DBG_RX, "tty rx %d bytes, protos_registered=%d",
+        count, hu->protos_registered);
 
     spin_lock_irqsave(&hu->rx_lock, lock_flags);
 

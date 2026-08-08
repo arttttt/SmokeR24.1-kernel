@@ -308,6 +308,7 @@ static ssize_t brcm_bt_drv_read(struct file *f, char __user *buf, size_t
     struct brcm_bt_dev *bt_dev_p = f->private_data;
     size_t skb_size = 0;
     unsigned long flags;
+    int left = 0;
 
     spin_lock_irqsave(&bt_dev_p->rx_q_lock, flags);
     skb = skb_peek(&bt_dev_p->rx_q);
@@ -341,11 +342,14 @@ static ssize_t brcm_bt_drv_read(struct file *f, char __user *buf, size_t
              * the queue for the next read, so a packet split across several
              * reads is still delivered in order. */
             skb_pull(skb, skb_size);
+            left = skb->len;
             if (!skb->len) {
                 skb = skb_dequeue(&bt_dev_p->rx_q);
                 kfree_skb(skb);
             }
             spin_unlock_irqrestore(&bt_dev_p->rx_q_lock, flags);
+            BT_DRV_DBG(V4L2_DBG_RX, "read: asked=%zu given=%zu left=%d",
+                len, skb_size, left);
             return skb_size;
          }
     }
@@ -398,6 +402,14 @@ static ssize_t brcm_bt_write(struct file *f, const char __user *buf,
         ret=-EFAULT;
         goto nomem;
     }
+
+    /* Name the frame the stack is sending: H4 type byte, then the HCI opcode
+     * for commands (little-endian, right after the type). Without this, a
+     * timeout reported by bluedroid cannot be tied to a command that actually
+     * reached the driver. */
+    BT_DRV_DBG(V4L2_DBG_TX, "from stack: type=0x%02x opcode=0x%04x len=%zu",
+        skb->data[0], (len >= 3) ? (skb->data[1] | (skb->data[2] << 8)) : 0,
+        len);
 
     /* writing to tx queue should be atomic */
     skb_queue_tail(&bt_dev->tx_q, skb);
@@ -482,6 +494,7 @@ static void bt_send_data_ldisc(struct work_struct *w)
     struct sk_buff *skb;
     int len = 0;
     unsigned long flags;
+    unsigned char pkt_type = 0;
 
     BT_DRV_DBG(V4L2_DBG_TX, "sending data to ldisc");
 
@@ -493,6 +506,9 @@ static void bt_send_data_ldisc(struct work_struct *w)
         if (skb)
         {
             sh_ldisc_cb(skb)->pkt_type = skb->data[0];
+            /* st_write takes ownership of the skb, so read anything needed for
+             * logging before handing it over. */
+            pkt_type = skb->data[0];
 
             if(bt_dev_p->st_write != NULL){
                 len = bt_dev_p->st_write(skb);
@@ -501,6 +517,9 @@ static void bt_send_data_ldisc(struct work_struct *w)
             {
                 BT_DRV_ERR("%s Error!!! bt_dev_p->st_write is NULL", __func__);
             }
+
+            BT_DRV_DBG(V4L2_DBG_TX, "to ldisc: type=0x%02x ret=%d",
+                pkt_type, len);
 
             if(len < 0)
             {
@@ -589,6 +608,11 @@ static long brcm_bt_st_receive(void *priv_data, struct sk_buff *skb)
         err = -EINVAL;
         return err;
     }
+
+    /* Dump the frame before queueing it: the wake-up below lets a reader
+     * consume and free this skb, so it must not be dereferenced afterwards. */
+    BT_DRV_DBG(V4L2_DBG_RX, "from ldisc: len=%d head=%*ph", skb->len,
+        min(8, (int) skb->len), skb->data);
 
     spin_lock_irqsave(&brcm_bt_dev_p->rx_q_lock, flags);
     skb_queue_tail(&brcm_bt_dev_p->rx_q, skb);

@@ -428,6 +428,13 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
                 BRCM_HCI_DBG(V4L2_DBG_RX, "Complete data, rx_skb->len:%d", brcm->rx_skb->len);
                 /* route frame as internal command response */
                 if(unlikely(hu->protos_registered == LDISC_EMPTY)) {
+                    /* No protocol driver is attached, so the line discipline
+                     * answers this itself -- that is how patchram and the baud
+                     * handshake work. A frame the stack is waiting for that
+                     * lands here is lost as far as the stack can tell. */
+                    BRCM_HCI_DBG(V4L2_DBG_RX, "no proto registered -- "\
+                        "consuming frame internally, len=%d",
+                        brcm->rx_skb->len);
                     memcpy(skb_push(brcm->rx_skb, 1), brcm->rx_skb->cb, 1);
                     if (unlikely(brcm->rx_skb->data[0]==0x04
                         && brcm->rx_skb->data[4]==0x09
@@ -523,8 +530,9 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
                         }
                     }
 #endif
-                    BRCM_HCI_DBG(V4L2_DBG_RX, "routing frame to registered "\
-                                                                     "driver");
+                    BRCM_HCI_DBG(V4L2_DBG_RX, "routing frame to proto %d, "\
+                        "type=0x%02x len=%d", protoid, type,
+                        brcm->rx_skb->len);
                     brcm_hci_uart_route_frame(protoid, hu, brcm->rx_skb);
                 }
                 brcm->rx_state = HCIBRCM_W4_PACKET_TYPE;
