@@ -498,40 +498,59 @@ static void bt_send_data_ldisc(struct work_struct *w)
 
     BT_DRV_DBG(V4L2_DBG_TX, "sending data to ldisc");
 
-    if (atomic_read(&bt_dev_p->tx_cnt))
+    /* Drain the queue, do not send a single packet per run. queue_work() on an
+     * already-pending work item is a no-op, so two writes arriving back to back
+     * schedule this handler once -- and one skb was left behind until the next
+     * write happened to schedule it again.
+     *
+     * That is exactly what Android 8's HIDL HAL does: it writes the H4 type
+     * byte and the packet body as two separate write() calls. Every command
+     * body therefore sat in the queue until the stack sent the next command,
+     * so each command reached the chip roughly two seconds late and bluedroid
+     * gave up on it first ("Waited 2006 ms for a response to opcode 0xc03").
+     * Bluedroid on Android 7 wrote whole packets in one call, one skb per
+     * schedule, which is why this never showed before. */
+    while (atomic_read(&bt_dev_p->tx_cnt))
     {
         spin_lock_irqsave(&bt_dev_p->tx_q_lock, flags);
         skb = skb_dequeue(&bt_dev_p->tx_q);
         spin_unlock_irqrestore(&bt_dev_p->tx_q_lock, flags);
-        if (skb)
+
+        if (!skb)
         {
-            sh_ldisc_cb(skb)->pkt_type = skb->data[0];
-            /* st_write takes ownership of the skb, so read anything needed for
-             * logging before handing it over. */
-            pkt_type = skb->data[0];
+            /* Counter and queue disagree -- clear it rather than spin. */
+            atomic_set(&bt_dev_p->tx_cnt, 0);
+            break;
+        }
 
-            if(bt_dev_p->st_write != NULL){
-                len = bt_dev_p->st_write(skb);
-            }
-            else
-            {
-                BT_DRV_ERR("%s Error!!! bt_dev_p->st_write is NULL", __func__);
-            }
+        sh_ldisc_cb(skb)->pkt_type = skb->data[0];
+        /* st_write takes ownership of the skb, so read anything needed for
+         * logging before handing it over. */
+        pkt_type = skb->data[0];
 
-            BT_DRV_DBG(V4L2_DBG_TX, "to ldisc: type=0x%02x ret=%d",
-                pkt_type, len);
+        if(bt_dev_p->st_write != NULL){
+            len = bt_dev_p->st_write(skb);
+        }
+        else
+        {
+            BT_DRV_ERR("%s Error!!! bt_dev_p->st_write is NULL", __func__);
+            /* Nothing can be sent, and the skb is ours to free. */
+            len = -1;
+        }
 
-            if(len < 0)
-            {
-                kfree_skb(skb);
-                BT_DRV_ERR("Error!!! sending skb to ldisc_write from \
-                    send_tasklet. Packet dropped");
-                atomic_set(&bt_dev_p->tx_cnt, 0);
-            }
-            else
-            {
-                atomic_dec(&bt_dev_p->tx_cnt);
-            }
+        BT_DRV_DBG(V4L2_DBG_TX, "to ldisc: type=0x%02x ret=%d",
+            pkt_type, len);
+
+        if(len < 0)
+        {
+            kfree_skb(skb);
+            BT_DRV_ERR("Error!!! sending skb to ldisc_write from \
+                send_tasklet. Packet dropped");
+            atomic_set(&bt_dev_p->tx_cnt, 0);
+        }
+        else
+        {
+            atomic_dec(&bt_dev_p->tx_cnt);
         }
     }
 }
