@@ -655,7 +655,15 @@ static int f2fs_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return __f2fs_tmpfile(dir, dentry, mode, NULL);
 }
 
-static int f2fs_create_whiteout(struct inode *dir, struct inode **whiteout)
+/*
+ * Reachable only through RENAME_WHITEOUT, which lives in f2fs_rename2 -- and
+ * that whole block is disabled in this tree, since our f2fs_rename still has
+ * the four argument signature with no flags. Kept rather than dropped: it is
+ * what upstream calls once rename2 is wired up, and the tmpfile helper it
+ * builds on is now here.
+ */
+static int __maybe_unused f2fs_create_whiteout(struct inode *dir,
+						struct inode **whiteout)
 {
 	return __f2fs_tmpfile(dir, NULL, S_IFCHR | WHITEOUT_MODE, whiteout);
 }
