@@ -493,9 +493,12 @@ static const struct snd_soc_pcm_stream tegra_rt5671_bt_params = {
 
 };
 
+/* Fixed, unlike the speaker link above: BCM4354 sends FM audio as 48 kHz
+ * stereo and drives the AIF4 clock itself, so the rate is the chip's to
+ * state rather than ours to follow. min == max, as for BT SCO. */
 static const struct snd_soc_pcm_stream tegra_rt5671_fm_params = {
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rate_min = 8000,
+	.rate_min = 48000,
 	.rate_max = 48000,
 	.channels_min = 2,
 	.channels_max = 2,
