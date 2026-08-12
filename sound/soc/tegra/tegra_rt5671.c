@@ -159,6 +159,12 @@ static void tegra_rt5671_shutdown(struct snd_pcm_substream *substream)
 	tegra_asoc_utils_tristate_dap(i2s->id, true);
 }
 
+/* Defined with the other link params below. The speaker link is codec to
+ * codec, so it carries its rate in .params instead of taking it from a
+ * stream; probe seeds it from platform data and hw_params() below keeps it
+ * in step with AIF1. */
+static struct snd_soc_pcm_stream tegra_rt5671_spk_params;
+
 static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
@@ -173,6 +179,15 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 	int err, sample_size;
 
 	srate = params_rate(params);
+
+	/* Keep the speaker link on the same rate as this one. sysclk is set
+	 * below to PLL1 = 512 * srate, and the codec's get_clk_info() accepts
+	 * only an exact sysclk/rate ratio, so AIF2 has no freedom here: any
+	 * fixed value in tegra_rt5671_spk_params would be right for one srate
+	 * and would either mis-clock the amplifiers or fail hw_params with
+	 * -EINVAL for every other. */
+	tegra_rt5671_spk_params.rate_min = srate;
+	tegra_rt5671_spk_params.rate_max = srate;
 
 	i2s_daifmt = SND_SOC_DAIFMT_NB_NF;
 	i2s_daifmt |= pdata->i2s_param[HIFI_CODEC].is_i2s_master ?
@@ -460,10 +475,10 @@ static int tegra_rt5671_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static const struct snd_soc_pcm_stream tegra_rt5671_spk_params = {
+/* No rate here on purpose: it comes from the same platform data that
+ * configures AIF1, and is then tracked per stream. Declared above. */
+static struct snd_soc_pcm_stream tegra_rt5671_spk_params = {
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rate_min = 8000,
-	.rate_max = 48000,
 	.channels_min = 2,
 	.channels_max = 2,
 
@@ -741,6 +756,12 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "No platform data supplied\n");
 		return -EINVAL;
 	}
+
+	/* Seed the speaker link from the rate that configures AIF1, whether
+	 * that came from a board file or from nvidia,i2s-param-hifi, so the
+	 * two agree before the first stream opens. */
+	tegra_rt5671_spk_params.rate_min = pdata->i2s_param[HIFI_CODEC].rate;
+	tegra_rt5671_spk_params.rate_max = pdata->i2s_param[HIFI_CODEC].rate;
 
 	if (pdata->codec_name)
 		card->dai_link->codec_name = pdata->codec_name;
