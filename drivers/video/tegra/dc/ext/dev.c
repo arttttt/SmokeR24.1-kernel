@@ -1300,9 +1300,35 @@ static int tegra_dc_ext_flip(struct tegra_dc_ext_user *user,
 
 	if (syncpt_fd) {
 		if (post_sync_id != NVSYNCPT_INVALID) {
+			/* On this flip's own value, not one past it.
+			 *
+			 * tegra_dc_incr_syncpt_max has just raised the window's
+			 * syncpoint to post_sync_val, and the flip worker drives
+			 * the minimum up to exactly that once the flip has
+			 * latched. A fence on post_sync_val therefore comes due
+			 * when this flip reaches the panel, which is what the
+			 * caller is asking about.
+			 *
+			 * It used to be built on post_sync_val + 1, which no
+			 * flip of this one's ever reaches: the value arrives
+			 * only when the *following* flip is programmed. So the
+			 * fence handed to userspace described somebody else's
+			 * frame, and always trailed its own by a whole refresh.
+			 *
+			 * Nothing noticed while the composer was HWC1: fences
+			 * came back and were dropped. HWC2 waits on them, and a
+			 * present fence a frame late loses the race against
+			 * SurfaceFlinger's back-pressure check, which then skips
+			 * a frame -- half rate, and only through transitions
+			 * heavy enough to be near the edge anyway.
+			 *
+			 * The driver's own bookkeeping is untouched: it works
+			 * from flip_win->syncpt_max, and only the descriptor
+			 * handed out ever looked one step further.
+			 */
 			ret = nvhost_syncpt_create_fence_single_ext(
 					ext->dc->ndev, post_sync_id,
-					post_sync_val + 1, "flip-fence",
+					post_sync_val, "flip-fence",
 					syncpt_fd);
 			if (ret) {
 				dev_err(&ext->dc->ndev->dev,
