@@ -684,6 +684,30 @@ static void tegra_dc_ext_smooth_apc(struct tegra_vrr *vrr)
 	}
 }
 
+/* Tell whoever is waiting that the buffers the frame just replaced are theirs
+ * again.
+ *
+ * Pulled out into its own function so that it can happen at the one moment it
+ * becomes true -- the flip has latched -- rather than at the end of everything
+ * else this worker still has to do afterwards. See both call sites.
+ */
+static void tegra_dc_ext_incr_flip_syncpts(struct tegra_dc *dc,
+					   struct tegra_dc_ext_flip_data *data,
+					   int win_num)
+{
+	int i;
+
+	for (i = 0; i < win_num; i++) {
+		struct tegra_dc_ext_flip_win *flip_win = &data->win[i];
+		int index = flip_win->attr.index;
+
+		if (index < 0 || !test_bit(index, &dc->valid_windows))
+			continue;
+
+		tegra_dc_incr_syncpt_min(dc, index, flip_win->syncpt_max);
+	}
+}
+
 static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 {
 	struct tegra_dc_ext_flip_data *data =
@@ -699,6 +723,7 @@ static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 	struct tegra_vrr *vrr = ext->dc->out->vrr;
 	int i, nr_unpin = 0, nr_win = 0;
 	bool skip_flip = false;
+	bool syncpts_advanced = false;
 	bool wait_for_vblank = false;
 	bool show_background =
 		tegra_dc_ext_should_show_background(data, win_num);
@@ -856,24 +881,37 @@ static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 		if (dc->out->vrr)
 			trace_scanout_vrr_stats((data->win[win_num-1]).syncpt_max
 							, dc->out->vrr->dcb);
+
+		/* Said at the moment it became true.
+		 *
+		 * tegra_dc_sync_windows has just returned, which means the flip
+		 * has latched: the buffers of the frame it replaced are no
+		 * longer being read, and that is the whole of what these fences
+		 * promise. Everything below this line -- reprogramming the
+		 * bandwidth, calling the flip callback, unpinning handles --
+		 * is work this worker owes the driver, not work anybody waiting
+		 * on a buffer has any interest in.
+		 *
+		 * It used to come after all of it, and it is signalled from the
+		 * CPU rather than by the hardware, so whatever this thread did
+		 * next, and whenever the scheduler next got round to it, was
+		 * added to how long a client stood still holding a buffer it
+		 * was already entitled to draw into.
+		 */
+		tegra_dc_ext_incr_flip_syncpts(dc, data, win_num);
+		syncpts_advanced = true;
+
 		tegra_dc_program_bandwidth(dc, true);
 		if (!tegra_dc_has_multiple_dc())
 			tegra_dc_call_flip_callback();
 	}
 
-	if (!skip_flip) {
-		for (i = 0; i < win_num; i++) {
-			struct tegra_dc_ext_flip_win *flip_win = &data->win[i];
-			int index = flip_win->attr.index;
-
-			if (index < 0 ||
-				!test_bit(index, &dc->valid_windows))
-				continue;
-
-			tegra_dc_incr_syncpt_min(dc, index,
-					flip_win->syncpt_max);
-		}
-	}
+	/* A flip posted to a head that is off never reaches the branch above,
+	 * and its fences have to come due all the same: nothing is going to
+	 * show that frame, so everything waiting behind them would wait for
+	 * ever. */
+	if (!skip_flip && !syncpts_advanced)
+		tegra_dc_ext_incr_flip_syncpts(dc, data, win_num);
 
 	/* unpin and deref previous front buffers */
 	tegra_dc_ext_unpin_handles(unpin_handles, nr_unpin);
@@ -2545,7 +2583,21 @@ static int tegra_dc_release(struct inode *inode, struct file *filp)
 static int tegra_dc_ext_setup_windows(struct tegra_dc_ext *ext)
 {
 	int i, ret;
-	struct sched_param sparm = { .sched_priority = 1 };
+	/* Above the threads that wait on what these produce.
+	 *
+	 * These workers are what actually releases a client's buffer: they wait
+	 * for the flip to latch and then advance the syncpoint the client's
+	 * fence hangs on. At real-time priority 1 they sat below both
+	 * SurfaceFlinger's main thread and the composer service, which run at
+	 * 2 -- so the two threads waiting for a buffer to come free could
+	 * preempt the only thread able to free it, for as long as they had work
+	 * of their own.
+	 *
+	 * Three, not more: this is a short piece of work at a fixed rate, and
+	 * it should outrank composition without outranking the interrupt
+	 * threads that feed it, which sit at fifty.
+	 */
+	struct sched_param sparm = { .sched_priority = 3 };
 
 	for (i = 0; i < ext->dc->n_windows; i++) {
 		struct tegra_dc_ext_win *win = &ext->win[i];
