@@ -233,6 +233,14 @@ struct tegra_dc {
 	struct mutex			lock;
 	struct mutex			one_shot_lock;
 
+	/* Guards the windows' idea of where their counters stand.
+	 *
+	 * The counters are advanced from two places now: the thread that posts
+	 * a flip, which holds `lock` for everything else it does, and the
+	 * vblank handler, which cannot hold a mutex at all. This is the one
+	 * thing both touch, so it is the one thing that needs its own guard. */
+	spinlock_t			syncpt_lock;
+
 	struct resource			*fb_mem;
 	struct tegra_fb_info		*fb;
 #ifdef CONFIG_ADF_TEGRA

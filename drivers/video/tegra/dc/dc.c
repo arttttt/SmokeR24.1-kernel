@@ -2543,17 +2543,69 @@ u32 tegra_dc_incr_syncpt_max(struct tegra_dc *dc, int i)
 void tegra_dc_incr_syncpt_min(struct tegra_dc *dc, int i, u32 val)
 {
 	struct tegra_dc_win *win = tegra_dc_get_window(dc, i);
+	unsigned long flags;
 
 	BUG_ON(!win);
 	mutex_lock(&dc->lock);
 
 	tegra_dc_get(dc);
+	spin_lock_irqsave(&dc->syncpt_lock, flags);
 	while (win->syncpt.min < val) {
 		win->syncpt.min++;
 		nvhost_syncpt_cpu_incr_ext(dc->ndev, win->syncpt.id);
 		}
+	spin_unlock_irqrestore(&dc->syncpt_lock, flags);
 	tegra_dc_put(dc);
 	mutex_unlock(&dc->lock);
+}
+
+/* The same step, taken from the interrupt that means it has happened.
+ *
+ * A window's counter is what every fence over that window is written
+ * against, and it stands for one thing: how many of the flips posted to this
+ * window the display has actually taken. Raising it is therefore not
+ * bookkeeping to be done at leisure -- it is the announcement that a frame is
+ * on the panel, and everything waiting on that frame waits exactly this long.
+ *
+ * It used to be raised by the thread that posted the flip, after that thread
+ * had slept through the latch and been woken and scheduled again. The latch
+ * itself is an interrupt, so the delay between the two was pure scheduling:
+ * on a busy transition it regularly outlasted the rest of the refresh, and a
+ * fence that comes due after the next vblank is a fence the compositor reads
+ * as a frame it missed. It then skips a refresh on purpose, which is how a
+ * sixty-hertz panel comes to show thirty.
+ *
+ * Here there is nothing to wait for. The window has just gone clean, which is
+ * the hardware saying it has taken the flip, and the counter is raised on the
+ * spot.
+ *
+ * By one step, not up to a value. The maximum belongs to the last flip that
+ * was *posted*, and posting happens in the ioctl, so by now it may already
+ * name a frame still on its way. A latch is worth one flip and a flip raises
+ * the maximum by one, so one is both the right answer and the safe one --
+ * with the comparison keeping it from ever running past what was posted.
+ *
+ * Neither the head's mutex nor turning its clock on is possible here, and
+ * neither is needed. The counter lives in host1x and is raised by a single
+ * register write; host1x is powered, because the only caller has already read
+ * a register of this head to find out that the window went clean, and that
+ * read carries the assertion. The one thing genuinely shared with the posting
+ * thread is where the counter stands, and that has its own guard.
+ */
+void tegra_dc_incr_syncpt_min_irq(struct tegra_dc *dc, int i)
+{
+	struct tegra_dc_win *win = tegra_dc_get_window(dc, i);
+	unsigned long flags;
+
+	if (!win || win->syncpt.id == NVSYNCPT_INVALID)
+		return;
+
+	spin_lock_irqsave(&dc->syncpt_lock, flags);
+	if (win->syncpt.min < win->syncpt.max) {
+		win->syncpt.min++;
+		nvhost_syncpt_cpu_incr_ext(dc->ndev, win->syncpt.id);
+	}
+	spin_unlock_irqrestore(&dc->syncpt_lock, flags);
 }
 
 struct sync_fence *tegra_dc_create_fence(struct tegra_dc *dc, int i, u32 val)
@@ -5079,6 +5131,7 @@ static int tegra_dc_probe(struct platform_device *ndev)
 	mutex_init(&dc->lock);
 	mutex_init(&dc->one_shot_lock);
 	mutex_init(&dc->lp_lock);
+	spin_lock_init(&dc->syncpt_lock);
 	init_completion(&dc->frame_end_complete);
 	init_completion(&dc->crc_complete);
 	init_waitqueue_head(&dc->wq);

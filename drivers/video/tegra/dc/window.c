@@ -1229,8 +1229,20 @@ void tegra_dc_trigger_windows(struct tegra_dc *dc)
 			}
 		} else {
 			if (!(val & (WIN_A_ACT_REQ << i)) && interlace_done) {
+				/* Only a window that was waiting has just been
+				 * taken. The request bit is clear on every
+				 * window nobody flipped this frame too, and
+				 * those have nothing to announce -- see
+				 * tegra_dc_incr_syncpt_min_irq for why the
+				 * announcement belongs here and not in the
+				 * thread this wakes. */
+				bool latched = win->dirty;
+
 				win->dirty = 0;
 				completed = 1;
+
+				if (latched)
+					tegra_dc_incr_syncpt_min_irq(dc, i);
 			} else {
 				dirty = 1;
 			}
