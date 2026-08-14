@@ -489,8 +489,18 @@ static int tegra_dc_ext_set_windowattr(struct tegra_dc_ext *ext,
 
 #ifdef CONFIG_TEGRA_GRHOST_SYNC
 	if (flip_win->pre_syncpt_fence) {
+		int wait_err;
+
 		TRACE_NAME_BEGIN(pre_snycpt);
-		sync_fence_wait(flip_win->pre_syncpt_fence, 5000);
+		wait_err = sync_fence_wait(flip_win->pre_syncpt_fence, 5000);
+		/* The flip still goes up: after five seconds the frame is
+		 * lost either way, and refusing it here would turn one hung
+		 * fence into a wedged pipeline. But it no longer goes up
+		 * silently -- a flip that stopped waiting is the one fact
+		 * every stutter hunt so far had to rediscover the hard way. */
+		if (wait_err < 0)
+			dev_err(&ext->dc->ndev->dev,
+				"flip pre-fence wait failed: %d\n", wait_err);
 		sync_fence_put(flip_win->pre_syncpt_fence);
 		TRACE_NAME_END(pre_snycpt);
 	} else
@@ -1143,6 +1153,12 @@ static int tegra_dc_ext_pin_windows(struct tegra_dc_ext_user *user,
 #ifdef CONFIG_TEGRA_GRHOST_SYNC
 				flip_win->pre_syncpt_fence = sync_fence_fdget(
 					flip_win->attr.pre_syncpt_fd);
+				/* A descriptor that is not a fence used to
+				 * slip through as no fence at all, and the
+				 * flip went up without waiting for the very
+				 * thing the caller asked it to wait for. */
+				if (!flip_win->pre_syncpt_fence)
+					return -EINVAL;
 #else
 				BUG();
 #endif
