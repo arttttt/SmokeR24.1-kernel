@@ -94,6 +94,29 @@ int main(int argc, char **argv)
 		if (set_aligned(fd, &cmu))
 			return 1;
 		printf("identity csc restored\n");
+	} else if (!strcmp(mode, "set")) {
+		/* arbitrary csc, clamped to the 10-bit register field: the
+		 * kernel writes the u16 unmasked and the hardware drops bits
+		 * 10-15, so 512 would silently wrap to 0. */
+		int i;
+		if (argc < 11) {
+			fprintf(stderr, "set needs 9 csc values\n");
+			return 2;
+		}
+		for (i = 0; i < 9; i++) {
+			int v = atoi(argv[2 + i]);
+			if (v < 0)
+				v = 0;
+			if (v > 0x3ff)
+				v = 0x3ff;
+			cmu.csc[i] = (u16)v;
+		}
+		if (set_aligned(fd, &cmu))
+			return 1;
+		printf("csc set: %u %u %u / %u %u %u / %u %u %u\n",
+		       cmu.csc[0], cmu.csc[1], cmu.csc[2],
+		       cmu.csc[3], cmu.csc[4], cmu.csc[5],
+		       cmu.csc[6], cmu.csc[7], cmu.csc[8]);
 	} else if (!strcmp(mode, "ramp")) {
 		/* warm ramp: green/blue down to g_end/b_end (S8.8), back up */
 		int g_end = argc > 2 ? atoi(argv[2]) : 200;
