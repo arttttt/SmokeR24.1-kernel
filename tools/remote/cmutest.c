@@ -82,6 +82,19 @@ int main(int argc, char **argv)
 
 	if (!strcmp(mode, "get")) {
 		dump(&cmu);
+	} else if (!strcmp(mode, "dump")) {
+		/* The whole live pipeline, machine-readable: one value per line,
+		 * cmu_enable, then csc[9], lut1[256], lut2[960] -- the input of
+		 * the host-side emulator that turns a screencap into what the
+		 * panel actually shows. */
+		int i;
+		printf("%u\n", cmu.cmu_enable);
+		for (i = 0; i < 9; i++)
+			printf("%u\n", cmu.csc[i]);
+		for (i = 0; i < 256; i++)
+			printf("%u\n", cmu.lut1[i]);
+		for (i = 0; i < 960; i++)
+			printf("%u\n", cmu.lut2[i]);
 	} else if (!strcmp(mode, "swap")) {
 		static const u16 sw[9] = { 0, 0, 256, 0, 256, 0, 256, 0, 0 };
 		memcpy(cmu.csc, sw, sizeof(sw));
@@ -143,7 +156,7 @@ int main(int argc, char **argv)
 		printf("ramp done in %lldms (121 aligned writes)\n",
 		       (now_us() - t0) / 1000);
 	} else {
-		fprintf(stderr, "usage: %s get|swap|ident|ramp [g_end b_end]\n", argv[0]);
+		fprintf(stderr, "usage: %s get|dump|swap|ident|set 9xcsc|ramp [g_end b_end]\n", argv[0]);
 		return 2;
 	}
 
