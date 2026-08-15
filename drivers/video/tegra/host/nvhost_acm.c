@@ -338,7 +338,13 @@ void nvhost_module_idle_mult(struct platform_device *dev, int refs)
 	while (refs--) {
 		pm_runtime_mark_last_busy(&dev->dev);
 		if (pdata->clockgate_delay)
-			pm_runtime_put_sync_autosuspend(&dev->dev);
+			/* Asynchronous on purpose: this runs on the completion
+			 * path of every job, and the synchronous variant makes
+			 * that path execute the suspend callback itself when
+			 * the timer has already expired. Deferring to the pm
+			 * workqueue costs nothing the timer was not already
+			 * costing. */
+			pm_runtime_put_autosuspend(&dev->dev);
 		else
 			pm_runtime_put(&dev->dev);
 	}
