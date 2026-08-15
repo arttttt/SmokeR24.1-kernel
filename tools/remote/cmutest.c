@@ -95,16 +95,22 @@ int main(int argc, char **argv)
 			return 1;
 		printf("identity csc restored\n");
 	} else if (!strcmp(mode, "ramp")) {
-		/* night-light-like ramp: green/blue down to 78%/61%, back up */
+		/* warm ramp: green/blue down to g_end/b_end (S8.8), back up */
+		int g_end = argc > 2 ? atoi(argv[2]) : 200;
+		int b_end = argc > 3 ? atoi(argv[3]) : 156;
 		int step;
 		long long t0 = now_us();
+		if (g_end < 0 || g_end > 256 || b_end < 0 || b_end > 256) {
+			fprintf(stderr, "ramp ends must be 0..256\n");
+			return 2;
+		}
 		for (step = 0; step <= 120; step++) {
 			int down = step <= 60 ? step : 120 - step;
 			cmu.csc[0] = 256;
 			cmu.csc[1] = 0; cmu.csc[2] = 0; cmu.csc[3] = 0;
-			cmu.csc[4] = (u16)(256 - down * 56 / 60);
+			cmu.csc[4] = (u16)(256 - down * (256 - g_end) / 60);
 			cmu.csc[5] = 0; cmu.csc[6] = 0; cmu.csc[7] = 0;
-			cmu.csc[8] = (u16)(256 - down * 100 / 60);
+			cmu.csc[8] = (u16)(256 - down * (256 - b_end) / 60);
 			if (ioctl(fd, TEGRA_DC_EXT_SET_CMU_ALIGNED, &cmu) < 0) {
 				perror("SET_CMU_ALIGNED");
 				return 1;
@@ -114,7 +120,7 @@ int main(int argc, char **argv)
 		printf("ramp done in %lldms (121 aligned writes)\n",
 		       (now_us() - t0) / 1000);
 	} else {
-		fprintf(stderr, "usage: %s get|swap|ident|ramp\n", argv[0]);
+		fprintf(stderr, "usage: %s get|swap|ident|ramp [g_end b_end]\n", argv[0]);
 		return 2;
 	}
 
