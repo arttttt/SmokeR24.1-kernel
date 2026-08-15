@@ -33,6 +33,7 @@
 #include <linux/mm.h>
 #include <linux/mount.h>
 
+#include <uapi/linux/dma-buf.h>
 #include <uapi/linux/magic.h>
 
 static inline int is_dma_buf_file(struct file *);
@@ -235,10 +236,67 @@ static loff_t dma_buf_llseek(struct file *file, loff_t offset, int whence)
 	return base + offset;
 }
 
+/**
+ * dma_buf_set_name - Set a name to a specific dma_buf to track the usage.
+ * The name of the dma-buf buffer can only be set when the dma-buf is not
+ * attached to any devices. It could theoritically support changing the
+ * name of the dma-buf if the same piece of memory is used for multiple
+ * purpose between different devices.
+ *
+ * @dmabuf [in]     dmabuf buffer that will be renamed.
+ * @buf:   [in]     A piece of userspace memory that contains the name of
+ *                  the dma-buf.
+ *
+ * Returns 0 on success. If the dma-buf buffer is already attached to
+ * devices, return -EBUSY.
+ *
+ */
+static long dma_buf_set_name(struct dma_buf *dmabuf, const char __user *buf)
+{
+	char *name = strndup_user(buf, DMA_BUF_NAME_LEN);
+	long ret = 0;
+
+	if (IS_ERR(name))
+		return PTR_ERR(name);
+
+	mutex_lock(&dmabuf->lock);
+	if (!list_empty(&dmabuf->attachments)) {
+		ret = -EBUSY;
+		kfree(name);
+		goto out_unlock;
+	}
+	kfree(dmabuf->name);
+	dmabuf->name = name;
+
+out_unlock:
+	mutex_unlock(&dmabuf->lock);
+	return ret;
+}
+
+static long dma_buf_ioctl(struct file *file,
+			  unsigned int cmd, unsigned long arg)
+{
+	struct dma_buf *dmabuf;
+
+	if (!is_dma_buf_file(file))
+		return -EBADF;
+
+	dmabuf = file->private_data;
+
+	switch (cmd) {
+	case DMA_BUF_SET_NAME:
+		return dma_buf_set_name(dmabuf, (const char __user *)arg);
+
+	default:
+		return -ENOTTY;
+	}
+}
+
 static const struct file_operations dma_buf_fops = {
 	.release	= dma_buf_release,
 	.mmap		= dma_buf_mmap_internal,
 	.llseek		= dma_buf_llseek,
+	.unlocked_ioctl	= dma_buf_ioctl,
 };
 
 /*
@@ -930,7 +988,7 @@ static int dma_buf_describe(struct seq_file *s)
 		return ret;
 
 	seq_printf(s, "\nDma-buf Objects:\n");
-	seq_printf(s, "\texp_name\tsize\tflags\tmode\tcount\tino\n");
+	seq_printf(s, "\texp_name\tsize\tflags\tmode\tcount\tino\tname\n");
 
 	list_for_each_entry(buf_obj, &db_list.head, list_node) {
 		ret = mutex_lock_interruptible(&buf_obj->lock);
@@ -943,11 +1001,12 @@ static int dma_buf_describe(struct seq_file *s)
 
 		seq_printf(s, "\t");
 
-		seq_printf(s, "\t%s\t%08zu\t%08x\t%08x\t%08ld\t%08lu\n",
+		seq_printf(s, "\t%s\t%08zu\t%08x\t%08x\t%08ld\t%08lu\t%s\n",
 				buf_obj->exp_name, buf_obj->size,
 				buf_obj->file->f_flags, buf_obj->file->f_mode,
 				(long)(buf_obj->file->f_count.counter),
-				file_inode(buf_obj->file)->i_ino);
+				file_inode(buf_obj->file)->i_ino,
+				buf_obj->name ?: "");
 
 		seq_printf(s, "\t\tAttached Devices:\n");
 		attach_count = 0;

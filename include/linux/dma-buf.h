@@ -141,6 +141,9 @@ struct dma_buf {
 	unsigned vmapping_counter;
 	void *vmap_ptr;
 	const char *exp_name;
+	/* userspace-provided name; useful for accounting and debugging.
+	 * Protected by @lock. */
+	const char *name;
 	struct list_head list_node;
 	struct dma_buf_mapping mapping[MAX_DOMAIN_NR]; /* For lazy unmapping */
 	void *priv;
