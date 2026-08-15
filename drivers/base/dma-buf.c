@@ -29,6 +29,11 @@
 #include <linux/export.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/cred.h>
+#include <linux/mm.h>
+#include <linux/mount.h>
+
+#include <uapi/linux/magic.h>
 
 static inline int is_dma_buf_file(struct file *);
 
@@ -38,6 +43,25 @@ struct dma_buf_list {
 };
 
 static struct dma_buf_list db_list;
+
+static const struct dentry_operations dma_buf_dentry_ops = {
+	.d_dname = simple_dname,
+};
+
+static struct vfsmount *dma_buf_mnt;
+
+static struct dentry *dma_buf_fs_mount(struct file_system_type *fs_type,
+		int flags, const char *name, void *data)
+{
+	return mount_pseudo(fs_type, "dmabuf:", NULL, &dma_buf_dentry_ops,
+			DMA_BUF_MAGIC);
+}
+
+static struct file_system_type dma_buf_fs_type = {
+	.name = "dmabuf",
+	.mount = dma_buf_fs_mount,
+	.kill_sb = kill_anon_super,
+};
 
 static bool dmabuf_lazy_unmapping; /* Set if lazy unmapping for iommu'ed */
 
@@ -225,6 +249,56 @@ static inline int is_dma_buf_file(struct file *file)
 	return file->f_op == &dma_buf_fops;
 }
 
+/* On this kernel alloc_anon_inode() (3.13) and alloc_file_pseudo() (4.19)
+ * do not exist yet; their work is open-coded here from the same era's
+ * fs/anon_inodes.c, against the private mount instead of the shared one. */
+static struct file *dma_buf_getfile(struct dma_buf *dmabuf, int flags)
+{
+	static const struct qstr this = QSTR_INIT("dmabuf", 6);
+	static const struct address_space_operations anon_aops = {
+		.set_page_dirty = __set_page_dirty_no_writeback,
+	};
+	struct path path;
+	struct file *file;
+	struct inode *inode = new_inode_pseudo(dma_buf_mnt->mnt_sb);
+
+	if (!inode)
+		return ERR_PTR(-ENOMEM);
+
+	inode->i_ino = get_next_ino();
+	inode->i_mapping->a_ops = &anon_aops;
+	inode->i_state = I_DIRTY;
+	inode->i_mode = S_IRUSR | S_IWUSR;
+	inode->i_uid = current_fsuid();
+	inode->i_gid = current_fsgid();
+	inode->i_flags |= S_PRIVATE;
+	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	inode->i_size = dmabuf->size;
+	inode_set_bytes(inode, dmabuf->size);
+
+	path.dentry = d_alloc_pseudo(dma_buf_mnt->mnt_sb, &this);
+	if (!path.dentry) {
+		iput(inode);
+		return ERR_PTR(-ENOMEM);
+	}
+	path.mnt = mntget(dma_buf_mnt);
+
+	/* The dentry takes over the inode reference; from here on dropping
+	 * the path drops the inode with it. */
+	d_instantiate(path.dentry, inode);
+
+	file = alloc_file(&path, OPEN_FMODE(flags), &dma_buf_fops);
+	if (IS_ERR(file)) {
+		path_put(&path);
+		return file;
+	}
+	file->f_mapping = inode->i_mapping;
+	file->f_flags = flags & (O_ACCMODE | O_NONBLOCK);
+	file->private_data = dmabuf;
+
+	return file;
+}
+
 /**
  * dma_buf_export_named - Creates a new dma_buf, and associates an anon file
  * with this buffer, so it can be exported.
@@ -267,7 +341,11 @@ struct dma_buf *dma_buf_export_named(void *priv, const struct dma_buf_ops *ops,
 	dmabuf->size = size;
 	dmabuf->exp_name = exp_name;
 
-	file = anon_inode_getfile("dmabuf", &dma_buf_fops, dmabuf, flags);
+	file = dma_buf_getfile(dmabuf, flags);
+	if (IS_ERR(file)) {
+		kfree(dmabuf);
+		return ERR_CAST(file);
+	}
 	file->f_mode |= FMODE_LSEEK;
 
 	dmabuf->file = file;
@@ -852,7 +930,7 @@ static int dma_buf_describe(struct seq_file *s)
 		return ret;
 
 	seq_printf(s, "\nDma-buf Objects:\n");
-	seq_printf(s, "\texp_name\tsize\tflags\tmode\tcount\n");
+	seq_printf(s, "\texp_name\tsize\tflags\tmode\tcount\tino\n");
 
 	list_for_each_entry(buf_obj, &db_list.head, list_node) {
 		ret = mutex_lock_interruptible(&buf_obj->lock);
@@ -865,10 +943,11 @@ static int dma_buf_describe(struct seq_file *s)
 
 		seq_printf(s, "\t");
 
-		seq_printf(s, "\t%s\t%08zu\t%08x\t%08x\t%08ld\n",
+		seq_printf(s, "\t%s\t%08zu\t%08x\t%08x\t%08ld\t%08lu\n",
 				buf_obj->exp_name, buf_obj->size,
 				buf_obj->file->f_flags, buf_obj->file->f_mode,
-				(long)(buf_obj->file->f_count.counter));
+				(long)(buf_obj->file->f_count.counter),
+				file_inode(buf_obj->file)->i_ino);
 
 		seq_printf(s, "\t\tAttached Devices:\n");
 		attach_count = 0;
@@ -964,6 +1043,10 @@ static inline void dma_buf_uninit_debugfs(void)
 
 static int __init dma_buf_init(void)
 {
+	dma_buf_mnt = kern_mount(&dma_buf_fs_type);
+	if (IS_ERR(dma_buf_mnt))
+		return PTR_ERR(dma_buf_mnt);
+
 	mutex_init(&db_list.lock);
 	INIT_LIST_HEAD(&db_list.head);
 	dma_buf_init_debugfs();
@@ -978,5 +1061,6 @@ subsys_initcall(dma_buf_init);
 static void __exit dma_buf_deinit(void)
 {
 	dma_buf_uninit_debugfs();
+	kern_unmount(dma_buf_mnt);
 }
 __exitcall(dma_buf_deinit);
