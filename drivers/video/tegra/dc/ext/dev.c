@@ -323,6 +323,35 @@ static int tegra_dc_ext_check_windowattr(struct tegra_dc_ext *ext,
 		goto fail;
 	}
 
+	/* Check the scaling ratio.
+	 *
+	 * Nothing downstream does: compute_dda_inc() silently clamps the
+	 * increment when the ratio is beyond what the window can filter,
+	 * and the window then reads memory at the wrong stride -- which
+	 * shows as underflow exactly on the frames heavy enough to ask
+	 * for it. Refused here instead, while the caller can still hear
+	 * the answer.
+	 *
+	 * The comparison is deliberately no stricter than the hardware:
+	 * the DDA works on (in - 1) / (out - 1), so the plain ratio with
+	 * the boundary included errs on the side of accepting.
+	 */
+	addr = tegra_dc_parse_feature(dc, win->idx, HAS_SCALE);
+	if (addr) {
+		unsigned int in_w = dfixed_trunc(win->w);
+		unsigned int in_h = dfixed_trunc(win->h);
+
+		if ((win->out_w && in_w > addr[H_FILTER_DOWN] * win->out_w) ||
+		    (win->out_h && in_h > addr[V_FILTER_DOWN] * win->out_h) ||
+		    (in_w && win->out_w > addr[H_SCALE_UP] * in_w) ||
+		    (in_h && win->out_h > addr[V_SCALE_UP] * in_h)) {
+			dev_err(&dc->ndev->dev,
+				"Scaling of window %d is invalid: %u x %u -> %u x %u.\n",
+				win->idx, in_w, in_h, win->out_w, win->out_h);
+			goto fail;
+		}
+	}
+
 	if (win->flags & TEGRA_DC_EXT_FLIP_FLAG_BLOCKLINEAR) {
 		if (win->flags & TEGRA_DC_EXT_FLIP_FLAG_TILED) {
 			dev_err(&dc->ndev->dev, "Layout cannot be both "
@@ -1098,6 +1127,23 @@ static int tegra_dc_ext_pin_windows(struct tegra_dc_ext_user *user,
 		if (index < 0 || !test_bit(index, &dc->valid_windows))
 			continue;
 
+		/* Refused here, at the boundary, where the caller still
+		 * hears the answer. The same check in the flip worker can
+		 * only log: by the time it runs, the frame is already
+		 * queued and there is no one left to refuse to. */
+		if (flip_win->attr.buff_id) {
+			struct tegra_dc_win tmp_win;
+
+			memset(&tmp_win, 0, sizeof(tmp_win));
+			tmp_win.idx = index;
+			tegra_dc_ext_set_windowattr_basic(&tmp_win,
+							  &flip_win->attr);
+			ret = tegra_dc_ext_check_windowattr(user->ext,
+							    &tmp_win);
+			if (ret < 0)
+				return ret;
+		}
+
 		ret = tegra_dc_ext_pin_window(user, flip_win->attr.buff_id,
 					      &flip_win->handle[TEGRA_DC_Y],
 					      &flip_win->phys_addr);
@@ -1800,6 +1846,16 @@ static int tegra_dc_ext_negotiate_bw(struct tegra_dc_ext_user *user,
 		if (wins[i].buff_id > 0) {
 			tegra_dc_ext_set_windowattr_basic(&dc->tmp_wins[idx],
 							  &wins[i]);
+			dc->tmp_wins[idx].idx = idx;
+
+			/* A proposal that names a frame the windows cannot
+			 * show is refused like the frame itself would be --
+			 * so the caller finds out while weighing plans, not
+			 * while posting one. */
+			ret = tegra_dc_ext_check_windowattr(user->ext,
+							    &dc->tmp_wins[idx]);
+			if (ret < 0)
+				return ret;
 		}
 		else {
 			dc->tmp_wins[idx].flags = 0;
