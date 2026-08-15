@@ -499,6 +499,13 @@ static void cdma_timeout_handler(struct work_struct *work)
 		cmdproc_stop = prev_cmdproc & ~(BIT(ch->chid));
 		host1x_sync_writel(dev,
 			host1x_sync_cmdproc_stop_r(), cmdproc_stop);
+		/* The watchdog fired for work that was already done. The
+		 * client left recorded here reads as "timer already started"
+		 * to every later submission, so no timer would ever be armed
+		 * again and the channel would run unguarded from now on.
+		 * Cancelling the work is neither needed nor possible -- this
+		 * IS the expired work. */
+		cdma->timeout.clientid = 0;
 		mutex_unlock(&cdma->lock);
 		mutex_unlock(&dev->timeout_mutex);
 		return;
