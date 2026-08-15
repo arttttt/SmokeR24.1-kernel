@@ -80,23 +80,24 @@ static void lock_device(struct nvhost_job *job, bool lock)
 	}
 }
 
-/* A 32-bit wait: the payload register takes the whole threshold, where the
- * packed single-word form truncated it to 24 bits -- a busy syncpoint wraps
- * that in hours, and a wrapped threshold is a wait that never ends. The
- * setclass mask names two registers: the payload at +0, the wait itself two
- * registers up; the class stays HOST1X afterwards, exactly as the packed
- * form left it. No guard on the registers: the only chips built from this
- * file (t124, t210) both carry the host1x04 register set.
+/* The packed single-word wait, as this driver always pushed it.
+ *
+ * A 32-bit form was tried here (payload register + wait, mainline
+ * e902585fc8b6) and REVERTED: on this silicon the pushed pair stalled the
+ * channel -- cdma timeouts with the syncpoint already past the threshold,
+ * five-second fence waits up the flip path, visible freezes. Whether the
+ * fault was the mask/word order or the method pair itself needs the TRM or
+ * a bare-channel experiment; until one of those exists, the packed form
+ * stays. Its 24-bit threshold has carried this driver for a decade -- the
+ * hardware evidently compares within a window rather than absolutely.
  */
 static void cdma_push_wait_syncpt(struct nvhost_channel *ch, u32 id,
 				  u32 thresh)
 {
 	nvhost_cdma_push(&ch->cdma,
 		nvhost_opcode_setclass(NV_HOST1X_CLASS_ID,
-			host1x_uclass_load_syncpt_payload_32_r(),
-			(1 << 0) | (1 << 2)),
-		thresh);
-	nvhost_cdma_push(&ch->cdma, id, NVHOST_OPCODE_NOOP);
+			host1x_uclass_wait_syncpt_r(), 1),
+		nvhost_class_host_wait_syncpt(id, thresh));
 }
 
 static void serialize(struct nvhost_job *job)
