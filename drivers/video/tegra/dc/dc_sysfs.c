@@ -416,111 +416,6 @@ static ssize_t cmu_enable_show(struct device *dev,
 
 static DEVICE_ATTR(cmu_enable,
 		S_IRUGO|S_IWUSR, cmu_enable_show, cmu_enable_store);
-
-static ssize_t color_filter_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	int rr, gr, br, rg, gg, bg, rb, gb, bb;
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
-	struct tegra_dc_cmu *cmu = &dc->cmu;
-
-	sscanf(buf, "%d %d %d %d %d %d %d %d %d", &rr, &gr, &br, &rg, &gg, &bg, &rb, &gb, &bb);
-
-	if (rr < 0)
-		goto fail;
-	if (gr < 0)
-		goto fail;
-	if (br < 0)
-		goto fail;
-	if (rg < 0)
-		goto fail;
-	if (gg < 0)
-		goto fail;
-	if (bg < 0)
-		goto fail;
-	if (rb < 0)
-		goto fail;
-	if (gb < 0)
-		goto fail;
-	if (bb < 0)
-		goto fail;
-
-	cmu->csc.krr = rr;
-	cmu->csc.kgr = gr;
-	cmu->csc.kbr = br;
-	cmu->csc.krg = rg;
-	cmu->csc.kgg = gg;
-	cmu->csc.kbg = bg;
-	cmu->csc.krb = rb;
-	cmu->csc.kgb = gb;
-	cmu->csc.kbb = bb;
-
-	tegra_dc_update_cmu(dc, cmu);
-
-	return count;
-
-fail:
-	return -EINVAL;
-}
-
-static ssize_t color_filter_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
-	struct tegra_dc_cmu *cmu = &dc->cmu;
-
-	return snprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d %d %d %d\n", 
-					cmu->csc.krr, cmu->csc.kgr, cmu->csc.kbr, 
-					cmu->csc.krg, cmu->csc.kgg, cmu->csc.kbg, 
-					cmu->csc.krb, cmu->csc.kgb, cmu->csc.kbb);
-}
-
-static DEVICE_ATTR(color_filter,
-		S_IRUGO|S_IWUSR, color_filter_show, color_filter_store);
-
-static ssize_t color_filter_rgb_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	int r, g, b;
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
-	struct tegra_dc_cmu *cmu = &dc->cmu;
-
-	sscanf(buf, "%d %d %d", &r, &g, &b);
-
-	if (r < 0)
-		goto fail;
-	if (g < 0)
-		goto fail;
-	if (b < 0)
-		goto fail;
-
-	cmu->csc.krr = r;
-	cmu->csc.kgg = g;
-	cmu->csc.kbb = b;
-
-	tegra_dc_update_cmu(dc, cmu);
-
-	return count;
-
-fail:
-	return -EINVAL;
-}
-
-static ssize_t color_filter_rgb_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
-	struct tegra_dc_cmu *cmu = &dc->cmu;
-
-	return snprintf(buf, PAGE_SIZE, "%d %d %d\n", cmu->csc.krr, cmu->csc.kgg, cmu->csc.kbb);
-}
-
-static DEVICE_ATTR(color_filter_rgb,
-		S_IRUGO|S_IWUSR, color_filter_rgb_show, color_filter_rgb_store);
 #endif
 
 #ifdef CONFIG_TEGRA_ISOMGR
@@ -841,8 +736,6 @@ void tegra_dc_remove_sysfs(struct device *dev)
 #endif
 #ifdef CONFIG_TEGRA_DC_CMU
 	device_remove_file(dev, &dev_attr_cmu_enable);
-	device_remove_file(dev, &dev_attr_color_filter);
-	device_remove_file(dev, &dev_attr_color_filter_rgb);
 #endif
 #ifdef CONFIG_TEGRA_ISOMGR
 	device_remove_file(dev, &dev_attr_reserved_bw);
@@ -895,8 +788,6 @@ void tegra_dc_create_sysfs(struct device *dev)
 #endif
 #ifdef CONFIG_TEGRA_DC_CMU
 	error |= device_create_file(dev, &dev_attr_cmu_enable);
-	error |= device_create_file(dev, &dev_attr_color_filter);
-	error |= device_create_file(dev, &dev_attr_color_filter_rgb);
 #endif
 #ifdef CONFIG_TEGRA_ISOMGR
 	error |= device_create_file(dev, &dev_attr_reserved_bw);
