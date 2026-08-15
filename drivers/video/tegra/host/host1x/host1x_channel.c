@@ -80,6 +80,25 @@ static void lock_device(struct nvhost_job *job, bool lock)
 	}
 }
 
+/* A 32-bit wait: the payload register takes the whole threshold, where the
+ * packed single-word form truncated it to 24 bits -- a busy syncpoint wraps
+ * that in hours, and a wrapped threshold is a wait that never ends. The
+ * setclass mask names two registers: the payload at +0, the wait itself two
+ * registers up; the class stays HOST1X afterwards, exactly as the packed
+ * form left it. No guard on the registers: the only chips built from this
+ * file (t124, t210) both carry the host1x04 register set.
+ */
+static void cdma_push_wait_syncpt(struct nvhost_channel *ch, u32 id,
+				  u32 thresh)
+{
+	nvhost_cdma_push(&ch->cdma,
+		nvhost_opcode_setclass(NV_HOST1X_CLASS_ID,
+			host1x_uclass_load_syncpt_payload_32_r(),
+			(1 << 0) | (1 << 2)),
+		thresh);
+	nvhost_cdma_push(&ch->cdma, id, NVHOST_OPCODE_NOOP);
+}
+
 static void serialize(struct nvhost_job *job)
 {
 	struct nvhost_channel *ch = job->ch;
@@ -103,13 +122,7 @@ static void serialize(struct nvhost_job *job)
 		u32 id = job->sp[i].id;
 		u32 max = nvhost_syncpt_read_max(sp, id);
 
-		/* 32-bit form: see the note in push_waits. */
-		nvhost_cdma_push(&ch->cdma,
-			nvhost_opcode_setclass(NV_HOST1X_CLASS_ID,
-				host1x_uclass_load_syncpt_payload_32_r(),
-				(1 << 0) | (1 << 2)),
-			max);
-		nvhost_cdma_push(&ch->cdma, id, NVHOST_OPCODE_NOOP);
+		cdma_push_wait_syncpt(ch, id, max);
 	}
 }
 
@@ -159,13 +172,7 @@ static void add_sync_waits(struct nvhost_channel *ch, int fd)
 		if (nvhost_syncpt_is_expired(sp, id, thresh))
 			continue;
 
-		/* 32-bit form: see the note in push_waits. */
-		nvhost_cdma_push(&ch->cdma,
-			nvhost_opcode_setclass(NV_HOST1X_CLASS_ID,
-				host1x_uclass_load_syncpt_payload_32_r(),
-				(1 << 0) | (1 << 2)),
-			thresh);
-		nvhost_cdma_push(&ch->cdma, id, NVHOST_OPCODE_NOOP);
+		cdma_push_wait_syncpt(ch, id, thresh);
 	}
 	sync_fence_put(fence);
 }
@@ -191,19 +198,7 @@ static void push_waits(struct nvhost_job *job)
 					     wait->thresh))
 			continue;
 
-		/* A 32-bit wait: the payload register takes the whole
-		 * threshold, where the packed single-word form truncated it
-		 * to 24 bits -- a busy syncpoint wraps that in hours, and a
-		 * wrapped threshold is a wait that never ends. The mask
-		 * names two registers: payload at +0, the wait itself two
-		 * registers up. */
-		nvhost_cdma_push(&ch->cdma,
-			nvhost_opcode_setclass(NV_HOST1X_CLASS_ID,
-				host1x_uclass_load_syncpt_payload_32_r(),
-				(1 << 0) | (1 << 2)),
-			wait->thresh);
-		nvhost_cdma_push(&ch->cdma, wait->syncpt_id,
-			NVHOST_OPCODE_NOOP);
+		cdma_push_wait_syncpt(ch, wait->syncpt_id, wait->thresh);
 	}
 
 	if (pdata->resource_policy == RESOURCE_PER_DEVICE)

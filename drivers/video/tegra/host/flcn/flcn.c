@@ -347,18 +347,28 @@ int nvhost_flcn_finalize_poweron(struct platform_device *pdev)
 	host1x_writel(pdev, flcn_dmatrfbase_r(),
 			(v->dma_addr + v->os.bin_data_offset) >> 8);
 
-	for (offset = 0; offset < v->os.data_size; offset += 256)
-		flcn_dma_pa_to_internal_256b(pdev,
+	for (offset = 0; offset < v->os.data_size; offset += 256) {
+		err = flcn_dma_pa_to_internal_256b(pdev,
 					   v->os.data_offset + offset,
 					   offset, false);
+		/* Checked where it long was not: a chunk that never found
+		 * room in the queue was silently skipped before, and a
+		 * firmware with a hole boots into garbage the retry loop
+		 * then has to discover the slow way. */
+		if (err)
+			return err;
+	}
 
 	/* The whole of the code, not the first page and a self-load: the
 	 * host DMA is pipelined now and loads it faster than the falcon
 	 * pulls it page by page from inside the boot. */
-	for (offset = 0; offset < v->os.code_size; offset += 256)
-		flcn_dma_pa_to_internal_256b(pdev,
+	for (offset = 0; offset < v->os.code_size; offset += 256) {
+		err = flcn_dma_pa_to_internal_256b(pdev,
 					   v->os.code_offset + offset,
 					   offset, true);
+		if (err)
+			return err;
+	}
 
 	/* The copies above are queued, not finished. One wait covers them
 	 * all -- the queue drains in order. */

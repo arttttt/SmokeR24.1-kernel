@@ -540,14 +540,19 @@ int nvhost_tsec_finalize_poweron(struct platform_device *dev)
 	host1x_writel(dev, flcn_dmatrfbase_r(),
 		(m->dma_addr + m->os.bin_data_offset) >> 8);
 
-	for (offset = 0; offset < m->os.data_size; offset += 256)
-		flcn_dma_pa_to_internal_256b(dev,
+	for (offset = 0; offset < m->os.data_size; offset += 256) {
+		err = flcn_dma_pa_to_internal_256b(dev,
 					   m->os.data_offset + offset,
 					   offset, false);
+		if (err)
+			return err;
+	}
 
-	flcn_dma_pa_to_internal_256b(dev,
+	err = flcn_dma_pa_to_internal_256b(dev,
 				     m->os.code_offset+TSEC_OS_START_OFFSET,
 				     TSEC_OS_START_OFFSET, true);
+	if (err)
+		return err;
 
 	/* The copies above are queued, not finished: the shared helper is
 	 * pipelined now and waits only for room in the DMA queue. */
