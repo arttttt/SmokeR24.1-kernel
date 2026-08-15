@@ -114,6 +114,14 @@ static inline u32 host1x_uclass_wait_syncpt_r(void)
 {
 	return 0x8;
 }
+static inline u32 host1x_uclass_load_syncpt_payload_32_r(void)
+{
+	return 0x4e;
+}
+static inline u32 host1x_uclass_wait_syncpt_32_r(void)
+{
+	return 0x50;
+}
 static inline u32 host1x_uclass_wait_syncpt_indx_f(u32 v)
 {
 	return (v & 0xff) << 24;
