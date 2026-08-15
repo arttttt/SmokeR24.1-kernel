@@ -77,6 +77,7 @@ struct flcn {
 		u32 data_offset;
 		u32 data_size;
 		u32 code_offset;
+		u32 code_size;
 		u32 size;
 	} os, fce;
 
@@ -109,6 +110,7 @@ int flcn_dma_pa_to_internal_256b(struct platform_device *pdev,
 					      u32 internal_offset,
 					      bool imem);
 int flcn_wait_mem_scrubbing(struct platform_device *dev);
+int flcn_dma_wait_idle(struct platform_device *pdev, u32 *timeout);
 
 int flcn_wait_idle(struct platform_device *pdev,
 				u32 *timeout);

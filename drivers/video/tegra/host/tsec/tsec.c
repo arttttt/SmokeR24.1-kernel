@@ -549,6 +549,14 @@ int nvhost_tsec_finalize_poweron(struct platform_device *dev)
 				     m->os.code_offset+TSEC_OS_START_OFFSET,
 				     TSEC_OS_START_OFFSET, true);
 
+	/* The copies above are queued, not finished: the shared helper is
+	 * pipelined now and waits only for room in the DMA queue. */
+	timeout = 0;
+	err = flcn_dma_wait_idle(dev, &timeout);
+	if (err) {
+		dev_err(&dev->dev, "firmware copy did not drain");
+		return err;
+	}
 
 	/* boot tsec */
 	host1x_writel(dev, flcn_bootvec_r(),

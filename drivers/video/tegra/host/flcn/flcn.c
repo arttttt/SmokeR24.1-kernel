@@ -81,7 +81,7 @@ int flcn_wait_idle(struct platform_device *pdev,
 	return -1;
 }
 
-static int flcn_dma_wait_idle(struct platform_device *pdev, u32 *timeout)
+int flcn_dma_wait_idle(struct platform_device *pdev, u32 *timeout)
 {
 	nvhost_dbg_fn("");
 
@@ -106,6 +106,35 @@ static int flcn_dma_wait_idle(struct platform_device *pdev, u32 *timeout)
 	return -1;
 }
 
+/* The DMA engine queues several transfers; a new command may be issued as
+ * soon as the queue is not full, without waiting for the previous transfer
+ * to finish. Waiting for idle after every chunk serialised the whole
+ * firmware load on the slowest step. */
+static int flcn_dma_wait_not_full(struct platform_device *pdev, u32 *timeout)
+{
+	nvhost_dbg_fn("");
+
+	if (!*timeout)
+		*timeout = FLCN_IDLE_TIMEOUT_DEFAULT;
+
+	do {
+		u32 check = min_t(u32, FLCN_IDLE_CHECK_PERIOD, *timeout);
+		u32 dmatrfcmd = host1x_readl(pdev, flcn_dmatrfcmd_r());
+
+		if (flcn_dmatrfcmd_full_v(dmatrfcmd) !=
+		    flcn_dmatrfcmd_full_true_v()) {
+			nvhost_dbg_fn("done");
+			return 0;
+		}
+		udelay(FLCN_IDLE_CHECK_PERIOD);
+		*timeout -= check;
+	} while (*timeout || !tegra_platform_is_silicon());
+
+	dev_err(&pdev->dev, "dma queue-full timeout");
+
+	return -1;
+}
+
 
 int flcn_dma_pa_to_internal_256b(struct platform_device *pdev,
 					      phys_addr_t pa,
@@ -116,16 +145,24 @@ int flcn_dma_pa_to_internal_256b(struct platform_device *pdev,
 	u32 pa_offset =  flcn_dmatrffboffs_offs_f(pa);
 	u32 i_offset = flcn_dmatrfmoffs_offs_f(internal_offset);
 	u32 timeout = 0; /* default*/
+	int err;
 
 	if (imem)
 		cmd |= flcn_dmatrfcmd_imem_true_f();
+
+	/* Pipelined: wait only for room in the queue, not for the transfer.
+	 * The caller finishes its run of chunks with flcn_dma_wait_idle() --
+	 * every transfer is still waited for, but once per load rather than
+	 * once per 256 bytes. */
+	err = flcn_dma_wait_not_full(pdev, &timeout);
+	if (err)
+		return err;
 
 	host1x_writel(pdev, flcn_dmatrfmoffs_r(), i_offset);
 	host1x_writel(pdev, flcn_dmatrffboffs_r(), pa_offset);
 	host1x_writel(pdev, flcn_dmatrfcmd_r(), cmd);
 
-	return flcn_dma_wait_idle(pdev, &timeout);
-
+	return 0;
 }
 
 int flcn_setup_ucode_image(struct platform_device *dev,
@@ -202,6 +239,7 @@ int flcn_setup_ucode_image(struct platform_device *dev,
 	v->os.size = ucode.bin_header->os_bin_size;
 	v->os.bin_data_offset = ucode.bin_header->os_bin_data_offset;
 	v->os.code_offset = ucode.os_header->os_code_offset;
+	v->os.code_size   = ucode.os_header->os_code_size;
 	v->os.data_offset = ucode.os_header->os_data_offset;
 	v->os.data_size   = ucode.os_header->os_data_size;
 
@@ -314,8 +352,22 @@ int nvhost_flcn_finalize_poweron(struct platform_device *pdev)
 					   v->os.data_offset + offset,
 					   offset, false);
 
-	flcn_dma_pa_to_internal_256b(pdev, v->os.code_offset,
-					   0, true);
+	/* The whole of the code, not the first page and a self-load: the
+	 * host DMA is pipelined now and loads it faster than the falcon
+	 * pulls it page by page from inside the boot. */
+	for (offset = 0; offset < v->os.code_size; offset += 256)
+		flcn_dma_pa_to_internal_256b(pdev,
+					   v->os.code_offset + offset,
+					   offset, true);
+
+	/* The copies above are queued, not finished. One wait covers them
+	 * all -- the queue drains in order. */
+	timeout = 0;
+	err = flcn_dma_wait_idle(pdev, &timeout);
+	if (err) {
+		dev_err(&pdev->dev, "firmware copy did not drain");
+		return err;
+	}
 
 	/* setup falcon interrupts and enable interface */
 	host1x_writel(pdev, flcn_irqmset_r(),
