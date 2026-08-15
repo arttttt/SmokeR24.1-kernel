@@ -189,6 +189,7 @@ static int dma_buf_release(struct inode *inode, struct file *file)
 	list_del(&dmabuf->list_node);
 	mutex_unlock(&db_list.lock);
 
+	kfree(dmabuf->name);
 	kfree(dmabuf);
 	return 0;
 }
