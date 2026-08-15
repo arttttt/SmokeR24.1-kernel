@@ -14,6 +14,13 @@ the hardware and applies them to the screencap byte for byte. The output
 PNG is what the panel shows, and differences can be judged numerically
 instead of by eye.
 
+One blind spot: on a scene that has sat still for a second, the
+flattener hands the whole frame to the GPU and SurfaceFlinger bakes any
+active colour transform into it with a shader -- the matrix leaves the
+hardware (the composer restores the boot state) and screencap misses
+the GL tint too. Identity tables under an active correction therefore
+mean "capture during a live scene": touch the screen and shoot again.
+
 Usage: cmushot.py [out.png]     (device via adb; needs cmutest on it)
 """
 import subprocess
@@ -73,6 +80,12 @@ def main():
         print("CMU disabled: the screencap already is what the panel shows")
         shot.save(out_path)
         return
+
+    identity = np.array_equal(csc, [256, 0, 0, 0, 256, 0, 0, 0, 256])
+    if identity:
+        print("note: identity matrix -- if a correction is active, it is "
+              "living in the GL-flattened static frame right now; touch "
+              "the screen and capture again to see the hardware tint")
 
     shown = apply_pipeline(rgb, csc, lut1, lut2)
     Image.fromarray(shown).save(out_path)
