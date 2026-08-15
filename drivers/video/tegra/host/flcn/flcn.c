@@ -50,7 +50,11 @@
 
 static int nvhost_flcn_init_sw(struct platform_device *dev);
 
-#define FLCN_IDLE_TIMEOUT_DEFAULT	10000	/* 10 milliseconds */
+/* 100 milliseconds. Ten used to be enough on an idle bus, but the boot DMA
+ * competes for EMC with whatever woke the engine up, and a boot that misses
+ * a tight deadline is retried from scratch three times before the module
+ * gives up -- a false failure here costs far more than a longer wait. */
+#define FLCN_IDLE_TIMEOUT_DEFAULT	100000	/* 100 milliseconds */
 #define FLCN_IDLE_CHECK_PERIOD		10	/* 10 usec */
 int flcn_wait_idle(struct platform_device *pdev,
 				u32 *timeout)
