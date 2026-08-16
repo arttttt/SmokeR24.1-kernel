@@ -2504,11 +2504,17 @@ struct tegra_dc_platform_data
 #ifdef CONFIG_TRUSTED_LITTLE_KERNEL
 			int retval;
 
+			/* The secure world's share of VRR feeds the vendor's
+			 * adaptive algorithm, which this device never runs --
+			 * no trusted app answers here, and failing the WHOLE
+			 * display over it cost a boot: no head device, a
+			 * headless composer, and a crash loop. The plain
+			 * structure serves the porch-stretch path in full. */
 			retval = te_vrr_set_buf(virt_to_phys(vrr));
-			if (retval) {
-				dev_err(&ndev->dev, "failed to set buffer\n");
-				goto fail_parse;
-			}
+			if (retval)
+				dev_warn(&ndev->dev,
+					 "vrr: no secure buffer (%d), adaptive path stays dark\n",
+					 retval);
 #endif /* CONFIG_TRUSTED_LITTLE_KERNEL */
 		} else {
 			dev_err(&ndev->dev, "not enough memory\n");
