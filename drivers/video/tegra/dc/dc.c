@@ -1718,7 +1718,9 @@ static const struct file_operations dbg_vrr_fluct_avg_pct_ops = {
  *
  * An experiment tool, not a policy: whoever will stretch the porch in
  * earnest has to know first what this panel tolerates, and this file is
- * how that gets found out. */
+ * how that gets found out. Switch on a still screen only -- a stretched
+ * frame under a rendering SurfaceFlinger costs a frame of latency at
+ * the boundary while its timing model resyncs. */
 static int dbg_vrr_act_vfp_show(struct seq_file *m, void *unused)
 {
 	struct tegra_dc *dc = m->private;
@@ -4507,6 +4509,12 @@ static void _tegra_dc_controller_disable(struct tegra_dc *dc)
 		dc->out_ops->vrr_enable(dc, 0);
 		/* TODO: Fix properly. Bug 1644102. */
 		tegra_dc_set_act_vfp(dc, dc->mode.v_front_porch);
+#ifdef CONFIG_DEBUG_FS
+		/* The line above restored the mode's own porch; the
+		 * calibration knob's memory goes with it, or its file would
+		 * report a stretch the hardware no longer carries. */
+		dc->dbg_act_vfp = 0;
+#endif
 	}
 
 	if (dc->out_ops && dc->out_ops->disable)
