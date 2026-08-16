@@ -1701,12 +1701,6 @@ static const struct file_operations dbg_vrr_fluct_avg_pct_ops = {
 	.release = single_release,
 };
 
-/* The deepest step of this panel's refresh-stretch ladder: the front
- * porch that makes an effective 30 Hz of the mode's timing. The register
- * field holds four times more, but past this line nobody has ever driven
- * the panel, and a typo must not be the first explorer. */
-#define DBG_ACT_VFP_MAX	2086
-
 /* The refresh-stretch calibration stand.
  *
  * Writes a vertical front porch straight into the controller's active
@@ -1755,8 +1749,11 @@ static ssize_t dbg_vrr_act_vfp_write(struct file *file,
 		return -ENXIO;
 	}
 
-	if (new_vfp < dc->mode.v_ref_to_sync + 1 ||
-	    new_vfp > DBG_ACT_VFP_MAX) {
+	/* The upper bound is the register's, not a policy: the vertical
+	 * front porch field is thirteen bits wide, and bits past it do not
+	 * exist to write. Where the panel's real floor lies is exactly
+	 * what this knob exists to find out. */
+	if (new_vfp < dc->mode.v_ref_to_sync + 1 || new_vfp > 0x1fff) {
 		mutex_unlock(&dc->lock);
 		return -EINVAL;
 	}
