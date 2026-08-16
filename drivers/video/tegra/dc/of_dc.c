@@ -2483,8 +2483,12 @@ struct tegra_dc_platform_data
 		}
 	}
 
+	/* A single-mode panel may carry the capability too: the porch
+	 * stretch works on the one mode there is. The two-mode demand was
+	 * the vendor's product shape -- a native mode paired with a VRR
+	 * one -- not a requirement of the machinery. */
 	vrr_np = of_get_child_by_name(np_target_disp, "vrr-settings");
-	if (!vrr_np || (pdata->default_out->n_modes < 2)) {
+	if (!vrr_np || (pdata->default_out->n_modes < 1)) {
 		pr_info("%s: could not find vrr-settings node\n", __func__);
 	} else if (pdata->default_out->type != TEGRA_DC_OUT_DSI) {
 		dev_err(&ndev->dev,

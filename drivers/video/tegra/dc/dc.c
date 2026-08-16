@@ -1701,6 +1701,87 @@ static const struct file_operations dbg_vrr_fluct_avg_pct_ops = {
 	.release = single_release,
 };
 
+/* The deepest step of this panel's refresh-stretch ladder: the front
+ * porch that makes an effective 30 Hz of the mode's timing. The register
+ * field holds four times more, but past this line nobody has ever driven
+ * the panel, and a typo must not be the first explorer. */
+#define DBG_ACT_VFP_MAX	2086
+
+/* The refresh-stretch calibration stand.
+ *
+ * Writes a vertical front porch straight into the controller's active
+ * bank: the next frame comes later, the effective refresh drops, and
+ * nothing else moves -- no modeset, no clock change, the mode itself
+ * stays untouched. The write survives until the next write or until the
+ * head blanks: the disable path restores the mode's own porch, so sleep
+ * and blank need no help.
+ *
+ * An experiment tool, not a policy: whoever will stretch the porch in
+ * earnest has to know first what this panel tolerates, and this file is
+ * how that gets found out. */
+static int dbg_vrr_act_vfp_show(struct seq_file *m, void *unused)
+{
+	struct tegra_dc *dc = m->private;
+
+	if (!dc)
+		return -EINVAL;
+
+	seq_printf(m, "%d\n", dc->dbg_act_vfp ?: dc->mode.v_front_porch);
+
+	return 0;
+}
+
+static ssize_t dbg_vrr_act_vfp_write(struct file *file,
+		const char __user *addr, size_t len, loff_t *pos)
+{
+	struct seq_file *m = file->private_data;
+	struct tegra_dc *dc = m->private;
+	long   new_vfp;
+	int    ret;
+
+	if (!dc)
+		return -EINVAL;
+
+	ret = kstrtol_from_user(addr, len, 10, &new_vfp);
+	if (ret < 0)
+		return ret;
+
+	mutex_lock(&dc->lock);
+
+	if (!dc->enabled || !dc->out->vrr || !dc->out->vrr->capability) {
+		mutex_unlock(&dc->lock);
+		return -ENXIO;
+	}
+
+	if (new_vfp < dc->mode.v_ref_to_sync + 1 ||
+	    new_vfp > DBG_ACT_VFP_MAX) {
+		mutex_unlock(&dc->lock);
+		return -EINVAL;
+	}
+
+	tegra_dc_io_start(dc);
+	tegra_dc_set_act_vfp(dc, new_vfp);
+	tegra_dc_io_end(dc);
+	dc->dbg_act_vfp = new_vfp;
+
+	mutex_unlock(&dc->lock);
+
+	return len;
+}
+
+static int dbg_vrr_act_vfp_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dbg_vrr_act_vfp_show, inode->i_private);
+}
+
+static const struct file_operations dbg_vrr_act_vfp_ops = {
+	.open = dbg_vrr_act_vfp_open,
+	.read = seq_read,
+	.write = dbg_vrr_act_vfp_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static int dbg_tegrahw_type_show(struct seq_file *m, void *unused)
 {
 	struct tegra_dc *dc = m->private;
@@ -1969,6 +2050,14 @@ static void tegra_dc_create_debugfs(struct tegra_dc *dc)
 
 	retval = debugfs_create_file("fluct_avg_pct", S_IRUGO, vrrdir,
 				dc->out->vrr, &dbg_vrr_fluct_avg_pct_ops);
+	if (!retval)
+		goto remove_out;
+
+	/* Unlike its neighbours this one gets the dc, not the vrr: the knob
+	 * writes the controller's active bank and remembers the value on
+	 * the head it belongs to. */
+	retval = debugfs_create_file("act_vfp", S_IRUGO | S_IWUSR, vrrdir,
+				dc, &dbg_vrr_act_vfp_ops);
 	if (!retval)
 		goto remove_out;
 

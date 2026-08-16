@@ -288,6 +288,10 @@ struct tegra_dc {
 
 #ifdef CONFIG_DEBUG_FS
 	struct dentry			*debugdir;
+	/* The last front porch written through the vrr/act_vfp knob, or 0
+	 * when the mode's own value stands. Diagnostics only: the knob is
+	 * the panel's refresh-stretch calibration stand. */
+	int				dbg_act_vfp;
 #endif
 	struct tegra_dc_lut		fb_lut;
 	struct delayed_work		underflow_work;
