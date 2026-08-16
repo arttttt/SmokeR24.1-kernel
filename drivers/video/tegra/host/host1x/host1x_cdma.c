@@ -396,11 +396,18 @@ static bool cdma_check_dependencies(struct nvhost_cdma *cdma)
 		host1x_sync_cbstat_0_r() + 4 * ch->chid);
 	u32 cbread = host1x_sync_readl(dev,
 		host1x_sync_cbread0_r() + 4 * ch->chid);
-	u32 waiting = cbstat == 0x00010008;
-	u32 syncpt_id = cbread >> 24;
+	u32 syncpt_id;
 	int i;
 
-	if (!waiting)
+	/* Two costumes of the same wait: the packed word carries the id in
+	 * its top byte, the 32-bit form's data word is the id itself. A
+	 * detector matching only the packed offset would send every stuck
+	 * 32-bit wait to a full teardown instead of this soft path. */
+	if (cbstat == 0x00010008)
+		syncpt_id = cbread >> 24;
+	else if (cbstat == 0x00010050)
+		syncpt_id = cbread & 0x3ff;
+	else
 		return false;
 
 	for (i = 0; i < cdma->timeout.num_syncpts; ++i)

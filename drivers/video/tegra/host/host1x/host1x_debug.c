@@ -155,6 +155,14 @@ static void t20_debug_show_channel_cdma(struct nvhost_master *m,
 			base, baseval, val);
 		break;
 
+	case 0x00010050:
+		/* The 32-bit wait: the data word is the id alone, the
+		 * threshold went through the payload register one method
+		 * earlier and is not readable back from here. */
+		nvhost_debug_output(o, "waiting on syncpt %d (32-bit wait)\n",
+			cbread & 0x3ff);
+		break;
+
 	default:
 		nvhost_debug_output(o,
 				"active class %02x, offset %04x, val %08x\n",
