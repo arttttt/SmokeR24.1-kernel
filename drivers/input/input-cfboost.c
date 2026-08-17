@@ -71,7 +71,12 @@ static struct kernel_param_ops boost_freq_ops = {
 	.set = boost_freq_set,
 	.get = boost_freq_get,
 };
-static bool boost_enabled = 1; /* 1 = enabled */
+/* Off by default: every userspace profile turns this off in favour of
+ * the power HAL's boostpulse, and a default of on left the module live
+ * from early boot until the first profile was applied. The mechanism
+ * stays -- it is the only one that can floor memory and graphics from
+ * raw input -- it just waits to be asked. */
+static bool boost_enabled; /* 1 = enabled */
 module_param(boost_enabled, bool, 0644);
 module_param_cb(boost_freq, &boost_freq_ops, &boost_freq, 0644);
 static unsigned int boost_emc; /* kHz */
