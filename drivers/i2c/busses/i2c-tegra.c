@@ -1329,8 +1329,18 @@ skip_error_print:
 		return -EAGAIN;
 	}
 
+	/* A NACK comes back as -EAGAIN so the core's retries cover it --
+	 * the way NVIDIA shipped this controller ("i2c: tegra: Retry
+	 * transfer when unexpected/no_ack status is detected", Wei Ni,
+	 * 2011). Mainline later narrowed that to arbitration and
+	 * unexpected status, trading transient tolerance for faster scans
+	 * of absent addresses. This bus carries a handful of fixed,
+	 * known-present devices and a real boot storm: the battery
+	 * monitor's first probe was lost to a single unretried NACK. The
+	 * controller is already re-initialised and the STOP condition
+	 * waited out above, so the retry starts from a clean bus. */
 	if (i2c_dev->msg_err == I2C_ERR_NO_ACK)
-		return -EREMOTEIO;
+		return -EAGAIN;
 
 	if (i2c_dev->msg_err & I2C_ERR_UNEXPECTED_STATUS)
 		return -EAGAIN;
