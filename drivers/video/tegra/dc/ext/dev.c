@@ -2589,6 +2589,15 @@ static long tegra_dc_ioctl(struct file *filp, unsigned int cmd,
 		return -EACCES;
 #endif
 	}
+	case TEGRA_DC_EXT_SET_ACT_VFP:
+	{
+		u32 vfp;
+
+		if (get_user(vfp, (__u32 __user *)user_arg))
+			return -EFAULT;
+
+		return tegra_dc_set_act_vfp_aligned(user->ext->dc, vfp);
+	}
 	case TEGRA_DC_EXT_GET_CAP_INFO:
 	{
 		int ret = 0;

@@ -226,6 +226,12 @@ struct tegra_dc {
 	bool				cmu_shadow_force_update;
 	bool				cmu_enabled;
 #endif
+
+	/* The porch the composer asked for, waiting for the frame's end to
+	 * write it -- the async twin of the CMU shadow above. A release is
+	 * stored as the mode's own porch, never as zero. */
+	u32				act_vfp_shadow;
+	bool				act_vfp_shadow_dirty;
 	wait_queue_head_t		wq;
 	wait_queue_head_t		timestamp_wq;
 

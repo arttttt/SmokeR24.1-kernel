@@ -2555,6 +2555,57 @@ EXPORT_SYMBOL(tegra_dc_update_cmu_aligned);
 #define tegra_dc_update_cmu_aligned(dc, cmu)
 #endif
 
+/* The composer's road to the refresh stretch: remember the porch and let
+ * the frame's end write it. The caller never waits and never hears back
+ * -- the discipline the colour unit's aligned path lives by -- and a
+ * zero asks for the mode's own porch. Coalescing is last-wins on the
+ * shadow; the interrupt reference is taken once per dirtying, on the
+ * edge, so two requests before one frame's end still balance. */
+int tegra_dc_set_act_vfp_aligned(struct tegra_dc *dc, u32 vfp)
+{
+	mutex_lock(&dc->lock);
+
+	/* No vrr means the machinery never woke: a permanent fact of the
+	 * configuration, and the one answer worth being loud about. */
+	if (!dc->out->vrr || !dc->out->vrr->capability) {
+		mutex_unlock(&dc->lock);
+		return -ENOSYS;
+	}
+
+	/* A dark head loses the request quietly, like the colour path
+	 * does: its disable already restored the mode's own porch, and
+	 * whoever drives the stretch re-decides after every wake. */
+	if (!dc->enabled) {
+		mutex_unlock(&dc->lock);
+		return 0;
+	}
+
+	if (vfp == 0)
+		vfp = dc->mode.v_front_porch;
+
+	/* The bounds are the hardware's: the wait guard below the sync
+	 * reference, the thirteen-bit register field above. Out of range
+	 * is dropped without a word to the caller -- a trace for the
+	 * debugger, nothing for the product. */
+	if (vfp < dc->mode.v_ref_to_sync + 1 || vfp > 0x1fff) {
+		pr_debug_ratelimited("tegradc: act_vfp %u out of range\n",
+				     vfp);
+		mutex_unlock(&dc->lock);
+		return 0;
+	}
+
+	dc->act_vfp_shadow = vfp;
+	if (!dc->act_vfp_shadow_dirty) {
+		dc->act_vfp_shadow_dirty = true;
+		_tegra_dc_config_frame_end_intr(dc, true);
+	}
+
+	mutex_unlock(&dc->lock);
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra_dc_set_act_vfp_aligned);
+
 int tegra_dc_set_hdr(struct tegra_dc *dc, struct tegra_dc_hdr *hdr,
 						bool cache_dirty)
 {
@@ -3580,6 +3631,34 @@ static void tegra_dc_frame_end(struct work_struct *work)
 	tegra_dc_put(dc);
 	mutex_unlock(&dc->lock);
 #endif
+	/* The composer's porch request lands here, at the frame's end --
+	 * self-contained like the HDR block below, because it owes nothing
+	 * to the colour machinery above. A head gone dark between request
+	 * and frame's end loses the request: its disable path already
+	 * restored the mode's own porch. Either way the interrupt
+	 * reference taken at dirtying is given back exactly once. */
+	if (dc->act_vfp_shadow_dirty) {
+		mutex_lock(&dc->lock);
+		if (dc->act_vfp_shadow_dirty) {
+			if (dc->enabled) {
+				tegra_dc_get(dc);
+				tegra_dc_set_act_vfp(dc, dc->act_vfp_shadow);
+#ifdef CONFIG_DEBUG_FS
+				/* The calibration knob's file stays the one
+				 * honest reader of what was last applied. */
+				dc->dbg_act_vfp =
+					(dc->act_vfp_shadow ==
+					 dc->mode.v_front_porch)
+						? 0 : dc->act_vfp_shadow;
+#endif
+				tegra_dc_put(dc);
+			}
+			dc->act_vfp_shadow_dirty = false;
+			_tegra_dc_config_frame_end_intr(dc, false);
+		}
+		mutex_unlock(&dc->lock);
+	}
+
 	if (dc->hdr_cache_dirty) {
 		_tegra_dc_handle_hdr(dc);
 		_tegra_dc_config_frame_end_intr(dc, false);

@@ -587,6 +587,8 @@ int tegra_dc_update_cmu(struct tegra_dc *dc, struct tegra_dc_cmu *cmu);
 int tegra_dc_update_cmu_aligned(struct tegra_dc *dc, struct tegra_dc_cmu *cmu);
 #endif
 
+int tegra_dc_set_act_vfp_aligned(struct tegra_dc *dc, u32 vfp);
+
 int tegra_dc_set_hdr(struct tegra_dc *dc, struct tegra_dc_hdr *hdr,
 					bool cache_dirty);
 

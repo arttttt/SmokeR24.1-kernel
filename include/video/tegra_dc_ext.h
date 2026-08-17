@@ -783,6 +783,14 @@ struct tegra_dc_ext_feature {
 #define TEGRA_DC_EXT_GET_CAP_INFO\
 	_IOW('D', 0x1E, struct tegra_dc_ext_get_cap_info)
 
+/* Stretch the vertical front porch of the active timing: the effective
+ * refresh drops, nothing else moves. Fire-and-forget -- the value lands
+ * at the frame's end, the caller never waits and never hears back; a
+ * zero asks for the mode's own porch. The panel's tolerated floor is the
+ * caller's knowledge, not the kernel's. */
+#define TEGRA_DC_EXT_SET_ACT_VFP \
+	_IOW('D', 0x1F, __u32)
+
 enum tegra_dc_ext_control_output_type {
 	TEGRA_DC_EXT_DSI,
 	TEGRA_DC_EXT_LVDS,
