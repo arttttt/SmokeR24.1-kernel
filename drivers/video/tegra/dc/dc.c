@@ -4591,6 +4591,16 @@ static void _tegra_dc_controller_disable(struct tegra_dc *dc)
 		 * report a stretch the hardware no longer carries. */
 		dc->dbg_act_vfp = 0;
 #endif
+		/* A request that beat the blank to the shadow but not to a
+		 * frame's end would otherwise sit dirty forever: the masked
+		 * interrupt never queues the work, and a standing dirty
+		 * swallows every later request without ever re-arming. Drop
+		 * it and give the interrupt reference back -- the mirror of
+		 * the work's own dark-head branch. */
+		if (dc->act_vfp_shadow_dirty) {
+			dc->act_vfp_shadow_dirty = false;
+			_tegra_dc_config_frame_end_intr(dc, false);
+		}
 	}
 
 	if (dc->out_ops && dc->out_ops->disable)
