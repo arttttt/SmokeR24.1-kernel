@@ -100,6 +100,34 @@
 			ti,fw-atl-name = "0204_atl.dffs";
 			ti,tz-name = "battery";
 		};
+
+		/* U902, HPA02149 (INA231): the battery-rail power monitor
+		 * Xiaomi soldered and never described -- the config register
+		 * still read its power-on default when found. Senses the same
+		 * 10 mOhm low-side shunt the fuel gauge does, so it shows
+		 * battery current: honest on discharge, blind to the load
+		 * while VBUS feeds the system. Calibration is the canonical
+		 * set for a 10 mOhm shunt: 103 uA per current LSB, 3.4 A
+		 * range. No current-threshold on purpose: the driver then
+		 * parks the chip in power-down and every read is a one-shot
+		 * conversion (the trigger config: 16 averages of 140 us,
+		 * ~4.5 ms) -- the meter itself costs nothing between reads.
+		 * The continuous config is unused in this mode; the value
+		 * kept here is the honest one should a threshold ever arm
+		 * it: 512 averages of 1.1 ms both channels, a one-second
+		 * window. */
+		ina230@40 {
+			compatible = "ti,ina230x";
+			reg = <0x40>;
+			ti,rail-name = "VDD_BAT";
+			ti,continuous-config = <0x1297>;
+			ti,trigger-config = <0x0403>;
+			ti,resistor = <10>;
+			ti,calibration-data = <0x1366>;
+			ti,power-lsb = <2577>;
+			ti,divisor = <25>;
+			ti,precision-multiplier = <1000>;
+		};
 	};
 
 	i2c@7000c700 {
