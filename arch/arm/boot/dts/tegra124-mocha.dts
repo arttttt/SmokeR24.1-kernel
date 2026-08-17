@@ -120,7 +120,7 @@
 			compatible = "ti,ina230x";
 			reg = <0x40>;
 			ti,rail-name = "VDD_BAT";
-			ti,continuous-config = <0x1297>;
+			ti,continuous-config = <0x0d27>;
 			ti,trigger-config = <0x0403>;
 			ti,resistor = <10>;
 			ti,calibration-data = <0x1366>;
