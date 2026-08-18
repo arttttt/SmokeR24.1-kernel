@@ -232,6 +232,7 @@ static void alloc_handle(struct nvmap_client *client,
 static const unsigned int heap_policy_small[] = {
 	NVMAP_HEAP_CARVEOUT_VPR,
 	NVMAP_HEAP_CARVEOUT_IRAM,
+	NVMAP_HEAP_CARVEOUT_COMPOSER,
 	NVMAP_HEAP_CARVEOUT_IVM,
 	NVMAP_HEAP_CARVEOUT_MASK,
 	NVMAP_HEAP_IOVMM,
@@ -241,6 +242,7 @@ static const unsigned int heap_policy_small[] = {
 static const unsigned int heap_policy_large[] = {
 	NVMAP_HEAP_CARVEOUT_VPR,
 	NVMAP_HEAP_CARVEOUT_IRAM,
+	NVMAP_HEAP_CARVEOUT_COMPOSER,
 	NVMAP_HEAP_IOVMM,
 	NVMAP_HEAP_CARVEOUT_IVM,
 	NVMAP_HEAP_CARVEOUT_MASK,

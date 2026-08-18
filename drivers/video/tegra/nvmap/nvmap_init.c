@@ -47,6 +47,7 @@ struct device __weak tegra_vpr_dev;
 struct device __weak tegra_iram_dev;
 struct device __weak tegra_generic_cma_dev;
 struct device __weak tegra_vpr_cma_dev;
+struct device __weak tegra_composer_dev;
 struct dma_resize_notifier_ops __weak vpr_dev_ops;
 
 static const struct of_device_id nvmap_of_ids[] = {
@@ -94,11 +95,18 @@ static struct nvmap_platform_carveout nvmap_carveouts[4] = {
 		.dma_info	= &vpr_dma_info,
 		.enable_static_dma_map = true,
 	},
+	[3] = {
+		.name		= "composer",
+		.usage_mask	= NVMAP_HEAP_CARVEOUT_COMPOSER,
+		.base		= 0,
+		.size		= 0,
+		.dma_dev	= &tegra_composer_dev,
+	},
 };
 
 static struct nvmap_platform_data nvmap_data = {
 	.carveouts	= nvmap_carveouts,
-	.nr_carveouts	= 3,
+	.nr_carveouts	= 4,
 };
 
 static struct nvmap_platform_carveout *nvmap_get_carveout_pdata(const char *name)
