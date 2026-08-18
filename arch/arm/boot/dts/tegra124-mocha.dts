@@ -79,6 +79,18 @@
 		};
 	};
 
+	/*
+	 * The zone is nvmap's, and is said so: the carveouts device takes it
+	 * by phandle, the way it has always taken iram. The binding is not
+	 * decoration -- the dtc reserved-memory checker walks the phandles of
+	 * every memory-region property and answers in the negative for a child
+	 * nobody references, so an honest consumer is what lets the node live
+	 * at all.
+	 */
+	tegra-carveouts {
+		memory-region = <&iram>, <&composer_carveout>;
+	};
+
 	firmware {
 		android {
 			compatible = "android,firmware";
