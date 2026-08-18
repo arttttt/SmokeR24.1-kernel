@@ -52,6 +52,33 @@
 		linux,initrd-end = <0x851bc400>;
 	};
 
+	/*
+	 * The composer's own scratch zone, 64M of physically contiguous memory
+	 * for the merge engine. Static on purpose: resizable CMA was considered
+	 * and rejected, so the zone costs its full size whether the pool holds
+	 * forty megabytes or none, and the allocation from it is always instant.
+	 *
+	 * The address ends exactly where the growing regions begin. The boot
+	 * loader's fixed reserves -- ramoops, nvdumper, the lp0 vector, the
+	 * tsec zone -- close out the top of memory from fd400000 on, and below
+	 * them the resizable vpr spreads its 188M. This node is removed from
+	 * memblock in the device tree scan, which runs before the platform
+	 * reserves, so vpr's top-down search finds it already gone and parks
+	 * flush on its ceiling: the static zone and the growing one share a
+	 * boundary, with no hole between them, by construction.
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		composer_carveout: composer-carveout {
+			compatible = "nvidia,composer-carveout";
+			reg = <0x0 0xF0C00000 0x0 0x04000000>;
+			no-map;
+		};
+	};
+
 	firmware {
 		android {
 			compatible = "android,firmware";

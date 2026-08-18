@@ -321,6 +321,8 @@ skip_cma:
 RESERVEDMEM_OF_DECLARE(nvmap_co, "nvidia,generic_carveout", nvmap_co_setup);
 RESERVEDMEM_OF_DECLARE(nvmap_ivc_co, "nvidia,ivm_carveout", nvmap_co_setup);
 RESERVEDMEM_OF_DECLARE(nvmap_iram_co, "nvidia,iram-carveout", nvmap_co_setup);
+RESERVEDMEM_OF_DECLARE(nvmap_composer_co, "nvidia,composer-carveout",
+		       nvmap_co_setup);
 #if defined(CONFIG_ANDROID) || \
 	defined(CONFIG_ARCH_TEGRA_18x_SOC) || defined(CONFIG_ARCH_TEGRA_21x_SOC)
 RESERVEDMEM_OF_DECLARE(nvmap_vpr_co, "nvidia,vpr-carveout", nvmap_co_setup);
