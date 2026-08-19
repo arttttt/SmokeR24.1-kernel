@@ -184,6 +184,8 @@ phys_addr_t tegra_carveout_start;
 phys_addr_t tegra_carveout_size;
 phys_addr_t tegra_vpr_start;
 phys_addr_t tegra_vpr_size;
+phys_addr_t tegra_composer_carveout_start;
+phys_addr_t tegra_composer_carveout_size;
 phys_addr_t tegra_tsec_start;
 phys_addr_t tegra_tsec_size;
 phys_addr_t tegra_lp0_vec_start;

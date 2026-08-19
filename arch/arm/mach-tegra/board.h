@@ -137,6 +137,8 @@ extern phys_addr_t tegra_carveout_start;
 extern phys_addr_t tegra_carveout_size;
 extern phys_addr_t tegra_vpr_start;
 extern phys_addr_t tegra_vpr_size;
+extern phys_addr_t tegra_composer_carveout_start;
+extern phys_addr_t tegra_composer_carveout_size;
 extern phys_addr_t tegra_lp0_vec_start;
 extern phys_addr_t tegra_lp0_vec_size;
 extern bool tegra_vpr_resize;

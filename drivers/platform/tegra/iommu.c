@@ -83,6 +83,7 @@ void tegra_fb_linear_set(struct iommu_linear_map *map)
 		LINEAR_MAP_ADD(tegra_vpr);
 		LINEAR_MAP_ADD(tegra_carveout);
 	}
+	LINEAR_MAP_ADD(tegra_composer_carveout);
 #endif
 }
 EXPORT_SYMBOL(tegra_fb_linear_set);

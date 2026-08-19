@@ -295,6 +295,15 @@ static int __init nvmap_co_setup(struct reserved_mem *rmem)
 	co->base = rmem->base;
 	co->size = rmem->size;
 
+	/* The display reads the composer zone through its own address space,
+	 * whose linear map is built from these globals before nvmap is probed;
+	 * handing the zone's place over here is what lets the display scan it
+	 * straight, as the engine writes it. */
+	if (!strcmp(co->name, "composer")) {
+		tegra_composer_carveout_start = rmem->base;
+		tegra_composer_carveout_size = rmem->size;
+	}
+
 	if (!of_get_flat_dt_prop(rmem->fdt_node, "reusable", NULL) ||
 	    of_get_flat_dt_prop(rmem->fdt_node, "no-map", NULL))
 		goto skip_cma;
