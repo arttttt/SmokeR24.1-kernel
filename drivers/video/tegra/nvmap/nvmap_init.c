@@ -102,6 +102,7 @@ static struct nvmap_platform_carveout nvmap_carveouts[4] = {
 		.size		= 0,
 		.dma_dev	= &tegra_composer_dev,
 		.enable_static_dma_map = true,
+		.disable_dynamic_dma_map = true,
 	},
 };
 
