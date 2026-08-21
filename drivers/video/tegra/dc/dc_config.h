@@ -211,21 +211,46 @@ int tegra_dc_feature_has_scan_column(struct tegra_dc *dc, int win_idx);
 u32 *tegra_dc_parse_feature(struct tegra_dc *dc, int win_idx, int operation);
 void tegra_dc_feature_register(struct tegra_dc *dc);
 
+/*
+ * How much source each filter spans, which is not always the axis it is
+ * named after.
+ *
+ * A columnar read walks the source down its columns, so the extent the
+ * HORIZONTAL filter covers is the source's height and the vertical
+ * filter's is its width. window.c computes the DDA increments from
+ * exactly this pairing -- h_dda from win->h and out_w, v_dda from win->w
+ * and out_h -- and everything that has to reason about scaling has to
+ * agree with it.
+ *
+ * Said once here because saying it again is how it goes wrong. The
+ * scaling check in the flip path stated it a second time, in the
+ * same-named axes, and so refused every rotated window that scaled by
+ * nothing at all: a 2048x48 status bar shown as 48x2048 read as a
+ * forty-two-fold shrink beside a forty-two-fold stretch. The frame was
+ * dropped, the panel kept the one before it, and a rotation ended in a
+ * second of a stale screen.
+ */
+static inline fixed20_12 win_src_h_extent(const struct tegra_dc_win *win)
+{
+	return (win->flags & TEGRA_WIN_FLAG_SCAN_COLUMN) ? win->h : win->w;
+}
+
+static inline fixed20_12 win_src_v_extent(const struct tegra_dc_win *win)
+{
+	return (win->flags & TEGRA_WIN_FLAG_SCAN_COLUMN) ? win->w : win->h;
+}
+
 static inline bool win_use_v_filter(struct tegra_dc *dc,
 	const struct tegra_dc_win *win)
 {
 	return tegra_dc_feature_has_filter(dc, win->idx, HAS_V_FILTER) &&
-		(win->flags & TEGRA_WIN_FLAG_SCAN_COLUMN ?
-			win->w.full != dfixed_const(win->out_h)
-			: win->h.full != dfixed_const(win->out_h));
+		win_src_v_extent(win).full != dfixed_const(win->out_h);
 }
 
 static inline bool win_use_h_filter(struct tegra_dc *dc,
 	const struct tegra_dc_win *win)
 {
 	return tegra_dc_feature_has_filter(dc, win->idx, HAS_H_FILTER) &&
-		(win->flags & TEGRA_WIN_FLAG_SCAN_COLUMN ?
-			win->h.full != dfixed_const(win->out_w)
-			: win->w.full != dfixed_const(win->out_w));
+		win_src_h_extent(win).full != dfixed_const(win->out_w);
 }
 #endif

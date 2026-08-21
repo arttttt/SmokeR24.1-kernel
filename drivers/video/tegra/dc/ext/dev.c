@@ -335,19 +335,26 @@ static int tegra_dc_ext_check_windowattr(struct tegra_dc_ext *ext,
 	 * The comparison is deliberately no stricter than the hardware:
 	 * the DDA works on (in - 1) / (out - 1), so the plain ratio with
 	 * the boundary included errs on the side of accepting.
+	 *
+	 * Which source extent belongs to which filter is asked of
+	 * win_src_h_extent()/win_src_v_extent() rather than restated here,
+	 * because under a columnar read the two cross and a second opinion
+	 * about that refused every rotated window on the panel.
 	 */
 	addr = tegra_dc_parse_feature(dc, win->idx, HAS_SCALE);
 	if (addr) {
-		unsigned int in_w = dfixed_trunc(win->w);
-		unsigned int in_h = dfixed_trunc(win->h);
+		unsigned int src_h = dfixed_trunc(win_src_h_extent(win));
+		unsigned int src_v = dfixed_trunc(win_src_v_extent(win));
 
-		if ((win->out_w && in_w > addr[H_FILTER_DOWN] * win->out_w) ||
-		    (win->out_h && in_h > addr[V_FILTER_DOWN] * win->out_h) ||
-		    (in_w && win->out_w > addr[H_SCALE_UP] * in_w) ||
-		    (in_h && win->out_h > addr[V_SCALE_UP] * in_h)) {
+		if ((win->out_w && src_h > addr[H_FILTER_DOWN] * win->out_w) ||
+		    (win->out_h && src_v > addr[V_FILTER_DOWN] * win->out_h) ||
+		    (src_h && win->out_w > addr[H_SCALE_UP] * src_h) ||
+		    (src_v && win->out_h > addr[V_SCALE_UP] * src_v)) {
 			dev_err(&dc->ndev->dev,
-				"Scaling of window %d is invalid: %u x %u -> %u x %u.\n",
-				win->idx, in_w, in_h, win->out_w, win->out_h);
+				"Scaling of window %d is invalid: %u x %u -> %u x %u%s.\n",
+				win->idx, src_h, src_v, win->out_w, win->out_h,
+				(win->flags & TEGRA_WIN_FLAG_SCAN_COLUMN) ?
+					" (read by columns)" : "");
 			goto fail;
 		}
 	}
