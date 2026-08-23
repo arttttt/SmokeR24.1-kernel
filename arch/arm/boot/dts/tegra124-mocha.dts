@@ -53,19 +53,25 @@
 	};
 
 	/*
-	 * The composer's own scratch zone, 64M of physically contiguous memory
+	 * The composer's own scratch zone, 40M of physically contiguous memory
 	 * for the merge engine. Static on purpose: resizable CMA was considered
 	 * and rejected, so the zone costs its full size whether the pool holds
-	 * forty megabytes or none, and the allocation from it is always instant.
+	 * its tenants or none, and the allocation from it is always instant.
 	 *
-	 * The address ends exactly where the growing regions begin. The boot
-	 * loader's fixed reserves -- ramoops, nvdumper, the lp0 vector, the
-	 * tsec zone -- close out the top of memory from fd400000 on, and below
-	 * them the resizable vpr spreads its 188M. This node is removed from
-	 * memblock in the device tree scan, which runs before the platform
-	 * reserves, so vpr's top-down search finds it already gone and parks
-	 * flush on its ceiling: the static zone and the growing one share a
-	 * boundary, with no hole between them, by construction.
+	 * Sized to those tenants, measured live: the pool's three panel-sized
+	 * slots take 36M from the base, the cursor's sprite and staging add
+	 * under one more, and nothing else draws from the zone. 40M holds them
+	 * with room to breathe; the 24M the old 64M reservation kept idle went
+	 * back to the system.
+	 *
+	 * The base is the shared boundary, the size is the free edge. This
+	 * node is removed from memblock in the device tree scan, which runs
+	 * before the platform reserves, so the resizable vpr's top-down search
+	 * finds it already gone and parks its 188M flush under the base (read
+	 * back live: vpr at e5000000, its ceiling the zone's floor exactly).
+	 * Above the zone's own ceiling lies plain system RAM, so trimming the
+	 * top hands the difference straight back, with neither neighbour
+	 * moving.
 	 */
 	reserved-memory {
 		#address-cells = <2>;
@@ -74,7 +80,7 @@
 
 		composer_carveout: composer-carveout {
 			compatible = "nvidia,composer-carveout";
-			reg = <0x0 0xF0C00000 0x0 0x04000000>;
+			reg = <0x0 0xF0C00000 0x0 0x02800000>;
 			no-map;
 		};
 	};
