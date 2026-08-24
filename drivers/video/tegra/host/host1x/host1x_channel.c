@@ -49,6 +49,9 @@ static void submit_work_done_increment(struct nvhost_job *job)
 			job->sp[0].id), NVHOST_OPCODE_NOOP);
 }
 
+static void cdma_push_wait_syncpt(struct nvhost_channel *ch, u32 id,
+				  u32 thresh);
+
 static void lock_device(struct nvhost_job *job, bool lock)
 {
 	struct nvhost_channel *ch = job->ch;
@@ -68,12 +71,8 @@ static void lock_device(struct nvhost_job *job, bool lock)
 	}
 
 	if (lock) {
-		nvhost_cdma_push(&ch->cdma,
-			nvhost_opcode_setclass(NV_HOST1X_CLASS_ID,
-				host1x_uclass_wait_syncpt_r(), 1),
-			nvhost_class_host_wait_syncpt(
-				pdata->last_submit_syncpt_id,
-				pdata->last_submit_syncpt_value));
+		cdma_push_wait_syncpt(ch, pdata->last_submit_syncpt_id,
+				      pdata->last_submit_syncpt_value);
 	} else {
 		pdata->last_submit_syncpt_id = job->sp[0].id;
 		pdata->last_submit_syncpt_value = job->sp[0].fence;
