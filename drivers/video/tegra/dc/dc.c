@@ -2524,9 +2524,15 @@ static int _tegra_dc_update_cmu_aligned(struct tegra_dc *dc,
 				bool force)
 {
 	memcpy(&dc->cmu_shadow, cmu, sizeof(dc->cmu));
-	dc->cmu_shadow_dirty = true;
+	/* The interrupt reference rises only on the clean-to-dirty edge: the
+	 * frame-end worker drops it once per consumption, so a second update
+	 * landing before the frame end must only refresh the shadow -- the
+	 * same discipline the act_vfp path keeps. */
+	if (!dc->cmu_shadow_dirty) {
+		dc->cmu_shadow_dirty = true;
+		_tegra_dc_config_frame_end_intr(dc, true);
+	}
 	dc->cmu_shadow_force_update = dc->cmu_shadow_force_update || force;
-	_tegra_dc_config_frame_end_intr(dc, true);
 
 	return 0;
 }
@@ -2609,7 +2615,7 @@ EXPORT_SYMBOL(tegra_dc_set_act_vfp_aligned);
 int tegra_dc_set_hdr(struct tegra_dc *dc, struct tegra_dc_hdr *hdr,
 						bool cache_dirty)
 {
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&dc->lock);
 
@@ -2628,10 +2634,14 @@ int tegra_dc_set_hdr(struct tegra_dc *dc, struct tegra_dc_hdr *hdr,
 		return 0;
 	}
 	dc->hdr.enabled = hdr->enabled;
-	dc->hdr_cache_dirty = true;
 	if (!dc->hdr.enabled)
 		memset(&dc->hdr, 0, sizeof(dc->hdr));
-	ret = _tegra_dc_config_frame_end_intr(dc, true);
+	/* The same clean-to-dirty edge as the shadow paths above: the worker
+	 * drops the reference once, so only the first of a burst raises it. */
+	if (!dc->hdr_cache_dirty) {
+		dc->hdr_cache_dirty = true;
+		ret = _tegra_dc_config_frame_end_intr(dc, true);
+	}
 
 	mutex_unlock(&dc->lock);
 	return ret;
