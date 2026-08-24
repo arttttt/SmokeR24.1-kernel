@@ -902,6 +902,13 @@ static int ina230_probe(struct i2c_client *client,
 	ret = i2c_smbus_write_word_data(client, INA230_CONFIG,
 			__constant_cpu_to_be16(INA230_RESET));
 	if (ret < 0) {
+		/* This first touch of the chip can land while the bus is
+		 * still busy with early-boot traffic; asked again later the
+		 * probe succeeds, so a busy bus is a deferral, not a
+		 * failure. A chip that is absent answers differently and
+		 * still fails here the ordinary way. */
+		if (ret == -EAGAIN || ret == -EBUSY)
+			return -EPROBE_DEFER;
 		dev_err(&client->dev, "ina230 reset failed: %d\n", ret);
 		return ret;
 	}
