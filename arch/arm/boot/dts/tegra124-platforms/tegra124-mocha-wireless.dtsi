@@ -48,7 +48,27 @@
 		status = "okay";
 		fw_path = "/vendor/firmware/mocha_fw_bcmdhd.bin";
 		nv_path = "/vendor/etc/mocha_nvram.txt";
-		mac-address-file = "/vendor/etc/mocha_macaddr.txt";
+		/*
+		 * conn_init writes the address here, and it has to be a path it
+		 * can write: /vendor is mounted read-only, so the old location
+		 * under /vendor/etc never held a file at all and this property
+		 * did nothing.
+		 *
+		 * The file matters more than it looks. nv_path above carries a
+		 * Broadcom sample address, and the module parameter that would
+		 * override it is consumed once and cleared by the driver:
+		 *
+		 *     firmware_path[0] = '\0';
+		 *     nvram_path[0] = '\0';
+		 *
+		 * so only the first firmware download after boot sees the real
+		 * address. Android 10 reloads the firmware before every connect
+		 * attempt -- ClientModeImpl asks for the factory MAC, and on this
+		 * driver setting a MAC means ifdown/ifup -- and each of those
+		 * reloads fell back to the sample. This path is read on every
+		 * download instead, so the address survives them.
+		 */
+		mac-address-file = "/data/vendor/wifi/macaddr.txt";
 
 		country_code_map {
 
