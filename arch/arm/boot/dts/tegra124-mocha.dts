@@ -338,7 +338,14 @@
 			als_highrange = <2>;
 			als_lowthres = <0x0e00>;
 			als_highthres = <0xf800>;
-			als_sensitive = <25>;
+			/* The window the driver keeps around the last reported value:
+			 * it stays silent until the light leaves it. At 25 it was
+			 * coarser than the framework it feeds, which recalculates
+			 * brightness once the lux is ten percent up or twenty down --
+			 * so a change the framework would have acted on never reached
+			 * it. Ten matches the tighter of those two. Finer buys nothing:
+			 * the framework filters the rest itself. */
+			als_sensitive = <10>;
 		};
 
 		lp5521@32 {
