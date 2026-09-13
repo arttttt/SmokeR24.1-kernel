@@ -2748,8 +2748,30 @@ static int tegra_udc_start(struct usb_gadget *g,
 
 	/* Enable DR IRQ reg and Set usbcmd reg  Run bit */
 	if (vbus_enabled(udc) && !(udc->transceiver
-			&& udc->transceiver->state != OTG_STATE_B_PERIPHERAL))
-		tegra_vbus_session(&udc->gadget, 1);
+			&& udc->transceiver->state != OTG_STATE_B_PERIPHERAL)) {
+		if (udc->vbus_active) {
+			/*
+			 * A gadget driver attaching is not a cable arriving.
+			 * The session is already up -- the PHY is powered and
+			 * the charger has been identified -- so bring the
+			 * controller back without touching either. What is
+			 * skipped here is what costs the time:
+			 * tegra_usb_phy_power_on() and tegra_detect_cable_type(),
+			 * the latter spending the intervals BC1.2 requires
+			 * between its measurements.
+			 */
+			mutex_lock(&udc->sync_lock);
+			dr_controller_setup(udc);
+			ep0_setup(udc);
+			udc->usb_state = USB_STATE_ATTACHED;
+			udc->ep0_state = WAIT_FOR_SETUP;
+			udc->ep0_dir = 0;
+			dr_controller_run(udc);
+			mutex_unlock(&udc->sync_lock);
+		} else {
+			tegra_vbus_session(&udc->gadget, 1);
+		}
+	}
 
 	printk(KERN_INFO "%s: bind to driver %s\n",
 			udc->gadget.name, driver->driver.name);
@@ -2768,10 +2790,18 @@ static int tegra_udc_stop(struct usb_gadget *g,
 
 	DBG("%s(%d) BEGIN\n", __func__, __LINE__);
 
-	tegra_vbus_session(&udc->gadget, 0);
-
 	/* stand operation */
 	spin_lock_irqsave(&udc->lock, flags);
+	/*
+	 * The gadget driver is going away, not the cable. Stop the controller
+	 * so nothing is answered on the bus, and leave the VBUS session --
+	 * the powered PHY, the identified charger, the current limit -- where
+	 * it is: it describes what is plugged in, and nothing has been
+	 * unplugged. usb_gadget_vbus_disconnect() from the OTG driver is what
+	 * ends a session, and it still does.
+	 */
+	if (udc->vbus_active)
+		dr_controller_stop(udc);
 	udc->gadget.speed = USB_SPEED_UNKNOWN;
 	nuke(&udc->eps[0], -ESHUTDOWN);
 	list_for_each_entry(loop_ep, &udc->gadget.ep_list,
