@@ -678,6 +678,15 @@ extern int dhd_dongle_ramsize;
 module_param(dhd_dongle_ramsize, int, 0);
 #endif /* BCMDHDUSB */
 
+/*
+ * Stand-in address for an interface registered before the real one can be
+ * known. dhd_register_if() installs it; dhd_open() recognises it later and
+ * replaces it, so the two must agree on the value -- hence the one
+ * definition, ahead of both.
+ */
+static const uint8 dhd_placeholder_mac[ETHER_ADDR_LEN] =
+	{ 0x00, 0x90, 0x4c, 0x11, 0x22, 0x33 };
+
 /* Keep track of number of instances */
 static int dhd_found = 0;
 static int instance_base = 0; /* Starting instance number */
@@ -4496,6 +4505,32 @@ dhd_open(struct net_device *net)
 		/* dhd_sync_with_dongle has been called in dhd_bus_start or wl_android_wifi_on */
 		memcpy(net->dev_addr, dhd->pub.mac.octet, ETHER_ADDR_LEN);
 
+		/*
+		 * And the permanent address with it, if it is still the stand-in.
+		 *
+		 * register_netdevice() snapshots dev_addr into perm_addr once, at
+		 * registration, and nothing writes perm_addr afterwards. On this
+		 * board registration happens inside dhd_attach during probe --
+		 * about five seconds in -- while the platform's address lives in a
+		 * file under /data, which userspace has not mounted yet. So the
+		 * lookup fails, dhd_register_if() installs the placeholder, and
+		 * the snapshot preserves it for the life of the interface.
+		 *
+		 * dev_addr recovers on every firmware load, because preinit reads
+		 * the file again once it is reachable. perm_addr never did, and it
+		 * is the one the wifi HAL reports as the factory address --
+		 * ETHTOOL_GPERMADDR returns it verbatim. The framework then takes
+		 * that answer at face value and writes the placeholder back onto
+		 * the interface before connecting, so the device joined networks
+		 * under an address every board running this driver would share.
+		 *
+		 * Only the placeholder is replaced: an address that came from
+		 * anywhere else is somebody's decision and is left alone.
+		 */
+		if (!ETHER_ISNULLADDR(dhd->pub.mac.octet) &&
+			!memcmp(net->perm_addr, dhd_placeholder_mac, ETHER_ADDR_LEN))
+			memcpy(net->perm_addr, dhd->pub.mac.octet, ETHER_ADDR_LEN);
+
 #ifdef TOE
 		/* Get current TOE mode from dongle */
 		if (dhd_toe_get(dhd, ifidx, &toe_ol) >= 0 && (toe_ol & TOE_TX_CSUM_OL) != 0)
@@ -7117,7 +7152,9 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 	dhd_if_t *ifp;
 	struct net_device *net = NULL;
 	int err = 0;
-	uint8 temp_addr[ETHER_ADDR_LEN] = { 0x00, 0x90, 0x4c, 0x11, 0x22, 0x33 };
+	uint8 temp_addr[ETHER_ADDR_LEN];
+
+	memcpy(temp_addr, dhd_placeholder_mac, ETHER_ADDR_LEN);
 
 	DHD_TRACE(("%s: ifidx %d\n", __FUNCTION__, ifidx));
 
