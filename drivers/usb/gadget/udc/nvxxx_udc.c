@@ -4621,12 +4621,12 @@ void usbep_struct_setup(struct nv_udc_s *nvudc, u32 index, u8 *name)
 	if (index) {
 		strcpy(ep->name, name);
 		ep->usb_ep.name = ep->name;
-		ep->usb_ep.maxpacket = 1024;
+		usb_ep_set_maxpacket_limit(&ep->usb_ep, 1024);
 		ep->usb_ep.max_streams = 16;
 	} else {
 
 		ep->usb_ep.name = "ep0";
-		ep->usb_ep.maxpacket = 64;
+		usb_ep_set_maxpacket_limit(&ep->usb_ep, 64);
 	}
 	msg_dbg(nvudc->dev, "ep = %p, ep name = %s maxpacket = 0x%x\n",
 			ep, ep->name, ep->usb_ep.maxpacket);

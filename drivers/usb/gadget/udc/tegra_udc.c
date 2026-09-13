@@ -2878,7 +2878,7 @@ static int __init struct_ep_setup(struct tegra_udc *udc, unsigned char index,
 	/* for ep0: maxP defined in desc
 	 * for other eps, maxP is set by epautoconfig() called by gadget layer
 	 */
-	ep->ep.maxpacket = (unsigned short) ~0;
+	usb_ep_set_maxpacket_limit(&ep->ep, (unsigned short) ~0);
 
 	/* the queue lists any req for this ep */
 	INIT_LIST_HEAD(&ep->queue);
@@ -2913,7 +2913,7 @@ static int __init tegra_udc_ep_setup(struct tegra_udc *udc)
 	 * for other eps, gadget layer called ep_enable with defined desc
 	 */
 	udc->eps[0].desc = &tegra_ep0_desc;
-	udc->eps[0].ep.maxpacket = USB_MAX_CTRL_PAYLOAD;
+	usb_ep_set_maxpacket_limit(&udc->eps[0].ep, USB_MAX_CTRL_PAYLOAD);
 
 	/* setup the udc->eps[] for non-control endpoints and link
 	 * to gadget.ep_list */
