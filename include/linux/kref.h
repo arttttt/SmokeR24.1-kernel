@@ -25,6 +25,17 @@ struct kref {
 	atomic_t refcount;
 };
 
+#define KREF_INIT(n)	{ .refcount = ATOMIC_INIT(n), }
+
+/**
+ * kref_read - read the number of references to the object
+ * @kref: the kref being read
+ */
+static inline unsigned int kref_read(const struct kref *kref)
+{
+	return atomic_read(&kref->refcount);
+}
+
 /**
  * kref_init - initialize object.
  * @kref: object in question.

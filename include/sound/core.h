@@ -312,6 +312,23 @@ void snd_card_unref(struct snd_card *card);
 
 #define snd_card_set_dev(card, devptr) ((card)->dev = (devptr))
 
+/*
+ * snd_card_create() gained its parent device and became snd_card_new() after
+ * this kernel. The rename is the whole of the change: the new name does what
+ * the old one does and then records the parent, which is what this does.
+ */
+static inline int snd_card_new(struct device *parent, int idx, const char *xid,
+			       struct module *module, int extra_size,
+			       struct snd_card **card_ret)
+{
+	int err = snd_card_create(idx, xid, module, extra_size, card_ret);
+
+	if (err == 0 && parent)
+		snd_card_set_dev(*card_ret, parent);
+
+	return err;
+}
+
 /* device.c */
 
 int snd_device_new(struct snd_card *card, snd_device_type_t type,
