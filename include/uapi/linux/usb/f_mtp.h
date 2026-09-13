@@ -4,8 +4,6 @@
  * Copyright (C) 2010 Google, Inc.
  * Author: Mike Lockwood <lockwood@android.com>
  *
- * Copyright (C) 2014, NVIDIA CORPORATION. All rights reserved.
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -46,15 +44,7 @@ struct mtp_event {
 	/* event data to send */
 	void		*data;
 };
-#ifdef CONFIG_COMPAT
-struct mtp_event_32 {
-	/* size of the event */
-	u32	length;
-	/* event data to send */
-	u32	data;
-};
-#define MTP_SEND_EVENT_32          _IOW('M', 3, struct mtp_event_32)
-#endif
+
 /* Sends the specified file range to the host */
 #define MTP_SEND_FILE              _IOW('M', 0, struct mtp_file_range)
 /* Receives data from the host and writes it to a file.
