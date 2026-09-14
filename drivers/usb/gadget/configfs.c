@@ -447,6 +447,37 @@ static int config_usb_cfg_link(
 		}
 	}
 
+	/*
+	 * The list above is only where functions wait to be bound. Once the
+	 * gadget binds, configfs_composite_bind() moves every one of them off
+	 * func_list into the configuration, so from then on the check finds an
+	 * empty list and says nothing -- and linking the same function a
+	 * second time is allowed straight through.
+	 *
+	 * That is fatal when the function driver hands out one object per
+	 * instance rather than one per link: f_mtp keeps a single mtp_dev and
+	 * function_alloc_mtp_ptp() returns &dev->function every time, so
+	 * usb_get_function() gives back the very function that is already in
+	 * config->functions. list_add_tail() then puts a node that is on one
+	 * list onto another, splicing the two: the last function's next stops
+	 * pointing at the list head and points into func_list instead. Nothing
+	 * complains until the host asks for the configuration descriptor, and
+	 * config_buf() walks out of the list and dereferences whatever it
+	 * lands on -- in our case the configuration's own next_interface_id,
+	 * read as a descriptor table.
+	 *
+	 * So refuse the link if the function is already part of the
+	 * configuration, which is what -EEXIST above means anyway.
+	 */
+	list_for_each_entry(f, &cfg->c.functions, list) {
+		if (f->fi == fi) {
+			pr_err("%s: function is already bound into this configuration\n",
+			       __func__);
+			ret = -EEXIST;
+			goto out;
+		}
+	}
+
 	f = usb_get_function(fi);
 	if (IS_ERR(f)) {
 		ret = PTR_ERR(f);
