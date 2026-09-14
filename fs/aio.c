@@ -644,8 +644,16 @@ void aio_complete(struct kiocb *iocb, long res, long res2)
 	 */
 	if (unlikely(xchg(&iocb->ki_cancel,
 			  KIOCB_CANCELLED) == KIOCB_CANCELLED)) {
-		atomic_dec(&ctx->reqs_active);
-		/* Still need the wake_up in case free_ioctx is waiting */
+		/*
+		 * No event for this one, userland got its result when the
+		 * request was cancelled. The count of active requests is
+		 * still dropped, but at put_rq below, which every completion
+		 * passes through -- doing it here as well took it down twice
+		 * for one request, and free_ioctx() waits on that count to
+		 * reach zero before tearing the context down. Negative, the
+		 * wait ends early and the context can go while requests are
+		 * still live.
+		 */
 		goto put_rq;
 	}
 
