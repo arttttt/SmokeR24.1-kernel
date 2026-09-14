@@ -268,6 +268,29 @@ static int kiocb_cancel(struct kioctx *ctx, struct kiocb *kiocb,
 	res->data = kiocb->ki_user_data;
 	ret = cancel(kiocb, res);
 
+	/*
+	 * Give back the reference taken above. Neither caller does it: not
+	 * io_cancel(), which only copies *res out, and not free_ioctx(),
+	 * which walks ->active_reqs at exit. So every cancellation used to
+	 * leave ki_users one too high, and the aio_complete() that follows
+	 * took it from two to one instead of to zero -- kiocb_free() never
+	 * ran and the fput() it owes was never made.
+	 *
+	 * A cancel that finishes the request itself is unaffected either
+	 * way. One that only detaches it, which is what a cancel of USB I/O
+	 * is -- usb_ep_dequeue() takes the request off the endpoint and the
+	 * completion handler finishes it later -- is not: the file stayed
+	 * referenced forever. For FunctionFS that means the open count of an
+	 * instance never returns to zero, so it is never reset, and every
+	 * daemon started after the one that died is answered -ESRCH when it
+	 * writes its descriptors.
+	 *
+	 * Dropped before the lock is retaken, because the last put frees the
+	 * kiocb and fput() may sleep. Mainline has no equivalent line only
+	 * because it deleted ki_users altogether.
+	 */
+	aio_put_req(kiocb);
+
 	spin_lock_irq(&ctx->ctx_lock);
 
 	return ret;
