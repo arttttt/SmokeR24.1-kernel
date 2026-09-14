@@ -537,6 +537,32 @@ static int ffs_ep0_open(struct inode *inode, struct file *file)
 	if (unlikely(ffs->state == FFS_CLOSING))
 		return -EBUSY;
 
+	/*
+	 * An instance still FFS_ACTIVE with no function bound to a gadget is
+	 * one whose daemon has gone and whose descriptors describe nothing.
+	 * The state returns to FFS_READ_DESCRIPTORS when the open count
+	 * reaches zero, and the count is given back by the departing daemon's
+	 * last fput -- which is deferred to a workqueue. So a new daemon can
+	 * arrive first, take the count from one to two, and write its
+	 * descriptors into an active instance, where ep0 write reads them as
+	 * a reply to a setup that never happened and returns -ESRCH.
+	 *
+	 * Refuse the open instead. adbd answers a failure to open ep0 by
+	 * waiting a second and trying again, and a second is far longer than
+	 * a deferred fput, so the count reaches zero in between and the retry
+	 * finds an instance that has reset.
+	 *
+	 * Refusing rather than resetting here is deliberate. ffs_data_reset()
+	 * destroys the epfile array, and the departing daemon may still hold
+	 * ep1 or ep2 open; mainline made an early reset safe by moving epfile
+	 * into inode->i_private and clearing it on destroy, and without that
+	 * rework resetting from here would be a use-after-free. The guard on
+	 * a negative open count that 4.4 carries is the same trap -- mainline
+	 * removed it once the lifetime was fixed properly.
+	 */
+	if (unlikely(ffs->state == FFS_ACTIVE && !ffs->func))
+		return -EBUSY;
+
 	file->private_data = ffs;
 	ffs_data_opened(ffs);
 
