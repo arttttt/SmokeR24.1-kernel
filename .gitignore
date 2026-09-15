@@ -99,3 +99,6 @@ x509.genkey
 /output
 boot.img
 tools/camera/v4l2_diag_updated
+
+# macOS leaves one of these in every directory it has been looked at
+.DS_Store
