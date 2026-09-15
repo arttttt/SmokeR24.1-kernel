@@ -80,7 +80,7 @@
 
 /* Added by Ken on 20130603 */
 #define SUPPORT_TIMED_OUTPUT 1
-#define SUPPORT_WRITE_PAT    0
+#define SUPPORT_WRITE_PAT    1
 #define DRV2604_USE_PWM_MODE 0
 #define DRV2604_USE_RTP_MODE (1-DRV2604_USE_PWM_MODE)
 
@@ -661,8 +661,25 @@ static ssize_t pwmvalue_store(struct device *dev,
                  struct device_attribute *attr, const char *buf, size_t count)
 {
 	int vs = 0;
-	sscanf(buf, "%d ",&vs);
-	if (vs < 0 || vs > 127) vs = 100;
+
+	if (sscanf(buf, "%d", &vs) != 1)
+		return -EINVAL;
+
+	/* Clamp towards whichever end was aimed at. What was here instead --
+	 * anything out of range becomes 100 -- answers "far too much" with
+	 * less than the caller would have got by asking for the maximum, and
+	 * answers a negative number with a strong buzz. Neither is what was
+	 * meant, and neither is reported.
+	 *
+	 * The ceiling is 0x7F because that is where the strength ends: the
+	 * chip takes a signed real-time playback value with the input in
+	 * bidirectional mode, so 0x7F is 100% of rated voltage and there is
+	 * nothing above it to reach. */
+	if (vs < 0)
+		vs = 0;
+	else if (vs > REAL_TIME_PLAYBACK_CALIBRATION_STRENGTH)
+		vs = REAL_TIME_PLAYBACK_CALIBRATION_STRENGTH;
+
 	vibe_strength = vs;
 	return count;
 }
@@ -777,35 +794,56 @@ static int drv2604_dbg_get(void *data, u64 *val)
 DEFINE_SIMPLE_ATTRIBUTE(drv2604_dbg, drv2604_dbg_get, NULL, "%llu\n");
 
 #if SUPPORT_WRITE_PAT
+/* Play a pattern: pairs of (strength, milliseconds) starting at index 1,
+ * index 0 being the mode byte the writer sends.
+ *
+ * Driven through real-time playback, the same way every other kind of
+ * vibration on this board is. As written this went through the PWM input
+ * instead, which cannot work here: pwm_dev exists only under
+ * DRV2604_USE_PWM_MODE, which is off, so the field is not even declared, the
+ * PWM was never requested, and the write handler additionally put the chip
+ * into MODE_PWM_OR_ANALOG_INPUT -- against the grain of everything else.
+ *
+ * Real-time playback is also the better of the two for an LRA. The closed
+ * loop brakes the mass rather than letting it ring down, which is the whole
+ * difference between a click and a buzz, and a pattern is made of clicks.
+ *
+ * A strength of zero is a pause; the register takes a signed value, so a
+ * negative one drives the other way and brakes. The pattern ends at a zero
+ * strength with a zero time, or when the pairs run out.
+ */
 static void drv2604_pat_work(struct work_struct *work)
 {
 	int i;
-	u32 value = 0;
-	u32 time  = 0;
 
-	for (i = 1; i < vibdata.pat_len; i += 2) {
-		time = (u8)vibdata.pat[i + 1];
-		if (vibdata.pat[i] != 0) {
-			value = (vibdata.pat[i] > 0)?(vibdata.pat[i]):0;
-			if (value > 126)
-				value = 256;
-			else
-				value += 128;
-			pwm_duty_enable(vibdata.pwm_dev, value);
+	mutex_lock(&vibdata.lock);
+	drv2604_change_mode(MODE_REAL_TIME_PLAYBACK);
+	vibrator_is_playing = YES;
+	g_bAmpEnabled = true;
+	mutex_unlock(&vibdata.lock);
+
+	for (i = 1; i + 1 < vibdata.pat_len; i += 2) {
+		signed char strength = vibdata.pat[i];
+		unsigned int time = (u8)vibdata.pat[i + 1];
+
+		if (strength == 0 && time == 0)
+			break;
+
+		drv2604_set_rtp_val(strength);
+		if (time)
 			msleep(time);
-		} else {
-			if ((time == 0) || (i + 2 >= vibdata.pat_len)) { /* the end */
-				pwm_disable(vibdata.pwm_dev);
-				drv2604_change_mode(MODE_STANDBY);
-				pr_debug("drv2604 vib len:%d time:%d", vibdata.pat_len, time);
-				break;
-			} else {
-				pwm_duty_enable(vibdata.pwm_dev, 0);
-				msleep(time);
-			}
-		}
-		pr_debug("%s: %d vib:%d time:%d value:%u", __func__, i, vibdata.pat[i], time, value);
+
+		pr_debug("%s: %d strength:%d time:%u\n",
+			 __func__, i, strength, time);
 	}
+
+	mutex_lock(&vibdata.lock);
+	drv2604_set_rtp_val(0);
+	drv2604_change_mode(MODE_STANDBY);
+	vibrator_is_playing = NO;
+	g_bAmpEnabled = false;
+	mutex_unlock(&vibdata.lock);
+
 	wake_unlock(&vibdata.wklock);
 }
 #endif
@@ -832,13 +870,18 @@ static ssize_t drv2604_write_pattern(struct file *filp, struct kobject *kobj,
 	vibdata.pat_len = count + 2;
 	vibdata.pat_i = 1;
 
-	drv2604_change_mode(MODE_PWM_OR_ANALOG_INPUT);
+	/* The mode is the work's to choose, and it chooses real-time playback.
+	 * Setting it here, to the PWM input, was what the old playback path
+	 * needed and this one does not. */
 	queue_work(vibdata.hap_wq, &vibdata.pat_work);
 
 	mutex_unlock(&vibdata.lock);
 #endif
 #endif
-	return 0;
+	/* What a write returns is how much of the buffer it took. Returning
+	 * zero says none of it was, and a caller that believes it will offer
+	 * the same bytes again for as long as it has patience. */
+	return count;
 }
 
 static struct timed_output_dev to_dev = {
