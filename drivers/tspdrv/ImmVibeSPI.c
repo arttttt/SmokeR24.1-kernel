@@ -486,7 +486,11 @@ static struct vibrator {
 } vibdata;
 
 #if SUPPORT_WRITE_PAT
-static signed char pattern[PAT_MAX_LEN];
+/* Two bytes longer than the longest pattern. The terminating zero pair is
+ * written after whatever arrived, and at the maximum length it has to land
+ * somewhere: the attribute below accepts PAT_MAX_LEN bytes, so the pair
+ * lands on the last two of these. */
+static signed char pattern[PAT_MAX_LEN + 2];
 #endif
 
 static const unsigned char LRA_autocal_sequence[] = {
@@ -876,14 +880,23 @@ static ssize_t drv2604_write_pattern(struct file *filp, struct kobject *kobj,
 {
 #if SUPPORT_TIMED_OUTPUT
 #if SUPPORT_WRITE_PAT
+	/* Stop what is playing before taking the lock, not while holding it.
+	 * The work takes this same mutex as its first act, so waiting for it
+	 * to finish from inside the mutex is a deadlock: the waiter holds the
+	 * one thing the work needs in order to reach its end. Clearing the
+	 * length first asks a running pattern to stop at its next step rather
+	 * than play itself out. */
+	vibdata.pat_len = 0;
+	cancel_work_sync(&vibdata.pat_work);
+
 	mutex_lock(&vibdata.lock);
 	wake_lock(&vibdata.wklock);
 	pr_debug("%s count:%d [%d %d %d %d %d %d %d %d %d ]", __func__,
 		count, buffer[0], buffer[1], buffer[2], buffer[3],
 		buffer[4], buffer[5], buffer[6], buffer[7], buffer[8]);
 
-	vibdata.pat_len = 0;
-	cancel_work_sync(&vibdata.pat_work);
+	if (count > PAT_MAX_LEN)
+		count = PAT_MAX_LEN;
 
 	memcpy(pattern, buffer, count);
 	pattern[count] = 0;
@@ -918,7 +931,7 @@ static struct bin_attribute drv2604_bin_attrs = {
 		.mode	= 0644
 	},
 	.write  = drv2604_write_pattern,
-	.size	= PAT_MAX_LEN + 1,
+	.size	= PAT_MAX_LEN,
 };
 
 static int drv2604_probe(struct i2c_client *client, const struct i2c_device_id *id);
