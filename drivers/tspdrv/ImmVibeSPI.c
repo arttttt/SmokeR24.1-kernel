@@ -649,6 +649,15 @@ static void drv2604_change_mode(char mode)
 	usleep_range(4000, 5000); /* Added by Xiaomi */
 }
 
+#define YES 1
+#define NO  0
+
+/* Whether the amplifier is currently driving the motor. Declared here
+ * because the strength attribute below has to know: a new value has to
+ * reach the chip at once while a vibration is running, and only be stored
+ * for the next one when it is not. */
+static int vibrator_is_playing = NO;
+
 static ssize_t pwmvalue_show(struct device *dev,
                  struct device_attribute *attr, char *buf)
 {
@@ -681,20 +690,28 @@ static ssize_t pwmvalue_store(struct device *dev,
 		vs = REAL_TIME_PLAYBACK_CALIBRATION_STRENGTH;
 
 	vibe_strength = vs;
+
+	/* Apply it now if the motor is already turning.
+	 *
+	 * A waveform's shape is drawn by the caller while the vibration runs:
+	 * it asks for the whole length once and then moves the strength under
+	 * it, many times a second. Storing the value for the next vibration
+	 * instead of writing it to the amplifier turns every such shape into a
+	 * flat buzz at whatever level the previous one happened to leave
+	 * behind -- which, from reset, is the maximum. */
+	if (vibrator_is_playing)
+		drv2604_set_rtp_val(vibe_strength);
+
 	return count;
 }
 
 static DEVICE_ATTR(pwmvalue, (S_IWUSR|S_IRUGO), pwmvalue_show, pwmvalue_store);
 
 /* - Xiaomi - timed output interface -------------------------------------------------------------------------------- */
-#define YES 1
-#define NO  0
 
 #if DRV2604_USE_PWM_MODE
 extern int pwm_duty_enable(struct pwm_device *pwm, u32 duty);
 #endif
-
-static int vibrator_is_playing = NO;
 
 static int vibrator_get_time(struct timed_output_dev *dev)
 {
@@ -741,13 +758,18 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 			mode = drv2604_read_reg(MODE_REG) & DRV2604_MODE_MASK;
 			/* Modified by Ken on 20120530 */
 #if DRV2604_USE_RTP_MODE
-			/* Only change the mode if not already in RTP mode; RTP input already set at init */
-			if (mode != MODE_REAL_TIME_PLAYBACK) {
-				drv2604_set_rtp_val(vibe_strength);
+			/* The strength goes in every time, not only when the mode has
+			 * to change. Being left in real-time playback between
+			 * vibrations is an ordinary state, and skipping the write
+			 * there would start this one at the level the last one ended
+			 * on. */
+			drv2604_set_rtp_val(vibe_strength);
+
+			if (mode != MODE_REAL_TIME_PLAYBACK)
 				drv2604_change_mode(MODE_REAL_TIME_PLAYBACK);
-				vibrator_is_playing = YES;
-				g_bAmpEnabled = true;
-			}
+
+			vibrator_is_playing = YES;
+			g_bAmpEnabled = true;
 #endif
 #if DRV2604_USE_PWM_MODE
 			/* Only change the mode if not already in PWM mode */
