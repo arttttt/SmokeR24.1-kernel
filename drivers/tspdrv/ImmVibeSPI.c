@@ -393,6 +393,9 @@
 */
 #define SKIP_LRA_AUTOCAL	1
 #define GO_BIT_POLL_INTERVAL	15
+/* Calibration is the longest thing the GO bit starts, and the datasheet
+ * puts that at just over a second. */
+#define GO_BIT_POLL_TIMEOUT	2000
 
 #define LRA_SEMCO1036	0
 #define LRA_SEMCO0934	1
@@ -579,18 +582,40 @@ static const unsigned char *DRV_init_sequence;
 
 #endif
 
-static void drv2604_write_reg_val(const unsigned char *data, unsigned int size)
+/*
+ * Writes a list of register-value pairs, or reports the first refusal.
+ *
+ * It used to discard what the bus said, so a dead bus configured nothing and
+ * announced nothing, and everything afterwards ran against an amplifier in
+ * whatever state it had been left in.
+ */
+static int drv2604_write_reg_val(const unsigned char *data, unsigned int size)
 {
 	int i = 0;
 
-	if (size % 2 != 0)
-		return;
+	if (size % 2 != 0) {
+		pr_err("%s: a register list is pairs, and %u is not an even number\n",
+		       __func__, size);
+		return -EINVAL;
+	}
 
 	while (i < size) {
-		/* From Xiaomi end */
-		i2c_smbus_write_byte_data(g_pTheClient, data[i], data[i + 1]);
+		int ret = i2c_smbus_write_byte_data(g_pTheClient,
+						    data[i], data[i + 1]);
+
+		/* Stop at the first refusal. These lists configure the
+		 * amplifier as a whole, and carrying on past a register that
+		 * did not take leaves it in a state nothing here describes. */
+		if (ret < 0) {
+			pr_err("%s: register 0x%02x would not take 0x%02x: %d\n",
+			       __func__, data[i], data[i + 1], ret);
+			return ret;
+		}
+
 		i += 2;
 	}
+
+	return 0;
 }
 
 static void drv2604_set_go_bit(char val)
@@ -600,11 +625,18 @@ static void drv2604_set_go_bit(char val)
 	drv2604_write_reg_val(go, sizeof(go));
 }
 
-static unsigned char drv2604_read_reg(unsigned char reg)
+/*
+ * Reads one register, or a negative error.
+ *
+ * It used to return an unsigned char, which left it no way to say that the
+ * bus had refused: a failed transfer returned whatever the uninitialised byte
+ * on the stack held, and the missing-adapter case returned -EINVAL through an
+ * unsigned char, which is 0x19 -- an entirely plausible register value. Every
+ * decision made from a register was one bus hiccup away from being made from
+ * noise.
+ */
+static int drv2604_read_reg(unsigned char reg)
 {
-/* From Xiaomi start */
-
-
 	unsigned char data;
 	struct i2c_msg msgs[2];
 	struct i2c_adapter *i2c_adap = g_pTheClient->adapter;
@@ -612,7 +644,7 @@ static unsigned char drv2604_read_reg(unsigned char reg)
 	int res;
 
 	if (!i2c_adap)
-		return -EINVAL;
+		return -ENODEV;
 
 	msgs[0].addr = address;
 	msgs[0].flags = 0;	/* write */
@@ -625,16 +657,36 @@ static unsigned char drv2604_read_reg(unsigned char reg)
 	msgs[1].len = 1;
 
 	res = i2c_transfer(i2c_adap, msgs, 2);
+	if (res != 2) {
+		pr_err("%s: register 0x%02x did not answer: %d\n", __func__, reg, res);
+		return res < 0 ? res : -EIO;
+	}
 
 	return data;
-/* From Xiaomi end */
 }
 
 #if SKIP_LRA_AUTOCAL == 0
+/*
+ * Waits for whatever the GO bit started. Bounded, because the loop used to
+ * ask a register that could not report failure: a bus that stopped answering
+ * returned a value that happened not to equal GO and ended the wait by luck,
+ * or one that did and never ended it at all.
+ */
 static void drv2604_poll_go_bit(void)
 {
-	while (drv2604_read_reg(GO_REG) == GO)
+	int waited = 0;
+
+	while (waited < GO_BIT_POLL_TIMEOUT) {
+		int go = drv2604_read_reg(GO_REG);
+
+		if (go < 0 || go != GO)
+			return;
+
 		schedule_timeout_interruptible(msecs_to_jiffies(GO_BIT_POLL_INTERVAL));
+		waited += GO_BIT_POLL_INTERVAL;
+	}
+
+	pr_err("%s: still running after %d ms, giving up on it\n", __func__, waited);
 }
 #endif
 
@@ -744,7 +796,7 @@ static void vibrator_off(void)
 static void vibrator_enable(struct timed_output_dev *dev, int value)
 {
 #if SUPPORT_TIMED_OUTPUT
-	char mode;
+	int mode;
 	hrtimer_cancel(&vibdata.timer);
 	cancel_work_sync(&vibdata.work);
 
@@ -759,7 +811,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 
 		/* Added by Ken on 20120531 */
 		if (!g_bAmpEnabled) {
-			mode = drv2604_read_reg(MODE_REG) & DRV2604_MODE_MASK;
+			mode = drv2604_read_reg(MODE_REG);
 			/* Modified by Ken on 20120530 */
 #if DRV2604_USE_RTP_MODE
 			/* The strength goes in every time, not only when the mode has
@@ -769,7 +821,11 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 			 * on. */
 			drv2604_set_rtp_val(vibe_strength);
 
-			if (mode != MODE_REAL_TIME_PLAYBACK)
+			/* A read that failed leaves the mode unknown, and
+			 * setting it again costs nothing where not setting it
+			 * means no vibration at all. */
+			if (mode < 0 ||
+			    (mode & DRV2604_MODE_MASK) != MODE_REAL_TIME_PLAYBACK)
 				drv2604_change_mode(MODE_REAL_TIME_PLAYBACK);
 
 			vibrator_is_playing = YES;
@@ -777,7 +833,8 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 #endif
 #if DRV2604_USE_PWM_MODE
 			/* Only change the mode if not already in PWM mode */
-			if (mode != MODE_PWM_OR_ANALOG_INPUT) {
+			if (mode < 0 ||
+			    (mode & DRV2604_MODE_MASK) != MODE_PWM_OR_ANALOG_INPUT) {
 				pwm_duty_enable(vibdata.pwm_dev, 0);
 				drv2604_change_mode(MODE_PWM_OR_ANALOG_INPUT);
 				vibrator_is_playing = YES;
@@ -974,7 +1031,7 @@ static struct i2c_driver drv2604_driver = {
 /* From Xiaomi */
 static int drv2604_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-	char status;
+	int status;
 #if SKIP_LRA_AUTOCAL == 0
 	int nCalibrationCount = 0;
 #endif
@@ -1002,8 +1059,17 @@ static int drv2604_probe(struct i2c_client *client, const struct i2c_device_id *
 	}
 
 #if SKIP_LRA_AUTOCAL == 1
-	drv2604_write_reg_val(DRV_init_sequence, sizeof(LRA_init_sequence));
+	status = drv2604_write_reg_val(DRV_init_sequence, sizeof(LRA_init_sequence));
+	if (status < 0) {
+		pr_err("drv2604: the amplifier would not take its settings\n");
+		return status;
+	}
+
 	status = drv2604_read_reg(STATUS_REG);
+	if (status < 0) {
+		pr_err("drv2604: the amplifier did not report its status\n");
+		return status;
+	}
 #else
 	/* Run auto-calibration */
 	do {
@@ -1164,6 +1230,10 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_AmpDisable(VibeUInt8 nActuatorIndex
 */
 IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_AmpEnable(VibeUInt8 nActuatorIndex)
 {
+#if SKIP_LRA_AUTOCAL == 1
+	int rated;
+#endif
+
 	if (!g_bAmpEnabled) {
 		DbgOut((DBL_VERBOSE, "ImmVibeSPI_ForceOut_AmpEnable.\n"));
 #ifdef GUARANTEE_AUTOTUNE_BRAKE_TIME
@@ -1193,8 +1263,14 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_AmpEnable(VibeUInt8 nActuatorIndex)
 		/* Workaround for power issue in the DRV2604 */
 		/* Restore the register settings if they have reset to the defaults */
 #if SKIP_LRA_AUTOCAL == 1
-		if (drv2604_read_reg(RATED_VOLTAGE_REG) != DRV_init_sequence[43]) {
-			printk(KERN_INFO "drv2604 ImmVibeSPI_ForceOut_AmpEnable: Register values resent.\n");
+		/* The chip is known to lose its settings across a power
+		 * glitch, so one of them is read back as a witness for the
+		 * rest. A read that failed says nothing about the settings --
+		 * only that the bus is unwell, and rewriting them over the
+		 * same bus would not help. */
+		rated = drv2604_read_reg(RATED_VOLTAGE_REG);
+		if (rated >= 0 && rated != DRV_init_sequence[43]) {
+			pr_info("drv2604: the amplifier lost its settings, sending them again\n");
 			drv2604_write_reg_val(DRV_init_sequence, sizeof(LRA_init_sequence));
 		}
 #endif
@@ -1457,6 +1533,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_SetFrequency(VibeUInt8 nActuatorInd
 IMMVIBESPIAPI VibeStatus ImmVibeSPI_Device_GetName(VibeUInt8 nActuatorIndex, char *szDevName, int nSize)
 {
 	char szRevision[MAX_REVISION_STRING_SIZE];
+	int revision;
 
 	if ((!szDevName) || (nSize < 1))
 		return VIBE_E_FAIL;
@@ -1476,7 +1553,11 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_Device_GetName(VibeUInt8 nActuatorIndex, cha
 	}
 
 	/* Append revision number to the device name */
-	sprintf(szRevision, " Rev:%d", (drv2604_read_reg(SILICON_REVISION_REG) & SILICON_REVISION_MASK));
+	revision = drv2604_read_reg(SILICON_REVISION_REG);
+	if (revision < 0)
+		sprintf(szRevision, " Rev:?");
+	else
+		sprintf(szRevision, " Rev:%d", revision & SILICON_REVISION_MASK);
 	if ((strlen(szRevision) + strlen(szDevName)) < nSize - 1)
 		strcat(szDevName, szRevision);
 
