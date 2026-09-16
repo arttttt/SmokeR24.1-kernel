@@ -443,6 +443,18 @@ static bool g_brake = false;
 static bool g_bNeedToRestartPlayBack = false;
 
 #define MAX_TIMEOUT 10000 /* 10s */
+
+/*
+ * How long the amplifier stays out of standby after it stops driving.
+ *
+ * Leaving standby and going back costs four to five milliseconds each way,
+ * and effects that arrive in a stream pay that twice for every pulse. A
+ * texture under a dragging finger asks about every thirty milliseconds, so
+ * most of what the motor was given went on waking up and going to sleep
+ * again rather than on moving. Staying awake across the gaps costs quiescent
+ * current, and only while something is using the motor at all.
+ */
+#define STANDBY_AFTER_IDLE_MS	300
 #define PAT_MAX_LEN 256
 
 #define PWM_CH_ID 3
@@ -474,6 +486,7 @@ static struct vibrator {
 	struct hrtimer timer;
 	struct mutex lock;
 	struct work_struct work;
+	struct delayed_work idle_work;
 	struct work_struct work_play_eff;
 	unsigned char sequence[8];
 	volatile int should_stop;
@@ -697,12 +710,26 @@ static void drv2604_set_rtp_val(char value)
 	drv2604_write_reg_val(rtp_val, sizeof(rtp_val));
 }
 
+/* What was last asked of the mode register. */
+static char g_nCurrentMode = -1;
+
+/*
+ * The register is written every time, because it costs a fraction of a
+ * millisecond and keeps the chip right if it ever resets underneath us. The
+ * settle time afterwards is only owed when something actually changed, and
+ * skipping it where nothing did is most of what a stream of effects was
+ * paying for.
+ */
 static void drv2604_change_mode(char mode)
 {
 	unsigned char tmp[] = {MODE_REG, mode};
+	bool changing = (mode != g_nCurrentMode);
 
 	drv2604_write_reg_val(tmp, sizeof(tmp));
-	usleep_range(4000, 5000); /* Added by Xiaomi */
+	g_nCurrentMode = mode;
+
+	if (changing)
+		usleep_range(4000, 5000); /* Added by Xiaomi */
 }
 
 #define YES 1
@@ -713,6 +740,25 @@ static void drv2604_change_mode(char mode)
  * reach the chip at once while a vibration is running, and only be stored
  * for the next one when it is not. */
 static int vibrator_is_playing = NO;
+
+/*
+ * Puts the amplifier to sleep once nothing has used it for a while.
+ *
+ * Every path that stops driving the motor arms this instead of going to
+ * standby itself, and every path that starts driving cancels it. What the
+ * chip is left in between pulses is therefore real-time playback with
+ * nothing to play, which drives nothing and is free to return to.
+ */
+static void drv2604_idle_work(struct work_struct *work)
+{
+	mutex_lock(&vibdata.lock);
+
+	/* Something may have claimed the motor while this waited its turn. */
+	if (!vibrator_is_playing)
+		drv2604_change_mode(MODE_STANDBY);
+
+	mutex_unlock(&vibdata.lock);
+}
 
 static ssize_t pwmvalue_show(struct device *dev,
                  struct device_attribute *attr, char *buf)
@@ -784,10 +830,16 @@ static void vibrator_off(void)
 #if SUPPORT_TIMED_OUTPUT
 	if (vibrator_is_playing) {
 		vibrator_is_playing = NO;
-		drv2604_change_mode(MODE_STANDBY);
+		/* Stop driving without leaving the mode. Standby is what used
+		 * to stop it, and paying to re-enter the mode afterwards is
+		 * what this avoids. */
+		drv2604_set_rtp_val(0);
 		/* Added by Ken on 20120531 */
 		g_bAmpEnabled = false;
 	}
+
+	schedule_delayed_work(&vibdata.idle_work,
+			      msecs_to_jiffies(STANDBY_AFTER_IDLE_MS));
 
 	wake_unlock(&vibdata.wklock);
 #endif
@@ -799,6 +851,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	int mode;
 	hrtimer_cancel(&vibdata.timer);
 	cancel_work_sync(&vibdata.work);
+	cancel_delayed_work_sync(&vibdata.idle_work);
 
 #if SUPPORT_WRITE_PAT
 	cancel_work_sync(&vibdata.pat_work);
@@ -922,10 +975,12 @@ static void drv2604_pat_work(struct work_struct *work)
 
 	mutex_lock(&vibdata.lock);
 	drv2604_set_rtp_val(0);
-	drv2604_change_mode(MODE_STANDBY);
 	vibrator_is_playing = NO;
 	g_bAmpEnabled = false;
 	mutex_unlock(&vibdata.lock);
+
+	schedule_delayed_work(&vibdata.idle_work,
+			      msecs_to_jiffies(STANDBY_AFTER_IDLE_MS));
 
 	wake_unlock(&vibdata.wklock);
 }
@@ -945,6 +1000,7 @@ static ssize_t drv2604_write_pattern(struct file *filp, struct kobject *kobj,
 	 * than play itself out. */
 	vibdata.pat_len = 0;
 	cancel_work_sync(&vibdata.pat_work);
+	cancel_delayed_work_sync(&vibdata.idle_work);
 
 	mutex_lock(&vibdata.lock);
 	wake_lock(&vibdata.wklock);
@@ -1343,6 +1399,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_Initialize(void)
 	hrtimer_init(&vibdata.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	vibdata.timer.function = vibrator_timer_func;
 	INIT_WORK(&vibdata.work, vibrator_work);
+	INIT_DELAYED_WORK(&vibdata.idle_work, drv2604_idle_work);
 
 
 	wake_lock_init(&vibdata.wklock, WAKE_LOCK_SUSPEND, "vibrator");
