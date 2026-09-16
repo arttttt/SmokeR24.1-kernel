@@ -732,7 +732,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 #endif
 	mutex_lock(&vibdata.lock);
 
-	if (value) {
+	if (value > 0) {
 		wake_lock(&vibdata.wklock);
 		drv2604_read_reg(STATUS_REG);
 
@@ -760,11 +760,11 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 #endif
 		}
 
-		if (value > 0) {
-			if (value > MAX_TIMEOUT)
-				value = MAX_TIMEOUT;
-			hrtimer_start(&vibdata.timer, ns_to_ktime((u64)value * NSEC_PER_MSEC), HRTIMER_MODE_REL);
-		}
+		if (value > MAX_TIMEOUT)
+			value = MAX_TIMEOUT;
+
+		hrtimer_start(&vibdata.timer, ns_to_ktime((u64)value * NSEC_PER_MSEC),
+			      HRTIMER_MODE_REL);
 	} else
 		vibrator_off();
 
