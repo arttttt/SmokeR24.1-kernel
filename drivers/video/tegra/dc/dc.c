@@ -2144,8 +2144,26 @@ static ssize_t dbg_win_lut_write(struct file *file, const char __user *buf,
 	if (err)
 		return err;
 
-	dev_info(&dc->ndev->dev, "win%u lut: r %u%% g %u%% b %u%%\n",
-		 arg[0], arg[1], arg[2], arg[3]);
+	/* Read straight back, before anything else can flip. The palette
+	 * code decides for itself whether the table it was handed is the
+	 * identity and switches the block to match, so the only way to know
+	 * what it concluded is to look at what it left behind. */
+	mutex_lock(&dc->lock);
+	if (dc->enabled) {
+		u32 opts;
+
+		tegra_dc_get(dc);
+		tegra_dc_writel(dc, WINDOW_A_SELECT << arg[0],
+				DC_CMD_DISPLAY_WINDOW_HEADER);
+		opts = tegra_dc_readl(dc, DC_WIN_WIN_OPTIONS);
+		tegra_dc_put(dc);
+
+		dev_info(&dc->ndev->dev,
+			 "win%u lut: r %u%% g %u%% b %u%%; ppflags %02x, options %08x, palette %s\n",
+			 arg[0], arg[1], arg[2], arg[3], win->ppflags, opts,
+			 (opts & CP_ENABLE) ? "on" : "off");
+	}
+	mutex_unlock(&dc->lock);
 
 	return count;
 }
