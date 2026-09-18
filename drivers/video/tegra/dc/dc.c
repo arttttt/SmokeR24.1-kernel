@@ -2184,21 +2184,40 @@ static int dbg_win_state_show(struct seq_file *s, void *unused)
 
 	for_each_set_bit(i, &dc->valid_windows, DC_N_WINDOWS) {
 		struct tegra_dc_win *win = tegra_dc_get_window(dc, i);
-		u32 opts;
+		u32 asm_opts, act_opts, saved;
 
 		if (!win)
 			continue;
 
 		tegra_dc_writel(dc, WINDOW_A_SELECT << i,
 				DC_CMD_DISPLAY_WINDOW_HEADER);
-		opts = tegra_dc_readl(dc, DC_WIN_WIN_OPTIONS);
+
+		/* Both banks, because the window registers are staged: a write
+		 * lands in assembly and reaches active only when the frame it
+		 * belongs to is latched. A bit present in one and missing from
+		 * the other is a different fault from a bit missing in both --
+		 * the first was written and never taken up, the second was
+		 * never written. */
+		saved = tegra_dc_readl(dc, DC_CMD_STATE_ACCESS);
+
+		tegra_dc_writel(dc, WRITE_MUX_ASSEMBLY | READ_MUX_ASSEMBLY,
+				DC_CMD_STATE_ACCESS);
+		asm_opts = tegra_dc_readl(dc, DC_WIN_WIN_OPTIONS);
+
+		tegra_dc_writel(dc, WRITE_MUX_ASSEMBLY | READ_MUX_ACTIVE,
+				DC_CMD_STATE_ACCESS);
+		act_opts = tegra_dc_readl(dc, DC_WIN_WIN_OPTIONS);
+
+		tegra_dc_writel(dc, saved, DC_CMD_STATE_ACCESS);
 
 		seq_printf(s,
-			   "win%lu options %08x  palette %s  converter %s  vibrance %s\n",
-			   i, opts,
-			   (opts & CP_ENABLE) ? "on" : "off",
-			   (opts & CSC_ENABLE) ? "on" : "off",
-			   (opts & DV_ENABLE) ? "on" : "off");
+			   "win%lu assembly %08x  active %08x\n",
+			   i, asm_opts, act_opts);
+		seq_printf(s,
+			   "      active: palette %s  converter %s  vibrance %s\n",
+			   (act_opts & CP_ENABLE) ? "on" : "off",
+			   (act_opts & CSC_ENABLE) ? "on" : "off",
+			   (act_opts & DV_ENABLE) ? "on" : "off");
 		seq_printf(s,
 			   "      asked: palette %s  converter %s  vibrance %s r%u g%u b%u\n",
 			   (win->ppflags & TEGRA_WIN_PPFLAG_CP_ENABLE) ?
