@@ -891,6 +891,30 @@ struct tegra_dc_win {
 #endif
 	bool			csc_dirty;
 
+	/* Two colour blocks the window owns that nothing has ever driven
+	 * here. Both are asked for from debugfs while their worth is being
+	 * measured, and both have to be remembered rather than written once:
+	 * the flip path rebuilds WIN_OPTIONS from scratch every frame, so a
+	 * bit poked into the register survives until the next flip and no
+	 * longer.
+	 *
+	 * csc_force is the window's colour space converter on a window that
+	 * carries RGB. The converter is not a YUV-only block -- the TRM says
+	 * it "can also be used for gain control for RGB color modes", where
+	 * the hardware itself zeroes the cross-channel terms and leaves three
+	 * independent per-channel gains. The driver only ever switched it on
+	 * for YUV, which is a choice made here rather than a limit of the
+	 * silicon, and this is what asks the question.
+	 */
+	bool			csc_force;
+
+	/* Digital vibrance: a saturation boost per window, eight steps per
+	 * channel, applied after the converter and the palette. Declared in
+	 * the register header since the beginning and written by nothing.
+	 */
+	bool			dv_enable;
+	u8			dv[3];		/* r, g, b; 0..7 */
+
 	int			dirty;
 	int			underflows;
 	struct tegra_dc		*dc;

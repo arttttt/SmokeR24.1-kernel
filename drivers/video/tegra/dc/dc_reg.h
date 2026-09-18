@@ -582,6 +582,12 @@
 #define  DC_WIN_BUFFER_ADDR_MODE_TILE_UV	(1 << 16)
 
 #define DC_WIN_DV_CONTROL			0x70e
+/* Each channel is a fraction in eighths, 0 to 7/8, of how far the channel is
+ * pushed away from the other two: new R = R + (2R - G - B) * FR. Three bits
+ * each, and the gaps between them are not fields. */
+#define  DV_CONTROL_R(x)		(((x) & 0x7) << 0)
+#define  DV_CONTROL_G(x)		(((x) & 0x7) << 8)
+#define  DV_CONTROL_B(x)		(((x) & 0x7) << 16)
 #define DC_WIN_BLEND_NOKEY			0x70f
 #define DC_WIN_BLEND_1WIN			0x710
 #define DC_WIN_BLEND_2WIN_X			0x711

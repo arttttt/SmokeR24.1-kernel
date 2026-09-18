@@ -1973,6 +1973,181 @@ static const struct file_operations cmu_lut2_fops = {
 	.release	= single_release,
 };
 
+/*
+ * Three colour blocks each window owns and nothing here has ever driven: the
+ * converter on an RGB window, digital vibrance, and the window's own palette.
+ * The first two are answered by the flip path from state kept per window, the
+ * third by the palette code that was always complete. They are opened from
+ * here rather than given an interface of their own because what is being
+ * asked is whether the silicon does anything at all -- and the answer is a
+ * look at the screen, not a return value.
+ *
+ * A window is only shown while something is being flipped to it, so each of
+ * these takes effect on the next frame. Touching the screen is enough.
+ */
+static int dbg_win_read_four(const char __user *buf, size_t count,
+			     u32 out[4])
+{
+	char tmp[64];
+
+	if (count >= sizeof(tmp))
+		return -EINVAL;
+	if (copy_from_user(tmp, buf, count))
+		return -EFAULT;
+	tmp[count] = '\0';
+
+	if (sscanf(tmp, "%u %u %u %u", &out[0], &out[1], &out[2], &out[3]) != 4)
+		return -EINVAL;
+	if (out[0] >= DC_N_WINDOWS)
+		return -EINVAL;
+
+	return 0;
+}
+
+/* "<win> <r> <g> <b>", gains in Q2.8 with 256 for unity. All three zero
+ * switches the converter back off: a window scaled to nothing is black, so
+ * the value is free to mean something else.
+ *
+ * Only three of the eight coefficients are written. On RGB input the TRM has
+ * the hardware force the cross-channel terms to zero for red and blue by
+ * itself, which leaves KVR, KYRGB and KUB as the gain of one channel each --
+ * a diagonal, not a matrix. The rest are cleared so nothing of an earlier
+ * YUV surface is left behind.
+ */
+static ssize_t dbg_win_csc_write(struct file *file, const char __user *buf,
+				 size_t count, loff_t *ppos)
+{
+	struct tegra_dc *dc = file->private_data;
+	struct tegra_dc_win *win;
+	u32 arg[4];
+	int err;
+
+	err = dbg_win_read_four(buf, count, arg);
+	if (err)
+		return err;
+
+	win = tegra_dc_get_window(dc, arg[0]);
+	if (!win)
+		return -EINVAL;
+
+	mutex_lock(&dc->lock);
+
+	win->csc.yof = 0;
+	win->csc.kur = 0;
+	win->csc.kug = 0;
+	win->csc.kvg = 0;
+	win->csc.kvb = 0;
+	win->csc.kvr = arg[1];
+	win->csc.kyrgb = arg[2];
+	win->csc.kub = arg[3];
+	win->csc_dirty = true;
+	win->csc_force = arg[1] || arg[2] || arg[3];
+
+	mutex_unlock(&dc->lock);
+
+	dev_info(&dc->ndev->dev,
+		 "win%u csc %s: r %u g %u b %u (256 = 1.0)\n",
+		 arg[0], win->csc_force ? "on" : "off", arg[1], arg[2], arg[3]);
+
+	return count;
+}
+
+static const struct file_operations dbg_win_csc_fops = {
+	.write		= dbg_win_csc_write,
+	.open		= simple_open,
+	.llseek		= default_llseek,
+};
+
+/* "<win> <r> <g> <b>", each 0 to 7. All zero is the same as off, which it
+ * already is: a boost of nothing changes nothing. */
+static ssize_t dbg_win_dv_write(struct file *file, const char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	struct tegra_dc *dc = file->private_data;
+	struct tegra_dc_win *win;
+	u32 arg[4];
+	int err;
+
+	err = dbg_win_read_four(buf, count, arg);
+	if (err)
+		return err;
+	if (arg[1] > 7 || arg[2] > 7 || arg[3] > 7)
+		return -EINVAL;
+
+	win = tegra_dc_get_window(dc, arg[0]);
+	if (!win)
+		return -EINVAL;
+
+	mutex_lock(&dc->lock);
+	win->dv[0] = arg[1];
+	win->dv[1] = arg[2];
+	win->dv[2] = arg[3];
+	win->dv_enable = arg[1] || arg[2] || arg[3];
+	mutex_unlock(&dc->lock);
+
+	dev_info(&dc->ndev->dev, "win%u vibrance %s: r %u g %u b %u (of 7)\n",
+		 arg[0], win->dv_enable ? "on" : "off", arg[1], arg[2], arg[3]);
+
+	return count;
+}
+
+static const struct file_operations dbg_win_dv_fops = {
+	.write		= dbg_win_dv_write,
+	.open		= simple_open,
+	.llseek		= default_llseek,
+};
+
+/* "<win> <r> <g> <b>", each a per-channel gain in percent, 100 for unity and
+ * up to 200. A straight line through the palette is enough to answer whether
+ * the palette is looked at; a curve would answer the same question and be
+ * harder to read off the screen.
+ *
+ * Unlike the two above this one needs nothing from the flip path: the palette
+ * code decides for itself whether the table it was handed is the identity,
+ * and turns the block on or off to match. All ones therefore restores.
+ */
+static ssize_t dbg_win_lut_write(struct file *file, const char __user *buf,
+				 size_t count, loff_t *ppos)
+{
+	struct tegra_dc *dc = file->private_data;
+	struct tegra_dc_win *win;
+	u32 arg[4];
+	int err, i;
+
+	err = dbg_win_read_four(buf, count, arg);
+	if (err)
+		return err;
+	if (arg[1] > 200 || arg[2] > 200 || arg[3] > 200)
+		return -EINVAL;
+
+	win = tegra_dc_get_window(dc, arg[0]);
+	if (!win)
+		return -EINVAL;
+
+	mutex_lock(&dc->lock);
+	for (i = 0; i < 256; i++) {
+		win->lut.r[i] = min(i * arg[1] / 100, 255U);
+		win->lut.g[i] = min(i * arg[2] / 100, 255U);
+		win->lut.b[i] = min(i * arg[3] / 100, 255U);
+	}
+	mutex_unlock(&dc->lock);
+
+	err = tegra_dc_update_lut(dc, arg[0], -1);
+	if (err)
+		return err;
+
+	dev_info(&dc->ndev->dev, "win%u lut: r %u%% g %u%% b %u%%\n",
+		 arg[0], arg[1], arg[2], arg[3]);
+
+	return count;
+}
+
+static const struct file_operations dbg_win_lut_fops = {
+	.write		= dbg_win_lut_write,
+	.open		= simple_open,
+	.llseek		= default_llseek,
+};
+
 static void tegra_dc_remove_debugfs(struct tegra_dc *dc)
 {
 	if (dc->debugdir)
@@ -2077,6 +2252,21 @@ static void tegra_dc_create_debugfs(struct tegra_dc *dc)
 
 	retval = debugfs_create_file("cmu_lut2", S_IRUGO, dc->debugdir, dc,
 		&cmu_lut2_fops);
+	if (!retval)
+		goto remove_out;
+
+	retval = debugfs_create_file("win_csc", S_IWUSR, dc->debugdir, dc,
+		&dbg_win_csc_fops);
+	if (!retval)
+		goto remove_out;
+
+	retval = debugfs_create_file("win_dv", S_IWUSR, dc->debugdir, dc,
+		&dbg_win_dv_fops);
+	if (!retval)
+		goto remove_out;
+
+	retval = debugfs_create_file("win_lut", S_IWUSR, dc->debugdir, dc,
+		&dbg_win_lut_fops);
 	if (!retval)
 		goto remove_out;
 

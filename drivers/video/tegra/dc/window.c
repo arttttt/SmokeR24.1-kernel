@@ -977,6 +977,24 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 		else if (tegra_dc_fmt_bpp(win->fmt) < 24)
 			win_options |= COLOR_EXPAND;
 
+		/* The converter on a window that carries RGB. Asked for
+		 * explicitly and never inferred: its coefficients reset to
+		 * zero, so a window switched on without someone having first
+		 * said what it should compute goes black. Beside the branch
+		 * above rather than inside it, because a narrow RGB format
+		 * wants the colour expansion as well. */
+		if (!yuv && win->csc_force)
+			win_options |= CSC_ENABLE;
+
+		if (win->dv_enable) {
+			tegra_dc_writel(dc,
+				DV_CONTROL_R(win->dv[0]) |
+				DV_CONTROL_G(win->dv[1]) |
+				DV_CONTROL_B(win->dv[2]),
+				DC_WIN_DV_CONTROL);
+			win_options |= DV_ENABLE;
+		}
+
 		/*
 		 * For gen2 blending, change in the global alpha needs rewrite
 		 * to blending regs.
