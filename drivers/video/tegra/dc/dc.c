@@ -2156,6 +2156,84 @@ static const struct file_operations dbg_win_lut_fops = {
 	.llseek		= default_llseek,
 };
 
+/*
+ * What each window is actually doing, asked of the hardware rather than of
+ * the driver's idea of it. The three files above write, and until now there
+ * was nothing to read: a block that stops having an effect looks exactly like
+ * a block that was never switched on, and the general register dump answers
+ * for whichever window the header happens to be pointing at.
+ *
+ * Both halves are printed side by side on purpose -- what was asked for, and
+ * what WIN_OPTIONS says is running -- because the interesting failure is the
+ * two disagreeing.
+ */
+static int dbg_win_state_show(struct seq_file *s, void *unused)
+{
+	struct tegra_dc *dc = s->private;
+	unsigned long i;
+
+	mutex_lock(&dc->lock);
+
+	if (!dc->enabled) {
+		mutex_unlock(&dc->lock);
+		seq_puts(s, "display off\n");
+		return 0;
+	}
+
+	tegra_dc_get(dc);
+
+	for_each_set_bit(i, &dc->valid_windows, DC_N_WINDOWS) {
+		struct tegra_dc_win *win = tegra_dc_get_window(dc, i);
+		u32 opts;
+
+		if (!win)
+			continue;
+
+		tegra_dc_writel(dc, WINDOW_A_SELECT << i,
+				DC_CMD_DISPLAY_WINDOW_HEADER);
+		opts = tegra_dc_readl(dc, DC_WIN_WIN_OPTIONS);
+
+		seq_printf(s,
+			   "win%lu options %08x  palette %s  converter %s  vibrance %s\n",
+			   i, opts,
+			   (opts & CP_ENABLE) ? "on" : "off",
+			   (opts & CSC_ENABLE) ? "on" : "off",
+			   (opts & DV_ENABLE) ? "on" : "off");
+		seq_printf(s,
+			   "      asked: palette %s  converter %s  vibrance %s r%u g%u b%u\n",
+			   (win->ppflags & TEGRA_WIN_PPFLAG_CP_ENABLE) ?
+				"on" : "off",
+			   win->csc_force ? "on" : "off",
+			   win->dv_enable ? "on" : "off",
+			   win->dv[0], win->dv[1], win->dv[2]);
+		seq_printf(s,
+			   "      lut[0,64,128,255] r %u %u %u %u  g %u %u %u %u  b %u %u %u %u\n",
+			   win->lut.r[0], win->lut.r[64], win->lut.r[128],
+			   win->lut.r[255],
+			   win->lut.g[0], win->lut.g[64], win->lut.g[128],
+			   win->lut.g[255],
+			   win->lut.b[0], win->lut.b[64], win->lut.b[128],
+			   win->lut.b[255]);
+	}
+
+	tegra_dc_put(dc);
+	mutex_unlock(&dc->lock);
+
+	return 0;
+}
+
+static int dbg_win_state_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dbg_win_state_show, inode->i_private);
+}
+
+static const struct file_operations dbg_win_state_fops = {
+	.open		= dbg_win_state_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static void tegra_dc_remove_debugfs(struct tegra_dc *dc)
 {
 	if (dc->debugdir)
@@ -2275,6 +2353,11 @@ static void tegra_dc_create_debugfs(struct tegra_dc *dc)
 
 	retval = debugfs_create_file("win_lut", S_IWUSR, dc->debugdir, dc,
 		&dbg_win_lut_fops);
+	if (!retval)
+		goto remove_out;
+
+	retval = debugfs_create_file("win_state", S_IRUGO, dc->debugdir, dc,
+		&dbg_win_state_fops);
 	if (!retval)
 		goto remove_out;
 
