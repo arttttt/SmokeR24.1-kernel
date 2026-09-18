@@ -1483,6 +1483,20 @@ static int tegra_dc_ext_set_csc(struct tegra_dc_ext_user *user,
 	csc->kub =   new_csc->kub;
 	csc->kvb =   new_csc->kvb;
 
+	/* Coefficients used to arrive for a surface that could not be shown
+	 * without them, so writing them was the whole of the request and the
+	 * block came on by itself with the format. On RGB it is the other way
+	 * round: the surface is complete as it stands, and the converter is
+	 * something the caller wants done to it. Saying so is this call --
+	 * there is no other -- so a set that asks for anything at all turns
+	 * the block on, and a set of nothing turns it back off.
+	 *
+	 * All zeroes is the reset state and scales every channel to black, so
+	 * no caller can mean it. That leaves it free to mean "stop". */
+	win->csc_force = new_csc->yof || new_csc->kyrgb || new_csc->kur ||
+			 new_csc->kvr || new_csc->kug || new_csc->kvg ||
+			 new_csc->kub || new_csc->kvb;
+
 	tegra_dc_update_csc(dc, index);
 
 	mutex_unlock(&ext_win->lock);
