@@ -1505,6 +1505,42 @@ static int tegra_dc_ext_set_csc(struct tegra_dc_ext_user *user,
 }
 #endif
 
+static int tegra_dc_ext_set_vibrance(struct tegra_dc_ext_user *user,
+				     struct tegra_dc_ext_vibrance *new_dv)
+{
+	unsigned int index = new_dv->win_index;
+	struct tegra_dc *dc = user->ext->dc;
+	struct tegra_dc_ext_win *ext_win;
+	struct tegra_dc_win *win = tegra_dc_get_window(dc, index);
+
+	if (!win)
+		return -EINVAL;
+
+	if (new_dv->r > 7 || new_dv->g > 7 || new_dv->b > 7)
+		return -EINVAL;
+
+	ext_win = &user->ext->win[index];
+
+	mutex_lock(&ext_win->lock);
+
+	if (ext_win->user != user) {
+		mutex_unlock(&ext_win->lock);
+		return -EACCES;
+	}
+
+	win->dv[0] = new_dv->r;
+	win->dv[1] = new_dv->g;
+	win->dv[2] = new_dv->b;
+	/* A boost of nothing is not a boost, so all three zero is the way to
+	 * stop rather than a setting to carry. Nothing is lost by it: the
+	 * values are what would have been written anyway. */
+	win->dv_enable = new_dv->r || new_dv->g || new_dv->b;
+
+	mutex_unlock(&ext_win->lock);
+
+	return 0;
+}
+
 #if defined(CONFIG_TEGRA_CSC_V2)
 static int tegra_dc_ext_set_csc(struct tegra_dc_ext_user *user,
 				struct tegra_dc_ext_csc_v2 *new_csc)
@@ -2302,6 +2338,16 @@ static long tegra_dc_ioctl(struct file *filp, unsigned int cmd,
 		return tegra_dc_ext_set_csc(user, &args);
 	}
 #endif
+
+	case TEGRA_DC_EXT_SET_VIBRANCE:
+	{
+		struct tegra_dc_ext_vibrance args;
+
+		if (copy_from_user(&args, user_arg, sizeof(args)))
+			return -EFAULT;
+
+		return tegra_dc_ext_set_vibrance(user, &args);
+	}
 
 #ifdef CONFIG_TEGRA_CSC_V2
 	case TEGRA_DC_EXT_SET_CSC_V2:

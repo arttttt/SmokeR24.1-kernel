@@ -673,6 +673,27 @@ struct tegra_dc_ext_lut {
  */
 #define TEGRA_DC_EXT_LUT_FLAGS_FBOVERRIDE 0x01
 
+/*
+ * Digital vibrance: a saturation boost the window applies to its own pixels,
+ * after the palette and the converter and before any blending. Each channel
+ * is pushed away from the other two in eighths --
+ *
+ *	new R = R + (2R - G - B) * r/8
+ *
+ * and the same for green and blue with their own fraction. A channel of zero
+ * leaves that channel alone; all three zero switches the block off, which is
+ * also what it means, since a boost of nothing is not a boost.
+ *
+ * Only the display controller has this. Nothing about it is derivable from
+ * the surface, so it is asked for or it does not happen.
+ */
+struct tegra_dc_ext_vibrance {
+	__u32 win_index;
+	__u32 r;	/* 0..7, eighths */
+	__u32 g;
+	__u32 b;
+};
+
 #define TEGRA_DC_EXT_FLAGS_ENABLED	1
 struct tegra_dc_ext_status {
 	__u32 flags;
@@ -790,6 +811,13 @@ struct tegra_dc_ext_feature {
  * caller's knowledge, not the kernel's. */
 #define TEGRA_DC_EXT_SET_ACT_VFP \
 	_IOW('D', 0x1F, __u32)
+
+/* Sets a window's digital vibrance. Like the palette and the converter, the
+ * window has to be the caller's, and the value takes effect on that window's
+ * next flip -- the driver rebuilds the window's options every frame, so this
+ * is remembered rather than written straight through. */
+#define TEGRA_DC_EXT_SET_VIBRANCE \
+	_IOW('D', 0x20, struct tegra_dc_ext_vibrance)
 
 enum tegra_dc_ext_control_output_type {
 	TEGRA_DC_EXT_DSI,
