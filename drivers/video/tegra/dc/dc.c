@@ -2032,16 +2032,24 @@ static ssize_t dbg_win_csc_write(struct file *file, const char __user *buf,
 
 	mutex_lock(&dc->lock);
 
-	win->csc.yof = 0;
-	win->csc.kur = 0;
-	win->csc.kug = 0;
-	win->csc.kvg = 0;
-	win->csc.kvb = 0;
-	win->csc.kvr = arg[1];
-	win->csc.kyrgb = arg[2];
-	win->csc.kub = arg[3];
-	win->csc_dirty = true;
 	win->csc_force = arg[1] || arg[2] || arg[3];
+	if (win->csc_force) {
+		win->csc.yof = 0;
+		win->csc.kur = 0;
+		win->csc.kug = 0;
+		win->csc.kvg = 0;
+		win->csc.kvb = 0;
+		win->csc.kvr = arg[1];
+		win->csc.kyrgb = arg[2];
+		win->csc.kub = arg[3];
+	} else {
+		/* Every window boots holding BT.601, and a YUV surface put on
+		 * this one later would be shown with whatever is here. Asking
+		 * for a gain overwrote that; stopping puts it back, so the
+		 * window is left as it was found rather than merely quiet. */
+		tegra_dc_init_csc_defaults(&win->csc);
+	}
+	win->csc_dirty = true;
 
 	mutex_unlock(&dc->lock);
 

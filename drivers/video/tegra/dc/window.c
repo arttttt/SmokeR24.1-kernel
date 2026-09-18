@@ -972,19 +972,29 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 		}
 
 #endif
-		if (yuv)
+		/* Two ways into the converter, and for a long time only the
+		 * first existed. A YUV surface cannot be shown without it, so
+		 * the format asks on the surface's behalf and the coefficients
+		 * every window boots with -- BT.601, loaded by
+		 * tegra_dc_init_csc_defaults -- are what it runs.
+		 *
+		 * That made the format the only way in, which read as a limit
+		 * of the block and is not one: the TRM has the converter
+		 * taking RGB too, where the hardware zeroes the cross-channel
+		 * terms itself and what is left is a per-channel gain. An RGB
+		 * surface is complete as it stands, though, so nothing about
+		 * it can ask -- its owner has to, and csc_force is that
+		 * asking.
+		 *
+		 * The format keeps its way in. Taking it away would leave
+		 * video to whoever remembered to set coefficients, and the
+		 * one client here never has.
+		 */
+		if (yuv || win->csc_force)
 			win_options |= CSC_ENABLE;
-		else if (tegra_dc_fmt_bpp(win->fmt) < 24)
-			win_options |= COLOR_EXPAND;
 
-		/* The converter on a window that carries RGB. Asked for
-		 * explicitly and never inferred: its coefficients reset to
-		 * zero, so a window switched on without someone having first
-		 * said what it should compute goes black. Beside the branch
-		 * above rather than inside it, because a narrow RGB format
-		 * wants the colour expansion as well. */
-		if (!yuv && win->csc_force)
-			win_options |= CSC_ENABLE;
+		if (!yuv && tegra_dc_fmt_bpp(win->fmt) < 24)
+			win_options |= COLOR_EXPAND;
 
 		if (win->dv_enable) {
 			tegra_dc_writel(dc,
