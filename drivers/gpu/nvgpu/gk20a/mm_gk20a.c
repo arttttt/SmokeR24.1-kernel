@@ -1559,6 +1559,9 @@ u64 gk20a_vm_map(struct vm_gk20a *vm,
 
 	if ((mapping_size > bfr.size) ||
 		(buffer_offset > (bfr.size - mapping_size))) {
+		/* DEBUG (mocha, revert me) */
+		pr_err("gk20a_vm_map: REFUSED offset=%llu size=%llu buf=%llu\n",
+			buffer_offset, mapping_size, (u64)bfr.size);
 		err = -EINVAL;
 		goto clean_up;
 	}
@@ -1730,6 +1733,9 @@ u64 gk20a_vm_map(struct vm_gk20a *vm,
 
 	mutex_unlock(&vm->update_gmmu_lock);
 
+	/* DEBUG (mocha, revert me) */
+	pr_err("gk20a_vm_map: va=%#llx size=%llu align=%#llx kind=%d\n",
+		map_offset, (u64)bfr.size, offset_align, kind);
 	return map_offset;
 
 clean_up:
