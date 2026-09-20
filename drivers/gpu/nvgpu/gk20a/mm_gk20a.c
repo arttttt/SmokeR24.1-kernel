@@ -1762,9 +1762,6 @@ u64 gk20a_vm_map(struct vm_gk20a *vm,
 
 	mutex_unlock(&vm->update_gmmu_lock);
 
-	/* DEBUG (mocha, revert me) */
-	pr_err("gk20a_vm_map: va=%#llx size=%llu align=%#llx kind=%d\n",
-		map_offset, (u64)bfr.size, offset_align, kind);
 	return map_offset;
 
 clean_up:
