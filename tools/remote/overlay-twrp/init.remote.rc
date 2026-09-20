@@ -2,15 +2,14 @@
 # Imported by init.rc (added by patch_ramdisk.sh --twrp).
 #
 # All services start on boot independently:
-#   - watchdogkick: prevent hardware watchdog reboot
 #   - wificonnect: best-effort WiFi setup (never crashes recovery)
 #   - telnetd on port 2323
 #   - remotehttpd on port 8080
 
-service watchdogkick /sbin/watchdog-kick.sh
-    class default
-    seclabel u:r:recovery:s0
-
+# The watchdog is not a remote-debug concern -- a recovery resets itself with
+# or without this overlay -- so feeding it lives in init.recovery.tn8.rc, which
+# init.rc imports on its own. Defining it here as well would be a duplicate
+# service, and init keeps the first and warns about the second.
 service wificonnect /sbin/wifi-connect.sh
     class default
     oneshot
@@ -27,7 +26,6 @@ service remotehttpd /sbin/remote-server.sh
     seclabel u:r:recovery:s0
 
 on boot
-    start watchdogkick
     start wificonnect
     start telnetd
     start remotehttpd

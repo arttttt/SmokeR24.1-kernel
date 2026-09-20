@@ -1,0 +1,13 @@
+# Device services for recovery on this board.
+#
+# init.rc imports /init.recovery.${ro.hardware}.rc, and ro.hardware here is
+# tn8 -- the board shares its kernel and its name with NVIDIA's SHIELD Tablet.
+# Until now that import simply failed and was logged as such; this is the file
+# it was always looking for.
+
+service watchdogkick /sbin/watchdog-kick.sh
+    class default
+    seclabel u:r:recovery:s0
+
+on boot
+    start watchdogkick
