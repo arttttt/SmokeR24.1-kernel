@@ -1557,11 +1557,40 @@ u64 gk20a_vm_map(struct vm_gk20a *vm,
 	}
 	gmmu_page_size = vm->gmmu_page_sizes[bfr.pgsz_idx];
 
-	if ((mapping_size > bfr.size) ||
-		(buffer_offset > (bfr.size - mapping_size))) {
-		/* DEBUG (mocha, revert me) */
-		pr_err("gk20a_vm_map: REFUSED offset=%llu size=%llu buf=%llu\n",
-			buffer_offset, mapping_size, (u64)bfr.size);
+	/*
+	 * A caller that rounds its request up to the page it will get is
+	 * asking for the same memory, not for more of it: the mapping is
+	 * page granular either way, and the tail of the last page belongs to
+	 * this buffer and to nothing else. CUDA does exactly that -- a
+	 * 0x2a8000 byte frame comes in as a 0x2c0000 request, the next
+	 * multiple of the 128K big page -- and turning it down leaves the
+	 * caller holding an address with no pages under it. What follows is
+	 * a fault from the shader that reads it:
+	 *
+	 *     gk20a_fifo_handle_mmu_fault: mmu fault on engine 0,
+	 *         client 0 (l1 0), addr 0x00000005:0x00401000, type 2 (pte)
+	 *     channel 118 generated a mmu fault
+	 *     fifo_error_isr: channel reset initiated
+	 *
+	 * three milliseconds after the refusal, and every CUDA call in that
+	 * context returns 719 from then on.
+	 *
+	 * So take the request down to what the buffer actually has rather
+	 * than refusing it. Nothing past the buffer is mapped, which is what
+	 * the check is for; a request that reaches past the page it rounded
+	 * up to is still refused.
+	 */
+	if (mapping_size > bfr.size) {
+		u64 rounded = round_up(bfr.size, (u64)gmmu_page_size);
+
+		if (buffer_offset != 0 || mapping_size > rounded) {
+			err = -EINVAL;
+			goto clean_up;
+		}
+		mapping_size = bfr.size;
+	}
+
+	if (buffer_offset > (bfr.size - mapping_size)) {
 		err = -EINVAL;
 		goto clean_up;
 	}
