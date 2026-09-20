@@ -890,7 +890,7 @@ static int print_wakeup_source_stats(struct seq_file *m,
 	}
 
 #ifdef CONFIG_PM_ADVANCED_DEBUG
-	ret = seq_printf(m, "%-24s%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
+	ret = seq_printf(m, "%-24s\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
 			"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
 			ws->name, active_count, ws->event_count,
 			ws->wakeup_count, ws->expire_count,
