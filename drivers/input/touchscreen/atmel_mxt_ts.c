@@ -20,6 +20,7 @@
 #include <linux/firmware.h>
 #include <linux/i2c.h>
 #include <linux/i2c/atmel_mxt_ts.h>
+#include <linux/input/touch_vendor.h>
 #include <linux/debugfs.h>
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
@@ -4464,6 +4465,18 @@ static int mxt_probe(struct i2c_client *client,
 
 	if (!pdata)
 		return -EINVAL;
+
+	/*
+	 * The board may carry a Synaptics controller in this one's place, on
+	 * the same supply and reset line. Ask before anything here claims
+	 * them, and step aside when the bus names the other vendor.
+	 */
+	if (touch_vendor_is_other(client, pdata->reset_gpio,
+			TOUCH_VENDOR_ATMEL)) {
+		dev_info(&client->dev,
+				"another controller is fitted, stepping aside\n");
+		return -ENODEV;
+	}
 
 	data = kzalloc(sizeof(struct mxt_data), GFP_KERNEL);
 	if (!data) {

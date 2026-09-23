@@ -41,6 +41,7 @@
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/input/synaptics_dsx.h>
+#include <linux/input/touch_vendor.h>
 #include "synaptics_dsx_core.h"
 
 #define SYN_I2C_RETRY_TIMES 10
@@ -567,6 +568,22 @@ static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
 #else
 	hw_if.board_data = client->dev.platform_data;
 #endif
+
+	/*
+	 * The board may carry an Atmel controller in this one's place, on
+	 * the same supply and reset line. Ask before anything here claims
+	 * them, and step aside when the bus names the other vendor.
+	 */
+	if (touch_vendor_is_other(client, hw_if.board_data ?
+			hw_if.board_data->reset_gpio : -1,
+			TOUCH_VENDOR_SYNAPTICS)) {
+		dev_info(&client->dev,
+				"%s: another controller is fitted, stepping aside\n",
+				__func__);
+		kfree(synaptics_dsx_i2c_device);
+		synaptics_dsx_i2c_device = NULL;
+		return -ENODEV;
+	}
 
 	hw_if.bus_access = &bus_access;
 	hw_if.board_data->i2c_addr = client->addr;

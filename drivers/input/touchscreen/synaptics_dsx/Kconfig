@@ -18,6 +18,7 @@ choice
 config TOUCHSCREEN_SYNAPTICS_DSX_I2C
 	bool "RMI over I2C"
 	depends on I2C
+	select TOUCHSCREEN_VENDOR_DETECT
 config TOUCHSCREEN_SYNAPTICS_DSX_SPI
 	bool "RMI over SPI"
 	depends on SPI_MASTER
