@@ -481,6 +481,20 @@
 	hdmi {
 		status = "disabled";
 	};
+
+	/*
+	 * tn8 turns both SPI controllers on, and nothing on this board sits
+	 * behind either: no child nodes here, no board-file devices, no
+	 * spidev. Probing them only claims a clock and DMA channels and logs
+	 * a missing prod settings list for each.
+	 */
+	spi@7000d400 {
+		status = "disabled";
+	};
+
+	spi@7000da00 {
+		status = "disabled";
+	};
 };
 
 
