@@ -52,35 +52,46 @@
 
 #define TOUCH_VENDOR_SUPPLY		"vdd-touch"
 #define TOUCH_VENDOR_RESET_ACTIVE_MS	10
-#define TOUCH_VENDOR_POLL_MS		5
+#define TOUCH_VENDOR_BOOT_MIN_MS	50
+#define TOUCH_VENDOR_POLL_MS		10
 #define TOUCH_VENDOR_BOOT_MAX_MS	200
 
 struct touch_vendor_address {
 	unsigned short addr;
 	enum touch_vendor vendor;
+	bool primary;
 	const char *name;
 };
 
 /*
  * Atmel first: most boards carry one, and a probe that finds it at the
  * first address costs no failed transfer at all -- every address that does
- * not answer costs a "no acknowledge" line from the controller driver. The
- * bootloader addresses are the ones atmel_mxt_ts pairs with the
+ * not answer costs a "no acknowledge" line from the bus driver. The primary
+ * addresses are where a part with firmware answers, and the only ones
+ * polled while a controller boots; the rest are tried once, at the end.
+ * The bootloader addresses are the ones atmel_mxt_ts pairs with the
  * application addresses under BOOTLOADER_1664_1188: a part without
  * firmware answers there, and it is still an Atmel board that the Atmel
  * driver has to flash.
  */
 static const struct touch_vendor_address touch_vendor_addresses[] = {
-	{ 0x4a, TOUCH_VENDOR_ATMEL,	"Atmel maXTouch" },
-	{ 0x4b, TOUCH_VENDOR_ATMEL,	"Atmel maXTouch" },
-	{ 0x26, TOUCH_VENDOR_ATMEL,	"Atmel maXTouch bootloader" },
-	{ 0x27, TOUCH_VENDOR_ATMEL,	"Atmel maXTouch bootloader" },
-	{ 0x20, TOUCH_VENDOR_SYNAPTICS,	"Synaptics RMI4" },
+	{ 0x4a, TOUCH_VENDOR_ATMEL,	true,	"Atmel maXTouch" },
+	{ 0x20, TOUCH_VENDOR_SYNAPTICS,	true,	"Synaptics RMI4" },
+	{ 0x4b, TOUCH_VENDOR_ATMEL,	false,	"Atmel maXTouch" },
+	{ 0x26, TOUCH_VENDOR_ATMEL,	false,	"Atmel maXTouch bootloader" },
+	{ 0x27, TOUCH_VENDOR_ATMEL,	false,	"Atmel maXTouch bootloader" },
 };
 
 static DEFINE_MUTEX(touch_vendor_lock);
 static enum touch_vendor touch_vendor_found = TOUCH_VENDOR_UNKNOWN;
 
+/*
+ * Straight to the bus driver, once. i2c_transfer would repeat a NACK
+ * adap->retries times -- the Tegra driver hands NACKs back as -EAGAIN on
+ * purpose, so the devices that live on this bus survive a transient one --
+ * and an address that is simply empty would be asked, and logged, four
+ * times over.
+ */
 static bool touch_vendor_answers(struct i2c_adapter *adap, unsigned short addr)
 {
 	u8 byte;
@@ -90,12 +101,21 @@ static bool touch_vendor_answers(struct i2c_adapter *adap, unsigned short addr)
 		.len	= 1,
 		.buf	= &byte,
 	};
+	int ret;
 
-	return i2c_transfer(adap, &msg, 1) == 1;
+	if (!adap->algo || !adap->algo->master_xfer)
+		return false;
+
+	i2c_lock_adapter(adap);
+	ret = adap->algo->master_xfer(adap, &msg, 1);
+	i2c_unlock_adapter(adap);
+
+	return ret == 1;
 }
 
-/* One read per address, no retries; the first part to answer is the one. */
-static enum touch_vendor touch_vendor_scan(struct i2c_adapter *adap)
+/* The first part to answer is the one; primary_only skips the rest. */
+static enum touch_vendor touch_vendor_scan(struct i2c_adapter *adap,
+		bool primary_only)
 {
 	int i;
 
@@ -103,6 +123,8 @@ static enum touch_vendor touch_vendor_scan(struct i2c_adapter *adap)
 		const struct touch_vendor_address *entry =
 				&touch_vendor_addresses[i];
 
+		if (primary_only && !entry->primary)
+			continue;
 		if (touch_vendor_answers(adap, entry->addr)) {
 			dev_info(&adap->dev, "touch: %s answers at 0x%02x\n",
 					entry->name, entry->addr);
@@ -114,10 +136,11 @@ static enum touch_vendor touch_vendor_scan(struct i2c_adapter *adap)
 }
 
 /*
- * The controller did not answer as it was left, so it is off or held in
- * reset. Power it, pulse reset, and poll until it answers or the longest
- * boot time is up. Everything taken here is given back before returning:
- * the driver that wins sets the supply and the reset line up its own way.
+ * The controller is off or held in reset. Power it, pulse reset, give it
+ * the shortest boot time any part needs, then poll the primary addresses
+ * until one answers or the longest boot time is up, and try the rest once
+ * if none has. Everything taken here is given back before returning: the
+ * driver that wins sets the supply and the reset line up its own way.
  */
 static enum touch_vendor touch_vendor_power_and_scan(struct i2c_client *client,
 		int reset_gpio)
@@ -144,10 +167,16 @@ static enum touch_vendor touch_vendor_power_and_scan(struct i2c_client *client,
 	}
 
 	deadline = jiffies + msecs_to_jiffies(TOUCH_VENDOR_BOOT_MAX_MS);
-	do {
+	msleep(TOUCH_VENDOR_BOOT_MIN_MS);
+	for (;;) {
+		vendor = touch_vendor_scan(client->adapter, true);
+		if (vendor != TOUCH_VENDOR_UNKNOWN ||
+				!time_before(jiffies, deadline))
+			break;
 		msleep(TOUCH_VENDOR_POLL_MS);
-		vendor = touch_vendor_scan(client->adapter);
-	} while (vendor == TOUCH_VENDOR_UNKNOWN && time_before(jiffies, deadline));
+	}
+	if (vendor == TOUCH_VENDOR_UNKNOWN)
+		vendor = touch_vendor_scan(client->adapter, false);
 
 	if (reset_held)
 		gpio_free(reset_gpio);
@@ -164,8 +193,14 @@ enum touch_vendor touch_vendor_detect(struct i2c_client *client, int reset_gpio)
 	enum touch_vendor vendor;
 
 	mutex_lock(&touch_vendor_lock);
-	if (touch_vendor_found == TOUCH_VENDOR_UNKNOWN)
-		touch_vendor_found = touch_vendor_scan(client->adapter);
+	/*
+	 * A controller left running answers at once, and nothing waits. One
+	 * held in reset answers nothing, so asking it would only fill the log.
+	 */
+	if (touch_vendor_found == TOUCH_VENDOR_UNKNOWN &&
+			(!gpio_is_valid(reset_gpio) ||
+			 gpio_get_value_cansleep(reset_gpio)))
+		touch_vendor_found = touch_vendor_scan(client->adapter, false);
 	if (touch_vendor_found == TOUCH_VENDOR_UNKNOWN)
 		touch_vendor_found =
 			touch_vendor_power_and_scan(client, reset_gpio);
