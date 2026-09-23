@@ -34,12 +34,6 @@ static int spdif_probe(struct snd_soc_codec *codec) {
 	return 0;
 }
 
-static const struct snd_soc_dapm_route spdif_intercon[] = {
-	{ "OUT", NULL, "Playback" },
-	{ "Capture", NULL, "IN" },
-
-};
-
 static int spdif_write(struct snd_soc_codec * codec, unsigned int reg,
 							unsigned int val){
 	return 0;
@@ -51,8 +45,6 @@ static unsigned int spdif_read(struct snd_soc_codec *codec, unsigned int reg) {
 
 static struct snd_soc_codec_driver soc_codec_spdif_dit = {
 	.probe = spdif_probe,
-	.dapm_routes = spdif_intercon,
-	.num_dapm_routes = ARRAY_SIZE(spdif_intercon),
 	.read = spdif_read,
 	.write = spdif_write,
 };
