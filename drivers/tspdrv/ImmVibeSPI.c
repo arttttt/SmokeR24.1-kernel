@@ -1194,7 +1194,7 @@ static int drv2604_probe(struct i2c_client *client, const struct i2c_device_id *
 #endif
 	/* From Xiaomi end */
 
-	printk(KERN_ALERT"drv2604 probe succeeded");
+	pr_info("drv2604 probe succeeded\n");
 
 	return 0;
 }
@@ -1413,7 +1413,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_Initialize(void)
 	if (IS_ERR(vibdata.pwm_dev))
 		dev_err(&client->dev, "%s: pwm request failed\n", __func__);
 #endif
-	printk(KERN_ALERT"drv2604: initialized on M3\n");
+	pr_info("drv2604: initialized on M3\n");
 /* From Xiaomi end */
 
 	ImmVibeSPI_ForceOut_AmpDisable(0);
