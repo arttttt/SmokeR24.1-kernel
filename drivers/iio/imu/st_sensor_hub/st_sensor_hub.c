@@ -1850,13 +1850,13 @@ static int st_sensor_hub_i2c_probe(struct i2c_client *client,
 	hdata->dev = &client->dev;
 	i2c_set_clientdata(client, hdata);
 
-	dev_err(hdata->dev, "st_sensor_hub_i2c_probe.\n");
+	dev_dbg(hdata->dev, "st_sensor_hub_i2c_probe.\n");
 
 #ifdef CONFIG_OF
 	err = st_sensor_hub_parse_dt(client);
 	if (err < 0)
 		goto st_hub_free_hdata;
-	dev_err(hdata->dev, "st_sensor_hub_i2c_probe, irq=%d, wakeup=%d, reset=%d.\n", client->irq, hdata->gpio_wakeup, hdata->gpio_reset);
+	dev_dbg(hdata->dev, "st_sensor_hub_i2c_probe, irq=%d, wakeup=%d, reset=%d.\n", client->irq, hdata->gpio_wakeup, hdata->gpio_reset);
 #else /* CONFIG_OF */
 	if (client->dev.platform_data != NULL) {
 		hdata->gpio_wakeup = ((struct st_hub_pdata *)
