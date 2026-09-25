@@ -371,9 +371,17 @@ struct nvhost_device_data t124_vic_info = {
 	.busy			= nvhost_scale_notify_busy,
 	.idle			= nvhost_scale_notify_idle,
 	.scaling_post_cb	= &nvhost_scale_emc_callback,
-	.devfreq_governor	= "nvhost_podgov",
+	/* Watermarks, not the load average: the pod governor aims at
+	 * thirty per cent busy and is content with a merge that takes
+	 * seventeen milliseconds out of every fifty at the floor clock,
+	 * so it never raises VIC across a whole run of transitions. The
+	 * watermark governor is driven by the unit's own ACTMON
+	 * interrupt instead -- UNIT2_ACTMON_INTR, bit 13 of
+	 * HOST1X_SYNC_HINTSTATUS (TRM 12.9.5), the same wiring T210 uses. */
+	.devfreq_governor	= "wmark_active",
 	.actmon_regs		= HOST1X_CHANNEL_ACTMON2_REG_BASE,
 	.actmon_enabled		= true,
+	.actmon_irq		= 13,
 	.linear_emc		= true,
 	.serialize		= true,
 	.push_work_done		= true,
