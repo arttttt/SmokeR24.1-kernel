@@ -16,6 +16,7 @@
 
 #include <linux/devfreq.h>
 #include <linux/debugfs.h>
+#include <linux/math64.h>
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/device.h>
@@ -115,8 +116,8 @@ static void update_watermarks(struct devfreq *df,
 		 * at which we would go into lower frequency given the
 		 * that we are running at the new frequency? */
 		next_freq = freqlist_down(wmarkinfo, ideal_frequency);
-		relation = ((next_freq / current_frequency_khz) *
-			wmarkinfo->p_load_target) / 1000;
+		relation = div_u64(next_freq, (u32)current_frequency_khz);
+		relation = div_u64(relation * wmarkinfo->p_load_target, 1000);
 		df->profile->set_low_wmark(df->dev.parent, relation);
 	}
 
@@ -129,8 +130,8 @@ static void update_watermarks(struct devfreq *df,
 		 * at which we would go into highest frequency given the
 		 * that we are running at the new frequency? */
 		next_freq = freqlist_up(wmarkinfo, ideal_frequency);
-		relation = ((next_freq / current_frequency_khz) *
-			wmarkinfo->p_load_target) / 1000;
+		relation = div_u64(next_freq, (u32)current_frequency_khz);
+		relation = div_u64(relation * wmarkinfo->p_load_target, 1000);
 		relation = min((unsigned long long)wmarkinfo->p_load_max,
 			       relation);
 		df->profile->set_high_wmark(df->dev.parent, relation);
@@ -172,7 +173,7 @@ static int devfreq_watermark_target_freq(struct devfreq *df,
 		/* otherwise, based on relation between current load and
 		 * load target we calculate the "ideal" frequency
 		 * where we would be just at the target */
-		relation = (load * 1000) / wmarkinfo->p_load_target;
+		relation = div_u64(load * 1000, wmarkinfo->p_load_target);
 		ideal_freq = relation * (dev_stat.current_frequency / 1000);
 
 		/* round this frequency */
@@ -181,8 +182,8 @@ static int devfreq_watermark_target_freq(struct devfreq *df,
 
 	/* update average target frequency */
 	wmarkinfo->average_target_freq =
-		(wmarkinfo->p_smooth * wmarkinfo->average_target_freq +
-		 ideal_freq) / (wmarkinfo->p_smooth + 1);
+		div_u64(wmarkinfo->p_smooth * wmarkinfo->average_target_freq +
+			ideal_freq, wmarkinfo->p_smooth + 1);
 
 	/* update watermarks to match the ideal frequency */
 	update_watermarks(df, dev_stat.current_frequency, ideal_freq);
