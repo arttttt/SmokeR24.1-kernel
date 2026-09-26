@@ -97,6 +97,23 @@ static struct emc_iso_usage tegra12_emc_iso_usage[] = {
 		BIT(EMC_USER_DC1),
 		80, iso_share_calc_t124_os_idle
 	},
+	/* The display is rarely alone. The idle table above hands it up to
+	 * 74% of the memory clock's bandwidth, which is what the DRAM
+	 * delivers when nothing else is in the queue -- and the merge
+	 * engine and the GPU are in the queue for every transition, at
+	 * exactly the moments the display underflows (each one at EMC 300
+	 * or 396). Their EMC users carry a usage bit only while their
+	 * clock is on, so these rows cost nothing at rest and drop the
+	 * display's share to the general table -- and the memory clock a
+	 * step up -- only while an engine is actually working. */
+	{
+		BIT(EMC_USER_DC1) | BIT(EMC_USER_3D),
+		50, iso_share_calc_t124_general
+	},
+	{
+		BIT(EMC_USER_DC1) | BIT(EMC_USER_2D),
+		50, iso_share_calc_t124_general
+	},
 	{
 		BIT(EMC_USER_DC1) | BIT(EMC_USER_DC2),
 		50, iso_share_calc_t124_general
