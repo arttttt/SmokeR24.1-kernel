@@ -460,6 +460,21 @@ int nvhost_module_set_rate(struct platform_device *dev, void *priv,
 
 	ret = nvhost_module_update_rate(dev, index);
 	mutex_unlock(&client_list_lock);
+
+	/* A client's floor on the engine clock lands at once, but the memory
+	 * clock the engine needs at that rate comes from the scaling callback,
+	 * and only devfreq's own decisions used to call it. A client raising
+	 * VIC to 756 MHz for a merge got the engine and not the memory behind
+	 * it until devfreq next decided -- on the watermark governor, after
+	 * the load it was raised for. Call the callback here for every client
+	 * but devfreq itself, which already calls it on its own path. After
+	 * the unlock: the callback sets the memory clock through this very
+	 * function and takes the same lock. */
+	if (index == 0 && priv != pdata->power_manager &&
+	    pdata->scaling_post_cb && pdata->power_profile)
+		pdata->scaling_post_cb(pdata->power_profile,
+				       clk_get_rate(pdata->clk[index]));
+
 	return ret;
 }
 
