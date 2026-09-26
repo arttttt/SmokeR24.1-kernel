@@ -922,6 +922,9 @@ struct tegra_dc_win {
 	struct nvmap_handle_ref	*cur_handle;
 	unsigned		bandwidth;
 	unsigned		new_bandwidth;
+	/* the memory clock this window's latency allowance was last
+	 * computed for; the display's floor is the highest of these */
+	unsigned long		la_emc_hz;
 	struct tegra_dc_lut	lut;
 #if defined(CONFIG_TEGRA_DC_BLOCK_LINEAR)
 	u8	block_height_log2;

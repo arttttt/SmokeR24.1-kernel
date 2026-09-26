@@ -606,7 +606,10 @@ static int tegra_dc_handle_latency_allowance(struct tegra_dc *dc,
 			emc_freq_hz, bw, disp_params);
 
 		if (!err) {
-			clk_set_rate(dc->emc_la_clk, emc_freq_hz);
+			/* Remembered, not applied: the floor under the memory
+			 * clock is one for the whole display, and the caller
+			 * sets it from every window's need at once. */
+			w->la_emc_hz = emc_freq_hz;
 			break;
 		}
 
@@ -851,6 +854,39 @@ static inline unsigned long tegra_dc_kbps_to_emc(unsigned long bw)
 }
 #endif
 
+#if !defined(CONFIG_ARCH_TEGRA_2x_SOC) && \
+	!defined(CONFIG_ARCH_TEGRA_3x_SOC) && \
+	!defined(CONFIG_ARCH_TEGRA_11x_SOC) && \
+	!defined(CONFIG_ARCH_TEGRA_14x_SOC)
+/* One floor for the whole display: the highest memory clock any window's
+ * latency allowance was computed for. Before a flip every window still
+ * counts, the ones about to go dark included, so the floor covers both the
+ * frame being scanned out and the one being programmed; once the flip has
+ * landed the dark windows drop out and the floor may fall. Set per window,
+ * as it used to be, the floor was whatever the last window in the loop
+ * needed -- 102 or 204 MHz after a small one -- and the display underflowed
+ * at the next change of the memory clock. */
+static void tegra_dc_set_la_floor(struct tegra_dc *dc, bool use_new)
+{
+	unsigned long floor = 0;
+	unsigned i;
+
+	for_each_set_bit(i, &dc->valid_windows, DC_N_WINDOWS) {
+		struct tegra_dc_win *w = tegra_dc_get_window(dc, i);
+
+		if (use_new && !w->new_bandwidth)
+			w->la_emc_hz = 0;
+		floor = max(floor, w->la_emc_hz);
+	}
+
+	clk_set_rate(dc->emc_la_clk, floor);
+}
+#else
+static inline void tegra_dc_set_la_floor(struct tegra_dc *dc, bool use_new)
+{
+}
+#endif
+
 /* use the larger of dc->bw_kbps or dc->new_bw_kbps, and copies
  * dc->new_bw_kbps into dc->bw_kbps.
  * calling this function both before and after a flip is sufficient to select
@@ -916,6 +952,8 @@ void tegra_dc_program_bandwidth(struct tegra_dc *dc, bool use_new)
 		trace_program_bandwidth(dc);
 		w->bandwidth = w->new_bandwidth;
 	}
+
+	tegra_dc_set_la_floor(dc, use_new);
 }
 
 int tegra_dc_set_dynamic_emc(struct tegra_dc *dc)
