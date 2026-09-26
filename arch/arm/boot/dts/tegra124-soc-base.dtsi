@@ -232,11 +232,20 @@
 		#num-translation-enable = <4>;
 		#num-asid-security = <8>;
 
+		/* VIC shares the display's address space. A domain tuple is
+		 * one mapping, so the merge engine and the display that scans
+		 * its output translate through the same page tables: a layer
+		 * the display has shown is already mapped when the merge reads
+		 * it, and nvmap's stash, keyed by the mapping, hands the same
+		 * table back instead of building another. The composer zone
+		 * the merge writes into is reached through the display's
+		 * linear map, which covers it. Everything else VIC ever touched
+		 * in the common space it maps for itself, as before. */
 		domains = <
 			&ppcs_as TEGRA_SWGROUP_CELLS(PPCS)
 			&ppcs_as TEGRA_SWGROUP_CELLS(PPCS1)
 			&gpu_as TEGRA_SWGROUP_CELLS(GPUB)
-			&dc_as TEGRA_SWGROUP_CELLS2(DC, DC12)
+			&dc_as TEGRA_SWGROUP_CELLS3(DC, DC12, VIC)
 			&dc_as TEGRA_SWGROUP_CELLS(DCB)
 			&common_as TEGRA_SWGROUP_CELLS(AFI)
 			&common_as TEGRA_SWGROUP_CELLS(SDMMC1A)
