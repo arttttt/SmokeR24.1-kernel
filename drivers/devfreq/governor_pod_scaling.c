@@ -142,6 +142,17 @@ struct podgov_info_rec {
 	unsigned int		history_next;
 	unsigned int		history_count;
 	unsigned long		recent_high;
+
+	/* Polls in a row that found no busy cycle at all, and how many of
+	 * them take the clock straight to its floor. The usual descent is a
+	 * step a block window, damped, and the history holds the clock
+	 * where the last animation needed it: right while it runs, and a
+	 * waste once it has stopped. Nothing is forgotten by the drop; the
+	 * first work after it is lifted by the wake jump, and the first poll
+	 * after that reads the history against the floor and climbs back.
+	 * Nought disables the drop. */
+	unsigned int		p_quiet_polls;
+	unsigned int		empty_polls;
 	int			block;
 	struct kobj_attribute	enable_3d_scaling_attr;
 	struct kobj_attribute	user_attr;
@@ -369,6 +380,25 @@ static unsigned long scaling_state_check(struct devfreq *df, ktime_t time)
 	long max_boost, load, damp, freq, boost, res;
 	unsigned long cycles;
 
+	/* A quiet of p_quiet_polls polls drops the clock to its floor at
+	 * once, past the block window and the damping, and holds it there
+	 * for as long as the quiet lasts: the history still reads busy
+	 * against the floor, and left to the usual path it would climb the
+	 * clock back up with nothing to run. The first busy cycle ends the
+	 * quiet, and then the history has its say. */
+	if (podgov->p_quiet_polls &&
+	    podgov->empty_polls >= podgov->p_quiet_polls) {
+		if (df->previous_freq > df->min_freq) {
+			podgov->last_scale = time;
+			podgov->freq_avg = df->min_freq / 1000000;
+			trace_podgov_scaling_state_check(df->dev.parent,
+							 df->previous_freq,
+							 df->min_freq);
+			return df->min_freq;
+		}
+		return 0;
+	}
+
 	dt = (unsigned long) ktime_us_delta(time, podgov->last_scale);
 	if (dt < podgov->p_block_window || df->previous_freq == 0)
 		return 0;
@@ -591,6 +621,7 @@ static void nvhost_scale_emc_debug_init(struct devfreq *df)
 	CREATE_PODGOV_FILE(wake_freq);
 	CREATE_PODGOV_FILE(wake_gap);
 	CREATE_PODGOV_FILE(history);
+	CREATE_PODGOV_FILE(quiet_polls);
 #undef CREATE_PODGOV_FILE
 }
 
@@ -856,6 +887,7 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 	podgov->cycles_avg = div_u64((u64)podgov->cycles_avg * podgov->p_smooth
 				     + cycles, podgov->p_smooth + 1);
 	podgov_remember(podgov, cycles);
+	podgov->empty_polls = dev_stat.busy_time ? 0 : podgov->empty_polls + 1;
 
 	/* A poll always returns a clock, the current one when there is
 	 * nothing to change: update_devfreq then holds it within the min
@@ -959,6 +991,9 @@ static int nvhost_pod_init(struct devfreq *df)
 	/* A hundred polls: two and a half seconds at the polling interval,
 	 * as on L4T. Nought scales by the average instead. */
 	podgov->p_history = 100;
+	/* Three polls: seventy-five milliseconds of nothing, past any pause
+	 * inside an animation, short of the railgate. */
+	podgov->p_quiet_polls = 3;
 	podgov->adjustment_type = ADJUSTMENT_DEVICE_REQ;
 	podgov->p_user = 0;
 
