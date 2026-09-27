@@ -1003,13 +1003,15 @@ static int nvhost_pod_init(struct devfreq *df)
 	podgov->adjustment_type = ADJUSTMENT_DEVICE_REQ;
 	podgov->p_user = 0;
 
-	/* The wake jump: 252 MHz after 50 ms of quiet on the GPU -- the
-	 * lowest step at which the first frame after a pause still lands
-	 * on time. Measured on the UI-transition scenario, interleaved: 180
-	 * loses the heavy first frame (7-8 M cycles), 396 saves no more
-	 * frames than 252 and spends twice the busy time at 396 and above.
-	 * Off for anything else. */
-	podgov->p_wake_freq = strcmp(d->name, "vic03.0") ? 252000000 : 0;
+	/* The wake jump: 324 MHz after 50 ms of quiet on the GPU. Measured
+	 * on the UI-transition scenario, interleaved: 180 loses the heavy
+	 * first frame (7-8 M cycles); 252 lands most of them, but a frame of
+	 * 3.5-3.9 M cycles submitted the moment the GPU wakes takes 14-15 ms
+	 * there and misses by up to three -- four of the seven late GPU
+	 * frames left over twenty-four runs, and at 324 every one of them
+	 * fits; 396 saves no more frames than 252 and spends twice the busy
+	 * time at 396 and above. Off for anything else. */
+	podgov->p_wake_freq = strcmp(d->name, "vic03.0") ? 324000000 : 0;
 	podgov->p_wake_gap = 50000;
 
 	/* Reset clock counters */
