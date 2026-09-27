@@ -58,6 +58,9 @@
 
 #define GET_TARGET_FREQ_DONTSCALE	1
 
+/* The most polls the history of busy cycles can hold. */
+#define PODGOV_HISTORY_MAX		200
+
 /* time frame for load and hint tracking - when events come in at a larger
  * interval, this probably indicates the current estimates are stale
  */
@@ -127,6 +130,18 @@ struct podgov_info_rec {
 	unsigned int		idle_avg;
 	int			freq_avg;
 	unsigned int		hint_avg;
+
+	/* The busy cycles per second of the polls: their average, and the
+	 * busiest of the last p_history polls. The clock is scaled by the
+	 * busiest recent poll against the current clock, so a long
+	 * animation keeps its clock until it has been quiet for the whole
+	 * history, and the same busy cycles read the same at any clock. */
+	unsigned long		cycles_avg;
+	unsigned long		*cycles_history;
+	unsigned int		p_history;
+	unsigned int		history_next;
+	unsigned int		history_count;
+	unsigned long		recent_high;
 	int			block;
 	struct kobj_attribute	enable_3d_scaling_attr;
 	struct kobj_attribute	user_attr;
@@ -289,6 +304,57 @@ static void podgov_set_freq_request(struct devfreq *df, int freq_request)
 
 
 /*******************************************************************************
+ * podgov_remember(podgov, cycles)
+ *
+ * Keep a poll's busy cycles in the history and the busiest of the history
+ * up to date. The history is a ring of the last p_history polls; it is
+ * small enough to rescan whole on every poll, which also lets its length
+ * change under it.
+ ******************************************************************************/
+
+static void podgov_remember(struct podgov_info_rec *podgov,
+			    unsigned long cycles)
+{
+	unsigned int size = min_t(unsigned int, podgov->p_history,
+				  PODGOV_HISTORY_MAX);
+	unsigned int i;
+
+	if (!size) {
+		podgov->history_count = 0;
+		return;
+	}
+	if (podgov->history_next >= size)
+		podgov->history_next = 0;
+	if (podgov->history_count > size)
+		podgov->history_count = size;
+
+	podgov->cycles_history[podgov->history_next] = cycles;
+	podgov->history_next = (podgov->history_next + 1) % size;
+	if (podgov->history_count < size)
+		podgov->history_count++;
+
+	podgov->recent_high = 0;
+	for (i = 0; i < podgov->history_count; i++)
+		if (podgov->cycles_history[i] > podgov->recent_high)
+			podgov->recent_high = podgov->cycles_history[i];
+}
+
+/*******************************************************************************
+ * podgov_forget(podgov)
+ *
+ * Drop the history: what was busy before the device slept says nothing
+ * about the work after it wakes.
+ ******************************************************************************/
+
+static void podgov_forget(struct podgov_info_rec *podgov)
+{
+	podgov->history_count = 0;
+	podgov->history_next = 0;
+	podgov->recent_high = 0;
+	podgov->cycles_avg = 0;
+}
+
+/*******************************************************************************
  * freq = scaling_state_check(df, time)
  *
  * This handler is called to adjust the frequency of the device. The function
@@ -301,6 +367,7 @@ static unsigned long scaling_state_check(struct devfreq *df, ktime_t time)
 	struct podgov_info_rec *podgov = df->data;
 	unsigned long dt;
 	long max_boost, load, damp, freq, boost, res;
+	unsigned long cycles;
 
 	dt = (unsigned long) ktime_us_delta(time, podgov->last_scale);
 	if (dt < podgov->p_block_window || df->previous_freq == 0)
@@ -310,8 +377,12 @@ static unsigned long scaling_state_check(struct devfreq *df, ktime_t time)
 	freq = df->previous_freq / 1000000;
 	max_boost = (df->max_freq/3) / 1000000;
 
-	/* calculate and trace load */
-	load = 1000 - podgov->idle_avg;
+	/* The busyness: the busiest recent poll's cycles, or their
+	 * average when there is no history, against the current clock.
+	 * Over a thousand when the clock has come down since. */
+	cycles = podgov->history_count ? podgov->recent_high
+				       : podgov->cycles_avg;
+	load = div_u64((u64)cycles * 1000, df->previous_freq);
 	trace_podgov_busy(df->dev.parent, load);
 	damp = podgov->p_damp;
 
@@ -519,6 +590,7 @@ static void nvhost_scale_emc_debug_init(struct devfreq *df)
 	CREATE_PODGOV_FILE(smooth);
 	CREATE_PODGOV_FILE(wake_freq);
 	CREATE_PODGOV_FILE(wake_gap);
+	CREATE_PODGOV_FILE(history);
 #undef CREATE_PODGOV_FILE
 }
 
@@ -684,6 +756,7 @@ static int podgov_edge(struct devfreq *df, int busy, ktime_t now,
 	podgov->last_scale = now;
 	podgov->freq_avg = wake / 1000000;
 	podgov->idle_avg = 1000 - podgov->p_load_target;
+	podgov->cycles_avg = div_u64((u64)wake * podgov->p_load_target, 1000);
 	trace_podgov_estimate_freq(df->dev.parent, df->previous_freq, wake);
 	*freq = wake;
 	return 0;
@@ -711,6 +784,7 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 	int stat;
 	ktime_t now;
 	unsigned long rounded_freq;
+	unsigned long cycles;
 
 	/* Ensure maximal clock when scaling is disabled */
 	if (!podgov->enable) {
@@ -775,6 +849,14 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 		podgov->idle;
 	podgov->idle_avg = podgov->idle_avg / (podgov->p_smooth + 1);
 
+	/* The busy cycles per second: the clock, weighted by the share of
+	 * the poll the device was busy. */
+	cycles = div_u64((u64)dev_stat.current_frequency * dev_stat.busy_time,
+			 dev_stat.total_time);
+	podgov->cycles_avg = div_u64((u64)podgov->cycles_avg * podgov->p_smooth
+				     + cycles, podgov->p_smooth + 1);
+	podgov_remember(podgov, cycles);
+
 	/* A poll always returns a clock, the current one when there is
 	 * nothing to change: update_devfreq then holds it within the min
 	 * and max bounds, and a poll that returned "do not scale" would
@@ -826,6 +908,11 @@ static int nvhost_pod_init(struct devfreq *df)
 	podgov = kzalloc(sizeof(struct podgov_info_rec), GFP_KERNEL);
 	if (!podgov)
 		goto err_alloc_podgov;
+	podgov->cycles_history = kcalloc(PODGOV_HISTORY_MAX,
+					 sizeof(*podgov->cycles_history),
+					 GFP_KERNEL);
+	if (!podgov->cycles_history)
+		goto err_alloc_history;
 	df->data = (void *)podgov;
 
 	/* Set scaling parameter defaults */
@@ -869,6 +956,9 @@ static int nvhost_pod_init(struct devfreq *df)
 	}
 
 	podgov->p_block_window = 50000;
+	/* A hundred polls: two and a half seconds at the polling interval,
+	 * as on L4T. Nought scales by the average instead. */
+	podgov->p_history = 100;
 	podgov->adjustment_type = ADJUSTMENT_DEVICE_REQ;
 	podgov->p_user = 0;
 
@@ -958,6 +1048,8 @@ err_create_request_sysfs_entry:
 err_create_enable_sysfs_entry:
 	dev_err(&d->dev, "failed to create sysfs attributes");
 err_unsupported_chip_id:
+	kfree(podgov->cycles_history);
+err_alloc_history:
 	kfree(podgov);
 err_alloc_podgov:
 	return -ENOMEM;
@@ -987,6 +1079,7 @@ static void nvhost_pod_exit(struct devfreq *df)
 
 	nvhost_scale_emc_debug_deinit(df);
 
+	kfree(podgov->cycles_history);
 	kfree(podgov);
 }
 
@@ -1009,6 +1102,9 @@ static int nvhost_pod_event_handler(struct devfreq *df,
 		devfreq_monitor_suspend(df);
 		break;
 	case DEVFREQ_GOV_RESUME:
+		mutex_lock(&df->lock);
+		podgov_forget(df->data);
+		mutex_unlock(&df->lock);
 		devfreq_monitor_resume(df);
 		break;
 	default:
