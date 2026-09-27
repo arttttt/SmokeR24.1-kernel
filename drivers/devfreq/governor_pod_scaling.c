@@ -773,6 +773,12 @@ static int podgov_edge(struct devfreq *df, int busy, ktime_t now,
 		return GET_TARGET_FREQ_DONTSCALE;
 	}
 
+	/* Work ends the quiet on the edge, not on the poll that first sees
+	 * its cycles: the poll after a wake jump may still find none, the
+	 * job not yet on the engine, and would count it as more quiet and
+	 * drop the clock the jump just raised. */
+	podgov->empty_polls = 0;
+
 	if (!was_idle || !podgov->p_wake_freq ||
 	    ktime_us_delta(now, podgov->last_idle) < podgov->p_wake_gap ||
 	    df->previous_freq >= podgov->p_wake_freq)
