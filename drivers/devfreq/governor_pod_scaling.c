@@ -86,8 +86,8 @@ struct podgov_info_rec {
 	ktime_t			last_throughput_hint;
 	ktime_t			last_scale;
 
-	/* When the device was last reported idle: what a wake-up is
-	 * measured from. */
+	/* When the device last went idle (the busy-to-idle edge): what a
+	 * wake-up is measured from. */
 	ktime_t			last_idle;
 
 	struct delayed_work	idle_timer;
@@ -810,7 +810,10 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 		podgov->idle;
 	podgov->idle_avg = podgov->idle_avg / (podgov->p_smooth + 1);
 
-	if (!dev_stat.busy)
+	/* The quiet is measured from the busy-to-idle edge. The idle timer's
+	 * ticks arrive idle too, every slowdown delay while the clock is
+	 * above its floor; they must not restart it. */
+	if (!dev_stat.busy && !was_idle)
 		podgov->last_idle = now;
 
 	/*
