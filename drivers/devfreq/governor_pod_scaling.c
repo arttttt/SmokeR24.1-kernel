@@ -86,10 +86,20 @@ struct podgov_info_rec {
 	ktime_t			last_throughput_hint;
 	ktime_t			last_scale;
 
+	/* When the device was last reported idle: what a wake-up is
+	 * measured from. */
+	ktime_t			last_idle;
+
 	struct delayed_work	idle_timer;
 
 	unsigned int		p_slowdown_delay;
 	unsigned int		p_block_window;
+
+	/* The clock (Hz) the device is taken straight to on its first
+	 * work after a quiet of at least p_wake_gap (us), before any load
+	 * sample exists to justify it. Nought disables the jump. */
+	unsigned int		p_wake_freq;
+	unsigned int		p_wake_gap;
 	unsigned int		p_use_throughput_hint;
 	unsigned int		p_hint_lo_limit;
 	unsigned int		p_hint_hi_limit;
@@ -586,6 +596,8 @@ static void nvhost_scale_emc_debug_init(struct devfreq *df)
 	CREATE_PODGOV_FILE(scaledown_limit);
 	CREATE_PODGOV_FILE(smooth);
 	CREATE_PODGOV_FILE(slowdown_delay);
+	CREATE_PODGOV_FILE(wake_freq);
+	CREATE_PODGOV_FILE(wake_gap);
 #undef CREATE_PODGOV_FILE
 }
 
@@ -727,6 +739,7 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 	struct podgov_info_rec *podgov = df->data;
 	struct devfreq_dev_status dev_stat;
 	int stat;
+	int was_idle;
 	ktime_t now;
 	unsigned long rounded_freq;
 
@@ -787,6 +800,7 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 	}
 
 	*freq = dev_stat.current_frequency;
+	was_idle = !podgov->last_event_type;
 
 	/* Sustain local variables */
 	podgov->last_event_type = dev_stat.busy;
@@ -795,6 +809,48 @@ static int nvhost_pod_estimate_freq(struct devfreq *df,
 	podgov->idle_avg = (podgov->p_smooth * podgov->idle_avg) +
 		podgov->idle;
 	podgov->idle_avg = podgov->idle_avg / (podgov->p_smooth + 1);
+
+	if (!dev_stat.busy)
+		podgov->last_idle = now;
+
+	/*
+	 * The first work after a quiet spell is taken straight to the wake
+	 * clock, before any load sample exists.
+	 *
+	 * The load the governor scales by is the PMU's, published once a
+	 * frame, so after an idle spell the first busy event carries a
+	 * load of nought and the clock stays at its floor until the next
+	 * event after the next sample -- and there is no event inside a
+	 * long job. A frame's worth of rendering at the floor takes two
+	 * frames; by the time the usual "too busy, jump" fires, they are
+	 * lost. This is that same jump, taken on the first event of real
+	 * work rather than on the first sample of it: no work, no jump;
+	 * one block window later the load decides as usual.
+	 *
+	 * The block window is restarted so the jump is not undone by the
+	 * next event, the request average is set to the jump so the
+	 * damping does not pull it down, and the idle average is set to
+	 * the target load so the next decision starts from neutral.
+	 */
+	if (dev_stat.busy && was_idle && podgov->p_wake_freq &&
+	    ktime_us_delta(now, podgov->last_idle) >= podgov->p_wake_gap &&
+	    df->previous_freq < podgov->p_wake_freq) {
+		unsigned long wake = podgov->p_wake_freq;
+
+		cancel_delayed_work(&podgov->idle_timer);
+		scaling_limit(df, &wake);
+		rounded_freq = freqlist_up(podgov, wake, 0);
+		if (rounded_freq > df->previous_freq) {
+			podgov->last_scale = now;
+			podgov->freq_avg = rounded_freq / 1000000;
+			podgov->idle_avg = 1000 - podgov->p_load_target;
+			trace_podgov_estimate_freq(df->dev.parent,
+						   df->previous_freq,
+						   rounded_freq);
+			*freq = rounded_freq;
+			return 0;
+		}
+	}
 
 	/* if throughput hint enabled, and last hint is recent enough, return */
 	if (podgov->p_use_throughput_hint &&
@@ -900,9 +956,17 @@ static int nvhost_pod_init(struct devfreq *df)
 	podgov->adjustment_type = ADJUSTMENT_DEVICE_REQ;
 	podgov->p_user = 0;
 
+	/* The wake jump: 396 MHz after 50 ms of quiet on the GPU -- a
+	 * frame of rendering fits in a frame there, and it is the step the
+	 * governor's own "too busy" jump lands on from the floor. Off for
+	 * anything else. */
+	podgov->p_wake_freq = strcmp(d->name, "vic03.0") ? 396000000 : 0;
+	podgov->p_wake_gap = 50000;
+
 	/* Reset clock counters */
 	podgov->last_throughput_hint = now;
 	podgov->last_scale = now;
+	podgov->last_idle = now;
 
 	podgov->power_manager = df;
 
