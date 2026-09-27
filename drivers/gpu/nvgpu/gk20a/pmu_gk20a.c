@@ -23,6 +23,8 @@
 #include <linux/debugfs.h>
 #include <linux/dma-mapping.h>
 #include <linux/uaccess.h>
+#include <linux/pm_runtime.h>
+#include <linux/math64.h>
 
 #include "gk20a.h"
 #include "gr_gk20a.h"
@@ -4059,6 +4061,37 @@ int gk20a_pmu_load_norm(struct gk20a *g, u32 *load)
 	return 0;
 }
 
+/*
+ * Whether the PMU's registers can be read: the GPU is on its rail and
+ * clocked. A true answer holds off a runtime suspend until
+ * gk20a_pmu_release. Neither wakes the GPU: the readers are the load
+ * samplers, and a poll must not undo the gating it measures.
+ *
+ * The status is read and the hold taken under the runtime PM lock, as
+ * one step: a suspend takes that lock to check the holds before it marks
+ * the device suspending and drops the lock to gate the clocks, so it
+ * either sees the hold or has already left the active state.
+ */
+static bool gk20a_pmu_hold_awake(struct gk20a *g)
+{
+	struct device *dev = &g->dev->dev;
+	unsigned long flags;
+	bool awake;
+
+	spin_lock_irqsave(&dev->power.lock, flags);
+	awake = dev->power.runtime_status == RPM_ACTIVE && g->power_on;
+	if (awake)
+		atomic_inc(&dev->power.usage_count);
+	spin_unlock_irqrestore(&dev->power.lock, flags);
+
+	return awake;
+}
+
+static void gk20a_pmu_release(struct gk20a *g)
+{
+	pm_runtime_put_noidle(&g->dev->dev);
+}
+
 int gk20a_pmu_load_update(struct gk20a *g)
 {
 	struct pmu_gk20a *pmu = &g->pmu;
@@ -4069,11 +4102,52 @@ int gk20a_pmu_load_update(struct gk20a *g)
 		return 0;
 	}
 
+	/* The sample lives in the PMU's memory, behind registers a gated
+	 * GPU does not answer; the last sample stands until it wakes. */
+	if (!gk20a_pmu_hold_awake(g))
+		return 0;
 	pmu_copy_from_dmem(pmu, pmu->sample_buffer, (u8 *)&_load, 2, 0);
+	gk20a_pmu_release(g);
+
 	pmu->load_shadow = _load / 10;
 	pmu->load_avg = (((9*pmu->load_avg) + pmu->load_shadow) / 10);
 
 	return 0;
+}
+
+/*
+ * The share of cycles, in permille, that the GR and CE2 engines were busy
+ * since the previous call, from the raw idle counters #1 and #2 that
+ * pmu_init_perfmon wires. The read resets the counters, so each call
+ * measures the interval since the last one.
+ *
+ * This is what the GPU governor polls with, so it must not go through
+ * gk20a_busy: the governor holds devfreq->lock, which gk20a_busy takes
+ * again through the busy notification. A gated GPU is read as idle.
+ */
+void gk20a_pmu_busy_cycles_norm(struct gk20a *g, u32 *norm)
+{
+	u32 busy, total;
+
+	*norm = 0;
+	if (!gk20a_pmu_hold_awake(g))
+		return;
+
+	busy = pwr_pmu_idle_count_value_v(
+		gk20a_readl(g, pwr_pmu_idle_count_r(1)));
+	total = pwr_pmu_idle_count_value_v(
+		gk20a_readl(g, pwr_pmu_idle_count_r(2)));
+	gk20a_writel(g, pwr_pmu_idle_count_r(2),
+		     pwr_pmu_idle_count_reset_f(1));
+	wmb();
+	gk20a_writel(g, pwr_pmu_idle_count_r(1),
+		     pwr_pmu_idle_count_reset_f(1));
+	gk20a_pmu_release(g);
+
+	if (busy >= total)
+		*norm = total ? 1000 : 0;
+	else
+		*norm = (u32)div_u64((u64)busy * 1000, total);
 }
 
 void gk20a_pmu_get_load_counters(struct gk20a *g, u32 *busy_cycles,
