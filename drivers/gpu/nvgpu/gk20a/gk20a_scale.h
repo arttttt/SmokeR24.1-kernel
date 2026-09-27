@@ -30,6 +30,9 @@ struct gk20a_scale_profile {
 	struct devfreq_dev_profile	devfreq_profile;
 	struct devfreq_dev_status	dev_stat;
 	struct notifier_block		qos_notify_block;
+	/* The status being reported is an edge of activity, busy or
+	 * idle, not a sample: no load goes with it. */
+	bool				edge;
 	void				*private_data;
 };
 

@@ -26,6 +26,7 @@
 #include <linux/tegra-soc.h>
 #include <linux/platform_data/tegra_edp.h>
 #include <linux/pm_qos.h>
+#include <linux/math64.h>
 
 #include <governor.h>
 
@@ -127,27 +128,33 @@ static int gk20a_scale_target(struct device *dev, unsigned long *freq,
 }
 
 /*
- * update_load_estimate_gpmu(profile)
+ * gk20a_scale_sample(pdev)
  *
- * Update load estimate using gpmu. The gpmu value is normalised
- * based on the time it was asked last time.
+ * The load since the previous sample: the share of the elapsed time the
+ * GPU's engines were busy, from the PMU's raw counters. A gated GPU counts
+ * as idle. The PMU's own load average is refreshed alongside for the EMC
+ * and EDP paths that read it.
  */
 
-static void update_load_estimate_gpmu(struct platform_device *pdev)
+static void gk20a_scale_sample(struct platform_device *pdev)
 {
 	struct gk20a *g = get_gk20a(pdev);
 	struct gk20a_scale_profile *profile = g->scale_profile;
 	unsigned long dt;
-	u32 busy_time;
+	u32 busy;
 	ktime_t t;
 
 	t = ktime_get();
 	dt = ktime_us_delta(t, profile->last_event_time);
-
-	profile->dev_stat.total_time = dt;
 	profile->last_event_time = t;
-	gk20a_pmu_load_norm(g, &busy_time);
-	profile->dev_stat.busy_time = (busy_time * dt) / 1000;
+
+	gk20a_pmu_load_update(g);
+	gk20a_pmu_busy_cycles_norm(g, &busy);
+
+	/* A sample spans at least a microsecond: an empty one would read
+	 * as an edge. */
+	profile->dev_stat.total_time = dt ? dt : 1;
+	profile->dev_stat.busy_time = div_u64((u64)busy * dt, 1000);
 }
 
 /*
@@ -181,6 +188,12 @@ void gk20a_scale_resume(struct platform_device *pdev)
 	if (!devfreq)
 		return;
 
+	/* The time the GPU spent off is not the poll's to measure: the
+	 * first poll after the wake counts from here, as the PMU's
+	 * counters do. */
+	mutex_lock(&devfreq->lock);
+	g->scale_profile->last_event_time = ktime_get();
+	mutex_unlock(&devfreq->lock);
 	devfreq_resume_device(devfreq);
 }
 
@@ -203,7 +216,9 @@ static void gk20a_scale_notify(struct platform_device *pdev, bool busy)
 
 	mutex_lock(&devfreq->lock);
 	profile->dev_stat.busy = busy;
+	profile->edge = true;
 	update_devfreq(devfreq);
+	profile->edge = false;
 	mutex_unlock(&devfreq->lock);
 }
 
@@ -232,18 +247,18 @@ static int gk20a_scale_get_dev_status(struct device *dev,
 	struct platform_device *pdev = to_platform_device(dev);
 	struct gk20a_platform *platform = platform_get_drvdata(pdev);
 
-	/* update the software shadow */
-	gk20a_pmu_load_update(g);
-
-	/* inform edp about new constraint */
-	if (platform->prescale)
-		platform->prescale(pdev);
-
 	/* Make sure there are correct values for the current frequency */
 	profile->dev_stat.current_frequency = gk20a_clk_get_rate(g);
 
-	/* Update load estimate */
-	update_load_estimate_gpmu(to_platform_device(dev));
+	/* An edge is reported as it is, with no load: the load is the
+	 * poll's to measure, since the previous poll. */
+	if (!profile->edge) {
+		gk20a_scale_sample(pdev);
+
+		/* inform edp about new constraint */
+		if (platform->prescale)
+			platform->prescale(pdev);
+	}
 
 	/* Copy the contents of the current device status */
 	*stat = profile->dev_stat;
@@ -273,6 +288,7 @@ void gk20a_scale_init(struct platform_device *pdev)
 
 	profile->pdev = pdev;
 	profile->dev_stat.busy = false;
+	profile->last_event_time = ktime_get();
 
 	/* Create frequency table */
 	err = gk20a_scale_make_freq_table(profile);
@@ -291,6 +307,9 @@ void gk20a_scale_init(struct platform_device *pdev)
 		profile->devfreq_profile.target = gk20a_scale_target;
 		profile->devfreq_profile.get_dev_status =
 			gk20a_scale_get_dev_status;
+		/* The load is polled, as on L4T; the busy and idle edges
+		 * only mark where work starts and stops. */
+		profile->devfreq_profile.polling_ms = 25;
 
 		devfreq = devfreq_add_device(&pdev->dev,
 					&profile->devfreq_profile,
