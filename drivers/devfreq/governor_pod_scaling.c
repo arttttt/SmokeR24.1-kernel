@@ -959,11 +959,13 @@ static int nvhost_pod_init(struct devfreq *df)
 	podgov->adjustment_type = ADJUSTMENT_DEVICE_REQ;
 	podgov->p_user = 0;
 
-	/* The wake jump: 396 MHz after 50 ms of quiet on the GPU -- a
-	 * frame of rendering fits in a frame there, and it is the step the
-	 * governor's own "too busy" jump lands on from the floor. Off for
-	 * anything else. */
-	podgov->p_wake_freq = strcmp(d->name, "vic03.0") ? 396000000 : 0;
+	/* The wake jump: 252 MHz after 50 ms of quiet on the GPU -- the
+	 * lowest step at which the first frame after a pause still lands
+	 * on time. Measured on the UI-transition scenario, interleaved: 180
+	 * loses the heavy first frame (7-8 M cycles), 396 saves no more
+	 * frames than 252 and spends twice the busy time at 396 and above.
+	 * Off for anything else. */
+	podgov->p_wake_freq = strcmp(d->name, "vic03.0") ? 252000000 : 0;
 	podgov->p_wake_gap = 50000;
 
 	/* Reset clock counters */
