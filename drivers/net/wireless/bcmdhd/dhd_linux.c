@@ -628,6 +628,69 @@ static const struct kernel_param_ops reinit_ops = {
 };
 module_param_cb(reinit, &reinit_ops, &wifi_reinit, 0220);
 
+/*
+ * Firmware iovar probe -- write 1 to /sys/module/bcmdhd/parameters/probe_iovars
+ * and each iovar below is read once from the running firmware, the answer
+ * going to the kernel log:
+ *
+ *   bcmdhd: iovar pfn_macaddr      answers (0)
+ *   bcmdhd: iovar nd_hostip        unsupported (-23)
+ *
+ * A firmware image cannot say which iovars it has: those its ROM implements
+ * are not in the downloaded image as strings, so only asking tells. The first
+ * two are controls -- every firmware answers cur_etheraddr, and this one
+ * refuses nd_hostip, as dhd_ndo_add_ip() finds -- so a run that gets either
+ * wrong is not to be believed. An answer other than BCME_UNSUPPORTED, a
+ * refused argument or a short buffer included, means the firmware knows the
+ * name.
+ */
+static dhd_pub_t *probe_dhdp;
+static int wifi_probe_iovars;
+
+static const char * const probe_iovar_names[] = {
+	"cur_etheraddr", "nd_hostip",
+	"pfn_macaddr", "pfn_gscan_cfg", "pfn_swc", "pfn_add_bssid", "pfnlbest",
+	"mkeep_alive", "arpoe", "arp_ol", "arp_hostip", "ndoe",
+	"rssi_monitor", "rssi_event",
+	"radiostat", "ratestat", "wme_counters", "counters", "if_counters",
+	"event_log", "logtrace", "pktlog",
+	"apf", "pkt_filter_add", "roam_exp_params",
+	"mfp", "sae_password", "wpa_auth",
+};
+
+static int probe_iovars_set(const char *val, const struct kernel_param *kp)
+{
+	dhd_pub_t *dhdp = probe_dhdp;
+	char *buf;
+	int v, i, ret;
+
+	if (kstrtoint(val, 10, &v) || v != 1)
+		return -EINVAL;
+	if (!dhdp || dhdp->busstate != DHD_BUS_DATA) {
+		pr_err("bcmdhd: iovar probe: firmware is not up\n");
+		return -ENODEV;
+	}
+
+	buf = kmalloc(WLC_IOCTL_SMLEN * 4, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	for (i = 0; i < ARRAYSIZE(probe_iovar_names); i++) {
+		ret = dhd_iovar(dhdp, 0, (char *)probe_iovar_names[i], NULL, 0,
+			buf, WLC_IOCTL_SMLEN * 4, FALSE);
+		pr_info("bcmdhd: iovar %-16s %s (%d)\n", probe_iovar_names[i],
+			ret == BCME_UNSUPPORTED ? "unsupported" : "answers", ret);
+	}
+
+	kfree(buf);
+	return 0;
+}
+
+static const struct kernel_param_ops probe_iovars_ops = {
+	.set = probe_iovars_set,
+};
+module_param_cb(probe_iovars, &probe_iovars_ops, &wifi_probe_iovars, 0220);
+
 /* Watchdog interval */
 
 /* extend watchdog expiration to 2 seconds when DPC is running */
@@ -5523,6 +5586,7 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 #if defined(CUSTOMER_HW20) && defined(WLANAUDIO)
 	dhd_global = dhd;
 #endif /* CUSTOMER_HW20 && WLANAUDIO */
+	probe_dhdp = &dhd->pub;
 	return &dhd->pub;
 
 fail:
@@ -7749,6 +7813,8 @@ dhd_free(dhd_pub_t *dhdp)
 
 	if (dhdp) {
 		int i;
+		if (probe_dhdp == dhdp)
+			probe_dhdp = NULL;
 #ifdef DBG_PKT_MON
 		dhd_pktmon_free(dhdp);
 #endif /* DBG_PKT_MON */
