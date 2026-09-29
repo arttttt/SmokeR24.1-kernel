@@ -379,7 +379,7 @@ s32
 wl_cfgp2p_set_firm_p2p(struct bcm_cfg80211 *cfg)
 {
 	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
-	struct ether_addr null_eth_addr = { { 0, 0, 0, 0, 0, 0 } };
+	struct ether_addr primary_mac;
 	s32 ret = BCME_OK;
 	s32 val = 0;
 	/* Do we have to check whether APSTA is enabled or not ? */
@@ -406,9 +406,17 @@ wl_cfgp2p_set_firm_p2p(struct bcm_cfg80211 *cfg)
 	/* In case of COB type, firmware has default mac address
 	 * After Initializing firmware, we have to set current mac address to
 	 * firmware for P2P device address
+	 *
+	 * Hand over the address we chose rather than a null one. Given nothing
+	 * the firmware derives its own, the primary address with the locally
+	 * administered bit set, which is the primary address itself once that
+	 * has been randomized (see wl_cfgp2p_generate_bss_mac).
 	 */
-	ret = wldev_iovar_setbuf_bsscfg(ndev, "p2p_da_override", &null_eth_addr,
-		sizeof(null_eth_addr), cfg->ioctl_buf, WLC_IOCTL_MAXLEN, 0, &cfg->ioctl_buf_sync);
+	get_primary_mac(cfg, &primary_mac);
+	wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+	ret = wldev_iovar_setbuf_bsscfg(ndev, "p2p_da_override", &cfg->p2p->dev_addr,
+		sizeof(cfg->p2p->dev_addr), cfg->ioctl_buf, WLC_IOCTL_MAXLEN, 0,
+		&cfg->ioctl_buf_sync);
 	if (ret && ret != BCME_UNSUPPORTED) {
 		CFGP2P_ERR(("failed to update device address ret %d\n", ret));
 	}
@@ -2015,14 +2023,31 @@ wl_cfgp2p_generate_bss_mac(struct ether_addr *primary_addr,
 		return;
 	}
 
-	memset(out_dev_addr, 0, sizeof(*out_dev_addr));
 	memset(out_int_addr, 0, sizeof(*out_int_addr));
 
 	/* Generate the P2P Device Address.  This consists of the device's
 	 * primary MAC address with the locally administered bit set.
+	 *
+	 * Unless the primary address has that bit already, as it does whenever
+	 * Android randomizes the station's address: setting it then gives the
+	 * primary address back, and the firmware refuses a discovery BSS that
+	 * shares it (p2p_disc answers BCME_BUSY), so P2P never starts. Take a
+	 * random address instead, as brcmfmac does since 455f3e76cfc0 ("fix
+	 * P2P_DEVICE ethernet address generation").
+	 *
+	 * Callers ask again whenever P2P is off, into the same cfg->p2p fields.
+	 * A random address chosen earlier is kept for as long as it is still
+	 * apart from the primary one, so that every answer names the address
+	 * the P2P device was created with.
 	 */
-	memcpy(out_dev_addr, primary_addr, sizeof(*out_dev_addr));
-	out_dev_addr->octet[0] |= 0x02;
+	if (primary_addr->octet[0] & 0x02) {
+		if (!(out_dev_addr->octet[0] & 0x02) ||
+			!memcmp(out_dev_addr, primary_addr, sizeof(*out_dev_addr)))
+			eth_random_addr(out_dev_addr->octet);
+	} else {
+		memcpy(out_dev_addr, primary_addr, sizeof(*out_dev_addr));
+		out_dev_addr->octet[0] |= 0x02;
+	}
 
 	/* Generate the P2P Interface Address.  If the discovery and connection
 	 * BSSCFGs need to simultaneously co-exist, then this address must be

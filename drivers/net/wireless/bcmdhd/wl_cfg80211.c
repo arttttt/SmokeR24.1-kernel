@@ -13851,17 +13851,18 @@ static void wl_delay(u32 ms)
 s32 wl_cfg80211_get_p2p_dev_addr(struct net_device *net, struct ether_addr *p2pdev_addr)
 {
 	struct bcm_cfg80211 *cfg = g_bcm_cfg;
-	struct ether_addr p2pif_addr;
 	struct ether_addr primary_mac;
 	if (!cfg->p2p)
 		return -1;
+	/* Into cfg->p2p, where a random address chosen before is kept: into
+	 * the caller's buffer it would be chosen afresh on every question.
+	 */
 	if (!p2p_is_on(cfg)) {
 		get_primary_mac(cfg, &primary_mac);
-		wl_cfgp2p_generate_bss_mac(&primary_mac, p2pdev_addr, &p2pif_addr);
-	} else {
-		memcpy(p2pdev_addr->octet,
-			cfg->p2p->dev_addr.octet, ETHER_ADDR_LEN);
+		wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr,
+			&cfg->p2p->int_addr);
 	}
+	memcpy(p2pdev_addr->octet, cfg->p2p->dev_addr.octet, ETHER_ADDR_LEN);
 
 
 	return 0;
