@@ -6201,6 +6201,9 @@ dhdsdio_isr(void *arg)
 	/* Count the interrupt call */
 	bus->intrcount++;
 	bus->ipend = TRUE;
+#ifdef DHD_WAKE_STATUS
+	dhd_wake_isr(bus->dhd);
+#endif /* DHD_WAKE_STATUS */
 
 	/* Shouldn't get this interrupt if we're sleeping? */
 	if (!SLPAUTO_ENAB(bus)) {

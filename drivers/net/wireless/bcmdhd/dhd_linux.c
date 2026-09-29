@@ -55,6 +55,9 @@
 #include <linux/reboot.h>
 #include <linux/notifier.h>
 #include <net/addrconf.h>
+#ifdef DHD_WAKE_STATUS
+#include <net/ndisc.h>
+#endif /* DHD_WAKE_STATUS */
 #ifdef ENABLE_ADAPTIVE_SCHED
 #include <linux/cpufreq.h>
 #endif /* ENABLE_ADAPTIVE_SCHED */
@@ -836,6 +839,27 @@ static int dhd_l2_filter_block_ping(dhd_pub_t *pub, void *pktbuf, int ifidx);
 #endif
 void dhd_enable_packet_filter(int value, dhd_pub_t *dhd);
 #if defined(CONFIG_PM_SLEEP)
+#ifdef DHD_WAKE_STATUS
+/*
+ * Between the start of a system suspend and the end of the resume, the first
+ * wlan interrupt is taken as the one that woke the host, and whatever it
+ * brings -- a firmware event or a frame -- is what the wake is counted as.
+ * Broadcom's bcmdhd 1.77 has the counters and the classification below but
+ * never sets its wake flag on SDIO, so its counts stay at zero; the arming
+ * here is this driver's own. One wlan device only, as the notifier is.
+ */
+static volatile bool dhd_wake_armed = FALSE;
+
+void
+dhd_wake_isr(dhd_pub_t *dhdp)
+{
+	if (dhd_wake_armed) {
+		dhd_wake_armed = FALSE;
+		dhdp->pkt_wake = TRUE;
+	}
+}
+#endif /* DHD_WAKE_STATUS */
+
 static int dhd_pm_callback(struct notifier_block *nfb, unsigned long action, void *ignored)
 {
 	int ret = NOTIFY_DONE;
@@ -853,6 +877,12 @@ static int dhd_pm_callback(struct notifier_block *nfb, unsigned long action, voi
 		suspend = FALSE;
 		break;
 	}
+#ifdef DHD_WAKE_STATUS
+	if (action == PM_SUSPEND_PREPARE || action == PM_POST_SUSPEND) {
+		dhd_wake_armed = suspend;
+		smp_mb();
+	}
+#endif /* DHD_WAKE_STATUS */
 
 	/* FIXME: dhd_wlfc_suspend acquires wd wakelock and calling
 	   in this function is breaking LP0. So moving this function
@@ -3199,6 +3229,54 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 		if (((eth[12] << 8) | eth[13]) != ETHER_TYPE_BRCM)
 			dhd_pktmon_rx(dhdp, skb);
 #endif /* DBG_PKT_MON */
+#ifdef DHD_WAKE_STATUS
+		if (unlikely(dhdp->pkt_wake)) {
+			dhd_wake_counts_t *wc = &dhdp->wake_counts;
+			uint16 type = (eth[12] << 8) | eth[13];
+
+			dhdp->pkt_wake = FALSE;
+			if (type == ETHER_TYPE_BRCM) {
+				wc->rcwake++;
+			} else {
+				/* Classified as bcmdhd 1.77 does. */
+				wc->rxwake++;
+				if (type == ETHER_TYPE_ARP)
+					wc->rx_arp++;
+				if (eth[0] == 0xFF) {
+					wc->rx_bcast++;
+				} else if (eth[0] & 0x01) {
+					wc->rx_mcast++;
+					if (type == ETHER_TYPE_IPV6) {
+						wc->rx_multi_ipv6++;
+						/* Next header, then the ICMPv6 type. */
+						if (len > ETHER_HDR_LEN + 6 &&
+							eth[ETHER_HDR_LEN + 6] == IPPROTO_ICMPV6) {
+							wc->rx_icmpv6++;
+							if (len > ETHER_HDR_LEN + 40) {
+								switch (eth[ETHER_HDR_LEN + 40]) {
+								case NDISC_ROUTER_ADVERTISEMENT:
+									wc->rx_icmpv6_ra++;
+									break;
+								case NDISC_NEIGHBOUR_ADVERTISEMENT:
+									wc->rx_icmpv6_na++;
+									break;
+								case NDISC_NEIGHBOUR_SOLICITATION:
+									wc->rx_icmpv6_ns++;
+									break;
+								}
+							}
+						}
+					} else if (eth[2] == 0x5E) {
+						wc->rx_multi_ipv4++;
+					} else {
+						wc->rx_multi_other++;
+					}
+				} else {
+					wc->rx_ucast++;
+				}
+			}
+		}
+#endif /* DHD_WAKE_STATUS */
 
 		skb->protocol = eth_type_trans(skb, skb->dev);
 

@@ -549,6 +549,55 @@ static int wl_cfgvendor_dbg_get_rx_pkt_fates(struct wiphy *wiphy,
 }
 #endif /* DBG_PKT_MON */
 
+#ifdef DHD_WAKE_STATUS
+/*
+ * The counts dhd_linux.c keeps. Unlike bcmdhd 1.77 this sends no per-event
+ * array: the HAL copies CMD_COUNT_USED entries into a buffer the framework
+ * sizes at 32, and that driver announces WLC_E_LAST of them.
+ */
+static int wl_cfgvendor_get_wake_reason_stats(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	dhd_wake_counts_t *wc = &((dhd_pub_t *)cfg->pub)->wake_counts;
+	struct sk_buff *skb;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		VENDOR_REPLY_OVERHEAD + ATTRIBUTE_U32_LEN * 16);
+	if (unlikely(!skb))
+		return -ENOMEM;
+
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_TOTAL_CMD_EVENT, wc->rcwake);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_CMD_COUNT_USED, 0);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_TOTAL_RX_DATA_WAKE, wc->rxwake);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_UNICAST_COUNT, wc->rx_ucast);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_MULTICAST_COUNT, wc->rx_mcast);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_BROADCAST_COUNT, wc->rx_bcast);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP_PKT, wc->rx_arp);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP6_PKT, wc->rx_icmpv6);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP6_RA, wc->rx_icmpv6_ra);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP6_NA, wc->rx_icmpv6_na);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP6_NS, wc->rx_icmpv6_ns);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_IPV4_RX_MULTICAST_ADD_CNT, wc->rx_multi_ipv4);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_IPV6_RX_MULTICAST_ADD_CNT, wc->rx_multi_ipv6);
+	nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_OTHER_RX_MULTICAST_ADD_CNT, wc->rx_multi_other);
+
+	return cfg80211_vendor_cmd_reply(skb);
+}
+#endif /* DHD_WAKE_STATUS */
+
+/*
+ * The HAL tells the driver when it starts and stops and which socket takes
+ * its events. Newer bcmdhd holds asynchronous debug events back until then;
+ * this driver sends none, so the notice is taken and there is nothing else
+ * to do with it.
+ */
+static int wl_cfgvendor_set_hal_state(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	return 0;
+}
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -654,6 +703,40 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.doit = wl_cfgvendor_dbg_get_rx_pkt_fates
 	},
 #endif /* DBG_PKT_MON */
+#ifdef DHD_WAKE_STATUS
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_GET_WAKE_REASON_STATS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_get_wake_reason_stats
+	},
+#endif /* DHD_WAKE_STATUS */
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_SET_HAL_START
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_hal_state
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_SET_HAL_STOP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_hal_state
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_SET_HAL_PID
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_hal_state
+	},
 	{
 		{
 			.vendor_id = OUI_GOOGLE,

@@ -242,6 +242,25 @@ typedef struct {
 #endif /* defined(WLTDLS) && defined(PCIE_FULL_DONGLE) */
 
 /* Common structure for module and instance linkage */
+#ifdef DHD_WAKE_STATUS
+/* What woke the host through the wlan interrupt, as the wifi HAL asks. */
+typedef struct dhd_wake_counts {
+	uint32 rcwake;		/* by a firmware event */
+	uint32 rxwake;		/* by a received frame, split below */
+	uint32 rx_ucast;
+	uint32 rx_mcast;
+	uint32 rx_bcast;
+	uint32 rx_arp;
+	uint32 rx_icmpv6;
+	uint32 rx_icmpv6_ra;
+	uint32 rx_icmpv6_na;
+	uint32 rx_icmpv6_ns;
+	uint32 rx_multi_ipv4;
+	uint32 rx_multi_ipv6;
+	uint32 rx_multi_other;
+} dhd_wake_counts_t;
+#endif /* DHD_WAKE_STATUS */
+
 typedef struct dhd_pub {
 	/* Linkage ponters */
 	osl_t *osh;		/* OSL handle */
@@ -450,7 +469,15 @@ typedef struct dhd_pub {
 #ifdef DBG_PKT_MON
 	void *pktmon;		/* dhd_pktmon.c, created on the first start */
 #endif /* DBG_PKT_MON */
+#ifdef DHD_WAKE_STATUS
+	dhd_wake_counts_t wake_counts;
+	bool pkt_wake;		/* the wake's first frame or event is yet to come */
+#endif /* DHD_WAKE_STATUS */
 } dhd_pub_t;
+
+#ifdef DHD_WAKE_STATUS
+extern void dhd_wake_isr(dhd_pub_t *dhdp);
+#endif /* DHD_WAKE_STATUS */
 
 #if defined(BCMWDF)
 typedef struct {
