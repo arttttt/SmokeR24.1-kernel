@@ -49,6 +49,12 @@
 		fw_path = "/vendor/firmware/mocha_fw_bcmdhd.bin";
 		nv_path = "/vendor/etc/mocha_nvram.txt";
 		/*
+		 * The firmware's own roaming stays off, as it was when the driver
+		 * was built with DISABLE_BUILTIN_ROAM; the driver taken from 4.9
+		 * builds roaming in and asks the tree whether to turn it off.
+		 */
+		builtin-roam-disabled;
+		/*
 		 * conn_init writes the address here, and it has to be a path it
 		 * can write: /vendor is mounted read-only, so the old location
 		 * under /vendor/etc never held a file at all and this property
