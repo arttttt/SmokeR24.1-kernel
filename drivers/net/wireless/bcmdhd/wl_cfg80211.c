@@ -5276,10 +5276,18 @@ wl_cfg80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 				WL_TRACE_HW4(("fw state is not associated \n"));
 			}
 			/* Disconnect due to fw is not associated for FW_ASSOC_WATCHDOG_TIME ms.
-			* 'err == 0 or BCME_NOTASSOCIATED' of dhd_is_associated() and '!fw_assoc_state'
+			* 'err == 0' of dhd_is_associated() and '!fw_assoc_state'
 			* means that BSSID is null.
+			*
+			* Not on BCME_NOTASSOCIATED, as Broadcom's later drivers (1.77, 100.10)
+			* have it too. The question goes to interface 0 whatever dev is, and
+			* with a Wi-Fi Direct group up beside the station this firmware
+			* answers it not for the station: once a client joins the group it
+			* says "not associated" while the station's link carries traffic
+			* undisturbed. Taken as a lost link, that answer tore down a
+			* healthy connection five seconds after every peer came or went.
 			*/
-			if (dhd_assoc_state && !fw_assoc_state && (err == BCME_NOTASSOCIATED || !err)) {
+			if (dhd_assoc_state && !fw_assoc_state && !err) {
 				if (!fw_assoc_timeout.fw_assoc_watchdog_started) {
 					fw_assoc_timeout.dev = dev;
 					fw_assoc_timeout.cfg = cfg;
@@ -9499,7 +9507,7 @@ wl_notify_connect_status(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 				if (memcmp(curbssid, &e->addr, ETHER_ADDR_LEN) != 0) {
 					bool fw_assoc_state = TRUE;
 					dhd_pub_t *dhd = (dhd_pub_t *)cfg->pub;
-					fw_assoc_state = dhd_is_associated(dhd, 0, &err);
+					fw_assoc_state = dhd_is_associated(dhd, e->ifidx, &err);
 					if (!fw_assoc_state) {
 						WL_ERR(("Event sends up even different BSSID"
 							" cur: " MACDBG " event: " MACDBG" e->ifidx:%d\n",
