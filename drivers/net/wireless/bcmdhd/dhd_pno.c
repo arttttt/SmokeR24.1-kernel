@@ -232,9 +232,32 @@ dhd_pno_set_mac_oui(dhd_pub_t *dhd, uint8 *oui)
 }
 
 static int
+dhd_pno_set_mac_addr(dhd_pub_t *dhd, struct ether_addr *macaddr)
+{
+	int err;
+	wl_pfn_macaddr_cfg_t cfg;
+
+	cfg.version = WL_PFN_MACADDR_CFG_VER;
+	if (ETHER_ISNULLADDR(macaddr)) {
+		cfg.flags = 0;
+	} else {
+		cfg.flags = (WL_PFN_MAC_OUI_ONLY_MASK | WL_PFN_SET_MAC_UNASSOC_MASK);
+	}
+	memcpy(&cfg.macaddr, macaddr, ETHER_ADDR_LEN);
+
+	err = dhd_iovar(dhd, 0, "pfn_macaddr", (char *)&cfg, sizeof(cfg), NULL, 0, TRUE);
+	if (err < 0) {
+		DHD_ERROR(("%s : failed to execute pfn_macaddr\n", __FUNCTION__));
+	}
+
+	return err;
+}
+
+static int
 _dhd_pno_set(dhd_pub_t *dhd, const dhd_pno_params_t *pno_params, dhd_pno_mode_t mode)
 {
 	int err = BCME_OK;
+	struct ether_addr macaddr;
 	wl_pfn_param_t pfn_param;
 	dhd_pno_params_t *_params;
 	dhd_pno_status_info_t *_pno_state;
@@ -342,6 +365,20 @@ _dhd_pno_set(dhd_pub_t *dhd, const dhd_pno_params_t *pno_params, dhd_pno_mode_t 
 		err = BCME_BADARG;
 		goto exit;
 	}
+
+	/*
+	 * Scan with the OUI the framework asked for and a random rest while
+	 * not associated. The Samsung driver this comes from gives up on PNO
+	 * when the firmware refuses; here a refusal leaves PNO scanning with
+	 * the real address, which is what it did before this was applied.
+	 */
+	memset(&macaddr, 0, ETHER_ADDR_LEN);
+	memcpy(&macaddr, _pno_state->pno_oui, DOT11_OUI_LEN);
+	DHD_PNO(("Setting mac oui to FW - %02x:%02x:%02x\n", _pno_state->pno_oui[0],
+		_pno_state->pno_oui[1], _pno_state->pno_oui[2]));
+	if (dhd_pno_set_mac_addr(dhd, &macaddr) < 0)
+		DHD_ERROR(("%s : pno scans keep the real mac address\n", __FUNCTION__));
+
 	if (mode == DHD_PNO_BATCH_MODE) {
 		int _tmp = pfn_param.bestn;
 		/* set bestn to calculate the max mscan which firmware supports */
