@@ -376,6 +376,95 @@ wl_cfgvendor_set_pno_mac_oui(struct wiphy *wiphy,
 	return err;
 }
 
+#ifdef LINKSTAT_SUPPORT
+/*
+ * Link layer statistics from what this firmware has.
+ *
+ * Samsung's bcmdhd (LineageOS android_kernel_samsung_universal8890,
+ * bcmdhd4358) builds these from the radiostat, wme_counters, counters and
+ * ratestat iovars. The BCM4354 firmware here carries only counters, so the
+ * radio record goes out empty -- no channels, no on-time -- per-AC figures
+ * are totals under best effort, and there are no peer or rate records.
+ * What the framework does get is real: beacons from the AP, data frames
+ * sent and received, losses and retries, and the AP's RSSI.
+ */
+static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
+	int buflen = sizeof(wifi_radio_stat) + sizeof(wifi_iface_stat);
+	wifi_radio_stat *radio;
+	wifi_iface_stat *iface;
+	wl_cnt_t *cnt = NULL;
+	char *buf;
+	int err, i;
+
+	buf = kzalloc(buflen, GFP_KERNEL);
+	cnt = kzalloc(sizeof(*cnt), GFP_KERNEL);
+	if (unlikely(!buf || !cnt)) {
+		err = -ENOMEM;
+		goto exit;
+	}
+	radio = (wifi_radio_stat *)buf;
+	iface = (wifi_iface_stat *)(buf + sizeof(wifi_radio_stat));
+
+	err = wldev_iovar_getbuf(ndev, "counters", NULL, 0,
+		(char *)cnt, sizeof(*cnt), NULL);
+	if (unlikely(err)) {
+		WL_ERR(("%s: counters failed (%d)\n", __FUNCTION__, err));
+		goto exit;
+	}
+	if (dtoh16(cnt->version) > WL_CNT_T_VERSION) {
+		WL_ERR(("%s: wl_cnt_t version %u, expected up to %u\n",
+			__FUNCTION__, dtoh16(cnt->version), WL_CNT_T_VERSION));
+		err = -EINVAL;
+		goto exit;
+	}
+
+	radio->num_channels = 0;
+
+	iface->info.mode = WIFI_INTERFACE_STA;
+	memcpy(iface->info.mac_addr, ndev->dev_addr, ETHER_ADDR_LEN);
+	if (wl_get_drv_status(cfg, CONNECTED, ndev)) {
+		wlc_ssid_t ssid;
+		scb_val_t scbval;
+
+		iface->info.state = WIFI_ASSOCIATED;
+		memset(&ssid, 0, sizeof(ssid));
+		if (!wldev_ioctl(ndev, WLC_GET_SSID, &ssid, sizeof(ssid), false)) {
+			u32 ssid_len = MIN(dtoh32(ssid.SSID_len), DOT11_MAX_SSID_LEN);
+			memcpy(iface->info.ssid, ssid.SSID, ssid_len);
+		}
+		wldev_ioctl(ndev, WLC_GET_BSSID, iface->info.bssid, ETHER_ADDR_LEN, false);
+		memset(&scbval, 0, sizeof(scbval));
+		if (!wldev_get_rssi(ndev, &scbval))
+			iface->rssi_mgmt = dtoh32(scbval.val);
+	} else {
+		iface->info.state = WIFI_DISCONNECTED;
+	}
+
+	iface->beacon_rx = dtoh32(cnt->rxbeaconmbss);
+	for (i = 0; i < WIFI_AC_MAX; i++)
+		iface->ac[i].ac = i;
+	iface->ac[WIFI_AC_BE].tx_mpdu = dtoh32(cnt->txframe);
+	iface->ac[WIFI_AC_BE].rx_mpdu = dtoh32(cnt->rxframe);
+	iface->ac[WIFI_AC_BE].rx_mcast = dtoh32(cnt->rxmulti);
+	iface->ac[WIFI_AC_BE].mpdu_lost = dtoh32(cnt->txfail);
+	iface->ac[WIFI_AC_BE].retries = dtoh32(cnt->txretry);
+	iface->num_peers = 0;
+
+	err = wl_cfgvendor_send_cmd_reply(wiphy, ndev, buf, buflen);
+	if (unlikely(err))
+		WL_ERR(("%s: vendor command reply failed (%d)\n", __FUNCTION__, err));
+
+exit:
+	kfree(cnt);
+	kfree(buf);
+	return err;
+}
+#endif /* LINKSTAT_SUPPORT */
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -445,6 +534,16 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_set_pno_mac_oui
 	},
+#ifdef LINKSTAT_SUPPORT
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = LSTATS_SUBCMD_GET_INFO
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_lstats_get_info
+	},
+#endif /* LINKSTAT_SUPPORT */
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
