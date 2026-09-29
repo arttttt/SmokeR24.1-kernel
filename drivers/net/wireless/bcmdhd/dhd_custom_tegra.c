@@ -19,6 +19,7 @@
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/of.h>
+#include <linux/of_net.h>
 
 #include <bcmutils.h>
 #include <linux_osl.h>
@@ -144,16 +145,43 @@ err_out:
 	return ret;
 }
 
+/*
+ * The address the board's own node gives: mac-address, or the file named
+ * by mac-address-file, which of_get_mac_address() reads and then keeps on
+ * the node. The rel-24 driver asked this first; the one from 4.9 dropped
+ * it, and every firmware download after the first fell back to the
+ * sample address in the nvram.
+ */
+static int wifi_get_mac_addr_node(unsigned char *buf)
+{
+	struct device_node *np;
+	const void *mac;
+
+	np = of_find_compatible_node(NULL, NULL, "android,bcmdhd_wlan");
+	if (!np)
+		return -ENOENT;
+	mac = of_get_mac_address(np);
+	of_node_put(np);
+	if (!mac)
+		return -ENOENT;
+	memcpy(buf, mac, 6);
+
+	return 0;
+}
+
 int wifi_get_mac_addr(unsigned char *buf)
 {
 	int ret = -ENODATA;
 
 	/* The MAC address search order is:
+	 * The wlan node (mac-address, mac-address-file)
 	 * DTB (from NCT/EEPROM)
 	 * NCT
 	 * File (FCT/rootfs)
 	*/
-	ret = wifi_get_mac_address_dtb("/chosen", "nvidia,wifi-mac", buf);
+	ret = wifi_get_mac_addr_node(buf);
+	if (ret)
+		ret = wifi_get_mac_address_dtb("/chosen", "nvidia,wifi-mac", buf);
 	if (ret)
 		ret = wifi_get_mac_addr_file(buf);
 
