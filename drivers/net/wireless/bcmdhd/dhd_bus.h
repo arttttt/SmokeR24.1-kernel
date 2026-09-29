@@ -81,6 +81,9 @@ extern bool dhd_bus_dev_pm_enabled(dhd_pub_t *dhdpub);
 /* Device console input function */
 extern int dhd_bus_console_in(dhd_pub_t *dhd, uchar *msg, uint msglen);
 extern int dhd_bus_mem_dump(dhd_pub_t *dhd);
+#ifdef BCMSDIO
+extern int dhd_bus_socram_dump(dhd_pub_t *dhd);
+#endif /* BCMSDIO */
 #endif /* defined(DHD_DEBUG) */
 
 /* Deferred processing for the bus, return TRUE requests reschedule */

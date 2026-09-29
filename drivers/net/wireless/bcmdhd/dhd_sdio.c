@@ -3192,6 +3192,35 @@ dhd_bus_mem_dump(dhd_pub_t *dhdp)
 	dhd_bus_t *bus = dhdp->bus;
 	return dhdsdio_mem_dump(bus);
 }
+
+/*
+ * A dump on request -- the wifi HAL's, for a bug report -- rather than from
+ * a trap: the dongle is running, so the bus is taken and clocked the way the
+ * bus iovars take it before its RAM is read.
+ */
+int
+dhd_bus_socram_dump(dhd_pub_t *dhdp)
+{
+	dhd_bus_t *bus = dhdp->bus;
+	int ret;
+
+	if (!bus || dhdp->busstate != DHD_BUS_DATA || dhdp->dongle_reset)
+		return BCME_NOTREADY;
+
+	dhd_os_sdlock(dhdp);
+	BUS_WAKE(bus);
+	dhdsdio_clkctl(bus, CLK_AVAIL, FALSE);
+
+	ret = dhdsdio_mem_dump(bus);
+
+	if ((bus->idletime == DHD_IDLE_IMMEDIATE) && !bus->dpc_sched) {
+		bus->activity = FALSE;
+		dhdsdio_clkctl(bus, CLK_NONE, TRUE);
+	}
+	dhd_os_sdunlock(dhdp);
+
+	return ret;
+}
 #endif /* #ifdef DHD_DEBUG */
 
 int

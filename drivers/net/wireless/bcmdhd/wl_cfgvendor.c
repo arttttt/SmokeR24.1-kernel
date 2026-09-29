@@ -75,6 +75,7 @@
 #include <wl_android.h>
 #include <wl_cfgvendor.h>
 #include <dhd_pktmon.h>
+#include <dhd_bus.h>
 #ifdef PROP_TXSTATUS
 #include <dhd_wlfc.h>
 #endif
@@ -598,6 +599,76 @@ static int wl_cfgvendor_set_hal_state(struct wiphy *wiphy,
 	return 0;
 }
 
+#if defined(DHD_DEBUG) && defined(BCMSDIO)
+/*
+ * The firmware memory dump the HAL puts in bug reports: TRIGGER reads the
+ * dongle's RAM into the driver and answers with its length; the HAL then
+ * asks GET with a buffer of that length for the driver to fill.
+ */
+static int wl_cfgvendor_dbg_trigger_mem_dump(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	dhd_pub_t *dhdp = (dhd_pub_t *)cfg->pub;
+	struct sk_buff *skb;
+	int ret;
+
+	ret = dhd_bus_socram_dump(dhdp);
+	if (ret || !dhdp->soc_ram || !dhdp->soc_ram_length) {
+		WL_ERR(("%s: firmware memory dump failed (%d)\n", __FUNCTION__, ret));
+		return -EIO;
+	}
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		VENDOR_REPLY_OVERHEAD + ATTRIBUTE_U32_LEN);
+	if (unlikely(!skb))
+		return -ENOMEM;
+	nla_put_u32(skb, DEBUG_ATTRIBUTE_FW_DUMP_LEN, dhdp->soc_ram_length);
+
+	return cfg80211_vendor_cmd_reply(skb);
+}
+
+static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	dhd_pub_t *dhdp = (dhd_pub_t *)cfg->pub;
+	const struct nlattr *iter;
+	void __user *user_buf = NULL;
+	uint32 buf_len = 0, copy_len;
+	struct sk_buff *skb;
+	int tmp;
+
+	nla_for_each_attr(iter, data, len, tmp) {
+		switch (nla_type(iter)) {
+			case DEBUG_ATTRIBUTE_FW_DUMP_LEN:
+				buf_len = nla_get_u32(iter);
+				break;
+			case DEBUG_ATTRIBUTE_FW_DUMP_DATA:
+				user_buf = (void __user *)(unsigned long) nla_get_u64(iter);
+				break;
+			default:
+				WL_ERR(("%s: no such attribute %d\n", __FUNCTION__, nla_type(iter)));
+				return -EINVAL;
+		}
+	}
+	if (!buf_len || !user_buf || !dhdp->soc_ram)
+		return -EINVAL;
+
+	copy_len = MIN(buf_len, dhdp->soc_ram_length);
+	if (copy_to_user(user_buf, dhdp->soc_ram, copy_len))
+		return -EFAULT;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		VENDOR_REPLY_OVERHEAD + ATTRIBUTE_U32_LEN);
+	if (unlikely(!skb))
+		return -ENOMEM;
+	nla_put_u32(skb, DEBUG_ATTRIBUTE_FW_DUMP_DATA, copy_len);
+
+	return cfg80211_vendor_cmd_reply(skb);
+}
+#endif /* DHD_DEBUG && BCMSDIO */
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -767,7 +838,11 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.subcmd = DEBUG_TRIGGER_MEM_DUMP
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+#if defined(DHD_DEBUG) && defined(BCMSDIO)
+		.doit = wl_cfgvendor_dbg_trigger_mem_dump
+#else
 		.doit = wl_cfgvendor_unsupported_feature
+#endif
 	},
 	{
 		{
@@ -775,7 +850,11 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.subcmd = DEBUG_GET_MEM_DUMP
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+#if defined(DHD_DEBUG) && defined(BCMSDIO)
+		.doit = wl_cfgvendor_dbg_get_mem_dump
+#else
 		.doit = wl_cfgvendor_unsupported_feature
+#endif
 	},
 	{
 		{
