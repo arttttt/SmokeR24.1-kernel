@@ -688,6 +688,25 @@ static int wl_cfgvendor_dbg_get_feature(struct wiphy *wiphy,
 	return wl_cfgvendor_send_cmd_reply(wiphy, wdev->netdev, &features, sizeof(features));
 }
 
+/*
+ * There are no ring buffers: the firmware carries no event_log to fill
+ * them. Saying there are none, rather than refusing the question, leaves
+ * the framework nothing to start logging on.
+ */
+static int wl_cfgvendor_dbg_get_ring_status(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct sk_buff *skb;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		VENDOR_REPLY_OVERHEAD + ATTRIBUTE_U32_LEN);
+	if (unlikely(!skb))
+		return -ENOMEM;
+	nla_put_u32(skb, DEBUG_ATTRIBUTE_RING_NUM, 0);
+
+	return cfg80211_vendor_cmd_reply(skb);
+}
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -838,14 +857,6 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
-			.subcmd = DEBUG_GET_RING_STATUS
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = OUI_GOOGLE,
 			.subcmd = DEBUG_START_LOGGING
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
@@ -881,7 +892,7 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.subcmd = DEBUG_GET_RING_STATUS
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
+		.doit = wl_cfgvendor_dbg_get_ring_status
 	},
 	{
 		{
