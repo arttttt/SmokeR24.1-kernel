@@ -23,6 +23,8 @@
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 #include "dhd_custom_sysfs_tegra.h"
 #endif
+#include "dhd_custom_sysfs_tegra_scan.h"
+#include <wl_cfg80211.h>
 
 static int tegra_net_diag_debug;
 
@@ -48,11 +50,23 @@ static void tegra_net_diag_work_func(struct work_struct *work)
 	struct net_device *net
 		= NULL;
 #endif
+	struct wireless_dev *wdev = NULL;
+	struct bcm_cfg80211 *cfg = NULL;
 	int err;
 
 	/* check input */
 	if (!net)
 		return;
+
+	/* Abort ongoing scan and acquire scan lock */
+	if (wifi_scan_sem_lock() < 0)
+		return;
+
+	wdev = net->ieee80211_ptr;
+	if (wdev != NULL && wdev->wiphy != NULL) {
+		cfg = wiphy_priv(wdev->wiphy);
+		wl_cfg80211_cancel_scan(cfg);
+	}
 
 	/* get assoc mode (802.11 mode a/b/g/n/ac) */
 	{
@@ -133,6 +147,7 @@ static void tegra_net_diag_work_func(struct work_struct *work)
 #ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
 	tegra_net_diag_data.bw_est = tegra_net_bw_est_get_value();
 #endif
+	wifi_scan_sem_unlock();
 
 }
 
@@ -167,6 +182,29 @@ static void tegra_net_diag_work_stop(void)
 	cancel_delayed_work_sync(&tegra_net_diag_work);
 }
 
+void tegra_net_diag_get_value(tegra_net_diag_data_t *net_diag_data)
+{
+	TEGRA_NET_DIAG_DEBUG("%s\n", __func__);
+
+	memset(&tegra_net_diag_data, 0, sizeof(tegra_net_diag_data_t));
+
+	/* start network diagnostics work */
+	tegra_net_diag_work_start();
+
+	/* wait for network diagnostics work to finish */
+	flush_delayed_work(&tegra_net_diag_work);
+
+	memcpy(net_diag_data, &tegra_net_diag_data,
+			sizeof(tegra_net_diag_data_t));
+
+	/* save a copy of the diag data in bcmdhd tcpdump */
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+	tcpdump_pkt_save('D', "", __func__, __LINE__,
+		(void *) &tegra_net_diag_data, sizeof(tegra_net_diag_data), 0);
+#endif
+}
+
+
 /* network diagnostics sysfs */
 
 static ssize_t
@@ -178,11 +216,7 @@ tegra_net_diag_show(struct device *dev,
 
 	TEGRA_NET_DIAG_DEBUG("%s\n", __func__);
 
-	/* start network diagnostics work */
-	tegra_net_diag_work_start();
-
-	/* wait for network diagnostics work to finish */
-	flush_delayed_work(&tegra_net_diag_work);
+	tegra_net_diag_get_value(&tegra_net_diag_data);
 
 	/* show assoc mode (802.11 mode a/b/g/n/ac) */
 	snprintf(s, PAGE_SIZE - (s - buf),
@@ -213,12 +247,6 @@ tegra_net_diag_show(struct device *dev,
 		"Bandwidth: %ld\n",
 		tegra_net_diag_data.bw_est);
 	s += strlen(s);
-
-	/* save a copy of the diag data in bcmdhd tcpdump */
-#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
-	tcpdump_pkt_save('D', "", __func__, __LINE__,
-		(void *) &tegra_net_diag_data, sizeof(tegra_net_diag_data), 0);
-#endif
 
 	return strlen(buf);
 }
@@ -260,7 +288,7 @@ tegra_net_diag_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(net_diag, S_IRUGO | S_IWUGO,
+static DEVICE_ATTR(net_diag, S_IRUGO | S_IWUSR,
 	tegra_net_diag_show,
 	tegra_net_diag_store);
 

@@ -18,7 +18,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -38,6 +38,7 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/sort.h>
+#include <linux/version.h>
 #include <dngl_stats.h>
 #include <wlioctl.h>
 
@@ -191,6 +192,42 @@ _dhd_pno_enable(dhd_pub_t *dhd, int enable)
 	DHD_PNO(("%s set pno as %s\n",
 		__FUNCTION__, enable ? "Enable" : "Disable"));
 exit:
+	return err;
+}
+
+bool dhd_is_pno_supported(dhd_pub_t *dhd)
+{
+	dhd_pno_status_info_t *_pno_state;
+
+	if (!dhd || !dhd->pno_state) {
+		DHD_ERROR(("NULL POINTER : %s\n",
+			__FUNCTION__));
+		return FALSE;
+	}
+	_pno_state = PNO_GET_PNOSTATE(dhd);
+	return WLS_SUPPORTED(_pno_state);
+}
+
+int
+dhd_pno_set_mac_oui(dhd_pub_t *dhd, uint8 *oui)
+{
+	int err = BCME_OK;
+	dhd_pno_status_info_t *_pno_state;
+
+	if (!dhd || !dhd->pno_state) {
+		DHD_ERROR(("NULL POINTER : %s\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+	_pno_state = PNO_GET_PNOSTATE(dhd);
+	if (ETHER_ISMULTI(oui)) {
+		DHD_ERROR(("Expected unicast OUI\n"));
+		err = BCME_ERROR;
+	} else {
+		memcpy(_pno_state->pno_oui, oui, DOT11_OUI_LEN);
+		DHD_PNO(("PNO mac oui to be used - %02x:%02x:%02x\n", _pno_state->pno_oui[0],
+		    _pno_state->pno_oui[1], _pno_state->pno_oui[2]));
+	}
+
 	return err;
 }
 
@@ -1560,7 +1597,15 @@ exit:
 		_params->params_batch.get_batch.bytes_written = err;
 	}
 	mutex_unlock(&_pno_state->pno_mutex);
+#if IS_ENABLED(CONFIG_PREEMPT_RT_FULL)
+	if (swait_active(&_pno_state->get_batch_done.wait))
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 57)
+	if (waitqueue_active((struct wait_queue_head *)&_pno_state->get_batch_done.wait))
+#else
 	if (waitqueue_active(&_pno_state->get_batch_done.wait))
+#endif
+#endif
 		complete(&_pno_state->get_batch_done);
 	return err;
 }
@@ -2006,7 +2051,15 @@ dhd_pno_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 	{
 		struct dhd_pno_batch_params *params_batch;
 		params_batch = &_pno_state->pno_params_arr[INDEX_OF_BATCH_PARAMS].params_batch;
+#if IS_ENABLED(CONFIG_PREEMPT_RT_FULL)
+		if (!swait_active(&_pno_state->get_batch_done.wait)) {
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 57)
+		if (!waitqueue_active((struct wait_queue_head *)&_pno_state->get_batch_done.wait)) {
+#else
 		if (!waitqueue_active(&_pno_state->get_batch_done.wait)) {
+#endif
+#endif
 			DHD_PNO(("%s : WLC_E_PFN_BEST_BATCHING\n", __FUNCTION__));
 			params_batch->get_batch.buf = NULL;
 			params_batch->get_batch.bufsize = 0;

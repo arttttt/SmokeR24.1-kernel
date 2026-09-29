@@ -43,7 +43,7 @@
 #endif
 
 #ifndef TCPDUMP_MAXSIZ
-#define TCPDUMP_MAXSIZ		(6 * 1024 * 1024)
+#define TCPDUMP_MAXSIZ		(3 * 1024 * 1024)
 #endif
 
 /* delay between rx packet and running statistics work function
@@ -148,6 +148,9 @@ static multidump_pkt_log_t multidump_pkt_log[3] = {
 #define multidump_serial_no	(multidump_pkt_log[multi].serial_no)
 #define multidump_pkt(i)	(multidump_pkt_log[multi].pkt + i)
 #define multidump_maxpkt	(multidump_pkt_log[multi].maxpkt)
+/* If multi is not set default multi is 0 do replacing null with
+ &(tcpdump_pkt_data[i][0]) but not updating max length. it will
+ be 0 which means no memcpy will happen */
 #define multidump_pkt_data(i)	(\
 				(multi == 0)\
 				? &(tcpdump_pkt_data[i][0]) \
@@ -155,7 +158,7 @@ static multidump_pkt_log_t multidump_pkt_log[3] = {
 				? &(pwrdump_pkt_data[i][0]) \
 				: (multi == 2)\
 				? &(statdump_pkt_data[i][0]) \
-				: (unsigned char *) 0\
+				: &(tcpdump_pkt_data[i][0])\
 				)
 #define multidump_pkt_data_max_len(i)\
 				(\
@@ -203,7 +206,7 @@ DEFINE_SPINLOCK(tcpdump_lock);
 static DEFINE_SEMAPHORE(tcpdump_read_lock);
 
 extern int lp0_logs_enable;
-static int pkt_save = 0;
+static int pkt_save;
 static int pkt_rx_save = 1;
 static int pkt_tx_save = 1;
 static atomic_t insert_dummy_timestamp = ATOMIC_INIT(1);

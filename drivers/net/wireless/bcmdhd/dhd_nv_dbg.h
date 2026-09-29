@@ -29,19 +29,19 @@
 					time_to_tm(now.tv_sec, -sys_tz.tz_minuteswest * 60, &date_time);	\
 					pr_info("[%.2d-%.2d %.2d:%.2d:%.2d.%u] %s: ",	\
 						date_time.tm_mon+1, date_time.tm_mday, date_time.tm_hour,	\
-						date_time.tm_min,date_time.tm_sec ,	\
+						date_time.tm_min, date_time.tm_sec,	\
 						(unsigned int)(now.tv_usec/1000), __func__);	\
-				} while(0)
+				} while (0)
 
 #define DHD_NV_PRINT(args) 	\
 								do {	\
 									NV_TIMESTAMP();\
 									pr_cont args;	\
-								} while(0)
+								} while (0)
 
-#define DHD_NV_INFO(args)	do {	DHD_NV_PRINT(args);	} while(0)
-#define DHD_NV_DEBUG(args)	do {	DHD_NV_PRINT(args);	} while(0)
-#define DHD_NV_ERROR(args)	do {	DHD_NV_PRINT(args);	} while(0)
+#define DHD_NV_INFO(args)	do {	DHD_NV_PRINT(args);	} while (0)
+#define DHD_NV_DEBUG(args)	do {	DHD_NV_PRINT(args);	} while (0)
+#define DHD_NV_ERROR(args)	do {	DHD_NV_PRINT(args);	} while (0)
 
 #endif  /* _dhd_nv_dbg_h_ */
 

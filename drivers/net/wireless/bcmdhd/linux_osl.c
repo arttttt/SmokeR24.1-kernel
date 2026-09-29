@@ -63,6 +63,7 @@
 #endif /* BCM_SECURE_DMA */
 
 #include <linux/fs.h>
+#include <linux/mmc/host.h>
 
 
 #if defined(BCMPCIE)
@@ -542,7 +543,7 @@ static struct sk_buff *osl_alloc_skb(osl_t *osh, unsigned int len)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)
 	gfp_t flags = (in_atomic() || irqs_disabled()) ? GFP_ATOMIC : GFP_KERNEL;
 #if defined(CONFIG_SPARSEMEM) && defined(CONFIG_ZONE_DMA)
-	flags |= GFP_ATOMIC;
+	flags |= GFP_DMA;
 #endif
 	skb = __dev_alloc_skb(len, flags);
 #else
@@ -1841,9 +1842,13 @@ osl_os_get_image_block(char *buf, int len, void *image)
 	if (!image)
 		return 0;
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(4, 13, 0))
+	rdlen = kernel_read(fp, buf, len, &fp->f_pos);
+#else
 	rdlen = kernel_read(fp, fp->f_pos, buf, len);
 	if (rdlen > 0)
 		fp->f_pos += rdlen;
+#endif
 
 	return rdlen;
 }
@@ -2418,3 +2423,29 @@ osl_sec_cma_baseaddr_memsize(osl_t *osh, dma_addr_t *cma_baseaddr, uint32 *cma_m
 }
 
 #endif /* BCM_SECURE_DMA */
+
+int dhd_mmc_power_save_host(struct mmc_host *host)
+{
+	if (!host) {
+		printf("%s: host is NULL\n", __FUNCTION__);
+		return -EINVAL;
+	}
+
+	if (host->ios.power_mode == MMC_POWER_OFF)
+		return 0;
+
+	return mmc_power_save_host(host);
+}
+
+int dhd_mmc_power_restore_host(struct mmc_host *host)
+{
+	if (!host) {
+		printf("%s: host is NULL\n", __FUNCTION__);
+		return -EINVAL;
+	}
+
+	if (host->ios.power_mode == MMC_POWER_ON)
+		return 0;
+
+	return mmc_power_restore_host(host);
+}

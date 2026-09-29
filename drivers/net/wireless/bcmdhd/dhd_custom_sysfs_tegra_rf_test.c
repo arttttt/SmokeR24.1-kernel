@@ -22,7 +22,6 @@
 #include "wldev_common.h"
 
 atomic_t rf_test = ATOMIC_INIT(0);
-atomic_t pm_disable = ATOMIC_INIT(0);
 atomic_t cur_power_mode = ATOMIC_INIT(0);
 extern int tegra_sysfs_wifi_on;
 
@@ -79,6 +78,7 @@ tegra_sysfs_rf_test_disable()
 	extern struct net_device *dhd_custom_sysfs_tegra_histogram_stat_netdev;
 	struct net_device *net = dhd_custom_sysfs_tegra_histogram_stat_netdev;
 	int i;
+	int arg;
 
 	pr_info("%s\n", __func__);
 
@@ -91,56 +91,13 @@ tegra_sysfs_rf_test_disable()
 				pr_err("%s: Failed to restore %s val\n", __func__, rf_test_params[i].var);
 			}
 		}
+		arg = atomic_read(&cur_power_mode);
 		if (wldev_ioctl(net, WLC_SET_PM,
-			(void *)&atomic_read(&cur_power_mode),
-			sizeof(cur_power_mode), true)) {
+			(void *)&arg, sizeof(cur_power_mode), true)) {
 			pr_err("%s: Failed to restore power mode state\n", __func__);
 		}
 	}
 }
-
-void
-tegra_sysfs_pm_disable(void)
-{
-	extern struct net_device *dhd_custom_sysfs_tegra_histogram_stat_netdev;
-	struct net_device *net = dhd_custom_sysfs_tegra_histogram_stat_netdev;
-	int power_mode_off = 0;
-
-	pr_info("%s\n", __func__);
-
-	if (tegra_sysfs_wifi_on) {
-		if (wldev_ioctl(net, WLC_GET_PM, &cur_power_mode,
-				sizeof(cur_power_mode), false))
-			pr_err("%s: Failed to get current power mode state\n", __func__);
-
-		if (wldev_ioctl(net, WLC_SET_PM, &power_mode_off,
-				sizeof(power_mode_off), true))
-			pr_err("%s: Failed to set power mode off state\n", __func__);
-	}
-	atomic_set(&pm_disable, 1);
-}
-
-
-void
-tegra_sysfs_pm_enable(void)
-{
-	extern struct net_device *dhd_custom_sysfs_tegra_histogram_stat_netdev;
-	struct net_device *net = dhd_custom_sysfs_tegra_histogram_stat_netdev;
-
-	pr_info("%s\n", __func__);
-
-	if (atomic_read(&pm_disable)) {
-		atomic_set(&pm_disable, 0);
-		if (tegra_sysfs_wifi_on) {
-			if (wldev_ioctl(net, WLC_SET_PM,
-				(void *)&atomic_read(&cur_power_mode),
-				sizeof(cur_power_mode), true)) {
-				pr_err("%s: Failed to restore power mode state\n", __func__);
-			}
-		}
-	}
-}
-
 
 ssize_t
 tegra_sysfs_rf_test_state_show(struct device *dev,
@@ -170,44 +127,6 @@ tegra_sysfs_rf_test_state_store(struct device *dev,
 	} else if (strncmp(buf, "disable", 7) == 0) {
 		if (atomic_read(&rf_test) && tegra_sysfs_wifi_on) {
 			tegra_sysfs_rf_test_disable();
-		} else {
-			pr_info("%s: operation not allowed\n", __func__);
-		}
-	} else {
-		pr_err("%s: unknown command\n", __func__);
-	}
-
-	return count;
-}
-
-ssize_t
-tegra_sysfs_pm_state_show(struct device *dev,
-	struct device_attribute *attr,
-	char *buf)
-{
-	if (atomic_read(&pm_disable)) {
-		strcpy(buf, "pm disabled\n");
-		return strlen(buf);
-	} else {
-		strcpy(buf, "pm enabled\n");
-		return strlen(buf);
-	}
-}
-
-ssize_t
-tegra_sysfs_pm_state_store(struct device *dev,
-	struct device_attribute *attr,
-	const char *buf, size_t count)
-{
-	if (strncmp(buf, "pm_disable", 10) == 0) {
-		if (!atomic_read(&pm_disable)) {
-			tegra_sysfs_pm_disable();
-		} else {
-			pr_info("%s: operation not allowed\n", __func__);
-		}
-	} else if (strncmp(buf, "pm_enable", 9) == 0) {
-		if (atomic_read(&pm_disable)) {
-			tegra_sysfs_pm_enable();
 		} else {
 			pr_info("%s: operation not allowed\n", __func__);
 		}

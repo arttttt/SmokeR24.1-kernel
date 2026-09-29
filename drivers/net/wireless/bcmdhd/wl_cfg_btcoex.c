@@ -432,9 +432,9 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 	char buf_flag7_default[8] =   { 7, 00, 00, 00, 0x0, 0x00, 0x00, 0x00};
 
 	/* Figure out powermode 1 or o command */
-	strncpy((char *)&powermode_val, command + strlen("BTCOEXMODE") +1, 1);
+	powermode_val = command[strlen("BTCOEXMODE") + 1];
 
-	if (strnicmp((char *)&powermode_val, "1", strlen("1")) == 0) {
+	if (powermode_val == '1') {
 		WL_TRACE_HW4(("DHCP session starts\n"));
 
 
@@ -485,7 +485,7 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 			WL_ERR(("was called w/o DHCP OFF. Continue\n"));
 		}
 	}
-	else if (strnicmp((char *)&powermode_val, "2", strlen("2")) == 0) {
+	else if (powermode_val ==  '2') {
 
 
 
@@ -553,14 +553,15 @@ int wl_btcoex_set_btcparams(struct net_device *dev, char *command, int total_len
 	int bytes_written = 0, ret = -1;
 	uint32 param = -1, value = -1;
 
-	if (sscanf(command, "%*s %d %d", &param , &value) != 2) {
+	if (sscanf(command, "%*s %d %d", &param, &value) != 2) {
 		WL_ERR(("%s: command error", __func__));
 		return BCME_BADARG;
 	}
-	WL_TRACE(("%s:btcparams param %d, value %d\n",__func__, param, value));
-	memset(command,0,total_len);
-	if ((ret = dev_wlc_intvar_set_reg(dev,"btc_params", (char*)&param, (char*)&value))!= BCME_OK) {
-		WL_ERR(("%s: failed %d\n",__func__, ret));
+	WL_TRACE(("%s:btcparams param %d, value %d\n", __func__, param, value));
+	memset(command, 0, total_len);
+	ret = dev_wlc_intvar_set_reg(dev, "btc_params", (char *)&param, (char *)&value);
+	if (ret != BCME_OK) {
+		WL_ERR(("%s: failed %d\n", __func__, ret));
 		return ret;
 	}
 	bytes_written = snprintf(command, total_len, "OK");
@@ -576,12 +577,13 @@ int wl_btcoex_get_btcparams(struct net_device *dev, char *command, int total_len
 	WL_ERR(("%s: command error", __func__));
 		return BCME_BADARG;
 	}
-	WL_TRACE(("%s: btcparams value %d\n",__func__, param));
-	if((ret = dev_wlc_intvar_get_reg(dev,"btc_params", param, &value))!= BCME_OK) {
-		WL_ERR(("%s: failed %d\n",__func__, ret));
+	WL_TRACE(("%s: btcparams value %d\n", __func__, param));
+	ret = dev_wlc_intvar_get_reg(dev, "btc_params", param, &value);
+	if (ret != BCME_OK) {
+		WL_ERR(("%s: failed %d\n", __func__, ret));
 		return ret;
 	}
-	memset(command,0,total_len);
+	memset(command, 0, total_len);
 	bytes_written = snprintf(command, total_len, "%d", value);
 	return bytes_written;
 }

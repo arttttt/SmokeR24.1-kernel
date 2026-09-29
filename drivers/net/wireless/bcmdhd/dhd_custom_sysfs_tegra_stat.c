@@ -3,7 +3,7 @@
  *
  * NVIDIA Tegra Sysfs for BCMDHD driver
  *
- * Copyright (C) 2014-2016 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2014-2019 NVIDIA Corporation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -18,10 +18,16 @@
 
 #include "dhd_custom_sysfs_tegra.h"
 #include "dhd_custom_sysfs_tegra_stat.h"
+#include "dhd_custom_net_diag_tegra.h"
 
 /* Flags */
 int wifi_stat_debug;
 int aggr_not_assoc_err_set;
+
+int eapol_message_1_retry = -1;
+int eapol_message_2_retry = -1;
+int eapol_message_3_retry = -1;
+int eapol_message_4_retry = -1;
 
 struct net_device *dhd_custom_sysfs_tegra_histogram_stat_netdev;
 struct tegra_sysfs_histogram_stat bcmdhd_stat;
@@ -34,7 +40,7 @@ static void
 stat_work_func(struct work_struct *work);
 
 static unsigned int stat_delay_ms;
-static unsigned int stat_rate_ms = 10 * 1000;
+static unsigned int stat_rate_ms = 60 * 1000;
 /* overall bcmdhd stat rate in msec */
 static unsigned int bcmdhd_stat_rate_ms = 15 * 60 * 1000;
 
@@ -123,6 +129,11 @@ stat_work_func(struct work_struct *work)
 	wl_cnt_t *cnt;
 	int i;
 	struct timespec now;
+#ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+	tegra_net_diag_data_t net_diag_data;
+	int bwValue;
+	int roundOffBw;
+#endif
 	get_monotonic_boottime(&now);
 
 	UNUSED_PARAMETER(dwork);
@@ -167,7 +178,31 @@ stat_work_func(struct work_struct *work)
 		TEGRA_SYSFS_HISTOGRAM_AGGR_DRV_STATE(now);
 		TEGRA_SYSFS_HISTOGRAM_AGGR_PM_STATE(now);
 #ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
-		bcmdhd_stat.driver_stat.cur_bw_est = tegra_net_bw_est_get_value();
+		memset(&net_diag_data, 0, sizeof(tegra_net_diag_data_t));
+		tegra_net_diag_get_value(&net_diag_data);
+		bcmdhd_stat.driver_stat.cur_bw_est = net_diag_data.bw_est;
+		bwValue = net_diag_data.bw_est;
+		roundOffBw = 0;
+		if (bwValue < 1024) {
+			roundOffBw = (bwValue * 100) / 100;
+		} else if (bwValue < 1048576) {
+			roundOffBw = ((bwValue/1024) * 100) / 100;
+		} else if (bwValue < 1073741824) {
+			roundOffBw = ((bwValue/1048576) * 100) / 100;
+		} else {
+			roundOffBw = ((bwValue/1073741824) * 100) / 100;
+		}
+		if (roundOffBw <= 10) {
+			bcmdhd_stat.driver_stat.bw_est_level_0++;
+		} else if (roundOffBw <= 50) {
+			bcmdhd_stat.driver_stat.bw_est_level_1++;
+		} else if (roundOffBw <= 100) {
+			bcmdhd_stat.driver_stat.bw_est_level_2++;
+		} else if (roundOffBw <= 300) {
+			bcmdhd_stat.driver_stat.bw_est_level_3++;
+		} else if (roundOffBw > 300) {
+			bcmdhd_stat.driver_stat.bw_est_level_4++;
+		}
 #endif /* CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA */
 		memcpy(&bcmdhd_stat.fw_stat, cnt, sizeof(wl_cnt_t));
 		tcpdump_pkt_save(TCPDUMP_TAG_STAT,
@@ -215,16 +250,22 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 #else
 	struct timespec now;
 	int i, n, comma;
+#ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+	tegra_net_diag_data_t net_diag_data;
+#endif
 	get_monotonic_boottime(&now);
 	TEGRA_SYSFS_HISTOGRAM_AGGR_DRV_STATE(now);
 	TEGRA_SYSFS_HISTOGRAM_AGGR_PM_STATE(now);
-
+#ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
+	memset(&net_diag_data, 0, sizeof(tegra_net_diag_data_t));
+	tegra_net_diag_get_value(&net_diag_data);
+#endif /* CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA */
 	/* print statistics head */
 	n = 0;
 	snprintf(buf + n, PAGE_SIZE - n,
 		"{\n"
 #ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
-		"\"version\": 3.1,\n"
+		"\"version\": 3.3,\n"
 #else
 		"\"version\": 3,\n"
 #endif /* CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA */
@@ -236,6 +277,7 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		"\"connect_success\": %lu,\n"
 		"\"connect_fail\": %lu,\n"
 		"\"connect_fail_reason_15\": %lu,\n"
+		"\"connect_fail_set_ssid\": %lu,\n"
 		"\"disconnect_rssi_low\": %lu,\n"
 		"\"disconnect_rssi_high\": %lu,\n"
 		"\"fw_tx_err\": %lu,\n"
@@ -244,7 +286,8 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		"\"hang\": %lu,\n"
 		"\"ago_start\": %lu,\n"
 		"\"connect_on_2g_channel\": %lu,\n"
-		"\"connect_on_5g_channel\": %lu,\n",
+		"\"connect_on_5g_channel\": %lu,\n"
+		"\"skb_realloc_headroom_fail\": %lu,\n",
 		MSEC(dhdstats_ts),
 		MSEC(now),
 		PRINT_DIFF(gen_stat.wifi_on_success),
@@ -253,6 +296,7 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		PRINT_DIFF(gen_stat.connect_success),
 		PRINT_DIFF(gen_stat.connect_fail),
 		PRINT_DIFF(gen_stat.connect_fail_reason_15),
+		PRINT_DIFF(gen_stat.connect_fail_set_ssid),
 		PRINT_DIFF(gen_stat.disconnect_rssi_low),
 		PRINT_DIFF(gen_stat.disconnect_rssi_high),
 		PRINT_DIFF(gen_stat.fw_tx_err),
@@ -261,7 +305,8 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		PRINT_DIFF(gen_stat.hang),
 		PRINT_DIFF(gen_stat.ago_start),
 		PRINT_DIFF(gen_stat.connect_on_2g_channel),
-		PRINT_DIFF(gen_stat.connect_on_5g_channel));
+		PRINT_DIFF(gen_stat.connect_on_5g_channel),
+		PRINT_DIFF(gen_stat.skb_realloc_headroom_fail));
 
 	/* print statistics */
 	n = strlen(buf);
@@ -298,11 +343,29 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		"\"sdio_tx_err\": %lu,\n"
 		"\"rssi\": %d,\n"
 		"\"rssi_low\": %lu,\n"
-		"\"rssi_high\": %lu,\n",
+		"\"rssi_high\": %lu,\n"
+		"\"rssi_level_0\": %lu,\n"
+		"\"rssi_level_1\": %lu,\n"
+		"\"rssi_level_2\": %lu,\n"
+		"\"rssi_level_3\": %lu,\n"
+		"\"rssi_level_4\": %lu,\n"
+		"\"eapol_message_1_retry\": %lu,\n"
+		"\"eapol_message_2_retry\": %lu,\n"
+		"\"eapol_message_3_retry\": %lu,\n"
+		"\"eapol_message_4_retry\": %lu,\n",
 		PRINT_DIFF(gen_stat.sdio_tx_err),
 		bcmdhd_stat.gen_stat.rssi,
 		PRINT_DIFF(gen_stat.rssi_low),
-		PRINT_DIFF(gen_stat.rssi_high));
+		PRINT_DIFF(gen_stat.rssi_high),
+		PRINT_DIFF(gen_stat.rssi_level_0),
+		PRINT_DIFF(gen_stat.rssi_level_1),
+		PRINT_DIFF(gen_stat.rssi_level_2),
+		PRINT_DIFF(gen_stat.rssi_level_3),
+		PRINT_DIFF(gen_stat.rssi_level_4),
+		PRINT_DIFF(gen_stat.eapol_message_1_retry),
+		PRINT_DIFF(gen_stat.eapol_message_2_retry),
+		PRINT_DIFF(gen_stat.eapol_message_3_retry),
+		PRINT_DIFF(gen_stat.eapol_message_4_retry));
 
 	/* print framework stats */
 	n = strlen(buf);
@@ -366,6 +429,13 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		"\"aggr_bus_credit_unavail\": %lu,\n"
 #ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
 		"\"cur_bw_est\": %lu,\n"
+		"\"bw_est_level_0\": %lu,\n"
+		"\"bw_est_level_1\": %lu,\n"
+		"\"bw_est_level_2\": %lu,\n"
+		"\"bw_est_level_3\": %lu,\n"
+		"\"bw_est_level_4\": %lu,\n"
+		"\"cur_mode\": \"%s\",\n"
+		"\"cur_channel_width\": %d,\n"
 #endif /* CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA */
 		"\"aggr_not_assoc_err\": %lu,\n"
 		"\"cur_country_code\": \"%s\"\n"
@@ -376,7 +446,14 @@ tegra_sysfs_histogram_stat_show(struct device *dev,
 		PRINT_DIFF(driver_stat.aggr_num_wowlan_broadcast),
 		PRINT_DIFF(driver_stat.aggr_bus_credit_unavail),
 #ifdef CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA
-		tegra_net_bw_est_get_value(),
+		net_diag_data.bw_est,
+		PRINT_DIFF(driver_stat.bw_est_level_0),
+		PRINT_DIFF(driver_stat.bw_est_level_1),
+		PRINT_DIFF(driver_stat.bw_est_level_2),
+		PRINT_DIFF(driver_stat.bw_est_level_3),
+		PRINT_DIFF(driver_stat.bw_est_level_4),
+		net_diag_data.assoc_mode,
+		net_diag_data.assoc_channel_width,
 #endif /* CONFIG_BCMDHD_CUSTOM_NET_BW_EST_TEGRA */
 		PRINT_DIFF(driver_stat.aggr_not_assoc_err),
 		bcmdhd_stat.fw_stat.cur_country_code);

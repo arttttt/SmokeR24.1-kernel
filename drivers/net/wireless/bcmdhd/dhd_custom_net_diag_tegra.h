@@ -31,8 +31,8 @@
 #include "wlioctl.h"
 #include "wldev_common.h"
 
-#define TEGRA_NET_DIAG_DEBUG\
-	switch (tegra_net_diag_debug) case 1: pr_err\
+#define TEGRA_NET_DIAG_DEBUG(...) \
+	do { if (tegra_net_diag_debug) pr_err(__VA_ARGS__); } while (0)
 
 typedef struct tegra_net_diag_data {
 	char assoc_mode[32];
@@ -41,6 +41,8 @@ typedef struct tegra_net_diag_data {
 	int rssi;
 	unsigned long bw_est;
 } tegra_net_diag_data_t;
+
+void tegra_net_diag_get_value(tegra_net_diag_data_t *net_diag_data);
 
 int tegra_net_diag_register(struct device *dev);
 

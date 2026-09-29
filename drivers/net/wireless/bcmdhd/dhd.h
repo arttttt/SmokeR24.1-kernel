@@ -5,7 +5,7 @@
  * DHD OS, bus, and protocol modules.
  *
  * Copyright (C) 1999-2015, Broadcom Corporation
- * Copyright (c) 2017, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2017-2019, NVIDIA CORPORATION. All rights reserved.
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -46,9 +46,6 @@
 #include <linux/ethtool.h>
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_HAS_WAKELOCK)
-#include <linux/wakelock.h>
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined (CONFIG_HAS_WAKELOCK) */
 /* The kernel threading is sdio-specific */
 struct task_struct;
 struct sched_param;
@@ -85,6 +82,32 @@ enum dhd_bus_state {
 	DHD_BUS_SUSPEND,	/* Bus has been suspended */
 };
 
+/* Download Types */
+typedef enum download_type {
+	FW,
+	NVRAM,
+	CLM_BLOB
+} download_type_t;
+
+#define MAX_CLM_BUF_SIZE       (48 * 1024) /* max clm blob size */
+
+#ifndef CONFIG_BCMDHD_CLM_PATH
+#ifdef OEM_ANDROID
+#if defined(CUSTOMER_HW4) && defined(PLATFORM_SLP)
+#define CONFIG_BCMDHD_CLM_PATH "/lib/firmware/bcmdhd_clm.blob"
+#else
+#define CONFIG_BCMDHD_CLM_PATH "/system/etc/wifi/bcmdhd_clm.blob"
+#endif /* CUSTOMER_HW4 && PLATFORM_SLP */
+#elif defined(LINUX) || defined(linux)
+#define CONFIG_BCMDHD_CLM_PATH "/var/run/bcmdhd_clm.blob"
+#elif defined(MACOSX_DHD)
+#define CONFIG_BCMDHD_CLM_PATH "/bcm-wifi/bcmdhd_clm.blob"
+#else
+/* clm download will fail on empty path */
+#define CONFIG_BCMDHD_CLM_PATH ""
+#endif /* OEM_ANDROID */
+#endif /* CONFIG_BCMDHD_CLM_PATH */
+#define WL_CCODE_NULL_COUNTRY  "#n"
 
 #define DHD_IF_ROLE_STA(role)	(role == WLC_E_IF_ROLE_STA ||\
 				role == WLC_E_IF_ROLE_P2P_CLIENT)
@@ -122,8 +145,9 @@ enum dhd_op_flags {
 #define DHD_SCAN_UNASSOC_ACTIVE_TIME 65 /* ms: Embedded def. Unassoc Active setting from DHD */
 #define DHD_SCAN_PASSIVE_TIME		130 /* ms: Embedded default Passive setting from DHD */
 
+/* Controlling number of retries from DT */
 #ifndef POWERUP_MAX_RETRY
-#define POWERUP_MAX_RETRY	3 /* how many times we retry to power up the chip */
+#define POWERUP_MAX_RETRY	0 /* how many times we retry to power up the chip */
 #endif
 #ifndef POWERUP_WAIT_MS
 #define POWERUP_WAIT_MS		2000 /* ms: time out in waiting wifi to come up */
@@ -487,6 +511,11 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(dhd_workitem_context_t, dhd_get_dhd_workitem_
 #ifdef PNO_SUPPORT
 int dhd_pno_clean(dhd_pub_t *dhd);
 #endif /* PNO_SUPPORT */
+#if defined(KEEP_ALIVE)
+extern int dhd_dev_start_mkeep_alive(dhd_pub_t *dhd_pub, u8 mkeep_alive_id, u8 *ip_pkt,
+	u16 ip_pkt_len, u8* src_mac_addr, u8* dst_mac_addr, u32 period_msec);
+extern int dhd_dev_stop_mkeep_alive(dhd_pub_t *dhd_pub, u8 mkeep_alive_id);
+#endif /* defined(KEEP_ALIVE) */
 /*
  *  Wake locks are an Android power management concept. They are used by applications and services
  *  to request CPU resources.
@@ -618,6 +647,31 @@ extern void dhd_sched_dpc(dhd_pub_t *dhdp);
 
 /* Notify tx completion */
 extern void dhd_txcomplete(dhd_pub_t *dhdp, void *txp, bool success);
+
+#define WIFI_FEATURE_INFRA              0x0001      /* Basic infrastructure mode        */
+#define WIFI_FEATURE_INFRA_5G           0x0002      /* Support for 5 GHz Band           */
+#define WIFI_FEATURE_HOTSPOT            0x0004      /* Support for GAS/ANQP             */
+#define WIFI_FEATURE_P2P                0x0008      /* Wifi-Direct                      */
+#define WIFI_FEATURE_SOFT_AP            0x0010      /* Soft AP                          */
+#define WIFI_FEATURE_GSCAN              0x0020      /* Google-Scan APIs                 */
+#define WIFI_FEATURE_NAN                0x0040      /* Neighbor Awareness Networking    */
+#define WIFI_FEATURE_D2D_RTT            0x0080      /* Device-to-device RTT             */
+#define WIFI_FEATURE_D2AP_RTT           0x0100      /* Device-to-AP RTT                 */
+#define WIFI_FEATURE_BATCH_SCAN         0x0200      /* Batched Scan (legacy)            */
+#define WIFI_FEATURE_PNO                0x0400      /* Preferred network offload        */
+#define WIFI_FEATURE_ADDITIONAL_STA     0x0800      /* Support for two STAs             */
+#define WIFI_FEATURE_TDLS               0x1000      /* Tunnel directed link setup       */
+#define WIFI_FEATURE_TDLS_OFFCHANNEL    0x2000      /* Support for TDLS off channel     */
+#define WIFI_FEATURE_EPR                0x4000      /* Enhanced power reporting         */
+#define WIFI_FEATURE_AP_STA             0x8000      /* Support for AP STA Concurrency   */
+#define WIFI_FEATURE_LINKSTAT           0x10000     /* Support for Linkstats            */
+#define WIFI_FEATURE_HAL_EPNO           0x40000     /* WiFi PNO enhanced                */
+#define WIFI_FEATUE_RSSI_MONITOR        0x80000     /* RSSI Monitor                     */
+
+#define MAX_FEATURE_SET_CONCURRRENT_GROUPS  3
+
+extern int dhd_dev_get_feature_set(struct net_device *dev);
+int dhd_os_get_version(struct net_device *dev, bool dhd_ver, char **buf, uint32 size);
 
 /* OS independent layer functions */
 extern int dhd_os_proto_block(dhd_pub_t * pub);
@@ -854,6 +908,9 @@ extern uint dhd_master_mode;
 /* Roaming mode control */
 extern uint dhd_roam_disable;
 
+/* Disable builtin roaming */
+extern bool builtin_roam_disabled;
+
 /* Roaming mode control */
 extern uint dhd_radio_up;
 
@@ -1042,6 +1099,15 @@ int dhd_process_cid_mac(dhd_pub_t *dhdp, bool prepost);
 #define DHD_OS_PREFREE(dhdpub, addr, size) MFREE(dhdpub->osh, addr, size)
 #endif /* defined(CONFIG_DHD_USE_STATIC_BUF) */
 
+/* blob support */
+int dhd_get_download_buffer(dhd_pub_t *dhd, char *file_path, download_type_t component,
+	char **buffer, int *length);
+
+void dhd_free_download_buffer(dhd_pub_t *dhd, void *buffer, int length);
+
+int dhd_download_clm_blob(dhd_pub_t *dhd, unsigned char *buf, uint32 len);
+
+int dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path);
 
 #define dhd_add_flowid(pub, ifidx, ac_prio, ea, flowid)  do {} while (0)
 #define dhd_del_flowid(pub, ifidx, flowid)               do {} while (0)

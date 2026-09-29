@@ -3,6 +3,10 @@
 # SDIO Basic feature
 #####################
 
+ifeq ($(NV_BUILD_CONFIGURATION_IS_COVERAGE),1)
+GCOV_PROFILE :=y
+endif
+
 DHDCFLAGS += -Wall -Wstrict-prototypes -Dlinux -DLINUX -DBCMDRIVER            \
 	-DBCMDONGLEHOST -DUNRELEASEDCHIP -DBCMDMA32 -DBCMFILEIMAGE            \
 	-DDHDTHREAD -DSHOW_EVENTS -DBCMDBG -DWLP2P                            \
@@ -43,13 +47,12 @@ DHDCFLAGS += -DCUSTOM_TDLS_RSSI_THRESHOLD_HIGH=-60
 DHDCFLAGS += -DCUSTOM_TDLS_RSSI_THRESHOLD_LOW=-70
 
 # Roaming
-DHDCFLAGS += -DDISABLE_BUILTIN_ROAM
-#DHDCFLAGS += -DROAM_AP_ENV_DETECTION
-#DHDCFLAGS += -DROAM_ENABLE
-#DHDCFLAGS += -DENABLE_FW_ROAM_SUSPEND
+DHDCFLAGS += -DROAM_AP_ENV_DETECTION
+DHDCFLAGS += -DROAM_ENABLE -DROAM_CHANNEL_CACHE -DROAM_API
+DHDCFLAGS += -DENABLE_FW_ROAM_SUSPEND
 # Roaming trigger
-#DHDCFLAGS += -DCUSTOM_ROAM_TRIGGER_SETTING=-75
-#DHDCFLAGS += -DCUSTOM_ROAM_DELTA_SETTING=10
+DHDCFLAGS += -DCUSTOM_ROAM_TRIGGER_SETTING=-75
+DHDCFLAGS += -DCUSTOM_ROAM_DELTA_SETTING=10
 # Set PM 2 always regardless suspend/resume
 DHDCFLAGS += -DSUPPORT_PM2_ONLY
 
@@ -60,6 +63,8 @@ DHDCFLAGS += -DMIRACAST_AMPDU_SIZE=8
 # GScan and Vendor Ext support
 DHDCFLAGS += -DWL_VENDOR_EXT_SUPPORT
 DHDCFLAGS += -DGSCAN_SUPPORT
+
+DHDCFLAGS += -DVENDOR_NET_SKB_ALLOC
 
 # Early suspend
 DHDCFLAGS += -DDHD_USE_EARLYSUSPEND
@@ -222,7 +227,6 @@ ifneq ($(CONFIG_BCMDHD_SDIO),)
   DHDCFLAGS += -DBDC -DDHD_BCMEVENTS -DMMC_SDIO_ABORT
   DHDCFLAGS += -DBCMSDIO -DBCMLXSDMMC -DUSE_SDIOFIFO_IOVAR
   DHDCFLAGS += -DPROP_TXSTATUS
-  DHDCFLAGS += -DQMONITOR
 endif
 
 ifeq ($(CONFIG_BCMDHD_HW_OOB),y)
@@ -231,15 +235,15 @@ else
   DHDCFLAGS += -DSDIO_ISR_THREAD
 endif
 
-ifneq ($(CONFIG_BCMDHD_PCIE),)
-  DHDCFLAGS += -DPCIE_FULL_DONGLE -DBCMPCIE -DCUSTOM_DPC_PRIO_SETTING=-1
+ifeq ($(CONFIG_BCMDHD_QMONITOR),y)
+  DHDCFLAGS += -DQMONITOR
 endif
-
 #EXTRA_LDFLAGS += --strip-debug
 
 EXTRA_CFLAGS += $(DHDCFLAGS) -DDHD_DEBUG -include dhd_nv_dbg.h
 EXTRA_CFLAGS += -DSRCBASE=\"$(src)\"
 EXTRA_CFLAGS += -I$(src)/include/ -I$(src)/
+KBUILD_CFLAGS += -I$(srctree)/drivers/mmc
 KBUILD_CFLAGS += -I$(LINUXDIR)/include -I$(shell pwd)
 
 DHDOFILES := dhd_pno.o dhd_common.o dhd_ip.o dhd_custom_gpio.o \
@@ -247,21 +251,15 @@ DHDOFILES := dhd_pno.o dhd_common.o dhd_ip.o dhd_custom_gpio.o \
 	bcmutils.o bcmwifi_channels.o hndpmu.o linux_osl.o sbutils.o siutils.o \
 	wl_android.o wl_cfg80211.o wl_cfgp2p.o wl_cfg_btcoex.o wldev_common.o wl_linux_mon.o  \
 	dhd_linux_platdev.o dhd_pno.o dhd_linux_wq.o wl_cfg_btcoex.o \
-	hnd_pktq.o hnd_pktpool.o wl_cfgvendor.o nv_logger.o
+	hnd_pktq.o hnd_pktpool.o wl_cfgvendor.o dhd_custom_tegra.o nv_logger.o
 
 ifneq ($(CONFIG_BCMDHD_SDIO),)
   DHDOFILES += bcmsdh.o bcmsdh_linux.o bcmsdh_sdmmc.o bcmsdh_sdmmc_linux.o
-  DHDOFILES += dhd_cdc.o dhd_wlfc.o dhd_sdio.o dhd_qmon.o
-endif
-
-ifneq ($(CONFIG_BCMDHD_PCIE),)
-  DHDOFILES += dhd_pcie.o dhd_pcie_linux.o dhd_msgbuf.o dhd_flowring.o
-  DHDOFILES += pcie_core.o
+  DHDOFILES += dhd_cdc.o dhd_wlfc.o dhd_sdio.o
 endif
 
 ifneq ($(CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA),)
   DHDOFILES += dhd_custom_sysfs_tegra.o
-  DHDOFILES += dhd_custom_sysfs_tegra_ping.o
   DHDOFILES += dhd_custom_sysfs_tegra_rssi.o
   DHDOFILES += dhd_custom_sysfs_tegra_scan.o
   DHDOFILES += dhd_custom_sysfs_tegra_stat.o
@@ -279,6 +277,10 @@ endif
 
 ifneq ($(CONFIG_BCMDHD_CUSTOM_NET_DIAG_TEGRA),)
   DHDOFILES += dhd_custom_net_diag_tegra.o
+endif
+
+ifeq ($(CONFIG_BCMDHD_QMONITOR),y)
+  DHDOFILES += dhd_qmon.o
 endif
 
 bcmdhd-objs := $(DHDOFILES)

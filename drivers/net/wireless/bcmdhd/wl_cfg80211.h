@@ -2,7 +2,7 @@
  * Linux cfg80211 driver
  *
  * Copyright (C) 1999-2015, Broadcom Corporation
- * Copyright (c) 2017, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2017-2019, NVIDIA CORPORATION. All rights reserved.
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -76,6 +76,8 @@ struct wl_ibss;
 
 #define PM_BLOCK 1
 #define PM_ENABLE 0
+
+#define DISCONNECT_WAIT_TIME 250
 
 #if defined(DHD_DEBUG)
 #define	WL_ERR(args)									\
@@ -369,12 +371,12 @@ struct net_info {
 };
 
 /* association inform */
-#define MAX_REQ_LINE 1024
+#define MAX_REQ_LINE 1024u
 struct wl_connect_info {
 	u8 req_ie[MAX_REQ_LINE];
-	s32 req_ie_len;
+	u32 req_ie_len;
 	u8 resp_ie[MAX_REQ_LINE];
-	s32 resp_ie_len;
+	u32 resp_ie_len;
 };
 
 /* firmware /nvram downloading controller */
@@ -399,7 +401,7 @@ struct wl_pmk_list {
 };
 
 
-#define ESCAN_BUF_SIZE (64 * 1024)
+#define ESCAN_BUF_SIZE (3 * 64 * 1024)
 
 struct escan_info {
 	u32 escan_state;
@@ -572,6 +574,7 @@ struct bcm_cfg80211 {
 	wait_queue_head_t netif_change_event;
 	wl_if_event_info if_event_info;
 	struct completion send_af_done;
+	struct completion send_disconnected;
 	struct afx_hdl *afx_hdl;
 	struct ap_info *ap_info;
 	struct sta_info *sta_info;
@@ -681,14 +684,17 @@ wl_remove_netinfo(struct bcm_cfg80211 *cfg, struct net_device *ndev)
 	struct net_info *_net_info, *next;
 	bool dealloc_needed = false;
 
+	if (down_interruptible(&cfg->net_wdev_sema) < 0) {
+		WL_ERR(("%s: cannot lock semaphore\n", __func__));
+		return;
+	}
+
 	list_for_each_entry_safe(_net_info, next, &cfg->net_list, list) {
 		if (ndev && (_net_info->ndev == ndev)) {
 			list_del(&_net_info->list);
 			cfg->iface_cnt--;
 			if (_net_info->wdev) {
-				down_interruptible(&cfg->net_wdev_sema);
 				ndev->ieee80211_ptr = NULL;
-				up(&cfg->net_wdev_sema);
 			}
 			INIT_LIST_HEAD(&_net_info->list);
 			list_add(&_net_info->list, &cfg->dealloc_list);
@@ -698,12 +704,16 @@ wl_remove_netinfo(struct bcm_cfg80211 *cfg, struct net_device *ndev)
 
 	if (dealloc_needed)
 		schedule_work(&cfg->dealloc_work);
+	up(&cfg->net_wdev_sema);
 }
 static inline void
 wl_delete_all_netinfo(struct bcm_cfg80211 *cfg)
 {
 	struct net_info *_net_info, *next;
-	down_interruptible(&cfg->net_wdev_sema);
+	if (down_interruptible(&cfg->net_wdev_sema) < 0) {
+		WL_ERR(("%s: cannot lock semaphore\n", __func__));
+		return;
+	}
 	down_write(&cfg->netif_sem);
 	list_for_each_entry_safe(_net_info, next, &cfg->net_list, list) {
 		list_del(&_net_info->list);
@@ -934,6 +944,13 @@ wl_get_netinfo_by_netdev(struct bcm_cfg80211 *cfg, struct net_device *ndev)
 	((wl_cfgp2p_find_wpsie((u8 *)_sme->ie, _sme->ie_len) != NULL) && \
 	 (!_sme->crypto.n_ciphers_pairwise) && \
 	 (!_sme->crypto.cipher_group))
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
+#define STA_INFO_BIT(info) (1ul << NL80211_STA_ ## info)
+#define strnicmp(str1, str2, len) strncasecmp((str1), (str2), (len))
+#else
+#define STA_INFO_BIT(info) (STATION_ ## info)
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)) */
 extern s32 wl_cfg80211_attach(struct net_device *ndev, void *context);
 extern s32 wl_cfg80211_attach_post(struct net_device *ndev);
 extern void wl_cfg80211_detach(void *para);
@@ -994,6 +1011,7 @@ extern s32 wl_mode_to_nl80211_iftype(s32 mode);
 int wl_cfg80211_do_driver_init(struct net_device *net);
 void wl_cfg80211_enable_trace(bool set, u32 level);
 extern s32 wl_update_wiphybands(struct bcm_cfg80211 *cfg, bool notify);
+void wl_scan_abort(struct bcm_cfg80211 *cfg);
 extern s32 wl_cfg80211_if_is_group_owner(void);
 extern  chanspec_t wl_chspec_host_to_driver(chanspec_t chanspec);
 extern chanspec_t wl_ch_host_to_driver(u16 channel);
@@ -1059,5 +1077,7 @@ extern void wl_cfg80211_del_p2p_wdev(void);
 #ifdef QOS_MAP_SET
 extern uint8 *wl_get_up_table(void);
 #endif /* QOS_MAP_SET */
+
+void wl_cfg80211_cancel_scan(struct bcm_cfg80211 *cfg);
 
 #endif /* _wl_cfg80211_h_ */

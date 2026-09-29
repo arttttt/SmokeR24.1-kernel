@@ -3120,10 +3120,13 @@ printbuf:
 	}
 
 	if (sdpcm_shared.flags & SDPCM_SHARED_TRAP) {
+	/* Enable this flag if dhdsdio_mem_dump to file is implemented */
+#ifdef DHD_SDIO_MEM_DUMP
 		/* Mem dump to a file on device */
 		dhdsdio_mem_dump(bus);
 		/* In some cases, the host back trace could be relevant too. */
 		WARN_ON(1);
+#endif
 	}
 
 done:
@@ -8133,7 +8136,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 			} else
 				bcmerror = BCME_SDIO_ERROR;
 
-				dhd_os_sdunlock(dhdp);
+			dhd_os_sdunlock(dhdp);
 		} else {
 			bcmerror = BCME_SDIO_ERROR;
 			DHD_INFO(("%s called when dongle is not in reset\n",

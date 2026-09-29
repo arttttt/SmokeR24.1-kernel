@@ -2,14 +2,14 @@
  * Broadcom Dongle Host Driver (DHD), common DHD core.
  *
  * Copyright (C) 1999-2015, Broadcom Corporation
- * Copyright (c) 2017, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2017-2020, NVIDIA CORPORATION. All rights reserved.
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -17,7 +17,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -81,7 +81,6 @@ extern void htsf_update(struct dhd_info *dhd, void *data);
 #endif
 int dhd_msg_level = DHD_ERROR_VAL;
 
-
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 #include "dhd_custom_sysfs_tegra.h"
 #include "dhd_custom_sysfs_tegra_stat.h"
@@ -121,16 +120,12 @@ bool ap_fw_loaded = FALSE;
 #define DHD_COMPILED "\nCompiled in " SRCBASE
 #endif /* DHD_DEBUG */
 
-#if defined(DHD_DEBUG)
-const char dhd_version[] = "Dongle Host Driver, version " EPI_VERSION_STR
-	DHD_COMPILED " on " __DATE__ " at " __TIME__;
-#else
 const char dhd_version[] = "\nDongle Host Driver, version " EPI_VERSION_STR "\nCompiled from ";
-#endif 
 
 void dhd_set_timer(void *bus, uint wdtick);
 
-
+/* XXX Should ideally read this from target -- taken from wlu */
+#define MAX_CHUNK_LEN 1408 /* 8 * 8 * 22 */
 
 /* IOVar table */
 enum {
@@ -271,6 +266,193 @@ const bcm_iovar_t dhd_iovars[] = {
 
 #define DHD_IOVAR_BUF_SIZE	128
 
+int dhd_get_download_buffer(dhd_pub_t *dhd, char *file_path,
+	download_type_t component, char **buffer, int *length)
+
+{
+	int ret = BCME_ERROR;
+	int len = 0;
+	int file_len;
+	void *image = NULL;
+	uint8 *buf = NULL;
+
+	/* Point to cache if available. */
+#ifdef CACHE_FW_IMAGES
+	if (component == FW) {
+		if (dhd->cached_fw_length) {
+			len = dhd->cached_fw_length;
+			buf = dhd->cached_fw;
+		}
+	} else if (component == NVRAM) {
+		if (dhd->cached_nvram_length) {
+			len = dhd->cached_nvram_length;
+			buf = dhd->cached_nvram;
+		}
+	} else if (component == CLM_BLOB) {
+		if (dhd->cached_clm_length) {
+			len = dhd->cached_clm_length;
+			buf = dhd->cached_clm;
+		}
+	} else {
+		return ret;
+	}
+#endif /* CACHE_FW_IMAGES */
+	/* No Valid cache found on this call */
+	if (!len) {
+		file_len = *length;
+		*length = 0;
+
+		if (file_path) {
+			image = dhd_os_open_image(file_path);
+			if (image == NULL) {
+				goto err;
+			}
+		}
+
+		buf = MALLOCZ(dhd->osh, file_len);
+		if (buf == NULL) {
+			DHD_ERROR(("%s: Failed to allocate memory %d bytes\n",
+				__func__, file_len));
+			goto err;
+		}
+
+		/* Download image */
+#if defined(BCMEMBEDIMAGE) && defined(DHD_EFI)
+		if (!image) {
+			memcpy(buf, nvram_arr, sizeof(nvram_arr));
+			len = sizeof(nvram_arr);
+		} else {
+			len = dhd_os_get_image_block((char *)buf, file_len,
+				image);
+			if ((len <= 0 || len > file_len)) {
+				MFREE(dhd->osh, buf, file_len);
+				goto err;
+			}
+		}
+#else
+		len = dhd_os_get_image_block((char *)buf, file_len, image);
+		if ((len <= 0 || len > file_len)) {
+			MFREE(dhd->osh, buf, file_len);
+			goto err;
+		}
+#endif /* DHD_EFI */
+	}
+
+	ret = BCME_OK;
+	*length = len;
+	*buffer = buf;
+
+	/* Cache if first call. */
+#ifdef CACHE_FW_IMAGES
+	if (component == FW) {
+		if (!dhd->cached_fw_length) {
+			dhd->cached_fw = buf;
+			dhd->cached_fw_length = len;
+		}
+	} else if (component == NVRAM) {
+		if (!dhd->cached_nvram_length) {
+			dhd->cached_nvram = buf;
+			dhd->cached_nvram_length = len;
+		}
+	} else if (component == CLM_BLOB) {
+		if (!dhd->cached_clm_length) {
+			dhd->cached_clm = buf;
+			dhd->cached_clm_length = len;
+		}
+	}
+#endif /* CACHE_FW_IMAGES */
+
+err:
+	if (image)
+		dhd_os_close_image(image);
+
+	return ret;
+}
+
+int
+dhd_download_2_dongle(dhd_pub_t	*dhd, char *iovar, uint16 flag, uint16 dload_type,
+	unsigned char *dload_buf, int len)
+{
+	struct wl_dload_data *dload_ptr = (struct wl_dload_data *)dload_buf;
+	int err = 0;
+	int dload_data_offset;
+	static char iovar_buf[WLC_IOCTL_MEDLEN];
+	int iovar_len;
+
+	memset(iovar_buf, 0, sizeof(iovar_buf));
+
+	dload_data_offset = OFFSETOF(wl_dload_data_t, data);
+	dload_ptr->flag = (DLOAD_HANDLER_VER << DLOAD_FLAG_VER_SHIFT) | flag;
+	dload_ptr->dload_type = dload_type;
+	dload_ptr->len = htod32(len - dload_data_offset);
+	dload_ptr->crc = 0;
+	len = ROUNDUP(len, 8);
+
+	iovar_len = bcm_mkiovar(iovar, dload_buf,
+		(uint)len, iovar_buf, sizeof(iovar_buf));
+	if (iovar_len == 0) {
+		DHD_ERROR(("%s: insufficient buffer space passed to bcm_mkiovar for '%s' \n",
+					__FUNCTION__, iovar));
+		return BCME_BUFTOOSHORT;
+	}
+
+	err = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovar_buf,
+			iovar_len, IOV_SET, 0);
+
+	return err;
+}
+
+int
+dhd_download_clm_blob(dhd_pub_t	*dhd, unsigned char *buf, uint32 len)
+{
+	int chunk_len, cumulative_len = 0;
+	int size2alloc;
+	unsigned char *new_buf;
+	int err = 0, data_offset;
+	uint16 dl_flag = DL_BEGIN;
+
+	data_offset = OFFSETOF(wl_dload_data_t, data);
+	size2alloc = data_offset + MAX_CHUNK_LEN;
+	size2alloc = ROUNDUP(size2alloc, 8);
+
+	new_buf = (unsigned char *)MALLOCZ(dhd->osh, size2alloc);
+	if (new_buf != NULL) {
+		do {
+			if (len >= MAX_CHUNK_LEN)
+				chunk_len = MAX_CHUNK_LEN;
+			else
+				chunk_len = len;
+
+			memcpy(new_buf + data_offset, buf + cumulative_len, chunk_len);
+			cumulative_len += chunk_len;
+
+			if (len - chunk_len == 0)
+				dl_flag |= DL_END;
+
+			err = dhd_download_2_dongle(dhd, "clmload", dl_flag, DL_TYPE_CLM,
+				new_buf, data_offset + chunk_len);
+
+			dl_flag &= ~DL_BEGIN;
+
+			len = len - chunk_len;
+		} while ((len > 0) && (err == 0));
+
+		MFREE(dhd->osh, new_buf, size2alloc);
+	} else {
+		err = BCME_NOMEM;
+	}
+
+	return err;
+}
+
+void dhd_free_download_buffer(dhd_pub_t	*dhd, void *buffer, int length)
+{
+#ifdef CACHE_FW_IMAGES
+	return;
+#endif
+	MFREE(dhd->osh, buffer, length);
+}
+
 void dhd_save_fwdump(dhd_pub_t *dhd_pub, void * buffer, uint32 length)
 {
 
@@ -361,7 +543,6 @@ dhd_wl_ioctl_cmd(dhd_pub_t *dhd_pub, int cmd, void *arg, int len, uint8 set, int
 extern atomic_t rf_test;
 extern atomic_t cur_power_mode;
 extern rf_test_params_t rf_test_params[NUM_RF_TEST_PARAMS];
-extern atomic_t pm_disable;
 #endif /* CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA */
 
 int
@@ -418,10 +599,10 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
 	int i;
 	/* Changing PM is not allowed while RF test is enabled */
-	if (ioc->cmd == WLC_SET_PM && ioc->buf) {
-		uint pm_mode = *(uint *)ioc->buf;
+	if (ioc->cmd == WLC_SET_PM && buf) {
+		uint pm_mode = *(uint *)buf;
 		if (ioc->set) {
-			if (atomic_read(&rf_test) || atomic_read(&pm_disable)) {
+			if (atomic_read(&rf_test)) {
 				atomic_set(&cur_power_mode, pm_mode);
 				DHD_ERROR(("%s: WLC_SET_PM: %d not allowed\n", __FUNCTION__, pm_mode));
 				return BCME_OK;
@@ -430,15 +611,14 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 		}
 	}
 
-	if (atomic_read(&rf_test)) {
+	if (atomic_read(&rf_test) && buf) {
 		if (ioc->cmd == WLC_SET_VAR) {
 			uint value;
 			for (i = 0; i < NUM_RF_TEST_PARAMS; i++) {
 				const char * param = rf_test_params[i].var;
-				char *buf = (char *)ioc->buf;
-
-				value = (uint)buf[strlen(param)+1];
-				if (strncmp(ioc->buf, param, strlen(param)) == 0) {
+				char *buff = (char *)buf;
+				value = (uint)buff[strlen(param)+1];
+				if (strncmp(buf, param, strlen(param)) == 0) {
 					atomic_set(&rf_test_params[i].cur_val, value);
 					DHD_ERROR(("%s: WLC_SET_VAR %s:%d not allowed\n", __FUNCTION__, param, value));
 					return BCME_OK;
@@ -2115,7 +2295,7 @@ dhd_pktfilter_offload_enable(dhd_pub_t * dhd, char *arg, int enable, int master_
 	str = "pkt_filter_enable";
 	str_len = strlen(str);
 	bcm_strncpy_s(buf, sizeof(buf) - 1, str, sizeof(buf) - 1);
-	buf[ sizeof(buf) - 1 ] = '\0';
+	buf[ sizeof(buf) - 1] = '\0';
 	buf_len = str_len + 1;
 
 	pkt_filterp = (wl_pkt_filter_enable_t *)(buf + str_len + 1);
@@ -2204,7 +2384,7 @@ dhd_pktfilter_offload_set(dhd_pub_t * dhd, char *arg)
 
 	str = "pkt_filter_add";
 	str_len = strlen(str);
-	bcm_strncpy_s(buf, BUF_SIZE, str, str_len);
+	bcm_strncpy_s(buf, BUF_SIZE, str, str_len + 1);
 	buf[ str_len ] = '\0';
 	buf_len = str_len + 1;
 
@@ -2381,7 +2561,7 @@ dhd_aoe_hostip_clr(dhd_pub_t *dhd, int idx)
 
 	ret = dhd_iovar(dhd, 0, "arp_hostip_clear", NULL, 0, NULL, 0, TRUE);
 	if (ret)
-                DHD_ERROR(("%s failed code %d\n", __FUNCTION__, ret));
+		DHD_ERROR(("%s failed code %d\n", __FUNCTION__, ret));
 }
 
 void
@@ -2536,7 +2716,7 @@ bool dhd_is_associated(dhd_pub_t *dhd, uint8 ifidx, int *retval)
 	bzero(zbuf, 6);
 
 	ret  = dhd_wl_ioctl_cmd(dhd, WLC_GET_BSSID, (char *)&bssid,
-		ETHER_ADDR_LEN, FALSE, ifidx);
+				ETHER_ADDR_LEN, FALSE, ifidx);
 	DHD_TRACE((" %s WLC_GET_BSSID ioctl res = %d\n", __FUNCTION__, ret));
 
 	if (ret == BCME_NOTASSOCIATED) {
@@ -2675,58 +2855,8 @@ int dhd_keep_alive_onoff(dhd_pub_t *dhd)
 #endif /* defined(KEEP_ALIVE) */
 /* Android ComboSCAN support */
 
-/*
- *  data parsing from ComboScan tlv list
-*/
-int
-wl_iw_parse_data_tlv(char** list_str, void *dst, int dst_size, const char token,
-                     int input_size, int *bytes_left)
-{
-	char* str;
-	uint16 short_temp;
-	uint32 int_temp;
-
-	if ((list_str == NULL) || (*list_str == NULL) ||(bytes_left == NULL) || (*bytes_left < 0)) {
-		DHD_ERROR(("%s error paramters\n", __FUNCTION__));
-		return -1;
-	}
-	str = *list_str;
-
-	/* Clean all dest bytes */
-	memset(dst, 0, dst_size);
-	while (*bytes_left > 0) {
-
-		if (str[0] != token) {
-			DHD_TRACE(("%s NOT Type=%d get=%d left_parse=%d \n",
-				__FUNCTION__, token, str[0], *bytes_left));
-			return -1;
-		}
-
-		*bytes_left -= 1;
-		str += 1;
-
-		if (input_size == 1) {
-			memcpy(dst, str, input_size);
-		}
-		else if (input_size == 2) {
-			memcpy(dst, (char *)htod16(memcpy(&short_temp, str, input_size)),
-				input_size);
-		}
-		else if (input_size == 4) {
-			memcpy(dst, (char *)htod32(memcpy(&int_temp, str, input_size)),
-				input_size);
-		}
-
-		*bytes_left -= input_size;
-		str += input_size;
-		*list_str = str;
-		return 1;
-	}
-	return 1;
-}
-
 /* Parse EAPOL 4 way handshake messages */
-void dhd_dump_eapol_4way_message(char *dump_data, bool direction)
+void dhd_dump_eapol_4way_message(int ifidx, char *dump_data, bool direction)
 {
 	int pair, ack, mic, kerr, req, sec, install;
 	unsigned short us_tmp;
@@ -2746,19 +2876,32 @@ void dhd_dump_eapol_4way_message(char *dump_data, bool direction)
 		sec = 0 != (us_tmp & 0x200);
 		install = 0 != (us_tmp & 0x40);
 
-		if (!sec && !mic && ack && !install && pair && !kerr && !req)
-			DHD_NV_INFO(("ETHER_TYPE_802_1X [%s] : M1 of 4way\n",
+		if (!sec && !mic && ack && !install && pair && !kerr && !req) {
+			DHD_NV_INFO(("ifidx: %d ETHER_TYPE_802_1X [%s] : M1 of 4way\n", ifidx,
 				    direction ? "TX" : "RX"));
-		else if (pair && !install && !ack && mic &&
-				!sec && !kerr && !req)
-			DHD_NV_INFO(("ETHER_TYPE_802_1X [%s] : M2 of 4way\n",
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			eapol_message_1_retry++;
+#endif
+		} else if (pair && !install && !ack && mic &&
+				!sec && !kerr && !req) {
+			DHD_NV_INFO(("ifidx: %d ETHER_TYPE_802_1X [%s] : M2 of 4way\n", ifidx,
 				    direction ? "TX" : "RX"));
-		else if (pair && ack && mic && sec && !kerr && !req)
-			DHD_NV_INFO(("ETHER_TYPE_802_1X [%s] : M3 of 4way\n",
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			eapol_message_2_retry++;
+#endif
+		} else if (pair && ack && mic && sec && !kerr && !req) {
+			DHD_NV_INFO(("ifidx: %d ETHER_TYPE_802_1X [%s] : M3 of 4way\n", ifidx,
 				    direction ? "TX" : "RX"));
-		else if (pair && !install && !ack && mic &&
-				sec && !req && !kerr)
-			DHD_NV_INFO(("ETHER_TYPE_802_1X [%s] : M4 of 4way\n",
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			eapol_message_3_retry++;
+#endif
+		} else if (pair && !install && !ack && mic &&
+				sec && !req && !kerr) {
+			DHD_NV_INFO(("ifidx: %d ETHER_TYPE_802_1X [%s] : M4 of 4way\n", ifidx,
 				    direction ? "TX" : "RX"));
+#ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
+			eapol_message_4_retry++;
+#endif
+		}
 	}
 }

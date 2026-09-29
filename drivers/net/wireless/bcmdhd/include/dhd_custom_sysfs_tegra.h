@@ -3,7 +3,7 @@
  *
  * NVIDIA Tegra Sysfs for BCMDHD driver
  *
- * Copyright (C) 2014-2016 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2014-2018 NVIDIA Corporation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -40,6 +40,8 @@
 #define TCPDUMP_TAG_STAT	'&'
 #define TCPDUMP_TAG_PWR 	'P'
 
+extern char wifi_product_value[20];
+
 /* initialization */
 
 int
@@ -59,30 +61,6 @@ tegra_sysfs_suspend(void);
 
 void
 tegra_sysfs_resume(void);
-
-/* ping histogram */
-
-void
-tegra_sysfs_histogram_ping_request(struct sk_buff *skb);
-
-void
-tegra_sysfs_histogram_ping_reply(struct sk_buff *skb);
-
-void
-tegra_sysfs_histogram_ping_work_start(void);
-
-void
-tegra_sysfs_histogram_ping_work_stop(void);
-
-ssize_t
-tegra_sysfs_histogram_ping_show(struct device *dev,
-	struct device_attribute *attr,
-	char *buf);
-
-ssize_t
-tegra_sysfs_histogram_ping_store(struct device *dev,
-	struct device_attribute *attr,
-	const char *buf, size_t count);
 
 /* rssi histogram */
 
@@ -249,4 +227,22 @@ ssize_t
 tegra_sysfs_hostapd_downgradevotovi_store(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count);
+
+ssize_t
+tegra_sysfs_wifi_product_show(struct device *dev,
+	struct device_attribute *attr,
+	char *buf);
+
+ssize_t
+tegra_sysfs_wifi_product_store(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count);
+
+/* Appends wifi product value to blob path read from DT
+ * Parameters -
+ * @blob_path    : Actual blob path from DT
+ * @result       : New path after append
+ */
+void get_product_blob_path(char *blob_path, char **result);
+
 #endif  /* _dhd_custom_sysfs_tegra_h_ */

@@ -2,13 +2,14 @@
  * Header file of Broadcom Dongle Host Driver (DHD)
  * Prefered Network Offload code and Wi-Fi Location Service(WLS) code.
  * Copyright (C) 1999-2015, Broadcom Corporation
- * 
+ * Copyright (C) 2016-2017, NVIDIA CORPORATION. All rights reserved.
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +17,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -451,6 +452,7 @@ typedef union dhd_pno_params {
 #endif /* GSCAN_SUPPORT */
 } dhd_pno_params_t;
 typedef struct dhd_pno_status_info {
+	uint8 pno_oui[DOT11_OUI_LEN];
 	dhd_pub_t *dhd;
 	struct work_struct work;
 	struct mutex pno_mutex;
@@ -515,6 +517,9 @@ extern int dhd_pno_stop_for_hotlist(dhd_pub_t *dhd);
 extern int dhd_pno_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data);
 extern int dhd_pno_init(dhd_pub_t *dhd);
 extern int dhd_pno_deinit(dhd_pub_t *dhd);
+extern bool dhd_is_pno_supported(dhd_pub_t *dhd);
+extern int dhd_dev_pno_set_mac_oui(struct net_device *dev, uint8 *oui);
+extern int dhd_pno_set_mac_oui(dhd_pub_t *dhd, uint8 *oui);
 #ifdef GSCAN_SUPPORT
 extern void * dhd_pno_get_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type, void *info,
                        uint32 *len);
