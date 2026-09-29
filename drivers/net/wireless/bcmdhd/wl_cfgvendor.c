@@ -669,6 +669,25 @@ static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 }
 #endif /* DHD_DEBUG && BCMSDIO */
 
+/* As hardware_legacy/wifi_logger.h numbers them. */
+#define WIFI_LOGGER_MEMORY_DUMP_SUPPORTED	(1 << 0)
+#define WIFI_LOGGER_PACKET_FATE_SUPPORTED	(1 << 8)
+
+/* What of the HAL's logger this driver answers; no ring buffers. */
+static int wl_cfgvendor_dbg_get_feature(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	uint32 features = 0;
+
+#if defined(DHD_DEBUG) && defined(BCMSDIO)
+	features |= WIFI_LOGGER_MEMORY_DUMP_SUPPORTED;
+#endif
+#ifdef DBG_PKT_MON
+	features |= WIFI_LOGGER_PACKET_FATE_SUPPORTED;
+#endif
+	return wl_cfgvendor_send_cmd_reply(wiphy, wdev->netdev, &features, sizeof(features));
+}
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -878,7 +897,7 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.subcmd = DEBUG_GET_FEATURE
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
+		.doit = wl_cfgvendor_dbg_get_feature
 	},
 	{
 		{
