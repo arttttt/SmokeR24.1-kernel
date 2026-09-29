@@ -45,6 +45,7 @@
 #include <dhd_wlfc.h>
 #endif
 #include <dhd_ip.h>
+#include <dhd_pktmon.h>
 
 
 #ifdef CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
@@ -2041,6 +2042,10 @@ _dhd_wlfc_compressed_txstatus_update(dhd_pub_t *dhd, uint8* pkt_info, uint8 len,
 
 		/* set fifo_id to correct value because not all FW does that */
 		fifo_id = DHD_PKTTAG_FIFO(PKTTAG(pktbuf));
+
+#ifdef DBG_PKT_MON
+		dhd_pktmon_tx_status(dhd, pktbuf, status_flag);
+#endif /* DBG_PKT_MON */
 
 		entry = _dhd_wlfc_find_table_entry(wlfc, pktbuf);
 

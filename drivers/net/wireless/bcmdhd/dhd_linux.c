@@ -83,6 +83,7 @@
 #include <dhd_linux_wq.h>
 #include <dhd.h>
 #include <dhd_linux.h>
+#include <dhd_pktmon.h>
 #ifdef PCIE_FULL_DONGLE
 #include <dhd_flowring.h>
 #endif
@@ -2629,6 +2630,10 @@ dhd_sendpkt(dhd_pub_t *dhdp, int ifidx, void *pktbuf)
 			DHD_PKTTAG_SETFIFO(PKTTAG(pktbuf), WME_PRIO2AC(PKTPRIO(pktbuf)));
 	} else
 #endif /* PROP_TXSTATUS */
+#ifdef DBG_PKT_MON
+	dhd_pktmon_tx(dhdp, pktbuf);
+#endif /* DBG_PKT_MON */
+
 	/* If the protocol uses a data header, apply it */
 	dhd_prot_hdrpush(dhdp, ifidx, pktbuf);
 
@@ -3189,6 +3194,12 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 		}
 #endif /* DHD_RX_DUMP */
 
+#ifdef DBG_PKT_MON
+		/* Still a whole Ethernet frame here; firmware events are not frames. */
+		if (((eth[12] << 8) | eth[13]) != ETHER_TYPE_BRCM)
+			dhd_pktmon_rx(dhdp, skb);
+#endif /* DBG_PKT_MON */
+
 		skb->protocol = eth_type_trans(skb, skb->dev);
 
 		if (skb->pkt_type == PACKET_MULTICAST) {
@@ -3323,6 +3334,10 @@ dhd_txcomplete(dhd_pub_t *dhdp, void *txp, bool success)
 #ifdef PROP_TXSTATUS
 	dhd_if_t *ifp = dhd->iflist[DHD_PKTTAG_IF(PKTTAG(txp))];
 #endif
+
+#ifdef DBG_PKT_MON
+	dhd_pktmon_tx_done(dhdp, txp, success);
+#endif /* DBG_PKT_MON */
 
 	dhd_prot_hdrpull(dhdp, NULL, txp, NULL, NULL);
 
@@ -7656,6 +7671,9 @@ dhd_free(dhd_pub_t *dhdp)
 
 	if (dhdp) {
 		int i;
+#ifdef DBG_PKT_MON
+		dhd_pktmon_free(dhdp);
+#endif /* DBG_PKT_MON */
 		for (i = 0; i < ARRAYSIZE(dhdp->reorder_bufs); i++) {
 			if (dhdp->reorder_bufs[i]) {
 				reorder_info_t *ptr;

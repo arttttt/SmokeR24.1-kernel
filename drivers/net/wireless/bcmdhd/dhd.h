@@ -447,6 +447,9 @@ typedef struct dhd_pub {
 #endif /* defined(WLTDLS) && defined(PCIE_FULL_DONGLE) */
 	uint8 *soc_ram;
 	uint32 soc_ram_length;
+#ifdef DBG_PKT_MON
+	void *pktmon;		/* dhd_pktmon.c, created on the first start */
+#endif /* DBG_PKT_MON */
 } dhd_pub_t;
 
 #if defined(BCMWDF)

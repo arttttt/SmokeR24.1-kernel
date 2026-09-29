@@ -74,6 +74,7 @@
 #include <wl_cfgp2p.h>
 #include <wl_android.h>
 #include <wl_cfgvendor.h>
+#include <dhd_pktmon.h>
 #ifdef PROP_TXSTATUS
 #include <dhd_wlfc.h>
 #endif
@@ -465,6 +466,89 @@ exit:
 }
 #endif /* LINKSTAT_SUPPORT */
 
+#ifdef DBG_PKT_MON
+/* After bcmdhd 1.77's wl_cfgvendor.c, onto dhd_pktmon.c. */
+static int wl_cfgvendor_dbg_start_pkt_fate_monitoring(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	int ret;
+
+	ret = dhd_pktmon_start((dhd_pub_t *)cfg->pub);
+	if (unlikely(ret))
+		WL_ERR(("failed to start pkt fate monitoring, ret=%d\n", ret));
+
+	return ret;
+}
+
+typedef int (*dbg_mon_get_pkts_t) (dhd_pub_t *dhdp, void __user *user_buf,
+	uint16 req_count, uint16 *resp_count);
+
+static int __wl_cfgvendor_dbg_get_pkt_fates(struct wiphy *wiphy,
+	const void *data, int len, dbg_mon_get_pkts_t dbg_mon_get_pkts)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct sk_buff *skb;
+	const struct nlattr *iter;
+	void __user *user_buf = NULL;
+	uint16 req_count = 0, resp_count = 0;
+	int ret, tmp, type;
+
+	nla_for_each_attr(iter, data, len, tmp) {
+		type = nla_type(iter);
+		switch (type) {
+			case DEBUG_ATTRIBUTE_PKT_FATE_NUM:
+				req_count = nla_get_u32(iter);
+				break;
+			case DEBUG_ATTRIBUTE_PKT_FATE_DATA:
+				user_buf = (void __user *)(unsigned long) nla_get_u64(iter);
+				break;
+			default:
+				WL_ERR(("%s: no such attribute %d\n", __FUNCTION__, type));
+				return -EINVAL;
+		}
+	}
+
+	if (!req_count || !user_buf) {
+		WL_ERR(("%s: invalid request, user_buf=%p, req_count=%u\n",
+			__FUNCTION__, user_buf, req_count));
+		return -EINVAL;
+	}
+
+	ret = dbg_mon_get_pkts((dhd_pub_t *)cfg->pub, user_buf, req_count, &resp_count);
+	if (unlikely(ret)) {
+		WL_ERR(("failed to get packets, ret:%d\n", ret));
+		return ret;
+	}
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		VENDOR_REPLY_OVERHEAD + ATTRIBUTE_U32_LEN);
+	if (unlikely(!skb)) {
+		WL_ERR(("skb alloc failed"));
+		return -ENOMEM;
+	}
+	nla_put_u32(skb, DEBUG_ATTRIBUTE_PKT_FATE_NUM, resp_count);
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret))
+		WL_ERR(("vendor Command reply failed ret:%d\n", ret));
+
+	return ret;
+}
+
+static int wl_cfgvendor_dbg_get_tx_pkt_fates(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	return __wl_cfgvendor_dbg_get_pkt_fates(wiphy, data, len, dhd_pktmon_get_tx);
+}
+
+static int wl_cfgvendor_dbg_get_rx_pkt_fates(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	return __wl_cfgvendor_dbg_get_pkt_fates(wiphy, data, len, dhd_pktmon_get_rx);
+}
+#endif /* DBG_PKT_MON */
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -544,6 +628,32 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.doit = wl_cfgvendor_lstats_get_info
 	},
 #endif /* LINKSTAT_SUPPORT */
+#ifdef DBG_PKT_MON
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_START_PKT_FATE_MONITORING
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_dbg_start_pkt_fate_monitoring
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_GET_TX_PKT_FATES
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_dbg_get_tx_pkt_fates
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_GET_RX_PKT_FATES
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_dbg_get_rx_pkt_fates
+	},
+#endif /* DBG_PKT_MON */
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
