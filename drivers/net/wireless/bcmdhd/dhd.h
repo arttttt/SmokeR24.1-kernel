@@ -543,7 +543,8 @@ int dhd_pno_clean(dhd_pub_t *dhd);
 #endif /* PNO_SUPPORT */
 #if defined(KEEP_ALIVE)
 extern int dhd_dev_start_mkeep_alive(dhd_pub_t *dhd_pub, u8 mkeep_alive_id, u8 *ip_pkt,
-	u16 ip_pkt_len, u8* src_mac_addr, u8* dst_mac_addr, u32 period_msec);
+	u16 ip_pkt_len, u8* src_mac_addr, u8* dst_mac_addr, u32 period_msec,
+	u16 ether_type);
 extern int dhd_dev_stop_mkeep_alive(dhd_pub_t *dhd_pub, u8 mkeep_alive_id);
 #endif /* defined(KEEP_ALIVE) */
 /*

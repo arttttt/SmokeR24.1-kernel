@@ -476,6 +476,8 @@ static void wl_put_event(struct wl_event_q *e);
 static void wl_wakeup_event(struct bcm_cfg80211 *cfg);
 static s32 wl_notify_connect_status_ap(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	const wl_event_msg_t *e, void *data);
+static s32 wl_notify_rssi(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
+	const wl_event_msg_t *e, void *data);
 static s32 wl_notify_connect_status(struct bcm_cfg80211 *cfg,
 	bcm_struct_cfgdev *cfgdev, const wl_event_msg_t *e, void *data);
 static s32 wl_notify_roaming_status(struct bcm_cfg80211 *cfg,
@@ -9354,6 +9356,19 @@ wl_notify_connect_status_ibss(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	return err;
 }
 
+/* The firmware's RSSI crossed a level set with rssi_event. */
+static s32
+wl_notify_rssi(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
+	const wl_event_msg_t *e, void *data)
+{
+	struct net_device *ndev = cfgdev_to_wlc_ndev(cfgdev, cfg);
+
+	if (data && ntoh32(e->datalen) >= sizeof(int32))
+		wl_cfgvendor_rssi_event(cfg, ndev,
+			(int32)ntoh32(((wl_event_data_rssi_t *)data)->rssi));
+	return 0;
+}
+
 static s32
 wl_notify_connect_status(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	const wl_event_msg_t *e, void *data)
@@ -10906,6 +10921,7 @@ static void wl_init_event_handler(struct bcm_cfg80211 *cfg)
 	memset(cfg->evt_handler, 0, sizeof(cfg->evt_handler));
 
 	cfg->evt_handler[WLC_E_SCAN_COMPLETE] = wl_notify_scan_status;
+	cfg->evt_handler[WLC_E_RSSI] = wl_notify_rssi;
 	cfg->evt_handler[WLC_E_AUTH] = wl_notify_connect_status;
 	cfg->evt_handler[WLC_E_ASSOC] = wl_notify_connect_status;
 	cfg->evt_handler[WLC_E_LINK] = wl_notify_connect_status;

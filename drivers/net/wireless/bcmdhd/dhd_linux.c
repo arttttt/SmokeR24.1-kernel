@@ -6809,6 +6809,8 @@ if (bcmdhd_use_custom_pspretend_thr) {
 #ifdef WLMEDIA_HTSF
 	setbit(eventmask, WLC_E_HTSFSYNC);
 #endif /* WLMEDIA_HTSF */
+	/* Crossings of the levels RSSI monitoring sets; none until it sets some. */
+	setbit(eventmask, WLC_E_RSSI);
 #ifdef PNO_SUPPORT
 	setbit(eventmask, WLC_E_PFN_NET_FOUND);
 	setbit(eventmask, WLC_E_PFN_BEST_BATCHING);
@@ -10216,7 +10218,7 @@ dhd_wmf_t* dhd_wmf_conf(dhd_pub_t *dhdp, uint32 idx)
 #define TEMP_FRAME_SIZE 300
 int
 dhd_dev_start_mkeep_alive(dhd_pub_t *dhd_pub, u8 mkeep_alive_id, u8 *ip_pkt, u16 ip_pkt_len,
-	u8* src_mac, u8* dst_mac, u32 period_msec)
+	u8* src_mac, u8* dst_mac, u32 period_msec, u16 ether_type)
 {
 	char *pbuf;
 	const char *str;
@@ -10319,9 +10321,9 @@ dhd_dev_start_mkeep_alive(dhd_pub_t *dhd_pub, u8 mkeep_alive_id, u8 *ip_pkt, u16
 	memcpy(pmac_frame, src_mac, ETHER_ADDR_LEN);
 	pmac_frame += ETHER_ADDR_LEN;
 
-	/* Mapping Ethernet type (ETHERTYPE_IP: 0x0800) */
-	*(pmac_frame++) = 0x08;
-	*(pmac_frame++) = 0x00;
+	/* The Ethernet type the HAL gives: IPv4, or IPv6 */
+	*(pmac_frame++) = (uint8)(ether_type >> 8);
+	*(pmac_frame++) = (uint8)(ether_type & 0xff);
 
 	/* Mapping IP pkt */
 	memcpy(pmac_frame, ip_pkt, ip_pkt_len);

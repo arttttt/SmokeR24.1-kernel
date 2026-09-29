@@ -235,6 +235,7 @@ static int wl_cfgvendor_start_mkeep_alive(struct wiphy *wiphy, struct wireless_d
 	u8 src_mac[ETHER_ADDR_LEN];
 	u8 dst_mac[ETHER_ADDR_LEN];
 	u32 period_msec = 0;
+	u16 ether_type = ETHER_TYPE_IP;
 	const struct nlattr *iter;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	dhd_pub_t *dhd_pub = cfg->pub;
@@ -275,6 +276,10 @@ static int wl_cfgvendor_start_mkeep_alive(struct wiphy *wiphy, struct wireless_d
 			case MKEEP_ALIVE_ATTRIBUTE_PERIOD_MSEC:
 				period_msec = nla_get_u32(iter);
 				break;
+			case MKEEP_ALIVE_ATTRIBUTE_ETHER_TYPE:
+				/* R's HAL always sends it: IPv4 or IPv6 */
+				ether_type = nla_get_u16(iter);
+				break;
 			default:
 				WL_ERR(("Unknown type: %d\n", type));
 				ret = BCME_BADARG;
@@ -289,7 +294,7 @@ static int wl_cfgvendor_start_mkeep_alive(struct wiphy *wiphy, struct wireless_d
 	}
 
 	ret = dhd_dev_start_mkeep_alive(dhd_pub, mkeep_alive_id, ip_pkt, ip_pkt_len, src_mac,
-		dst_mac, period_msec);
+		dst_mac, period_msec, ether_type);
 	if (ret < 0) {
 		WL_ERR(("start_mkeep_alive is failed ret: %d\n", ret));
 	}
@@ -399,6 +404,7 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	wifi_radio_stat *radio;
 	wifi_iface_stat *iface;
 	wl_cnt_t *cnt = NULL;
+	uint32 tot_tx, tot_rx, tot_rxmulti, tot_fail, tot_retry;
 	char *buf;
 	int err, i;
 
@@ -424,6 +430,12 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		goto exit;
 	}
 
+	tot_tx = dtoh32(cnt->txframe);
+	tot_rx = dtoh32(cnt->rxframe);
+	tot_rxmulti = dtoh32(cnt->rxmulti);
+	tot_fail = dtoh32(cnt->txfail);
+	tot_retry = dtoh32(cnt->txretry);
+
 	radio->num_channels = 0;
 
 	iface->info.mode = WIFI_INTERFACE_STA;
@@ -446,14 +458,41 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		iface->info.state = WIFI_DISCONNECTED;
 	}
 
-	iface->beacon_rx = dtoh32(cnt->rxbeaconmbss);
+	iface->beacon_rx = dtoh32(cnt->rxbeaconmbss);	/* before cnt is reused */
 	for (i = 0; i < WIFI_AC_MAX; i++)
 		iface->ac[i].ac = i;
-	iface->ac[WIFI_AC_BE].tx_mpdu = dtoh32(cnt->txframe);
-	iface->ac[WIFI_AC_BE].rx_mpdu = dtoh32(cnt->rxframe);
-	iface->ac[WIFI_AC_BE].rx_mcast = dtoh32(cnt->rxmulti);
-	iface->ac[WIFI_AC_BE].mpdu_lost = dtoh32(cnt->txfail);
-	iface->ac[WIFI_AC_BE].retries = dtoh32(cnt->txretry);
+
+	/*
+	 * Per access category from wme_counters, which this firmware has;
+	 * Broadcom counts BE, BK, VI, VO and the HAL VO, VI, BE, BK. Without
+	 * it, the totals from counters stand under best effort.
+	 */
+	memset(cnt, 0, sizeof(*cnt));
+	if (sizeof(*cnt) >= sizeof(wl_wme_cnt_t) &&
+		!wldev_iovar_getbuf(ndev, "wme_counters", NULL, 0,
+			(char *)cnt, sizeof(wl_wme_cnt_t), NULL)) {
+		static const int hal_ac[AC_COUNT] = {
+			[AC_BE] = WIFI_AC_BE, [AC_BK] = WIFI_AC_BK,
+			[AC_VI] = WIFI_AC_VI, [AC_VO] = WIFI_AC_VO,
+		};
+		wl_wme_cnt_t *wme = (wl_wme_cnt_t *)cnt;
+
+		for (i = 0; i < AC_COUNT; i++) {
+			wifi_wmm_ac_stat *ac = &iface->ac[hal_ac[i]];
+
+			ac->tx_mpdu = dtoh32(wme->tx[i].packets);
+			ac->rx_mpdu = dtoh32(wme->rx[i].packets);
+			ac->mpdu_lost = dtoh32(wme->tx_failed[i].packets);
+		}
+		/* Retries are counted only as a whole. */
+		iface->ac[WIFI_AC_BE].retries = tot_retry;
+	} else {
+		iface->ac[WIFI_AC_BE].tx_mpdu = tot_tx;
+		iface->ac[WIFI_AC_BE].rx_mpdu = tot_rx;
+		iface->ac[WIFI_AC_BE].rx_mcast = tot_rxmulti;
+		iface->ac[WIFI_AC_BE].mpdu_lost = tot_fail;
+		iface->ac[WIFI_AC_BE].retries = tot_retry;
+	}
 	iface->num_peers = 0;
 
 	err = wl_cfgvendor_send_cmd_reply(wiphy, ndev, buf, buflen);
@@ -707,6 +746,86 @@ static int wl_cfgvendor_dbg_get_ring_status(struct wiphy *wiphy,
 	return cfg80211_vendor_cmd_reply(skb);
 }
 
+/*
+ * RSSI monitoring. The firmware has no rssi_monitor, the iovar newer bcmdhd
+ * drives this with, but it has the older rssi_event: given a set of levels it
+ * posts WLC_E_RSSI each time the RSSI of the AP's frames crosses one. The two
+ * thresholds the framework asks about become the two levels; a crossing that
+ * leaves the RSSI outside [min, max] is passed to the HAL as its
+ * RSSI_MONITOR_EVENT, and the framework then asks for new thresholds.
+ */
+static struct {
+	bool on;
+	int8 min_rssi;
+	int8 max_rssi;
+} rssi_mon;
+
+static int wl_cfgvendor_set_rssi_monitor(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
+	const struct nlattr *iter;
+	wl_rssi_event_t rev;
+	int8 max_rssi = 0, min_rssi = 0;
+	u32 start = 0;
+	int err, tmp;
+
+	nla_for_each_attr(iter, data, len, tmp) {
+		switch (nla_type(iter)) {
+			case RSSI_MONITOR_ATTRIBUTE_MAX_RSSI:
+				max_rssi = (int8)nla_get_u32(iter);
+				break;
+			case RSSI_MONITOR_ATTRIBUTE_MIN_RSSI:
+				min_rssi = (int8)nla_get_u32(iter);
+				break;
+			case RSSI_MONITOR_ATTRIBUTE_START:
+				start = nla_get_u32(iter);
+				break;
+		}
+	}
+	if (start && min_rssi > max_rssi)
+		return -EINVAL;
+
+	memset(&rev, 0, sizeof(rev));
+	if (start) {
+		rev.num_rssi_levels = 2;
+		rev.rssi_levels[0] = min_rssi;
+		rev.rssi_levels[1] = max_rssi;
+	}
+	err = wldev_iovar_setbuf(ndev, "rssi_event", &rev, sizeof(rev),
+		cfg->ioctl_buf, WLC_IOCTL_SMLEN, &cfg->ioctl_buf_sync);
+	if (unlikely(err)) {
+		WL_ERR(("%s: rssi_event failed (%d)\n", __FUNCTION__, err));
+		return err;
+	}
+
+	rssi_mon.min_rssi = min_rssi;
+	rssi_mon.max_rssi = max_rssi;
+	rssi_mon.on = !!start;
+	return 0;
+}
+
+void wl_cfgvendor_rssi_event(struct bcm_cfg80211 *cfg, struct net_device *ndev, int32 rssi)
+{
+	struct {
+		uint8 version;
+		int8 cur_rssi;
+		uint8 bssid[ETHER_ADDR_LEN];
+	} __attribute__ ((packed)) evt;
+
+	if (!rssi_mon.on || (rssi >= rssi_mon.min_rssi && rssi <= rssi_mon.max_rssi))
+		return;
+
+	memset(&evt, 0, sizeof(evt));
+	evt.version = 1;	/* RSSI_MONITOR_EVT_VERSION */
+	evt.cur_rssi = (int8)rssi;
+	wldev_ioctl(ndev, WLC_GET_BSSID, evt.bssid, ETHER_ADDR_LEN, false);
+
+	wl_cfgvendor_send_async_event(bcmcfg_to_wiphy(cfg), ndev,
+		GOOGLE_RSSI_MONITOR_EVENT, &evt, sizeof(evt));
+}
+
 static int wl_cfgvendor_dbg_get_version(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
@@ -845,6 +964,14 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_set_hal_state
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_SET_RSSI_MONITOR
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_rssi_monitor
 	},
 	{
 		{
