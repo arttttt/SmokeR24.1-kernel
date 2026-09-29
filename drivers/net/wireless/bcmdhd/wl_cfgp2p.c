@@ -759,8 +759,6 @@ wl_cfgp2p_enable_discovery(struct bcm_cfg80211 *cfg, struct net_device *dev,
 		goto set_ie;
 	}
 
-	wl_set_p2p_status(cfg, DISCOVERY_ON);
-
 	CFGP2P_DBG(("enter\n"));
 
 	ret = wl_cfgp2p_init_discovery(cfg);
@@ -768,6 +766,12 @@ wl_cfgp2p_enable_discovery(struct bcm_cfg80211 *cfg, struct net_device *dev,
 		CFGP2P_ERR((" init discovery error %d\n", ret));
 		goto exit;
 	}
+
+	/* Only once the firmware has it: marked earlier, a refusal left the
+	 * status claiming a discovery that did not exist, and every later
+	 * attempt returned success at the check above without asking again.
+	 */
+	wl_set_p2p_status(cfg, DISCOVERY_ON);
 	/* Set wsec to any non-zero value in the discovery bsscfg to ensure our
 	 * P2P probe responses have the privacy bit set in the 802.11 WPA IE.
 	 * Some peer devices may not initiate WPS with us if this bit is not set.
