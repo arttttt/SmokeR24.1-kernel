@@ -2644,6 +2644,10 @@ dhd_sendpkt(dhd_pub_t *dhdp, int ifidx, void *pktbuf)
 	}
 #endif
 
+#ifdef DBG_PKT_MON
+	dhd_pktmon_tx(dhdp, pktbuf);
+#endif /* DBG_PKT_MON */
+
 #ifdef PROP_TXSTATUS
 	if (dhd_wlfc_is_supported(dhdp)) {
 		/* store the interface ID */
@@ -2660,10 +2664,6 @@ dhd_sendpkt(dhd_pub_t *dhdp, int ifidx, void *pktbuf)
 			DHD_PKTTAG_SETFIFO(PKTTAG(pktbuf), WME_PRIO2AC(PKTPRIO(pktbuf)));
 	} else
 #endif /* PROP_TXSTATUS */
-#ifdef DBG_PKT_MON
-	dhd_pktmon_tx(dhdp, pktbuf);
-#endif /* DBG_PKT_MON */
-
 	/* If the protocol uses a data header, apply it */
 	dhd_prot_hdrpush(dhdp, ifidx, pktbuf);
 
