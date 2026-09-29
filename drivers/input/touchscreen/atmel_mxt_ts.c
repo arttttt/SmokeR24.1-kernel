@@ -4648,7 +4648,7 @@ retry:
 	if (fb_notifier_register(&fb_notif_atm))
 		dev_err(&client->dev, "%s: failed to register fb notifier\n", __func__);
 	else
-		dev_err(&client->dev, "%s: fb notifier registered\n", __func__);
+		dev_info(&client->dev, "%s: fb notifier registered\n", __func__);
 #endif
 
 #ifdef CONFIG_FB
@@ -4776,7 +4776,7 @@ static int mxt_ts_suspend(struct device *dev)
 	struct mxt_data *data =  dev_get_drvdata(dev);
 
 	if (data->wakeup_gesture_mode) {
-		dev_err(dev, "touch enable irq wake\n");
+		dev_dbg(dev, "touch enable irq wake\n");
 		enable_irq_wake(data->client->irq);
 	}
 
@@ -4788,7 +4788,7 @@ static int mxt_ts_resume(struct device *dev)
 	struct mxt_data *data =  dev_get_drvdata(dev);
 
 	if (data->wakeup_gesture_mode) {
-		dev_err(dev, "touch disable irq wake\n");
+		dev_dbg(dev, "touch disable irq wake\n");
 		disable_irq_wake(data->client->irq);
 	}
 

@@ -4433,7 +4433,7 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 	if (fb_notifier_register(&fb_notif_synaptics))
 		dev_err(&pdev->dev, "%s: failed to register fb notifier\n", __func__);
 	else
-		dev_err(&pdev->dev, "%s: fb notifier registered\n", __func__);
+		dev_info(&pdev->dev, "%s: fb notifier registered\n", __func__);
 #endif
 
 	return retval;
@@ -4714,7 +4714,7 @@ static int synaptics_rmi4_suspend(struct device *dev)
 
 #ifdef CONFIG_CUSTOM_DT2W
 	if (custom_wakeup_enable) {
-		dev_err(rmi4_data->pdev->dev.parent, "touch enable irq wake\n");
+		dev_dbg(rmi4_data->pdev->dev.parent, "touch enable irq wake\n");
 		enable_irq_wake(rmi4_data->irq);
 
 		return 0;
@@ -4786,7 +4786,7 @@ static int synaptics_rmi4_resume(struct device *dev)
 
 #ifdef CONFIG_CUSTOM_DT2W
 	if (custom_wakeup_enable) {
-		dev_err(rmi4_data->pdev->dev.parent, "touch disable irq wake\n");
+		dev_dbg(rmi4_data->pdev->dev.parent, "touch disable irq wake\n");
 		disable_irq_wake(rmi4_data->irq);
 
 		return 0;
