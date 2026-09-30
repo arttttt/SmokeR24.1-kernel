@@ -1242,6 +1242,14 @@ wl_cfgp2p_set_management_ie(struct bcm_cfg80211 *cfg, struct net_device *ndev, s
 				CFGP2P_ERR(("not suitable type\n"));
 				return BCME_ERROR;
 		}
+#if defined(DUAL_STA) || defined(WL_VIRTUAL_APSTA)
+		/* The AP beside the station has a BSS of its own, and its IEs go
+		 * there. Sent to BSS 0 they landed on the station, missed the AP,
+		 * and piled up: ap_info goes with each hotspot, the IEs in BSS 0
+		 * did not, and the next hotspot added them again.
+		 */
+		if (bssidx != cfg->cfgdev_bssidx)
+#endif /* DUAL_STA || WL_VIRTUAL_APSTA */
 		bssidx = 0;
 	} else if (wl_get_mode_by_netdev(cfg, ndev) == WL_MODE_BSS) {
 		switch (pktflag) {
