@@ -221,18 +221,6 @@ static const struct ieee80211_iface_limit common_if_limits[] = {
 	.types = BIT(NL80211_IFTYPE_ADHOC),
 	},
 };
-#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_RESTRICTED_CHANNEL)
-static const struct ieee80211_iface_limit apsta_if_limits[] = {
-	{
-	.max = 1,
-	.types = BIT(NL80211_IFTYPE_STATION),
-	},
-	{
-	.max = 1,
-	.types = BIT(NL80211_IFTYPE_AP),
-	},
-};
-#endif /* WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL */
 #ifdef BCM4330_CHIP
 #define NUM_DIFF_CHANNELS 1
 #else
@@ -250,21 +238,6 @@ common_iface_combinations[] = {
 	.limits = common_if_limits,
 	.n_limits = ARRAY_SIZE(common_if_limits),
 	},
-#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_RESTRICTED_CHANNEL)
-	{
-	/*
-	 * The hotspot beside the station. R's framework picks the hotspot's
-	 * channel without looking at the station's, and with one channel
-	 * cfg80211 turns START_AP down with -EBUSY before the driver sees it.
-	 * Two channels let it through; wl_cfg80211_set_channel then puts the
-	 * AP on the station's channel, so the radio still runs on one.
-	 */
-	.num_different_channels = 2,
-	.max_interfaces = 2,
-	.limits = apsta_if_limits,
-	.n_limits = ARRAY_SIZE(apsta_if_limits),
-	},
-#endif /* WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL */
 };
 #endif /* LINUX_VER >= 3.0 && (WL_IFACE_COMB_NUM_CHANNELS || WL_CFG80211_P2P_DEV_IF) */
 
@@ -7078,11 +7051,9 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	} param = {0, 0};
 
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-	enum ieee80211_band _band;
-#if defined(CUSTOM_SET_CPUCORE) || (defined(WL_VIRTUAL_APSTA) && \
-	defined(APSTA_RESTRICTED_CHANNEL))
+#ifdef CUSTOM_SET_CPUCORE
 	dhd_pub_t *dhd;
-#endif /* CUSTOM_SET_CPUCORE || (WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL) */
+#endif /* CUSTOM_SET_CPUCORE */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
 	enum nl80211_channel_type channel_type = NL80211_CHAN_HT20;
@@ -7091,52 +7062,18 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	if (!cfg)
 		return -EINVAL;
 
-#if defined(CUSTOM_SET_CPUCORE) || (defined(WL_VIRTUAL_APSTA) && \
-	defined(APSTA_RESTRICTED_CHANNEL))
+#ifdef CUSTOM_SET_CPUCORE
 	dhd =  (dhd_pub_t *)(cfg->pub);
-#endif /* CUSTOM_SET_CPUCORE || (WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL) */
+#endif /* CUSTOM_SET_CPUCORE */
 
 #ifndef P2PONEINT
 	dev = ndev_to_wlc_ndev(dev, cfg);
 #endif
 	_chan = ieee80211_frequency_to_channel(chan->center_freq);
-	_band = chan->band;
 	WL_ERR(("netdev_ifidx(%d), chan_type(%d) target channel(%d) \n",
 		dev->ifindex, channel_type, _chan));
 
-#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_RESTRICTED_CHANNEL)
-	/*
-	 * An AP beside a connected station goes on the station's channel,
-	 * whatever hostapd asked for (bcmdhd 1.77). This build runs one channel
-	 * at a time (CONFIG_BCMDHD_DISABLE_MCC), and R's framework picks the
-	 * hotspot's channel at random.
-	 */
-#define DEFAULT_2G_SOFTAP_CHANNEL	1
-#define DEFAULT_5G_SOFTAP_CHANNEL	149
-	if (wl_get_mode_by_netdev(cfg, dev) == WL_MODE_AP &&
-		DHD_OPMODE_STA_SOFTAP_CONCURR(dhd) &&
-		wl_get_drv_status(cfg, CONNECTED, bcmcfg_to_prmry_ndev(cfg))) {
-		u32 *sta_chan = (u32 *)wl_read_prof(cfg,
-			bcmcfg_to_prmry_ndev(cfg), WL_PROF_CHAN);
-#ifdef WL_RESTRICTED_APSTA_SCC
-		_chan = *sta_chan;
-#else
-		u32 sta_band = (*sta_chan > CH_MAX_2G_CHANNEL) ?
-			IEEE80211_BAND_5GHZ : IEEE80211_BAND_2GHZ;
-		if (chan->band == sta_band) {
-			_chan = (sta_band == IEEE80211_BAND_5GHZ &&
-				*sta_chan != DEFAULT_5G_SOFTAP_CHANNEL) ?
-				DEFAULT_2G_SOFTAP_CHANNEL : *sta_chan;
-		}
-#endif /* WL_RESTRICTED_APSTA_SCC */
-		_band = (_chan <= CH_MAX_2G_CHANNEL) ? IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
-		WL_ERR(("Target SoftAP channel will be set to %d\n", _chan));
-	}
-#undef DEFAULT_2G_SOFTAP_CHANNEL
-#undef DEFAULT_5G_SOFTAP_CHANNEL
-#endif /* WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL */
-
-	if (_band == IEEE80211_BAND_5GHZ) {
+	if (chan->band == IEEE80211_BAND_5GHZ) {
 		param.band = WLC_BAND_5G;
 		err = wldev_iovar_getbuf(dev, "bw_cap", &param, sizeof(param),
 			cfg->ioctl_buf, WLC_IOCTL_SMLEN, &cfg->ioctl_buf_sync);
@@ -7169,7 +7106,7 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 			}
 		}
 
-	} else if (_band == IEEE80211_BAND_2GHZ)
+	} else if (chan->band == IEEE80211_BAND_2GHZ)
 		bw = WL_CHANSPEC_BW_20;
 
 	/* In 5GHz band If AP is connected in 20 MHz then follow AP's bw
@@ -7179,7 +7116,7 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 		   interface name. */
 		if(!strncmp(iter->ndev->name, "wlan0", strlen("wlan0"))) {
 			if (wl_get_drv_status(cfg, CONNECTED, iter->ndev)) {
-				if (_band == IEEE80211_BAND_5GHZ) {
+				if (chan->band == IEEE80211_BAND_5GHZ) {
 					if(wldev_iovar_getint(iter->ndev,
 						"chanspec", (s32 *)&chanspec) == BCME_OK) {
 						chanspec = wl_chspec_driver_to_host(chanspec);

@@ -107,11 +107,8 @@ DHDCFLAGS += -DWL_IFACE_COMB_NUM_CHANNELS
 DHDCFLAGS += -DWL_ENABLE_P2P_IF
 
 # Hotspot beside the station: the AP on an interface of its own (wlan1), as
-# bcmdhd 1.77 has it, and on the station's channel, the only one this build
-# runs at a time (CONFIG_BCMDHD_DISABLE_MCC).
+# bcmdhd 1.77 has it, on the channel it was asked for.
 DHDCFLAGS += -DWL_VIRTUAL_APSTA
-DHDCFLAGS += -DAPSTA_RESTRICTED_CHANNEL
-DHDCFLAGS += -DWL_RESTRICTED_APSTA_SCC
 
 ##########################
 # driver type
