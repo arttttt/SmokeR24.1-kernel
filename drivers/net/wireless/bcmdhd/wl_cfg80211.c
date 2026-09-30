@@ -605,6 +605,10 @@ s32 wl_cfg80211_channel_to_freq(u32 channel);
 static void wl_cfg80211_work_handler(struct work_struct *work);
 static void wl_cfg80211_ap_chsw_work(struct work_struct *work);
 static void wl_cfg80211_ap_chsw_cancel(struct bcm_cfg80211 *cfg);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+static int wl_cfg80211_get_channel(struct wiphy *wiphy, struct wireless_dev *wdev,
+	struct cfg80211_chan_def *chandef);
+#endif
 static s32 wl_add_keyext(struct wiphy *wiphy, struct net_device *dev,
 	u8 key_idx, const u8 *mac_addr,
 	struct key_params *params);
@@ -9223,6 +9227,9 @@ static struct cfg80211_ops wl_cfg80211_ops = {
 	.leave_ibss = wl_cfg80211_leave_ibss,
 	.get_station = wl_cfg80211_get_station,
 	.dump_station = wl_cfg80211_dump_station,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+	.get_channel = wl_cfg80211_get_channel,
+#endif
 	.set_tx_power = wl_cfg80211_set_tx_power,
 	.get_tx_power = wl_cfg80211_get_tx_power,
 	.add_key = wl_cfg80211_add_key,
@@ -15876,6 +15883,42 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec, struct wip
 
 	return;
 }
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+/*
+ * The channel an interface is on, as the firmware has it, for "iw dev" and
+ * whatever else asks cfg80211. The driver had none, so an AP, a station or a
+ * P2P group showed no channel at all. As brcmfmac does: the chanspec of the
+ * interface, and no data for one that is on no channel -- a station not
+ * connected, an AP not up, the P2P Device, which has no netdev.
+ */
+static int
+wl_cfg80211_get_channel(struct wiphy *wiphy, struct wireless_dev *wdev,
+	struct cfg80211_chan_def *chandef)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *dev = wdev->netdev;
+	s32 chsp = 0;
+	s32 mode;
+
+	if (!dev)
+		return -ENODATA;
+
+	mode = wl_get_mode_by_netdev(cfg, dev);
+	if (!((mode == WL_MODE_AP && wl_get_drv_status(cfg, AP_CREATED, dev)) ||
+		(mode == WL_MODE_BSS && wl_get_drv_status(cfg, CONNECTED, dev))))
+		return -ENODATA;
+
+	if (wldev_iovar_getint(dev, "chanspec", &chsp) != BCME_OK)
+		return -ENODATA;
+
+	if (wl_chspec_chandef(wl_chspec_driver_to_host(chsp), chandef, wiphy) ||
+		!chandef->chan)
+		return -ENODATA;
+
+	return 0;
+}
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0) */
 
 static s32
 wl_csa_complete_ind(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
