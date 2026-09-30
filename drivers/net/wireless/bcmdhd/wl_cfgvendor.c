@@ -146,6 +146,7 @@ static int wl_cfgvendor_unsupported_feature(struct wiphy *wiphy,
 static int wl_cfgvendor_set_country(struct wiphy *wiphy,
         struct wireless_dev *wdev, const void  *data, int len)
 {
+        struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
         int err = BCME_ERROR, rem, type;
         char country_code[WLC_CNTRY_BUF_SZ] = {0};
         const struct nlattr *iter;
@@ -163,7 +164,15 @@ static int wl_cfgvendor_set_country(struct wiphy *wiphy,
                 }
         }
 
-        err = wldev_set_country(wdev->netdev, country_code, true, true);
+        /*
+         * The country is the radio's, whichever interface the HAL names: R
+         * sets it on the hotspot's before the hotspot comes up, and there
+         * the disassoc that went first failed (BCME_NOTSTA) and took the
+         * country with it. Through the primary, as the COUNTRY command and
+         * the regulatory notifier do, and like them without the disassoc,
+         * which would drop the station each time a hotspot starts beside it.
+         */
+        err = wldev_set_country(bcmcfg_to_prmry_ndev(cfg), country_code, true, false);
         if (err < 0) {
                 WL_ERR(("Set country failed ret:%d\n", err));
         }
