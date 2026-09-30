@@ -3897,7 +3897,11 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 		if ((ret = wl_cfgp2p_bss(cfg, ndev, bsscfg_idx, 0)) < 0) {
 			WL_ERR(("bss %d down failed ret:%d\n", bsscfg_idx, ret));
 		}
-		if ((ret = wl_cfg80211_add_del_bss(cfg, ndev,
+		/* Through the primary, as P2P deletes its BSSes: sent through the
+		 * BSS itself, "bss -1" was taken without an error and the BSS was
+		 * still there after it ("err 0 up 0").
+		 */
+		if ((ret = wl_cfg80211_add_del_bss(cfg, primary_ndev,
 			bsscfg_idx, iface_type, true, NULL)) < 0) {
 			WL_ERR(("DEL bss failed ret:%d \n", ret));
 			goto exit;
