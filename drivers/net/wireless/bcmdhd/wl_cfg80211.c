@@ -3910,7 +3910,8 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
 		!cfg->bss_pending_op, msecs_to_jiffies(MAX_WAIT_TIME));
 	if (timeout <= 0 || cfg->bss_pending_op) {
-		s32 up = 0;
+		/* "bss" takes its parameter for the index of the BSS to report */
+		s32 up = bsscfg_idx;
 		s32 err = wldev_iovar_getint_bsscfg(primary_ndev, "bss", &up, bsscfg_idx);
 
 		/* Whether the firmware still has the BSS: without the event there
