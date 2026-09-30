@@ -3887,6 +3887,14 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	ret = wl_cfg80211_interface_ops(cfg, ndev, bsscfg_idx,
 		NL80211_IFTYPE_STATION, 1, NULL);
 	if (ret == BCME_UNSUPPORTED) {
+		/* The firmware takes "bss -1" for a BSS still up and does nothing:
+		 * no IF_DEL, and the BSS lives on, up, to refuse the next create.
+		 * The interface can go without a stop_ap before it (the HAL deletes
+		 * it straight away), so it is taken down here first.
+		 */
+		if ((ret = wl_cfgp2p_bss(cfg, ndev, bsscfg_idx, 0)) < 0) {
+			WL_ERR(("bss %d down failed ret:%d\n", bsscfg_idx, ret));
+		}
 		if ((ret = wl_cfg80211_add_del_bss(cfg, ndev,
 			bsscfg_idx, iface_type, true, NULL)) < 0) {
 			WL_ERR(("DEL bss failed ret:%d \n", ret));
