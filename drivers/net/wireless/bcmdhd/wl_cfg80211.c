@@ -221,6 +221,18 @@ static const struct ieee80211_iface_limit common_if_limits[] = {
 	.types = BIT(NL80211_IFTYPE_ADHOC),
 	},
 };
+#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_RESTRICTED_CHANNEL)
+static const struct ieee80211_iface_limit apsta_if_limits[] = {
+	{
+	.max = 1,
+	.types = BIT(NL80211_IFTYPE_STATION),
+	},
+	{
+	.max = 1,
+	.types = BIT(NL80211_IFTYPE_AP),
+	},
+};
+#endif /* WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL */
 #ifdef BCM4330_CHIP
 #define NUM_DIFF_CHANNELS 1
 #else
@@ -238,6 +250,21 @@ common_iface_combinations[] = {
 	.limits = common_if_limits,
 	.n_limits = ARRAY_SIZE(common_if_limits),
 	},
+#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_RESTRICTED_CHANNEL)
+	{
+	/*
+	 * The hotspot beside the station. R's framework picks the hotspot's
+	 * channel without looking at the station's, and with one channel
+	 * cfg80211 turns START_AP down with -EBUSY before the driver sees it.
+	 * Two channels let it through; wl_cfg80211_set_channel then puts the
+	 * AP on the station's channel, so the radio still runs on one.
+	 */
+	.num_different_channels = 2,
+	.max_interfaces = 2,
+	.limits = apsta_if_limits,
+	.n_limits = ARRAY_SIZE(apsta_if_limits),
+	},
+#endif /* WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL */
 };
 #endif /* LINUX_VER >= 3.0 && (WL_IFACE_COMB_NUM_CHANNELS || WL_CFG80211_P2P_DEV_IF) */
 
@@ -3900,7 +3927,14 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
 		!cfg->bss_pending_op, msecs_to_jiffies(MAX_WAIT_TIME));
 	if (timeout <= 0 || cfg->bss_pending_op) {
-		WL_ERR(("timeout in waiting IF_DEL event\n"));
+		s32 up = 0;
+		s32 err = wldev_iovar_getint_bsscfg(primary_ndev, "bss", &up, bsscfg_idx);
+
+		/* Whether the firmware still has the BSS: without the event there
+		 * is no telling a slow delete from one that never happened.
+		 */
+		WL_ERR(("timeout in waiting IF_DEL event, bss %d: err %d up %d\n",
+			bsscfg_idx, err, up));
 	}
 
 exit:
