@@ -606,6 +606,9 @@ struct bcm_cfg80211 {
 	bool disable_roam_event;
 	bool pm_enable_work_on;
 	struct delayed_work pm_enable_work;
+	/* Tells cfg80211 the channel an AP came up on, after START_AP is done */
+	struct delayed_work ap_chsw_work;
+	struct net_device *ap_chsw_ndev;
 	vndr_ie_setbuf_t *ibss_vsie;	/* keep the VSIE for IBSS */
 	int ibss_vsie_len;
 	u32 rmc_event_pid;

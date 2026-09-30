@@ -603,6 +603,8 @@ s32 wl_cfg80211_channel_to_freq(u32 channel);
 
 
 static void wl_cfg80211_work_handler(struct work_struct *work);
+static void wl_cfg80211_ap_chsw_work(struct work_struct *work);
+static void wl_cfg80211_ap_chsw_cancel(struct bcm_cfg80211 *cfg);
 static s32 wl_add_keyext(struct wiphy *wiphy, struct net_device *dev,
 	u8 key_idx, const u8 *mac_addr,
 	struct key_params *params);
@@ -3952,6 +3954,7 @@ exit:
 		dhdp->op_mode &= ~DHD_FLAG_HOSTAP_MODE;
 #endif /* WL_VIRTUAL_APSTA */
 	}
+	wl_cfg80211_ap_chsw_cancel(cfg);
 	ifidx = dhd_net2idx(((struct dhd_pub *)(cfg->pub))->info, ndev);
 	wl_cfg80211_remove_if(cfg, ifidx, ndev);
 	cfg->bss_cfgdev = NULL;
@@ -8294,6 +8297,42 @@ wl_cfg80211_virtual_ap_leave(dhd_pub_t *dhd)
 #endif /* WL_VIRTUAL_APSTA */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
+static void
+wl_cfg80211_ap_chsw_work(struct work_struct *work)
+{
+	struct bcm_cfg80211 *cfg = container_of(work, struct bcm_cfg80211,
+		ap_chsw_work.work);
+	struct net_device *dev;
+	s32 chsp = 0;
+
+	/* nl80211 holds the RTNL through the whole of START_AP, so taking it
+	 * means START_AP is over. A trylock, so that cancelling this from under
+	 * the RTNL (stop_ap, del_iface) cannot deadlock on it.
+	 */
+	if (!rtnl_trylock()) {
+		schedule_delayed_work(&cfg->ap_chsw_work, msecs_to_jiffies(10));
+		return;
+	}
+	dev = cfg->ap_chsw_ndev;
+	cfg->ap_chsw_ndev = NULL;
+	if (dev && dev->ieee80211_ptr && wl_get_drv_status(cfg, AP_CREATED, dev) &&
+		wldev_iovar_getint(dev, "chanspec", &chsp) == BCME_OK) {
+		chanspec_t chanspec = wl_chspec_driver_to_host(chsp);
+
+		WL_DBG(("AP on chanspec 0x%04x\n", chanspec));
+		wl_cfg80211_ch_switch_notify(dev, chanspec, bcmcfg_to_wiphy(cfg));
+	}
+	rtnl_unlock();
+}
+
+/* The AP going: no channel to tell any more. */
+static void
+wl_cfg80211_ap_chsw_cancel(struct bcm_cfg80211 *cfg)
+{
+	cancel_delayed_work_sync(&cfg->ap_chsw_work);
+	cfg->ap_chsw_ndev = NULL;
+}
+
 static s32
 wl_cfg80211_start_ap(
 	struct wiphy *wiphy,
@@ -8424,16 +8463,12 @@ wl_cfg80211_start_ap(
 		/* The channel the AP is on, which is not always the one it was
 		 * asked for: beside a station this firmware puts it on the
 		 * station's. Told as a channel switch, hostapd and through it
-		 * the framework hold the real one, not the one they asked for.
+		 * the framework hold the real one. Told once START_AP is done:
+		 * nl80211 sets wdev->channel to the channel asked for when this
+		 * returns, and would overwrite it.
 		 */
-		s32 chsp = 0;
-
-		if (wldev_iovar_getint(dev, "chanspec", &chsp) == BCME_OK) {
-			chanspec_t chanspec = wl_chspec_driver_to_host(chsp);
-
-			WL_ERR(("AP on chanspec 0x%04x\n", chanspec));
-			wl_cfg80211_ch_switch_notify(dev, chanspec, wiphy);
-		}
+		cfg->ap_chsw_ndev = dev;
+		schedule_delayed_work(&cfg->ap_chsw_work, 0);
 	}
 
 #ifdef WL_CFG80211_ACL
@@ -8493,6 +8528,8 @@ wl_cfg80211_stop_ap(
 
 	if (!cfg)
 		return -EINVAL;
+
+	wl_cfg80211_ap_chsw_cancel(cfg);
 
 	if (dev == bcmcfg_to_prmry_ndev(cfg)) {
 		dev_role = NL80211_IFTYPE_AP;
@@ -12808,6 +12845,8 @@ static s32 wl_init_priv(struct bcm_cfg80211 *cfg)
 #endif 
 	cfg->roamoff_on_concurrent = true;
 	cfg->disable_roam_event = false;
+	INIT_DELAYED_WORK(&cfg->ap_chsw_work, wl_cfg80211_ap_chsw_work);
+	cfg->ap_chsw_ndev = NULL;
 	/* No virtual interface yet. 0 is the primary's bssidx, which the P2P code
 	 * would otherwise take for the virtual interface's.
 	 */
@@ -12846,6 +12885,7 @@ static s32 wl_init_priv(struct bcm_cfg80211 *cfg)
 
 static void wl_deinit_priv(struct bcm_cfg80211 *cfg)
 {
+	wl_cfg80211_ap_chsw_cancel(cfg);
 	DNGL_FUNC(dhd_cfg80211_deinit, (cfg));
 	wl_destroy_event_handler(cfg);
 	wl_flush_eq(cfg);
