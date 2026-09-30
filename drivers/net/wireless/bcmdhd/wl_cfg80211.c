@@ -35,6 +35,7 @@
 #include <linux/kernel.h>
 
 #include <bcmutils.h>
+#include <bcmdevs.h>
 #include <bcmwifi_channels.h>
 #include <bcmendian.h>
 #include <proto/ethernet.h>
@@ -454,6 +455,10 @@ wl_cfg80211_create_iface(struct wiphy *wiphy, enum nl80211_iftype
 		 iface_type, u8 *mac_addr, const char *name);
 s32
 wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev);
+s32
+wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
+	struct net_device *ndev, s32 bsscfg_idx,
+	enum nl80211_iftype iface_type, s32 del, u8 *addr);
 #endif /* defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF) */
 #ifdef WL_VIRTUAL_APSTA
 static s32 wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *dev);
