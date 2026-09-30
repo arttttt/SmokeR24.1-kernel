@@ -5754,6 +5754,8 @@ get_station_err:
 	return err;
 }
 
+#define MAX_NUM_OF_ASSOCIATED_DEV       64
+
 /*
  * The stations of an AP, for "iw station dump" and whatever else lists
  * them: the firmware's association list, each one through get_station.
@@ -6818,7 +6820,6 @@ exit:
 	return ack;
 }
 
-#define MAX_NUM_OF_ASSOCIATED_DEV       64
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
 static s32
 wl_cfg80211_mgmt_tx(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
