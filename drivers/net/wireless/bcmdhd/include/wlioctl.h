@@ -5898,9 +5898,18 @@ typedef struct wl_roam_prof_band {
 	wl_roam_prof_t roam_prof[WL_MAX_ROAM_PROF_BRACKETS];
 } wl_roam_prof_band_t;
 
+/* no default structure packing */
+#include <packed_section_end.h>
+
+/* Interface create/remove and the "bss" iovar, as Broadcom's bcmdhd 1.77
+ * declares them: with natural alignment, outside the packed section, which
+ * is the layout the firmware reads. */
 /* Data structures for Interface Create/Remove  */
 
-#define WL_INTERFACE_CREATE_VER	(0)
+#define WL_INTERFACE_CREATE_VER_0	0
+#define WL_INTERFACE_CREATE_VER_1	1
+#define WL_INTERFACE_CREATE_VER_2	2
+#define WL_INTERFACE_CREATE_VER_3	3
 
 /*
  * The flags filed of the wl_interface_create is designed to be
@@ -5914,9 +5923,22 @@ typedef struct wl_roam_prof_band {
  * be created is STA or AP.
  * 0 - Create a STA interface
  * 1 - Create an AP interface
+ * NOTE: This Bit 0 is applicable for the WL_INTERFACE_CREATE_VER < 2
  */
 #define WL_INTERFACE_CREATE_STA	(0 << 0)
 #define WL_INTERFACE_CREATE_AP	(1 << 0)
+
+/*
+ * From revision >= 2 Bit 0 of flags field will not used be for STA or AP interface creation.
+ * "iftype" field shall be used for identifying the interface type.
+ */
+typedef enum wl_interface_type {
+	WL_INTERFACE_TYPE_STA = 0,
+	WL_INTERFACE_TYPE_AP = 1,
+	WL_INTERFACE_TYPE_AWDL = 2,
+	WL_INTERFACE_TYPE_NAN = 3,
+	WL_INTERFACE_TYPE_MAX
+} wl_interface_type_t;
 
 /*
  * Bit 1 of flags field is used to inform whether MAC is present in the
@@ -5927,20 +5949,104 @@ typedef struct wl_roam_prof_band {
 #define WL_INTERFACE_MAC_DONT_USE	(0 << 1)
 #define WL_INTERFACE_MAC_USE		(1 << 1)
 
+/*
+ * Bit 2 of flags field is used to inform whether core or wlc index
+ * is present in the data structure or not.
+ * 0 - Ignore wlc_index field
+ * 1 - Use the wlc_index field
+ */
+#define WL_INTERFACE_WLC_INDEX_DONT_USE	(0 << 2)
+#define WL_INTERFACE_WLC_INDEX_USE	(1 << 2)
+
+/*
+ * Bit 3 of flags field is used to create interface on the host requested interface index
+ * 0 - Ignore if_index field
+ * 1 - Use the if_index field
+ */
+#define WL_INTERFACE_IF_INDEX_USE       (1 << 3)
+
+/*
+ * Bit 4 of flags field is used to assign BSSID
+ * 0 - Ignore bssid field
+ * 1 - Use the bssid field
+ */
+#define WL_INTERFACE_BSSID_INDEX_USE	(1 << 4)
+
+typedef struct wl_interface_create_v0 {
+	uint16	ver;			/**< version of this struct */
+	uint32  flags;			/**< flags that defines the operation */
+	struct	ether_addr   mac_addr;	/**< Optional Mac address */
+} wl_interface_create_v0_t;
+
 typedef struct wl_interface_create {
-	uint16	ver;			/* version of this struct */
-	uint32  flags;			/* flags that defines the operation */
-	struct	ether_addr   mac_addr;	/* Optional Mac address */
-} wl_interface_create_t;
+	uint16  ver;                    /**< version of this struct */
+	uint8   pad1[2];                /**< Padding bytes */
+	uint32  flags;                  /**< flags that defines the operation */
+	struct  ether_addr   mac_addr;  /**< Optional Mac address */
+	uint8   pad2[2];                /**< Padding bytes */
+	uint32  wlc_index;              /**< Optional wlc index */
+} wl_interface_create_v1_t;
 
-typedef struct wl_interface_info {
-	uint16	ver;			/* version of this struct */
-	struct ether_addr    mac_addr;	/* MAC address of the interface */
-	char	ifname[BCM_MSG_IFNAME_MAX]; /* name of interface */
-	uint8	bsscfgidx;		/* source bsscfg index */
-} wl_interface_info_t;
+typedef struct wl_interface_create_v2 {
+	uint16  ver;                    /**< version of this struct */
+	uint8   pad1[2];                /**< Padding bytes */
+	uint32  flags;                  /**< flags that defines the operation */
+	struct  ether_addr   mac_addr;  /**< Optional Mac address */
+	uint8   iftype;                 /**< Type of interface created */
+	uint8   pad2;                   /**< Padding bytes */
+	uint32  wlc_index;              /**< Optional wlc index */
+} wl_interface_create_v2_t;
 
-/* no default structure packing */
-#include <packed_section_end.h>
+typedef struct wl_interface_create_v3 {
+	uint16	ver;			/**< version of this struct */
+	uint16	len;			/**< length of whole structure including variable length */
+	uint16	fixed_len;		/**< Fixed length of this structure excluding data[] */
+	uint8	iftype;			/**< Type of interface created */
+	uint8	wlc_index;		/**< Optional wlc index */
+	uint32  flags;			/**< flags that defines the operation */
+	struct	ether_addr   mac_addr;	/**< Optional Mac address */
+	struct	ether_addr   bssid;	/**< Optional BSSID */
+	uint8	if_index;		/**< interface index requested by Host */
+	uint8	pad[3];			/**< Padding bytes to ensure data[] is at 32 bit aligned */
+	uint8	data[];			/**< Optional application/Module specific data */
+} wl_interface_create_v3_t;
+
+#define WL_INTERFACE_INFO_VER_0		0
+#define WL_INTERFACE_INFO_VER_1		1
+#define WL_INTERFACE_INFO_VER_2		2
+
+typedef struct wl_interface_info_v0 {
+	uint16	ver;			/**< version of this struct */
+	struct ether_addr    mac_addr;	/**< MAC address of the interface */
+	char	ifname[BCM_MSG_IFNAME_MAX]; /**< name of interface */
+	uint8	bsscfgidx;		/**< source bsscfg index */
+} wl_interface_info_v0_t;
+
+typedef struct wl_interface_info_v1 {
+	uint16  ver;                    /**< version of this struct */
+	struct ether_addr    mac_addr;  /**< MAC address of the interface */
+	char    ifname[BCM_MSG_IFNAME_MAX]; /**< name of interface */
+	uint8   bsscfgidx;              /**< source bsscfg index */
+	uint8	PAD;
+} wl_interface_info_v1_t;
+
+typedef struct wl_interface_info_v2 {
+	uint16                  ver;                    /**< version of this struct */
+	uint16                  length;                 /**< length of the whole structure */
+	struct  ether_addr      mac_addr;               /**< MAC address of the interface */
+	uint8                   bsscfgidx;              /**< source bsscfg index */
+	uint8                   if_index;               /**< Interface index allocated by FW */
+	char                    ifname[BCM_MSG_IFNAME_MAX]; /**< name of interface */
+} wl_interface_info_v2_t;
+
+/* Operations of the "bss" iovar */
+typedef enum wlc_ap_iov_bss_operation {
+	WLC_AP_IOV_OP_DELETE                   = -1,
+	WLC_AP_IOV_OP_DISABLE                  = 0,
+	WLC_AP_IOV_OP_ENABLE                   = 1,
+	WLC_AP_IOV_OP_MANUAL_AP_BSSCFG_CREATE  = 2,
+	WLC_AP_IOV_OP_MANUAL_STA_BSSCFG_CREATE = 3,
+	WLC_AP_IOV_OP_MOVE                     = 4
+} wlc_ap_iov_bss_oper_t;
 
 #endif /* _wlioctl_h_ */

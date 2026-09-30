@@ -908,6 +908,13 @@ wl_get_netinfo_by_netdev(struct bcm_cfg80211 *cfg, struct net_device *ndev)
 	true : false)
 #endif /* WL_CFG80211_P2P_DEV_IF */
 
+/* The type of the interface a scan was asked on (bcmdhd 1.77) */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 6, 0))
+#define scan_req_iftype(req) (req->dev->ieee80211_ptr->iftype)
+#else
+#define scan_req_iftype(req) (req->wdev->iftype)
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3, 6, 0) */
+
 #define wl_to_sr(w) (w->scan_req_int)
 #if defined(STATIC_WL_PRIV_STRUCT)
 #define wl_to_ie(w) (w->ie)

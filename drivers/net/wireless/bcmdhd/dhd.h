@@ -124,6 +124,8 @@ enum dhd_op_flags {
 	DHD_FLAG_P2P_MODE				= (1 << (2)), /* P2P Only */
 	/* STA + P2P */
 	DHD_FLAG_CONCURR_SINGLE_CHAN_MODE = (DHD_FLAG_STA_MODE | DHD_FLAG_P2P_MODE),
+	/* STA + SoftAP */
+	DHD_FLAG_CONCURR_STA_HOSTAP_MODE = (DHD_FLAG_STA_MODE | DHD_FLAG_HOSTAP_MODE),
 	DHD_FLAG_CONCURR_MULTI_CHAN_MODE		= (1 << (4)), /* STA + P2P */
 	/* Current P2P mode for P2P connection */
 	DHD_FLAG_P2P_GC_MODE				= (1 << (5)),
@@ -132,6 +134,13 @@ enum dhd_op_flags {
 	DHD_FLAG_IBSS_MODE				= (1 << (8)),
 	DHD_FLAG_MFG_MODE				= (1 << (9))
 };
+
+/* A SoftAP beside the station: both bits, the HOSTAP one set while the AP
+ * interface lives (bcmdhd 1.77).
+ */
+#define DHD_OPMODE_STA_SOFTAP_CONCURR(dhd) \
+	(dhd ? (((((dhd_pub_t *)dhd)->op_mode) & DHD_FLAG_CONCURR_STA_HOSTAP_MODE) == \
+	DHD_FLAG_CONCURR_STA_HOSTAP_MODE) : 0)
 
 /* Max sequential TX/RX Control timeouts to set HANG event */
 #ifndef MAX_CNTL_TX_TIMEOUT

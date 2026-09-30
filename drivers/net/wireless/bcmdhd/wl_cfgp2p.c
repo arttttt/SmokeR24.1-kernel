@@ -1171,7 +1171,7 @@ wl_cfgp2p_set_management_ie(struct bcm_cfg80211 *cfg, struct net_device *ndev, s
 	if (!cfg)
 		return -EINVAL;
 
-#ifdef DUAL_STA
+#if defined(DUAL_STA) || defined(WL_VIRTUAL_APSTA)
 	if ((cfg->p2p != NULL) && ((bssidx == 0) || (bssidx != cfg->cfgdev_bssidx))) {
 #else
 	if (cfg->p2p != NULL) {
@@ -1586,7 +1586,7 @@ wl_cfgp2p_find_idx(struct bcm_cfg80211 *cfg, struct net_device *ndev, s32 *bssid
 		}
 	}
 
-#ifdef DUAL_STA
+#if defined(DUAL_STA) || defined(WL_VIRTUAL_APSTA)
 	if (cfg->bss_cfgdev && (cfg->bss_cfgdev == ndev_to_cfgdev(ndev))) {
 		CFGP2P_INFO(("cfgdev is present, return the bssidx"));
 		*bssidx = cfg->cfgdev_bssidx;
@@ -1642,7 +1642,7 @@ wl_cfgp2p_find_type(struct bcm_cfg80211 *cfg, s32 bssidx, s32 *type)
 		}
 	}
 
-#ifdef DUAL_STA
+#if defined(DUAL_STA) || defined(WL_VIRTUAL_APSTA)
 	if (bssidx == cfg->cfgdev_bssidx) {
 		CFGP2P_DBG(("bssidx matching with the virtual I/F \n"));
 		*type = 1;

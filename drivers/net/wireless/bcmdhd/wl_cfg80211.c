@@ -448,13 +448,17 @@ static int wl_cfg80211_sched_scan_stop(struct wiphy *wiphy,
 static int wl_cfg80211_sched_scan_stop(struct wiphy *wiphy, struct net_device *dev);
 #endif
 #endif
-#if defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF)
+#if defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF) || defined(WL_VIRTUAL_APSTA)
 bcm_struct_cfgdev*
 wl_cfg80211_create_iface(struct wiphy *wiphy, enum nl80211_iftype
 		 iface_type, u8 *mac_addr, const char *name);
 s32
 wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev);
 #endif /* defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF) */
+#ifdef WL_VIRTUAL_APSTA
+static s32 wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *dev);
+static void wl_cfg80211_virtual_ap_leave(dhd_pub_t *dhd);
+#endif /* WL_VIRTUAL_APSTA */
 chanspec_t wl_chspec_driver_to_host(chanspec_t chanspec);
 
 /*
@@ -1542,10 +1546,46 @@ if (bcmdhd_prop_txstatus_vsdb) {
 		mode = WL_MODE_BSS;
 		break;
 	case NL80211_IFTYPE_P2P_GO:
-	case NL80211_IFTYPE_AP:
 		wlif_type = WL_P2P_IF_GO;
 		mode = WL_MODE_AP;
 		break;
+	case NL80211_IFTYPE_AP:
+#ifdef WL_VIRTUAL_APSTA
+	{
+		/*
+		 * The hotspot on an interface of its own beside the station (the
+		 * Wi-Fi HAL asks for wlan1), as bcmdhd 1.77 does it: a BSS of the
+		 * firmware's own, not a P2P group. One such interface, and not
+		 * while a P2P group holds the one further BSS the firmware keeps.
+		 */
+		bcm_struct_cfgdev *new_cfgdev;
+		dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
+
+		if (cfg->bss_cfgdev) {
+			WL_ERR(("A virtual interface exists already\n"));
+			return ERR_PTR(-EBUSY);
+		}
+		if (cfg->p2p && cfg->p2p->vif_created) {
+			WL_ERR(("Could not create the AP interface: a P2P group is running\n"));
+			return ERR_PTR(-EBUSY);
+		}
+		/* Or-ed, where 1.77 assigns: the station's bit has to stay, both
+		 * for the station and for the channel rule of a concurrent AP.
+		 */
+		dhdp->op_mode |= DHD_FLAG_HOSTAP_MODE;
+		new_cfgdev = wl_cfg80211_create_iface(cfg->wdev->wiphy,
+			NL80211_IFTYPE_AP, NULL, name);
+		if (!new_cfgdev) {
+			dhdp->op_mode &= ~DHD_FLAG_HOSTAP_MODE;
+			return ERR_PTR(-ENOMEM);
+		}
+		return new_cfgdev;
+	}
+#else
+		wlif_type = WL_P2P_IF_GO;
+		mode = WL_MODE_AP;
+		break;
+#endif /* WL_VIRTUAL_APSTA */
 	default:
 		WL_ERR(("Unsupported interface type\n"));
 		return NULL;
@@ -1556,6 +1596,12 @@ if (bcmdhd_prop_txstatus_vsdb) {
 		WL_ERR(("name is NULL\n"));
 		return NULL;
 	}
+#if defined(DUAL_STA) || defined(WL_VIRTUAL_APSTA)
+	if (cfg->bss_cfgdev && (wlif_type != -1)) {
+		WL_ERR(("Could not create a P2P group interface: a virtual interface is running\n"));
+		return ERR_PTR(-EBUSY);
+	}
+#endif /* DUAL_STA || WL_VIRTUAL_APSTA */
 	if (cfg->p2p_supported && (wlif_type != -1)) {
 		ASSERT(cfg->p2p); /* ensure expectation of p2p initialization */
 
@@ -1782,10 +1828,10 @@ wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 		return bcm_cfg80211_del_ibss_if(wiphy, cfgdev);
 #endif /* WLAIBSS_MCHAN */
 
-#ifdef DUAL_STA
+#if defined(DUAL_STA) || defined(WL_VIRTUAL_APSTA)
 	if (cfgdev == cfg->bss_cfgdev)
 		return wl_cfg80211_del_iface(wiphy, cfgdev);
-#endif /* DUAL_STA */
+#endif /* DUAL_STA || WL_VIRTUAL_APSTA */
 
 	if (wl_cfgp2p_find_idx(cfg, dev, &index) != BCME_OK) {
 		WL_ERR(("Find p2p index from ndev(%p) failed\n", dev));
@@ -1910,6 +1956,21 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 		break;
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_P2P_CLIENT:
+#ifdef WL_VIRTUAL_APSTA
+		if (ndev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP &&
+			cfg->bss_cfgdev == ndev_to_cfgdev(ndev)) {
+			/* Downgrade role from AP to STA on the virtual interface */
+			if ((err = wl_cfg80211_add_del_bss(cfg, ndev, cfg->cfgdev_bssidx,
+				NL80211_IFTYPE_STATION, 0, NULL)) < 0) {
+				WL_ERR(("AP-STA Downgrade failed \n"));
+				return -EINVAL;
+			}
+			wl_clr_drv_status(cfg, AP_CREATING, ndev);
+			wl_clr_drv_status(cfg, AP_CREATED, ndev);
+			wl_clr_drv_status(cfg, CONNECTED, ndev);
+			dhd->op_mode &= ~DHD_FLAG_HOSTAP_MODE;
+		}
+#endif /* WL_VIRTUAL_APSTA */
 		mode = WL_MODE_BSS;
 		infra = 1;
 		break;
@@ -1924,6 +1985,25 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 	}
 	if (!dhd)
 		return -EINVAL;
+#ifdef WL_VIRTUAL_APSTA
+	if (ap && type == NL80211_IFTYPE_AP &&
+		cfg->bss_cfgdev == ndev_to_cfgdev(ndev)) {
+		/* The AP beside the station, on its own BSS: no P2P, no radio-wide
+		 * softap sequence. bcmdhd 1.77 sets the AP mode bit here as well,
+		 * or-ed in to keep the station's.
+		 */
+		dhd->op_mode |= DHD_FLAG_HOSTAP_MODE;
+		wl_set_mode_by_netdev(cfg, ndev, mode);
+		if (!wl_get_drv_status(cfg, AP_CREATED, ndev) &&
+			!wl_get_drv_status(cfg, AP_CREATING, ndev) &&
+			(err = wl_cfg80211_set_ap_role(cfg, ndev)) < 0) {
+			WL_ERR(("set ap role failed!\n"));
+			return err;
+		}
+		ndev->ieee80211_ptr->iftype = type;
+		return 0;
+	}
+#endif /* WL_VIRTUAL_APSTA */
 	if (ap) {
 		wl_set_mode_by_netdev(cfg, ndev, mode);
 		if (cfg->p2p_supported && cfg->p2p->vif_created) {
@@ -2711,14 +2791,27 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	struct net_device *remain_on_channel_ndev = NULL;
 #endif
 
-	dhd_pub_t *dhd;
-
-	dhd = (dhd_pub_t *)(cfg->pub);
+#ifdef WL_VIRTUAL_APSTA
+	/*
+	 * Hostapd triggers scan before starting automatic channel selection
+	 * to collect channel characteristics. However firmware scan engine
+	 * doesn't support any channel characteristics collection along with
+	 * scan. Hence return scan success.
+	 *
+	 * Asked of the scan's own interface, as bcmdhd 1.77 does: the AP mode
+	 * bit is set while an AP runs beside the station, whose scans have to
+	 * go on.
+	 */
+	if (request && (scan_req_iftype(request) == NL80211_IFTYPE_AP)) {
+		WL_INFORM(("Scan Command on SoftAP Interface. Ignoring...\n"));
+		return 0;
+	}
+#else
 	/*
 	 * Hostapd triggers scan before starting automatic channel selection
 	 * also Dump stats IOVAR scans each channel hence returning from here.
 	 */
-	if (dhd->op_mode & DHD_FLAG_HOSTAP_MODE) {
+	if (((dhd_pub_t *)(cfg->pub))->op_mode & DHD_FLAG_HOSTAP_MODE) {
 #ifdef WL_SUPPORT_ACS
 		WL_INFORM(("Scan Command at SoftAP mode\n"));
 		return 0;
@@ -2727,6 +2820,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 		return -EINVAL;
 #endif /* WL_SUPPORT_ACS */
 	}
+#endif /* WL_VIRTUAL_APSTA */
 
 	ndev = ndev_to_wlc_ndev(ndev, cfg);
 
@@ -3317,52 +3411,189 @@ fail:
 }
 #endif /* WLAIBSS_MCHAN */
 
+/*
+ * interface_create and the "bss" iovar, as Broadcom's bcmdhd 1.77 drives
+ * them. The firmware's iovar came in versions with different layouts:
+ * asked with version 0 it answers which one it speaks, and the request
+ * follows that. The version 0 layout this driver used to send, packed,
+ * matched none of them.
+ */
+static bool
+wl_check_interface_create_v0(struct bcm_cfg80211 *cfg)
+{
+	dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
+	u32 chipid = dhd_bus_chip_id(dhdp);
+	u32 chiprevid = dhd_bus_chiprev_id(dhdp);
+
+	WL_DBG(("chipid=0x%x, chiprevid=%x\n", chipid, chiprevid));
+	/* BCM4359B0/C0 use the iovar version 0 */
+	return (chipid == BCM4359_CHIP_ID && (chiprevid == 5 || chiprevid == 9));
+}
+
 s32
 wl_cfg80211_interface_ops(struct bcm_cfg80211 *cfg,
 	struct net_device *ndev, s32 bsscfg_idx,
 	enum nl80211_iftype iface_type, s32 del, u8 *addr)
 {
-	wl_interface_create_t iface;
 	s32 ret;
-	wl_interface_info_t *info;
-
-	bzero(&iface, sizeof(wl_interface_create_t));
-
-	iface.ver = WL_INTERFACE_CREATE_VER;
-
-	if (iface_type == NL80211_IFTYPE_AP)
-		iface.flags = WL_INTERFACE_CREATE_AP;
-	else
-		iface.flags = WL_INTERFACE_CREATE_STA;
+	wl_interface_create_v2_t iface;
+	wl_interface_create_v3_t iface_v3;
+	wl_interface_info_v0_t *info_v0;
+	wl_interface_info_v1_t *info;
+	wl_interface_info_v2_t *info_v2;
+	enum wl_interface_type iftype;
+	uint32 ifflags;
+	bool use_iface_info_v0 = false;
+	bool use_iface_info_v2 = false;
+	u8 ioctl_buf[WLC_IOCTL_SMLEN];
 
 	if (del) {
 		ret = wldev_iovar_setbuf(ndev, "interface_remove",
-			NULL, 0, cfg->ioctl_buf, WLC_IOCTL_MEDLEN, NULL);
+			NULL, 0, ioctl_buf, sizeof(ioctl_buf), NULL);
+		if (unlikely(ret))
+			WL_ERR(("Interface remove failed!! ret %d\n", ret));
+		return ret;
+	}
+
+	/* Interface create */
+	bzero(&iface, sizeof(iface));
+
+	/*
+	 * flags field is still used along with iftype inorder to support the old version of the
+	 * FW work with the latest app changes.
+	 */
+	if (iface_type == NL80211_IFTYPE_AP) {
+		iftype = WL_INTERFACE_TYPE_AP;
+		ifflags = WL_INTERFACE_CREATE_AP;
 	} else {
+		iftype = WL_INTERFACE_TYPE_STA;
+		ifflags = WL_INTERFACE_CREATE_STA;
+	}
+	if (addr) {
+		ifflags |= WL_INTERFACE_MAC_USE;
+	}
+
+	if (wl_check_interface_create_v0(cfg)) {
+		wl_interface_create_v0_t iface_v0;
+
+		WL_DBG(("interface_create version 0\n"));
+		bzero(&iface_v0, sizeof(iface_v0));
+		use_iface_info_v0 = true;
+		iface_v0.ver = WL_INTERFACE_CREATE_VER_0;
+		iface_v0.flags = ifflags;
 		if (addr) {
-			memcpy(&iface.mac_addr.octet, addr, ETH_ALEN);
-			iface.flags |= WL_INTERFACE_MAC_USE;
+			memcpy(&iface_v0.mac_addr.octet, addr, ETH_ALEN);
 		}
 		ret = wldev_iovar_getbuf(ndev, "interface_create",
-			&iface, sizeof(wl_interface_create_t),
-			cfg->ioctl_buf, WLC_IOCTL_MAXLEN, &cfg->ioctl_buf_sync);
-		if (ret == 0) {
-			/* success */
-			info = (wl_interface_info_t *)cfg->ioctl_buf;
-			WL_DBG(("wl interface create success!! bssidx:%d \n",
-				info->bsscfgidx));
-			ret = info->bsscfgidx;
+			&iface_v0, sizeof(wl_interface_create_v0_t),
+			ioctl_buf, sizeof(ioctl_buf), NULL);
+	} else {
+		/* Pass ver = 0 for fetching the interface_create iovar version */
+		ret = wldev_iovar_getbuf(ndev, "interface_create",
+			&iface, sizeof(struct wl_interface_create_v2),
+			ioctl_buf, sizeof(ioctl_buf), NULL);
+		if (ret == BCME_UNSUPPORTED) {
+			WL_ERR(("interface_create iovar not supported\n"));
+			return ret;
+		} else if ((ret == 0) && *((uint32 *)ioctl_buf) == WL_INTERFACE_CREATE_VER_3) {
+			WL_DBG(("interface_create version 3\n"));
+			use_iface_info_v2 = true;
+			bzero(&iface_v3, sizeof(wl_interface_create_v3_t));
+			iface_v3.ver = WL_INTERFACE_CREATE_VER_3;
+			iface_v3.iftype = iftype;
+			iface_v3.flags = ifflags;
+			if (addr) {
+				memcpy(&iface_v3.mac_addr.octet, addr, ETH_ALEN);
+			}
+			ret = wldev_iovar_getbuf(ndev, "interface_create",
+				&iface_v3, sizeof(wl_interface_create_v3_t),
+				ioctl_buf, sizeof(ioctl_buf), NULL);
+		} else {
+			/* On any other error, attempt with iovar version 2 */
+			WL_DBG(("interface_create version 2. get_ver:%d\n", ret));
+			iface.ver = WL_INTERFACE_CREATE_VER_2;
+			iface.iftype = iftype;
+			iface.flags = ifflags;
+			if (addr) {
+				memcpy(&iface.mac_addr.octet, addr, ETH_ALEN);
+			}
+			ret = wldev_iovar_getbuf(ndev, "interface_create",
+				&iface, sizeof(struct wl_interface_create_v2),
+				ioctl_buf, sizeof(ioctl_buf), NULL);
 		}
 	}
 
-	if (ret < 0)
-		WL_ERR(("Interface %s failed!! ret %d\n",
-			del ? "remove" : "create", ret));
+	if (unlikely(ret)) {
+		WL_ERR(("Interface create failed!! ret %d\n", ret));
+		return ret;
+	}
 
+	/* success case */
+	if (use_iface_info_v2 == true) {
+		info_v2 = (wl_interface_info_v2_t *)ioctl_buf;
+		ret = info_v2->bsscfgidx;
+	} else if (use_iface_info_v0 == true) {
+		info_v0 = (wl_interface_info_v0_t *)ioctl_buf;
+		ret = info_v0->bsscfgidx;
+	} else {
+		info = (struct wl_interface_info_v1 *)ioctl_buf;
+		ret = info->bsscfgidx;
+	}
+
+	WL_DBG(("wl interface create success!! bssidx:%d \n", ret));
 	return ret;
 }
 
-#if defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF)
+#if defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF) || defined(WL_VIRTUAL_APSTA)
+static bool
+wl_customer6_legacy_chip_check(struct bcm_cfg80211 *cfg,
+	struct net_device *ndev)
+{
+	u32 chipnum;
+	wlc_rev_info_t revinfo;
+	int ret;
+
+	/* Get the device rev info */
+	memset(&revinfo, 0, sizeof(revinfo));
+	ret = wldev_ioctl(ndev, WLC_GET_REVINFO, &revinfo, sizeof(revinfo), false);
+	if (ret < 0) {
+		WL_ERR(("%s: GET revinfo FAILED. ret:%d\n", __FUNCTION__, ret));
+		return false;
+	}
+
+	WL_DBG(("%s: GET_REVINFO device 0x%x, vendor 0x%x, chipnum 0x%x\n", __FUNCTION__,
+		dtoh32(revinfo.deviceid), dtoh32(revinfo.vendorid), dtoh32(revinfo.chipnum)));
+	chipnum = dtoh32(revinfo.chipnum);
+	if ((chipnum == BCM4350_CHIP_ID) || (chipnum == BCM4355_CHIP_ID) ||
+		(chipnum == BCM4345_CHIP_ID)) {
+		/* WAR required */
+		return true;
+	}
+
+	return false;
+}
+
+static void
+wl_bss_iovar_war(struct bcm_cfg80211 *cfg,
+	struct net_device *ndev, s32 *val)
+{
+	if (wl_customer6_legacy_chip_check(cfg, ndev) ||
+		wl_check_interface_create_v0(cfg)) {
+		/* Few firmware branches have issues in bss iovar handling and
+		 * that can't be changed since they are in production.
+		 */
+		if (*val == WLC_AP_IOV_OP_MANUAL_AP_BSSCFG_CREATE) {
+			*val = WLC_AP_IOV_OP_MANUAL_STA_BSSCFG_CREATE;
+		} else if (*val == WLC_AP_IOV_OP_MANUAL_STA_BSSCFG_CREATE) {
+			*val = WLC_AP_IOV_OP_MANUAL_AP_BSSCFG_CREATE;
+		} else {
+			/* Ignore for other bss enums */
+			return;
+		}
+		WL_ERR(("wl bss %d\n", *val));
+	}
+}
+
 s32
 wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
 	struct net_device *ndev, s32 bsscfg_idx,
@@ -3381,19 +3612,30 @@ wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
 
 	bzero(&bss_setbuf, sizeof(bss_setbuf));
 
-	/* AP=3, STA=2, up=1, down=0, val=-1 */
+	/*
+	 * The firmware's operations: AP=2, STA=3, up=1, down=0, delete=-1. This
+	 * driver had AP and STA the other way round, which is what a few
+	 * firmware branches of older chips expect, and which on this chip
+	 * would have made the hotspot's BSS a station. As in bcmdhd 1.77 the
+	 * swap is kept for those chips alone.
+	 */
 	if (del) {
-		val = -1;
+		val = WLC_AP_IOV_OP_DELETE;
 	} else if (iface_type == NL80211_IFTYPE_AP) {
-		/* AP Interface */
+		/* Add/role change to AP Interface */
 		WL_DBG(("Adding AP Interface \n"));
-		val = 3;
+		val = WLC_AP_IOV_OP_MANUAL_AP_BSSCFG_CREATE;
 	} else if (iface_type == NL80211_IFTYPE_STATION) {
+		/* Add/role change to STA Interface */
 		WL_DBG(("Adding STA Interface \n"));
-		val = 2;
+		val = WLC_AP_IOV_OP_MANUAL_STA_BSSCFG_CREATE;
 	} else {
 		WL_ERR((" add_del_bss NOT supported for IFACE type:0x%x", iface_type));
 		return -EINVAL;
+	}
+
+	if (!del) {
+		wl_bss_iovar_war(cfg, ndev, &val);
 	}
 
 	bss_setbuf.cfg = htod32(bsscfg_idx);
@@ -3423,11 +3665,12 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 	struct net_device *new_ndev = NULL;
 	struct net_device *primary_ndev = NULL;
 	s32 ret = BCME_OK;
-	s32 bsscfg_idx = 1;
+	s32 bsscfg_idx = 0;
 	u32 timeout;
 	wl_if_event_info *event = NULL;
 	struct wireless_dev *wdev = NULL;
 	u8 addr[ETH_ALEN];
+	struct net_info *iter, *next;
 
 	WL_DBG(("Enter\n"));
 
@@ -3436,12 +3679,30 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 		return NULL;
 	}
 
+	for_each_ndev(cfg, iter, next) {
+		if (iter->ndev && strcmp(iter->ndev->name, name) == 0) {
+			WL_ERR(("Interface name, %s exists !\n", iter->ndev->name));
+			return NULL;
+		}
+	}
+
+	/* If any scan is going on, abort it */
+	wl_cfg80211_scan_abort(cfg);
+
 	primary_ndev = bcmcfg_to_prmry_ndev(cfg);
 
 	if (likely(!mac_addr)) {
-		/* Use primary MAC with the locally administered bit for the Secondary STA I/F */
+		/* Use primary MAC with the locally administered bit for the Secondary I/F,
+		 * unless the primary has that bit already, as it does whenever Android
+		 * randomizes the station's address: the bit then gives the primary address
+		 * back, and the firmware keeps no two BSSes on one address (as for the P2P
+		 * device, see wl_cfgp2p_generate_bss_mac). A random one then.
+		 */
 		memcpy(addr, primary_ndev->dev_addr, ETH_ALEN);
-		addr[0] |= 0x02;
+		if (addr[0] & 0x02)
+			eth_random_addr(addr);
+		else
+			addr[0] |= 0x02;
 	} else {
 		/* Use the application provided mac address (if any) */
 		memcpy(addr, mac_addr, ETH_ALEN);
@@ -3476,21 +3737,28 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 	/*
 	 * Intialize the firmware I/F.
 	 */
-	ret = wl_cfg80211_interface_ops(cfg, primary_ndev, bsscfg_idx,
-		NL80211_IFTYPE_STATION, 0, addr);
+	if (wl_customer6_legacy_chip_check(cfg, primary_ndev)) {
+		/* Use bss iovar instead of interface_create iovar */
+		ret = BCME_UNSUPPORTED;
+	} else {
+		ret = wl_cfg80211_interface_ops(cfg, primary_ndev, bsscfg_idx,
+			iface_type, 0, addr);
+	}
 	if (ret == BCME_UNSUPPORTED) {
-	    /* Use bssidx 1 by default */
+		/* Use bssidx 1 by default */
+		bsscfg_idx = 1;
 		if ((ret = wl_cfg80211_add_del_bss(cfg, primary_ndev,
 			bsscfg_idx, iface_type, 0, addr)) < 0) {
-			return NULL;
+			goto fail;
 		}
 	} else if (ret < 0) {
-	    WL_ERR(("Interface create failed!! ret:%d \n", ret));
-	    goto fail;
+		WL_ERR(("Interface create failed!! ret:%d \n", ret));
+		goto fail;
 	} else {
-	    /* Success */
-	    bsscfg_idx = ret;
+		/* Success */
+		bsscfg_idx = ret;
 	}
+	WL_ERR(("Interface created: type %d bssidx %d\n", iface_type, bsscfg_idx));
 
 	/*
 	 * Wait till the firmware send a confirmation event back.
@@ -3576,7 +3844,7 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	struct net_device *ndev = NULL;
 	struct net_device *primary_ndev = NULL;
 	s32 ret = BCME_OK;
-	s32 bsscfg_idx = 1;
+	s32 bsscfg_idx;
 	u32 timeout;
 	u32 ifidx;
 	enum nl80211_iftype iface_type = NL80211_IFTYPE_STATION;
@@ -3585,6 +3853,13 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 
 	if (!cfg->bss_cfgdev)
 		return 0;
+
+	bsscfg_idx = cfg->cfgdev_bssidx;
+	if (bsscfg_idx <= 0) {
+		/* validate bsscfgidx */
+		WL_ERR(("Wrong bssidx! \n"));
+		return -EINVAL;
+	}
 
 	/* If any scan is going on, abort it */
 	if (wl_get_drv_status_all(cfg, SCANNING)) {
@@ -3598,24 +3873,47 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	cfg->bss_pending_op = TRUE;
 	memset(&cfg->if_event_info, 0, sizeof(cfg->if_event_info));
 
-	/* Delete the firmware interface */
-	ret = wl_cfg80211_interface_ops(cfg, ndev, cfg->cfgdev_bssidx,
+	/* Delete the firmware interface. "interface_remove" command
+	 * should go on the interface to be deleted
+	 */
+	ret = wl_cfg80211_interface_ops(cfg, ndev, bsscfg_idx,
 		NL80211_IFTYPE_STATION, 1, NULL);
 	if (ret == BCME_UNSUPPORTED) {
 		if ((ret = wl_cfg80211_add_del_bss(cfg, ndev,
 			bsscfg_idx, iface_type, true, NULL)) < 0) {
 			WL_ERR(("DEL bss failed ret:%d \n", ret));
-			return ret;
+			goto exit;
 		}
 	} else if (ret < 0) {
-	    WL_ERR(("Interface DEL failed ret:%d \n", ret));
-	    return ret;
+		WL_ERR(("Interface DEL failed ret:%d \n", ret));
+		goto exit;
 	}
 
 	timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
 		!cfg->bss_pending_op, msecs_to_jiffies(MAX_WAIT_TIME));
 	if (timeout <= 0 || cfg->bss_pending_op) {
 		WL_ERR(("timeout in waiting IF_DEL event\n"));
+	}
+
+exit:
+	/* The host side goes whatever the firmware said, as in bcmdhd 1.77:
+	 * left behind, the interface would outlive its BSS.
+	 */
+	if (ndev->ieee80211_ptr &&
+		ndev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
+		/* An AP interface can go without a stop_ap before it (Wi-Fi off,
+		 * hostapd killed): the AP mode leaves with it.
+		 */
+		dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
+
+		wl_clr_drv_status(cfg, AP_CREATING, ndev);
+		wl_clr_drv_status(cfg, AP_CREATED, ndev);
+		wl_clr_drv_status(cfg, CONNECTED, ndev);
+#ifdef WL_VIRTUAL_APSTA
+		wl_cfg80211_virtual_ap_leave(dhdp);
+#else
+		dhdp->op_mode &= ~DHD_FLAG_HOSTAP_MODE;
+#endif /* WL_VIRTUAL_APSTA */
 	}
 	ifidx = dhd_net2idx(((struct dhd_pub *)(cfg->pub))->info, ndev);
 	wl_cfg80211_remove_if(cfg, ifidx, ndev);
@@ -3627,6 +3925,44 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 
 	return ret;
 }
+
+#ifdef WL_VIRTUAL_APSTA
+/*
+ * Make a virtual interface's BSS an AP, as bcmdhd 1.77 does for an AP beside
+ * the station: the "bss" iovar on that BSS alone. The primary's radio-wide
+ * softap sequence (WLC_DOWN, WLC_SET_AP) would take the station down and is
+ * left to the primary's own path. Marks the AP as being created.
+ */
+static s32
+wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *dev)
+{
+	s32 err;
+	s32 bssidx;
+
+	if (wl_cfgp2p_find_idx(cfg, dev, &bssidx) != BCME_OK || bssidx <= 0) {
+		WL_ERR(("Find index from dev(%p) failed\n", dev));
+		return -EINVAL;
+	}
+
+	/* The AP path keeps the security IEs it was given here */
+	if (!cfg->ap_info &&
+		!(cfg->ap_info = kzalloc(sizeof(struct ap_info), GFP_KERNEL))) {
+		WL_ERR(("struct ap_saved_ie allocation failed\n"));
+		return -ENOMEM;
+	}
+
+	WL_DBG(("Bringup SoftAP on virtual Interface bssidx:%d \n", bssidx));
+	if ((err = wl_cfg80211_add_del_bss(cfg, dev,
+		bssidx, NL80211_IFTYPE_AP, 0, NULL)) < 0) {
+		WL_ERR(("wl bss ap returned error:%d\n", err));
+		return err;
+	}
+
+	/* On success, mark AP creation in progress. */
+	wl_set_drv_status(cfg, AP_CREATING, dev);
+	return 0;
+}
+#endif /* WL_VIRTUAL_APSTA */
 #endif /* defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF) */
 
 static s32
@@ -6699,9 +7035,11 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	} param = {0, 0};
 
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-#ifdef CUSTOM_SET_CPUCORE
+	enum ieee80211_band _band;
+#if defined(CUSTOM_SET_CPUCORE) || (defined(WL_VIRTUAL_APSTA) && \
+	defined(APSTA_RESTRICTED_CHANNEL))
 	dhd_pub_t *dhd;
-#endif /* CUSTOM_SET_CPUCORE */
+#endif /* CUSTOM_SET_CPUCORE || (WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL) */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
 	enum nl80211_channel_type channel_type = NL80211_CHAN_HT20;
@@ -6710,18 +7048,52 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	if (!cfg)
 		return -EINVAL;
 
-#ifdef CUSTOM_SET_CPUCORE
+#if defined(CUSTOM_SET_CPUCORE) || (defined(WL_VIRTUAL_APSTA) && \
+	defined(APSTA_RESTRICTED_CHANNEL))
 	dhd =  (dhd_pub_t *)(cfg->pub);
-#endif /* CUSTOM_SET_CPUCORE */
+#endif /* CUSTOM_SET_CPUCORE || (WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL) */
 
 #ifndef P2PONEINT
 	dev = ndev_to_wlc_ndev(dev, cfg);
 #endif
 	_chan = ieee80211_frequency_to_channel(chan->center_freq);
+	_band = chan->band;
 	WL_ERR(("netdev_ifidx(%d), chan_type(%d) target channel(%d) \n",
 		dev->ifindex, channel_type, _chan));
 
-	if (chan->band == IEEE80211_BAND_5GHZ) {
+#if defined(WL_VIRTUAL_APSTA) && defined(APSTA_RESTRICTED_CHANNEL)
+	/*
+	 * An AP beside a connected station goes on the station's channel,
+	 * whatever hostapd asked for (bcmdhd 1.77). This build runs one channel
+	 * at a time (CONFIG_BCMDHD_DISABLE_MCC), and R's framework picks the
+	 * hotspot's channel at random.
+	 */
+#define DEFAULT_2G_SOFTAP_CHANNEL	1
+#define DEFAULT_5G_SOFTAP_CHANNEL	149
+	if (wl_get_mode_by_netdev(cfg, dev) == WL_MODE_AP &&
+		DHD_OPMODE_STA_SOFTAP_CONCURR(dhd) &&
+		wl_get_drv_status(cfg, CONNECTED, bcmcfg_to_prmry_ndev(cfg))) {
+		u32 *sta_chan = (u32 *)wl_read_prof(cfg,
+			bcmcfg_to_prmry_ndev(cfg), WL_PROF_CHAN);
+#ifdef WL_RESTRICTED_APSTA_SCC
+		_chan = *sta_chan;
+#else
+		u32 sta_band = (*sta_chan > CH_MAX_2G_CHANNEL) ?
+			IEEE80211_BAND_5GHZ : IEEE80211_BAND_2GHZ;
+		if (chan->band == sta_band) {
+			_chan = (sta_band == IEEE80211_BAND_5GHZ &&
+				*sta_chan != DEFAULT_5G_SOFTAP_CHANNEL) ?
+				DEFAULT_2G_SOFTAP_CHANNEL : *sta_chan;
+		}
+#endif /* WL_RESTRICTED_APSTA_SCC */
+		_band = (_chan <= CH_MAX_2G_CHANNEL) ? IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
+		WL_ERR(("Target SoftAP channel will be set to %d\n", _chan));
+	}
+#undef DEFAULT_2G_SOFTAP_CHANNEL
+#undef DEFAULT_5G_SOFTAP_CHANNEL
+#endif /* WL_VIRTUAL_APSTA && APSTA_RESTRICTED_CHANNEL */
+
+	if (_band == IEEE80211_BAND_5GHZ) {
 		param.band = WLC_BAND_5G;
 		err = wldev_iovar_getbuf(dev, "bw_cap", &param, sizeof(param),
 			cfg->ioctl_buf, WLC_IOCTL_SMLEN, &cfg->ioctl_buf_sync);
@@ -6754,7 +7126,7 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 			}
 		}
 
-	} else if (chan->band == IEEE80211_BAND_2GHZ)
+	} else if (_band == IEEE80211_BAND_2GHZ)
 		bw = WL_CHANSPEC_BW_20;
 
 	/* In 5GHz band If AP is connected in 20 MHz then follow AP's bw
@@ -6764,7 +7136,7 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 		   interface name. */
 		if(!strncmp(iter->ndev->name, "wlan0", strlen("wlan0"))) {
 			if (wl_get_drv_status(cfg, CONNECTED, iter->ndev)) {
-				if (chan->band == IEEE80211_BAND_5GHZ) {
+				if (_band == IEEE80211_BAND_5GHZ) {
 					if(wldev_iovar_getint(iter->ndev,
 						"chanspec", (s32 *)&chanspec) == BCME_OK) {
 						chanspec = wl_chspec_driver_to_host(chanspec);
@@ -7433,6 +7805,60 @@ wl_cfg80211_bcn_bringup_ap(
 			}
 		} else
 			WL_DBG(("Bss is already up\n"));
+#ifdef WL_VIRTUAL_APSTA
+	} else if ((dev_role == NL80211_IFTYPE_AP) && (bssidx != 0)) {
+		/*
+		 * The AP on a virtual interface beside the station, as bcmdhd 1.77
+		 * brings it up: its own BSS made an AP, the SSID set through that
+		 * interface, the BSS brought up. Nothing that takes the radio down:
+		 * the primary path below does WLC_DOWN, which would drop the
+		 * station, and 1.77's DISABLE_11H_SOFTAP does the same (not built).
+		 */
+		if (!wl_get_drv_status(cfg, AP_CREATING, dev)) {
+			/* Make sure fw is in proper state */
+			err = wl_cfg80211_set_ap_role(cfg, dev);
+			if (unlikely(err)) {
+				WL_ERR(("set ap role failed!\n"));
+				goto exit;
+			}
+		}
+
+		/* Device role SoftAP */
+		WL_DBG(("Creating AP bssidx:%d dev_role:%d\n", bssidx, dev_role));
+		/* Clear the status bit after use */
+		wl_clr_drv_status(cfg, AP_CREATING, dev);
+
+		/* Up already while the station runs, where it is a no-op */
+		err = wldev_ioctl(dev, WLC_UP, &ap, sizeof(s32), true);
+		if (unlikely(err)) {
+			WL_ERR(("WLC_UP error (%d)\n", err));
+			goto exit;
+		}
+
+		memset(&join_params, 0, sizeof(join_params));
+		/* join parameters starts with ssid */
+		join_params_size = sizeof(join_params.ssid);
+		join_params.ssid.SSID_len = MIN(cfg->hostapd_ssid.SSID_len,
+			(uint32)DOT11_MAX_SSID_LEN);
+		memcpy(join_params.ssid.SSID, cfg->hostapd_ssid.SSID,
+			join_params.ssid.SSID_len);
+		join_params.ssid.SSID_len = htod32(join_params.ssid.SSID_len);
+
+		/* create softap */
+		if ((err = wldev_ioctl(dev, WLC_SET_SSID, &join_params,
+			join_params_size, true)) != 0) {
+			WL_ERR(("SoftAP set ssid failed! \n"));
+			goto exit;
+		}
+		WL_DBG((" SoftAP SSID \"%s\" \n", join_params.ssid.SSID));
+
+		/* AP on Virtual Interface */
+		if ((err = wl_cfgp2p_bss(cfg, dev, bssidx, 1)) < 0) {
+			WL_ERR(("AP Bring up error %d\n", err));
+			goto exit;
+		}
+		wl_set_drv_status(cfg, AP_CREATED, dev);
+#endif /* WL_VIRTUAL_APSTA */
 	} else if ((dev_role == NL80211_IFTYPE_AP) &&
 		(wl_get_drv_status(cfg, AP_CREATING, dev))) {
 		/* Device role SoftAP */
@@ -7781,6 +8207,41 @@ wl_cfg80211_change_station(
 }
 #endif /* WL_SUPPORT_BACKPORTED_KPATCHES || KERNEL_VER >= KERNEL_VERSION(3, 2, 0)) */
 
+#ifdef WL_VIRTUAL_APSTA
+/*
+ * What an AP beside the station took from it, given back when the AP stops
+ * or fails to start: the packet filter while the screen is off, ARP offload
+ * and ND offload for the station (bcmdhd 1.77 restores the first two; ND
+ * offload is turned on again here as well, since it is otherwise enabled
+ * only when wlan0 gains an IPv6 address). And the AP mode bit.
+ */
+static void
+wl_cfg80211_virtual_ap_leave(dhd_pub_t *dhd)
+{
+	int err;
+
+#ifdef PKT_FILTER_SUPPORT
+	/* Enable packet filter */
+	if (dhd->early_suspended) {
+		WL_ERR(("Enable pkt_filter\n"));
+		dhd_enable_packet_filter(1, dhd);
+	}
+#endif /* PKT_FILTER_SUPPORT */
+	if (dhd->op_mode & DHD_FLAG_STA_MODE) {
+#ifdef ARP_OFFLOAD_SUPPORT
+		/* IF SoftAP is disabled, enable arpoe back for STA mode. */
+		dhd_arp_offload_set(dhd, dhd_arp_mode);
+		dhd_arp_offload_enable(dhd, TRUE);
+#endif /* ARP_OFFLOAD_SUPPORT */
+		err = dhd_ndo_enable(dhd, TRUE);
+		if (err)
+			WL_ERR(("%s: Enabling NDO Failed %d\n", __FUNCTION__, err));
+	}
+	/* clear the AP mode */
+	dhd->op_mode &= ~DHD_FLAG_HOSTAP_MODE;
+}
+#endif /* WL_VIRTUAL_APSTA */
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
 static s32
 wl_cfg80211_start_ap(
@@ -7793,11 +8254,13 @@ wl_cfg80211_start_ap(
 	struct parsed_ies ies;
 	s32 bssidx = 0;
 	u32 dev_role = 0;
+	dhd_pub_t *dhd;
 
 	WL_DBG(("Enter \n"));
 
 	if (!cfg)
 		return -EINVAL;
+	dhd = (dhd_pub_t *)(cfg->pub);
 
 	if (dev == bcmcfg_to_prmry_ndev(cfg)) {
 		WL_DBG(("Start AP req on primary iface: Softap\n"));
@@ -7819,13 +8282,48 @@ wl_cfg80211_start_ap(
 	}
 	if (p2p_is_on(cfg) &&
 		(bssidx == wl_to_p2p_bss_bssidx(cfg,
-		P2PAPI_BSSCFG_CONNECTION))) {
+		P2PAPI_BSSCFG_CONNECTION)) &&
+		(dev->ieee80211_ptr->iftype != NL80211_IFTYPE_AP)) {
+		/* Not an AP interface: the virtual AP beside the station may sit
+		 * on the bssidx a P2P group had, while P2P discovery runs again.
+		 */
 		dev_role = NL80211_IFTYPE_P2P_GO;
 		WL_DBG(("Start AP req on P2P connection iface\n"));
 	}
+#ifdef WL_VIRTUAL_APSTA
+	else if ((bssidx != 0) &&
+		(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)) {
+		/* The AP on a virtual interface beside the station (bcmdhd 1.77) */
+		WL_DBG(("Start AP req on virtual iface: Softap\n"));
+		dev_role = NL80211_IFTYPE_AP;
+		dhd->op_mode |= DHD_FLAG_HOSTAP_MODE;
+		err = dhd_ndo_enable(dhd, FALSE);
+		WL_DBG(("%s: Disabling NDO on Hostapd mode %d\n", __FUNCTION__, err));
+		if (err) {
+			WL_ERR(("%s: Disabling NDO Failed %d\n", __FUNCTION__, err));
+		}
+		err = BCME_OK;
+#ifdef PKT_FILTER_SUPPORT
+		/* Disable packet filter */
+		if (dhd->early_suspended) {
+			WL_ERR(("Disable pkt_filter\n"));
+			dhd_enable_packet_filter(0, dhd);
+		}
+#endif /* PKT_FILTER_SUPPORT */
+#ifdef ARP_OFFLOAD_SUPPORT
+		/* IF SoftAP is enabled, disable arpoe */
+		if (dhd->op_mode & DHD_FLAG_STA_MODE) {
+			dhd_arp_offload_set(dhd, 0);
+			dhd_arp_offload_enable(dhd, FALSE);
+		}
+#endif /* ARP_OFFLOAD_SUPPORT */
+	}
+#endif /* WL_VIRTUAL_APSTA */
 
-	if (!check_dev_role_integrity(cfg, dev_role))
+	if (!check_dev_role_integrity(cfg, dev_role)) {
+		err = -EINVAL;
 		goto fail;
+	}
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
 	if ((err = wl_cfg80211_set_channel(wiphy, dev,
@@ -7888,6 +8386,17 @@ fail:
 	if (err) {
 		WL_ERR(("ADD/SET beacon failed\n"));
 		wldev_iovar_setint(dev, "mpc", 1);
+#ifdef WL_VIRTUAL_APSTA
+		if ((dev_role == NL80211_IFTYPE_AP) && (bssidx != 0)) {
+			/* Take down what came up of the BSS and give the station
+			 * back what the AP took (bcmdhd 1.77 does it through stop_ap).
+			 */
+			wl_clr_drv_status(cfg, AP_CREATING, dev);
+			wl_clr_drv_status(cfg, AP_CREATED, dev);
+			wl_cfgp2p_bss(cfg, dev, bssidx, 0);
+			wl_cfg80211_virtual_ap_leave(dhd);
+		}
+#endif /* WL_VIRTUAL_APSTA */
 	}
 
 	return err;
@@ -7928,12 +8437,44 @@ wl_cfg80211_stop_ap(
 	}
 	if (p2p_is_on(cfg) &&
 		(bssidx == wl_to_p2p_bss_bssidx(cfg,
-		P2PAPI_BSSCFG_CONNECTION))) {
+		P2PAPI_BSSCFG_CONNECTION)) &&
+		(dev->ieee80211_ptr->iftype != NL80211_IFTYPE_AP)) {
 		dev_role = NL80211_IFTYPE_P2P_GO;
 	}
+#ifdef WL_VIRTUAL_APSTA
+	else if ((bssidx != 0) &&
+		(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)) {
+		/*
+		 * The AP on a virtual interface beside the station (bcmdhd 1.77):
+		 * only its BSS goes down. The primary path below turns the AP mode
+		 * off radio-wide, which would take the station along.
+		 */
+		dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
 
-	if (!check_dev_role_integrity(cfg, dev_role))
+		wl_clr_drv_status(cfg, AP_CREATING, dev);
+		wl_clr_drv_status(cfg, AP_CREATED, dev);
+		wl_clr_drv_status(cfg, CONNECTED, dev);
+		if ((err = wl_cfgp2p_bss(cfg, dev, bssidx, 0)) < 0) {
+			WL_ERR(("bss down error %d\n", err));
+		}
+		if (cfg->ap_info) {
+			kfree(cfg->ap_info->wpa_ie);
+			kfree(cfg->ap_info->rsn_ie);
+			kfree(cfg->ap_info->wps_ie);
+			kfree(cfg->ap_info);
+			cfg->ap_info = NULL;
+		}
+		/* Turn on the MPC */
+		wldev_iovar_setint(dev, "mpc", 1);
+		wl_cfg80211_virtual_ap_leave(dhd);
+		return err;
+	}
+#endif /* WL_VIRTUAL_APSTA */
+
+	if (!check_dev_role_integrity(cfg, dev_role)) {
+		err = -EINVAL;
 		goto exit;
+	}
 
 	if (dev_role == NL80211_IFTYPE_AP) {
 		/* SoftAp on primary Interface.
@@ -8014,9 +8555,17 @@ wl_cfg80211_change_beacon(
 	}
 	if (p2p_is_on(cfg) &&
 		(bssidx == wl_to_p2p_bss_bssidx(cfg,
-		P2PAPI_BSSCFG_CONNECTION))) {
+		P2PAPI_BSSCFG_CONNECTION)) &&
+		(dev->ieee80211_ptr->iftype != NL80211_IFTYPE_AP)) {
 		dev_role = NL80211_IFTYPE_P2P_GO;
 	}
+#ifdef WL_VIRTUAL_APSTA
+	else if ((bssidx != 0) &&
+		(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)) {
+		/* The AP on a virtual interface beside the station */
+		dev_role = NL80211_IFTYPE_AP;
+	}
+#endif /* WL_VIRTUAL_APSTA */
 
 	if (dev_role == 0) {
 		WL_ERR(("Unknown device role!\n"));
@@ -8024,8 +8573,10 @@ wl_cfg80211_change_beacon(
 		goto fail;
 	}
 
-	if (!check_dev_role_integrity(cfg, dev_role))
+	if (!check_dev_role_integrity(cfg, dev_role)) {
+		err = -EINVAL;
 		goto fail;
+	}
 
 	if ((dev_role == NL80211_IFTYPE_P2P_GO) && (cfg->p2p_wdev == NULL)) {
 		WL_ERR(("P2P already down status!\n"));
@@ -12187,6 +12738,10 @@ static s32 wl_init_priv(struct bcm_cfg80211 *cfg)
 #endif 
 	cfg->roamoff_on_concurrent = true;
 	cfg->disable_roam_event = false;
+	/* No virtual interface yet. 0 is the primary's bssidx, which the P2P code
+	 * would otherwise take for the virtual interface's.
+	 */
+	cfg->cfgdev_bssidx = -1;
 	/* register interested state */
 	set_bit(WL_STATUS_CONNECTED, &cfg->interrested_state);
 	spin_lock_init(&cfg->cfgdrv_lock);
@@ -13480,7 +14035,7 @@ skip_cfg80211_scan_done:
 	bcm_cfg80211_del_ibss_if(cfg->wdev->wiphy, cfg->ibss_cfgdev);
 #endif /* WLAIBSS_MCHAN */
 
-#if defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF)
+#if defined(DUAL_STA) || defined(DUAL_STA_STATIC_IF) || defined(WL_VIRTUAL_APSTA)
 	/* Clean up if not removed already */
 	if (cfg->bss_cfgdev)
 		wl_cfg80211_del_iface(cfg->wdev->wiphy, cfg->bss_cfgdev);
