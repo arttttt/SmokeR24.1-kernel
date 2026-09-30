@@ -465,6 +465,8 @@ static s32 wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *
 static void wl_cfg80211_virtual_ap_leave(dhd_pub_t *dhd);
 static void wl_cfg80211_free_ap_info(struct bcm_cfg80211 *cfg);
 #endif /* WL_VIRTUAL_APSTA */
+void wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec,
+	struct wiphy *wiphy);
 chanspec_t wl_chspec_driver_to_host(chanspec_t chanspec);
 
 /*
@@ -5752,6 +5754,40 @@ get_station_err:
 	return err;
 }
 
+/*
+ * The stations of an AP, for "iw station dump" and whatever else lists
+ * them: the firmware's association list, each one through get_station.
+ * The driver had no dump_station, so the list came back empty however
+ * many clients the hotspot had.
+ */
+static s32
+wl_cfg80211_dump_station(struct wiphy *wiphy, struct net_device *dev,
+	int idx, u8 *mac, struct station_info *sinfo)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	char mac_buf[MAX_NUM_OF_ASSOCIATED_DEV *
+		sizeof(struct ether_addr) + sizeof(uint)] = {0};
+	struct maclist *assoc_maclist = (struct maclist *)mac_buf;
+	s32 err;
+
+	RETURN_EIO_IF_NOT_UP(cfg);
+	if (wl_get_mode_by_netdev(cfg, dev) != WL_MODE_AP)
+		return -ENOENT;
+
+	assoc_maclist->count = htod32(MAX_NUM_OF_ASSOCIATED_DEV);
+	err = wldev_ioctl(dev, WLC_GET_ASSOCLIST,
+		assoc_maclist, sizeof(mac_buf), false);
+	if (err < 0) {
+		WL_ERR(("WLC_GET_ASSOCLIST error %d\n", err));
+		return err;
+	}
+	if (idx < 0 || idx >= dtoh32(assoc_maclist->count))
+		return -ENOENT;
+
+	memcpy(mac, &assoc_maclist->ea[idx], ETHER_ADDR_LEN);
+	return wl_cfg80211_get_station(wiphy, dev, mac, sinfo);
+}
+
 static s32
 wl_cfg80211_set_power_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	bool enabled, s32 timeout)
@@ -8382,6 +8418,22 @@ wl_cfg80211_start_ap(
 
 	WL_DBG(("** AP/GO Created **\n"));
 
+	if (dev_role == NL80211_IFTYPE_AP) {
+		/* The channel the AP is on, which is not always the one it was
+		 * asked for: beside a station this firmware puts it on the
+		 * station's. Told as a channel switch, hostapd and through it
+		 * the framework hold the real one, not the one they asked for.
+		 */
+		s32 chsp = 0;
+
+		if (wldev_iovar_getint(dev, "chanspec", &chsp) == BCME_OK) {
+			chanspec_t chanspec = wl_chspec_driver_to_host(chsp);
+
+			WL_ERR(("AP on chanspec 0x%04x\n", chanspec));
+			wl_cfg80211_ch_switch_notify(dev, chanspec, wiphy);
+		}
+	}
+
 #ifdef WL_CFG80211_ACL
 	/* Enfoce Admission Control. */
 	if ((err = wl_cfg80211_set_mac_acl(wiphy, dev, info->acl)) < 0) {
@@ -9131,6 +9183,7 @@ static struct cfg80211_ops wl_cfg80211_ops = {
 	.join_ibss = wl_cfg80211_join_ibss,
 	.leave_ibss = wl_cfg80211_leave_ibss,
 	.get_station = wl_cfg80211_get_station,
+	.dump_station = wl_cfg80211_dump_station,
 	.set_tx_power = wl_cfg80211_set_tx_power,
 	.get_tx_power = wl_cfg80211_get_tx_power,
 	.add_key = wl_cfg80211_add_key,
