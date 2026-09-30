@@ -3897,11 +3897,14 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 		if ((ret = wl_cfgp2p_bss(cfg, ndev, bsscfg_idx, 0)) < 0) {
 			WL_ERR(("bss %d down failed ret:%d\n", bsscfg_idx, ret));
 		}
-		/* Through the primary, as P2P deletes its BSSes: sent through the
-		 * BSS itself, "bss -1" was taken without an error and the BSS was
-		 * still there after it ("err 0 up 0").
+		/* "bss -1", through the BSS or the primary, is taken without an
+		 * error and the BSS is still there after it ("err 0 up 0"). The
+		 * one delete this firmware is known to carry out is P2P's
+		 * p2p_ifdel, by address; tried first, "bss -1" if it is refused.
 		 */
-		if ((ret = wl_cfg80211_add_del_bss(cfg, primary_ndev,
+		ret = wl_cfgp2p_ifdel(cfg, (struct ether_addr *)ndev->dev_addr);
+		WL_ERR(("p2p_ifdel for bss %d: %d\n", bsscfg_idx, ret));
+		if (ret < 0 && (ret = wl_cfg80211_add_del_bss(cfg, primary_ndev,
 			bsscfg_idx, iface_type, true, NULL)) < 0) {
 			WL_ERR(("DEL bss failed ret:%d \n", ret));
 			goto exit;
