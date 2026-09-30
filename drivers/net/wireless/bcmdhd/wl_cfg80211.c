@@ -8290,6 +8290,14 @@ wl_cfg80211_start_ap(
 		(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)) {
 		/* The AP on a virtual interface beside the station (bcmdhd 1.77) */
 		WL_DBG(("Start AP req on virtual iface: Softap\n"));
+		/* The security IEs are kept before the BSS comes up: the interface
+		 * was created an AP, so no change_virtual_iface allocated this.
+		 */
+		if (!cfg->ap_info &&
+			!(cfg->ap_info = kzalloc(sizeof(struct ap_info), GFP_KERNEL))) {
+			WL_ERR(("struct ap_saved_ie allocation failed\n"));
+			return -ENOMEM;
+		}
 		dev_role = NL80211_IFTYPE_AP;
 		dhd->op_mode |= DHD_FLAG_HOSTAP_MODE;
 		err = dhd_ndo_enable(dhd, FALSE);
