@@ -463,6 +463,7 @@ wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
 #ifdef WL_VIRTUAL_APSTA
 static s32 wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *dev);
 static void wl_cfg80211_virtual_ap_leave(dhd_pub_t *dhd);
+static void wl_cfg80211_free_ap_info(struct bcm_cfg80211 *cfg);
 #endif /* WL_VIRTUAL_APSTA */
 chanspec_t wl_chspec_driver_to_host(chanspec_t chanspec);
 
@@ -1999,6 +2000,8 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 		 */
 		dhd->op_mode |= DHD_FLAG_HOSTAP_MODE;
 		wl_set_mode_by_netdev(cfg, ndev, mode);
+		/* No scan across the role change (bcmdhd 1.77) */
+		wl_cfg80211_scan_abort(cfg);
 		if (!wl_get_drv_status(cfg, AP_CREATED, ndev) &&
 			!wl_get_drv_status(cfg, AP_CREATING, ndev) &&
 			(err = wl_cfg80211_set_ap_role(cfg, ndev)) < 0) {
@@ -3915,6 +3918,7 @@ exit:
 		wl_clr_drv_status(cfg, AP_CREATED, ndev);
 		wl_clr_drv_status(cfg, CONNECTED, ndev);
 #ifdef WL_VIRTUAL_APSTA
+		wl_cfg80211_free_ap_info(cfg);
 		wl_cfg80211_virtual_ap_leave(dhdp);
 #else
 		dhdp->op_mode &= ~DHD_FLAG_HOSTAP_MODE;
@@ -8221,6 +8225,21 @@ wl_cfg80211_change_station(
  * only when wlan0 gains an IPv6 address). And the AP mode bit.
  */
 static void
+wl_cfg80211_free_ap_info(struct bcm_cfg80211 *cfg)
+{
+	/* The security IEs the AP was given, kept while it runs: an interface
+	 * that goes without stop_ap must not hand them to the next AP.
+	 */
+	if (cfg->ap_info) {
+		kfree(cfg->ap_info->wpa_ie);
+		kfree(cfg->ap_info->rsn_ie);
+		kfree(cfg->ap_info->wps_ie);
+		kfree(cfg->ap_info);
+		cfg->ap_info = NULL;
+	}
+}
+
+static void
 wl_cfg80211_virtual_ap_leave(dhd_pub_t *dhd)
 {
 	int err;
@@ -8462,13 +8481,7 @@ wl_cfg80211_stop_ap(
 		if ((err = wl_cfgp2p_bss(cfg, dev, bssidx, 0)) < 0) {
 			WL_ERR(("bss down error %d\n", err));
 		}
-		if (cfg->ap_info) {
-			kfree(cfg->ap_info->wpa_ie);
-			kfree(cfg->ap_info->rsn_ie);
-			kfree(cfg->ap_info->wps_ie);
-			kfree(cfg->ap_info);
-			cfg->ap_info = NULL;
-		}
+		wl_cfg80211_free_ap_info(cfg);
 		/* Turn on the MPC */
 		wldev_iovar_setint(dev, "mpc", 1);
 		wl_cfg80211_virtual_ap_leave(dhd);
