@@ -3460,7 +3460,8 @@ wl_cfg80211_interface_ops(struct bcm_cfg80211 *cfg,
 	if (del) {
 		ret = wldev_iovar_setbuf(ndev, "interface_remove",
 			NULL, 0, ioctl_buf, sizeof(ioctl_buf), NULL);
-		if (unlikely(ret))
+		/* 7.81.3 has no interface_remove; del_iface falls back, no error */
+		if (unlikely(ret) && ret != BCME_UNSUPPORTED)
 			WL_ERR(("Interface remove failed!! ret %d\n", ret));
 		return ret;
 	}
@@ -3503,7 +3504,7 @@ wl_cfg80211_interface_ops(struct bcm_cfg80211 *cfg,
 			&iface, sizeof(struct wl_interface_create_v2),
 			ioctl_buf, sizeof(ioctl_buf), NULL);
 		if (ret == BCME_UNSUPPORTED) {
-			WL_ERR(("interface_create iovar not supported\n"));
+			WL_DBG(("interface_create iovar not supported\n"));
 			return ret;
 		} else if ((ret == 0) && *((uint32 *)ioctl_buf) == WL_INTERFACE_CREATE_VER_3) {
 			WL_DBG(("interface_create version 3\n"));
@@ -3603,7 +3604,7 @@ wl_bss_iovar_war(struct bcm_cfg80211 *cfg,
 			/* Ignore for other bss enums */
 			return;
 		}
-		WL_ERR(("wl bss %d\n", *val));
+		WL_DBG(("wl bss %d\n", *val));
 	}
 }
 
@@ -3770,7 +3771,7 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 		/* Success */
 		bsscfg_idx = ret;
 	}
-	WL_ERR(("Interface created: type %d bssidx %d\n", iface_type, bsscfg_idx));
+	WL_DBG(("Interface created: type %d bssidx %d\n", iface_type, bsscfg_idx));
 
 	/*
 	 * Wait till the firmware send a confirmation event back.
@@ -3905,7 +3906,7 @@ wl_cfg80211_del_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 		 * p2p_ifdel, by address; tried first, "bss -1" if it is refused.
 		 */
 		ret = wl_cfgp2p_ifdel(cfg, (struct ether_addr *)ndev->dev_addr);
-		WL_ERR(("p2p_ifdel for bss %d: %d\n", bsscfg_idx, ret));
+		WL_DBG(("p2p_ifdel for bss %d: %d\n", bsscfg_idx, ret));
 		if (ret < 0 && (ret = wl_cfg80211_add_del_bss(cfg, primary_ndev,
 			bsscfg_idx, iface_type, true, NULL)) < 0) {
 			WL_ERR(("DEL bss failed ret:%d \n", ret));
