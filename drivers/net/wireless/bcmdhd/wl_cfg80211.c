@@ -3572,7 +3572,10 @@ wl_customer6_legacy_chip_check(struct bcm_cfg80211 *cfg,
 	WL_DBG(("%s: GET_REVINFO device 0x%x, vendor 0x%x, chipnum 0x%x\n", __FUNCTION__,
 		dtoh32(revinfo.deviceid), dtoh32(revinfo.vendorid), dtoh32(revinfo.chipnum)));
 	chipnum = dtoh32(revinfo.chipnum);
-	if ((chipnum == BCM4350_CHIP_ID) || (chipnum == BCM4355_CHIP_ID) ||
+	/* The whole 4350 family, this board's 4354 among it: 1.77 named 4350
+	 * alone, and the 4354 got a station where it asked for the hotspot.
+	 */
+	if (BCM4350_CHIP(chipnum) || (chipnum == BCM4355_CHIP_ID) ||
 		(chipnum == BCM4345_CHIP_ID)) {
 		/* WAR required */
 		return true;
@@ -3621,11 +3624,10 @@ wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
 	bzero(&bss_setbuf, sizeof(bss_setbuf));
 
 	/*
-	 * The firmware's operations: AP=2, STA=3, up=1, down=0, delete=-1. This
-	 * driver had AP and STA the other way round, which is what a few
-	 * firmware branches of older chips expect, and which on this chip
-	 * would have made the hotspot's BSS a station. As in bcmdhd 1.77 the
-	 * swap is kept for those chips alone.
+	 * The firmware's operations: AP=2, STA=3, up=1, down=0, delete=-1. The
+	 * branches of a few older chips have AP and STA the other way round,
+	 * this board's 4354 among them (1.201.82 had AP=3 for it), and
+	 * wl_bss_iovar_war swaps them there, as bcmdhd 1.77 does.
 	 */
 	if (del) {
 		val = WLC_AP_IOV_OP_DELETE;
