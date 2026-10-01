@@ -45,6 +45,7 @@
 #include <linux/tfa9887.h>
 #include "tegra30_ahub.h"
 #include "tegra30_i2s.h"
+#include "tegra30_dam.h"
 
 #define DRV_NAME "tegra-snd-rt5671"
 
@@ -53,7 +54,22 @@
 #define DAI_LINK_RIGHT_SPK	2
 #define DAI_LINK_BTSCO		3
 #define DAI_LINK_FM		4
-#define NUM_DAI_LINKS		5
+#define DAI_LINK_FE_DEEP	5
+#define DAI_LINK_FE_FAST	6
+#define DAI_LINK_HIFI_BE	7
+#define NUM_DAI_LINKS		8
+
+/* Playback front ends, each feeding one DAM input */
+#define FE_DEEP			0
+#define FE_FAST			1
+#define NUM_FE			2
+
+/* NVIDIA's machine drivers all program 0x1000 as unity; TRM omits CONV */
+#define DAM_GAIN_UNITY		0x1000
+
+/* DAM_CHx_CTRL DATA_SYNC: one bit per channel to wait for */
+#define DAM_SYNC_NONE		0
+#define DAM_SYNC_WAIT_CH1	BIT(1)
 
 const char *tegra_rt5671_i2s_dai_name[TEGRA30_NR_I2S_IFC] = {
 	"tegra30-i2s.0",
@@ -73,6 +89,20 @@ struct tegra_rt5671 {
 	/* Streams holding the audio PLL rate, one bit per direction */
 	unsigned int rate_locked;
 	struct snd_soc_card *pcard;
+
+	/* Playback mixer: the front ends go through a DAM into I2S */
+	int dam_ifc;
+	struct mutex dam_lock;		/* DAM setup against BE users */
+	int dam_users;
+	spinlock_t dam_trigger_lock;	/* DAM enables, from two streams */
+	struct tegra30_i2s *be_i2s;
+	enum tegra30_ahub_txcif fe_fifo_cif[NUM_FE];
+	struct tegra_pcm_dma_params fe_dma_data[NUM_FE];
+};
+
+static const int tegra_rt5671_fe_dam_ch[NUM_FE] = {
+	[FE_DEEP] = TEGRA30_DAM_CHIN0_SRC,
+	[FE_FAST] = TEGRA30_DAM_CHIN1,
 };
 
 static int tegra_rt5671_set_clock(struct snd_soc_pcm_runtime *rtd,
@@ -138,6 +168,16 @@ static int tegra_rt5671_startup(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct tegra30_i2s *i2s = snd_soc_dai_get_drvdata(cpu_dai);
+
+	/* I2S playback is fed by the DAM, so it plays only through the
+	 * front ends; the plain link keeps capture */
+	if (!rtd->dai_link->no_pcm &&
+	    substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		dev_err(rtd->card->dev,
+			"%s plays through the mixer front ends only\n",
+			rtd->dai_link->name);
+		return -EINVAL;
+	}
 
 	tegra_asoc_utils_tristate_dap(i2s->id, false);
 
@@ -290,6 +330,276 @@ static struct snd_soc_ops tegra_rt5671_ops = {
 	.shutdown = tegra_rt5671_shutdown,
 };
 
+/*
+ * Playback mixer. Two front ends (deep buffer and fast) each own an APBIF
+ * FIFO routed into one DAM input; the DAM mixes them in bypass at 48 kHz
+ * and its output feeds the I2S of the back end, which carries AIF1.
+ */
+
+static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
+{
+	int ifc = machine->dam_ifc;
+	int ret;
+
+	tegra30_dam_enable_clock(ifc);
+
+	ret = tegra30_dam_soft_reset(ifc);
+	if (ret)
+		goto err;
+
+	tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHOUT, 48000);
+	tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN0_SRC, 48000);
+	tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN1, 48000);
+
+	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN0_SRC, DAM_GAIN_UNITY);
+	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN1, DAM_GAIN_UNITY);
+
+	ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN0_SRC, 2, 16, 2, 32);
+	if (!ret)
+		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN1,
+					   2, 16, 2, 32);
+	if (!ret)
+		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHOUT,
+					   2, 16, 2, 32);
+	if (ret)
+		goto err;
+
+	ret = tegra30_dam_enable_stereo_mixing(ifc, 1);
+	if (ret)
+		goto err;
+
+	tegra30_dam_ch0_set_datasync(ifc, DAM_SYNC_NONE);
+	tegra30_dam_ch1_set_datasync(ifc, DAM_SYNC_NONE);
+
+	return 0;
+
+err:
+	tegra30_dam_disable_clock(ifc);
+	return ret;
+}
+
+static int tegra_rt5671_be_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra30_i2s *i2s = snd_soc_dai_get_drvdata(rtd->cpu_dai);
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+	int ret = 0;
+
+	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
+		return -EINVAL;
+
+	mutex_lock(&machine->dam_lock);
+	if (!machine->dam_users) {
+		ret = tegra_rt5671_dam_setup(machine);
+		if (ret) {
+			dev_err(rtd->card->dev, "DAM setup failed: %d\n", ret);
+			goto out;
+		}
+		tegra30_ahub_set_rx_cif_source(i2s->playback_i2s_cif,
+				TEGRA30_AHUB_TXCIF_DAM0_TX0 + machine->dam_ifc);
+	}
+	machine->dam_users++;
+out:
+	mutex_unlock(&machine->dam_lock);
+	if (ret)
+		return ret;
+
+	return tegra_rt5671_startup(substream);
+}
+
+static void tegra_rt5671_be_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra30_i2s *i2s = snd_soc_dai_get_drvdata(rtd->cpu_dai);
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+
+	tegra_rt5671_shutdown(substream);
+
+	mutex_lock(&machine->dam_lock);
+	if (!--machine->dam_users) {
+		tegra30_ahub_unset_rx_cif_source(i2s->playback_i2s_cif);
+		tegra30_dam_enable_stereo_mixing(machine->dam_ifc, 0);
+		tegra30_dam_disable_clock(machine->dam_ifc);
+	}
+	mutex_unlock(&machine->dam_lock);
+}
+
+/* The DAM mixes in bypass, so the I2S side runs at the DAM output format */
+static int tegra_rt5671_be_fixup(struct snd_soc_pcm_runtime *rtd,
+				 struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+						SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_interval *channels = hw_param_interval(params,
+						SNDRV_PCM_HW_PARAM_CHANNELS);
+	struct snd_mask *format = hw_param_mask(params,
+						SNDRV_PCM_HW_PARAM_FORMAT);
+
+	rate->min = rate->max = 48000;
+	channels->min = channels->max = 2;
+	snd_mask_none(format);
+	snd_mask_set(format, SNDRV_PCM_FORMAT_S16_LE);
+
+	return 0;
+}
+
+static int tegra_rt5671_be_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+	struct tegra30_i2s *i2s = snd_soc_dai_get_drvdata(rtd->cpu_dai);
+
+	/* The DAM feeds this I2S; it must not take an APBIF FIFO itself */
+	i2s->allocate_pb_fifo_cif = false;
+	machine->be_i2s = i2s;
+
+	return 0;
+}
+
+static int tegra_rt5671_fe_startup(struct snd_pcm_substream *substream,
+				   int fe)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+	struct tegra_pcm_dma_params *dma = &machine->fe_dma_data[fe];
+	int ret;
+
+	tegra30_ahub_enable_clocks();
+
+	ret = tegra30_ahub_allocate_tx_fifo(&machine->fe_fifo_cif[fe],
+					    &dma->addr, &dma->req_sel);
+	if (ret) {
+		dev_err(rtd->card->dev, "No APBIF FIFO for %s: %d\n",
+			rtd->dai_link->name, ret);
+		machine->fe_fifo_cif[fe] = -1;
+		tegra30_ahub_disable_clocks();
+		return ret;
+	}
+	dma->wrap = 4;
+	dma->width = 32;
+	rtd->cpu_dai->playback_dma_data = dma;
+
+	tegra30_ahub_set_rx_cif_source(TEGRA30_AHUB_RXCIF_DAM0_RX0 +
+			machine->dam_ifc * 2 + tegra_rt5671_fe_dam_ch[fe],
+			machine->fe_fifo_cif[fe]);
+
+	return 0;
+}
+
+static void tegra_rt5671_fe_shutdown(struct snd_pcm_substream *substream,
+				     int fe)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+
+	tegra30_ahub_unset_rx_cif_source(TEGRA30_AHUB_RXCIF_DAM0_RX0 +
+			machine->dam_ifc * 2 + tegra_rt5671_fe_dam_ch[fe]);
+	tegra30_ahub_free_tx_fifo(machine->fe_fifo_cif[fe]);
+	machine->fe_fifo_cif[fe] = -1;
+	rtd->cpu_dai->playback_dma_data = NULL;
+
+	tegra30_ahub_disable_clocks();
+}
+
+static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
+				     struct snd_pcm_hw_params *params, int fe)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+	enum tegra30_ahub_txcif cif = machine->fe_fifo_cif[fe];
+
+	/* The front-end DAIs offer S16 only */
+	if (params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
+		return -EINVAL;
+
+	tegra30_ahub_set_tx_cif_channels(cif, params_channels(params),
+					 params_channels(params));
+	tegra30_ahub_set_tx_cif_bits(cif, TEGRA30_AUDIOCIF_BITS_16,
+				     TEGRA30_AUDIOCIF_BITS_16);
+	tegra30_ahub_set_tx_fifo_pack_mode(cif,
+				TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_16);
+
+	return 0;
+}
+
+/*
+ * Called by the platform before the DMA starts and after it stops. While
+ * the fast stream runs, CH0 waits for CH1 so the two mix sample-aligned;
+ * alone, neither channel waits.
+ */
+static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
+				   int cmd, int fe)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+	int ifc = machine->dam_ifc;
+	int ch = tegra_rt5671_fe_dam_ch[fe];
+	unsigned long flags;
+
+	spin_lock_irqsave(&machine->dam_trigger_lock, flags);
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (fe == FE_FAST)
+			tegra30_dam_ch0_set_datasync(ifc, DAM_SYNC_WAIT_CH1);
+		tegra30_dam_enable(ifc, TEGRA30_DAM_ENABLE, ch);
+		tegra30_ahub_enable_tx_fifo(machine->fe_fifo_cif[fe]);
+		break;
+
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		tegra30_ahub_disable_tx_fifo(machine->fe_fifo_cif[fe]);
+		tegra30_dam_enable(ifc, TEGRA30_DAM_DISABLE, ch);
+		if (fe == FE_FAST)
+			tegra30_dam_ch0_set_datasync(ifc, DAM_SYNC_NONE);
+		break;
+
+	default:
+		spin_unlock_irqrestore(&machine->dam_trigger_lock, flags);
+		return -EINVAL;
+	}
+	spin_unlock_irqrestore(&machine->dam_trigger_lock, flags);
+
+	return 0;
+}
+
+#define TEGRA_RT5671_FE_OPS(name, fe)					\
+static int tegra_rt5671_##name##_startup(struct snd_pcm_substream *s)	\
+{									\
+	return tegra_rt5671_fe_startup(s, fe);				\
+}									\
+static void tegra_rt5671_##name##_shutdown(struct snd_pcm_substream *s)	\
+{									\
+	tegra_rt5671_fe_shutdown(s, fe);				\
+}									\
+static int tegra_rt5671_##name##_hw_params(struct snd_pcm_substream *s,	\
+					struct snd_pcm_hw_params *p)	\
+{									\
+	return tegra_rt5671_fe_hw_params(s, p, fe);			\
+}									\
+static int tegra_rt5671_##name##_trigger(struct snd_pcm_substream *s,	\
+					 int cmd)			\
+{									\
+	return tegra_rt5671_fe_trigger(s, cmd, fe);			\
+}									\
+static struct snd_soc_ops tegra_rt5671_##name##_ops = {			\
+	.startup = tegra_rt5671_##name##_startup,			\
+	.shutdown = tegra_rt5671_##name##_shutdown,			\
+	.hw_params = tegra_rt5671_##name##_hw_params,			\
+	.trigger = tegra_rt5671_##name##_trigger,			\
+}
+
+TEGRA_RT5671_FE_OPS(fe_deep, FE_DEEP);
+TEGRA_RT5671_FE_OPS(fe_fast, FE_FAST);
+
+static struct snd_soc_ops tegra_rt5671_be_ops = {
+	.hw_params = tegra_rt5671_hw_params,
+	.hw_free = tegra_hw_free,
+	.startup = tegra_rt5671_be_startup,
+	.shutdown = tegra_rt5671_be_shutdown,
+};
+
 static int tegra_rt5671_event_hp(struct snd_soc_dapm_widget *w,
 					struct snd_kcontrol *k, int event)
 {
@@ -316,6 +626,7 @@ static const struct snd_soc_dapm_widget ardbeg_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("BT Headphone", NULL),
 	SND_SOC_DAPM_MIC("BT Mic", NULL),
 	SND_SOC_DAPM_LINE("FM", NULL),
+	SND_SOC_DAPM_MIXER("DAM Mixer", SND_SOC_NOPM, 0, 0, NULL, 0),
 };
 
 static const struct snd_soc_dapm_route ardbeg_audio_map[] = {
@@ -333,6 +644,10 @@ static const struct snd_soc_dapm_route ardbeg_audio_map[] = {
 	{"BT Headphone", NULL, "BT Playback"},
 	{"BT Capture", NULL, "BT Mic"},
 	{"FM Capture", NULL, "FM"},
+	/* Playback front ends through the DAM into AIF1 */
+	{"DAM Mixer", NULL, "FE0 Playback"},
+	{"DAM Mixer", NULL, "FE1 Playback"},
+	{"AIF1 Playback", NULL, "DAM Mixer"},
 };
 
 static const struct snd_kcontrol_new ardbeg_controls[] = {
@@ -477,6 +792,42 @@ static struct snd_soc_dai_link tegra_rt5671_dai[NUM_DAI_LINKS] = {
 		.params = &tegra_rt5671_fm_params,
 		.ignore_pmdown_time = 1,
 	},
+
+	[DAI_LINK_FE_DEEP] = {
+		.name = "rt5671 Deep Buffer",
+		.stream_name = "rt5671 Deep Buffer",
+		.codec_name = "snd-soc-dummy",
+		.platform_name = "tegra-pcm-audio",
+		.cpu_dai_name = "tegra-pcm-fe0",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.ops = &tegra_rt5671_fe_deep_ops,
+		.dynamic = 1,
+	},
+	[DAI_LINK_FE_FAST] = {
+		.name = "rt5671 Fast",
+		.stream_name = "rt5671 Fast",
+		.codec_name = "snd-soc-dummy",
+		.platform_name = "tegra-pcm-audio",
+		.cpu_dai_name = "tegra-pcm-fe1",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.ops = &tegra_rt5671_fe_fast_ops,
+		.dynamic = 1,
+	},
+	/* AIF1 playback behind the DAM; cpu, codec and platform are set
+	 * like the HIFI link's in probe */
+	[DAI_LINK_HIFI_BE] = {
+		.name = "rt5671 Mixer",
+		.stream_name = "rt5671 Mixer",
+		.codec_name = "rt5671.0-001c",
+		.platform_name = "tegra30-i2s.0",
+		.cpu_dai_name = "tegra30-i2s.0",
+		.codec_dai_name = "rt5671-aif1",
+		.init = tegra_rt5671_be_init,
+		.ops = &tegra_rt5671_be_ops,
+		.no_pcm = 1,
+		.be_hw_params_fixup = tegra_rt5671_be_fixup,
+		.ignore_pmdown_time = 1,
+	},
 };
 
 static int tegra_rt5671_suspend_post(struct snd_soc_card *card)
@@ -605,6 +956,13 @@ static struct snd_soc_card snd_soc_tegra_rt5671 = {
 	.fully_routed = true,
 };
 
+static void tegra_rt5671_free_dam(struct tegra_rt5671 *machine)
+{
+	tegra30_dam_free_channel(machine->dam_ifc, TEGRA30_DAM_CHIN0_SRC);
+	tegra30_dam_free_channel(machine->dam_ifc, TEGRA30_DAM_CHIN1);
+	tegra30_dam_free_controller(machine->dam_ifc);
+}
+
 static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = &snd_soc_tegra_rt5671;
@@ -661,11 +1019,18 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	tegra_rt5671_spk_params.rate_min = pdata->i2s_param[HIFI_CODEC].rate;
 	tegra_rt5671_spk_params.rate_max = pdata->i2s_param[HIFI_CODEC].rate;
 
-	if (pdata->codec_name)
-		card->dai_link->codec_name = pdata->codec_name;
+	if (pdata->codec_name) {
+		tegra_rt5671_dai[DAI_LINK_HIFI].codec_name = pdata->codec_name;
+		tegra_rt5671_dai[DAI_LINK_HIFI_BE].codec_name =
+			pdata->codec_name;
+	}
 
-	if (pdata->codec_dai_name)
-		card->dai_link->codec_dai_name = pdata->codec_dai_name;
+	if (pdata->codec_dai_name) {
+		tegra_rt5671_dai[DAI_LINK_HIFI].codec_dai_name =
+			pdata->codec_dai_name;
+		tegra_rt5671_dai[DAI_LINK_HIFI_BE].codec_dai_name =
+			pdata->codec_dai_name;
+	}
 
 	machine = kzalloc(sizeof(struct tegra_rt5671), GFP_KERNEL);
 	if (!machine) {
@@ -677,10 +1042,24 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 
 	machine->pdata = pdata;
 	machine->pcard = card;
+	mutex_init(&machine->dam_lock);
+	spin_lock_init(&machine->dam_trigger_lock);
+	machine->fe_fifo_cif[FE_DEEP] = -1;
+	machine->fe_fifo_cif[FE_FAST] = -1;
+
+	machine->dam_ifc = tegra30_dam_allocate_controller();
+	if (machine->dam_ifc < 0) {
+		ret = machine->dam_ifc;
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "No DAM for the mixer: %d\n", ret);
+		goto err_free_machine;
+	}
+	tegra30_dam_allocate_channel(machine->dam_ifc, TEGRA30_DAM_CHIN0_SRC);
+	tegra30_dam_allocate_channel(machine->dam_ifc, TEGRA30_DAM_CHIN1);
 
 	ret = tegra_asoc_utils_init(&machine->util_data, &pdev->dev, card);
 	if (ret)
-		goto err_free_machine;
+		goto err_free_dam;
 	tegra_asoc_utils_clk_disable(&machine->util_data);
 
 	/*
@@ -699,6 +1078,10 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	tegra_rt5671_dai[DAI_LINK_HIFI].cpu_dai_name =
 	tegra_rt5671_i2s_dai_name[codec_id];
 	tegra_rt5671_dai[DAI_LINK_HIFI].platform_name =
+	tegra_rt5671_i2s_dai_name[codec_id];
+	tegra_rt5671_dai[DAI_LINK_HIFI_BE].cpu_dai_name =
+	tegra_rt5671_i2s_dai_name[codec_id];
+	tegra_rt5671_dai[DAI_LINK_HIFI_BE].platform_name =
 	tegra_rt5671_i2s_dai_name[codec_id];
 
 	ret = snd_soc_register_card(card);
@@ -731,7 +1114,11 @@ err_fini_utils:
 	/* requested by the card's init, which may have run before a failure */
 	if (machine->gpio_requested & GPIO_HP_MUTE)
 		gpio_free(pdata->gpio_hp_mute);
+	if (machine->be_i2s)
+		machine->be_i2s->allocate_pb_fifo_cif = true;
 	tegra_asoc_utils_fini(&machine->util_data);
+err_free_dam:
+	tegra_rt5671_free_dam(machine);
 err_free_machine:
 	if (np)
 		kfree(machine->pdata);
@@ -753,7 +1140,11 @@ static int tegra_rt5671_driver_remove(struct platform_device *pdev)
 	if (machine->gpio_requested & GPIO_HP_MUTE)
 		gpio_free(pdata->gpio_hp_mute);
 
+	if (machine->be_i2s)
+		machine->be_i2s->allocate_pb_fifo_cif = true;
+
 	tegra_asoc_utils_fini(&machine->util_data);
+	tegra_rt5671_free_dam(machine);
 
 	if (np)
 		kfree(machine->pdata);
