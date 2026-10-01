@@ -64,6 +64,9 @@
 #define FE_FAST			1
 #define NUM_FE			2
 
+/* The DAM output, and so I2S0 and AIF1 behind it */
+#define DAM_OUT_RATE		48000
+
 /* NVIDIA's machine drivers all program 0x1000 as unity; TRM omits CONV */
 #define DAM_GAIN_UNITY		0x1000
 
@@ -347,9 +350,15 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
 	if (ret)
 		goto err;
 
-	tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHOUT, 48000);
-	tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN0_SRC, 48000);
-	tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN1, 48000);
+	ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHOUT, DAM_OUT_RATE);
+	if (!ret)
+		ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN0_SRC,
+						 DAM_OUT_RATE);
+	if (!ret)
+		ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN1,
+						 DAM_OUT_RATE);
+	if (ret)
+		goto err;
 
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN0_SRC, DAM_GAIN_UNITY);
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN1, DAM_GAIN_UNITY);
@@ -364,6 +373,8 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
 	if (ret)
 		goto err;
 
+	/* CH0 starts in bypass; the deep buffer's hw_params may change it */
+	tegra30_dam_enable_stereo_src(ifc, 0);
 	ret = tegra30_dam_enable_stereo_mixing(ifc, 1);
 	if (ret)
 		goto err;
@@ -435,7 +446,7 @@ static int tegra_rt5671_be_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_mask *format = hw_param_mask(params,
 						SNDRV_PCM_HW_PARAM_FORMAT);
 
-	rate->min = rate->max = 48000;
+	rate->min = rate->max = DAM_OUT_RATE;
 	channels->min = channels->max = 2;
 	snd_mask_none(format);
 	snd_mask_set(format, SNDRV_PCM_FORMAT_S16_LE);
@@ -500,16 +511,51 @@ static void tegra_rt5671_fe_shutdown(struct snd_pcm_substream *substream,
 	tegra30_ahub_disable_clocks();
 }
 
+/*
+ * Run CH0 at the deep buffer's rate. Off the output rate it goes through the
+ * converter, as stereo; stereo mixing needs bypass (TRM 20.10.4.1), so it is
+ * on only at the output rate.
+ */
+static int tegra_rt5671_dam_ch0_rate(struct tegra_rt5671 *machine, int rate)
+{
+	int ifc = machine->dam_ifc;
+	bool src = rate != DAM_OUT_RATE;
+	int ret;
+
+	mutex_lock(&machine->dam_lock);
+	if (src)
+		tegra30_dam_enable_stereo_mixing(ifc, 0);
+	ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN0_SRC, rate);
+	if (!ret) {
+		tegra30_dam_enable_stereo_src(ifc, src);
+		if (!src)
+			ret = tegra30_dam_enable_stereo_mixing(ifc, 1);
+	}
+	mutex_unlock(&machine->dam_lock);
+
+	return ret;
+}
+
 static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
 				     struct snd_pcm_hw_params *params, int fe)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
 	enum tegra30_ahub_txcif cif = machine->fe_fifo_cif[fe];
+	int ret;
 
 	/* The front-end DAIs offer S16 only */
 	if (params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
 		return -EINVAL;
+
+	if (fe == FE_DEEP) {
+		ret = tegra_rt5671_dam_ch0_rate(machine, params_rate(params));
+		if (ret) {
+			dev_err(rtd->card->dev, "DAM can't take %u Hz: %d\n",
+				params_rate(params), ret);
+			return ret;
+		}
+	}
 
 	tegra30_ahub_set_tx_cif_channels(cif, params_channels(params),
 					 params_channels(params));
