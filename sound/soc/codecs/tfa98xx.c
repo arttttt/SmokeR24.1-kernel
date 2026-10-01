@@ -94,7 +94,6 @@ struct tfa98xx_priv {
 	struct delayed_work download_work;
 	struct snd_soc_codec *codec;
 	unsigned int pilot_tone;
-	unsigned int reg_addr;
 	unsigned int fmt;
 	bool dsp_crash;
 	bool recalib;
@@ -241,6 +240,40 @@ static unsigned int tfa98xx_read_dsp(struct snd_soc_codec *codec, unsigned int r
 	return snd_soc_read(codec, TFA98XX_CF_MEM);
 }
 
+/*
+ * TFA9890 PLL tuning, from NXP's tfa9890_specific(): register 0x59, behind
+ * the key in 0x40, needs its two low bits set for the amplifier to behave.
+ * The reset clears it, so it is applied after every reset. It used to be
+ * written by the HAL at start-up through the raw register controls, and
+ * so was lost whenever the monitor reset the chip.
+ */
+#define TFA9890_KEY2_REG	0x40
+#define TFA9890_KEY2_UNLOCK	0x5A6B
+#define TFA9890_PLL_REG		0x59
+#define TFA9890_PLL_TUNE	0x0003
+
+static int tfa9890_specific(struct snd_soc_codec *codec)
+{
+	unsigned int val;
+	int ret;
+
+	ret = snd_soc_write(codec, TFA9890_KEY2_REG, TFA9890_KEY2_UNLOCK);
+	if (ret < 0)
+		return ret;
+
+	val = snd_soc_read(codec, TFA9890_PLL_REG);
+	if (TFA98XX_READ_FAILED(val))
+		ret = (int)val;
+	else
+		ret = snd_soc_write(codec, TFA9890_PLL_REG,
+				    val | TFA9890_PLL_TUNE);
+
+	/* lock again whatever happened */
+	snd_soc_write(codec, TFA9890_KEY2_REG, 0);
+
+	return ret;
+}
+
 static int tfa98xx_reset(struct snd_soc_codec *codec)
 {
 	struct i2c_client *client = to_i2c_client(codec->dev);
@@ -257,7 +290,7 @@ static int tfa98xx_reset(struct snd_soc_codec *codec)
 	if (ret < 0)
 		return ret;
 
-	return ret;
+	return tfa9890_specific(codec);
 }
 
 static int tfa98xx_reset_dsp(struct snd_soc_codec *codec)
@@ -1020,45 +1053,6 @@ static int tfa98xx_remove(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int tfa98xx_reg_addr_get(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
-
-	ucontrol->value.integer.value[0] = tfa98xx->reg_addr;
-	return 0;
-}
-
-static int tfa98xx_reg_addr_put(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
-
-	tfa98xx->reg_addr = ucontrol->value.integer.value[0];
-	return 0;
-}
-
-static int tfa98xx_reg_value_get(struct snd_kcontrol *kcontrol,
-				 struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
-
-	ucontrol->value.integer.value[0] = snd_soc_read(codec, tfa98xx->reg_addr);
-	return 0;
-}
-
-static int tfa98xx_reg_value_put(struct snd_kcontrol *kcontrol,
-				 struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
-
-	return snd_soc_write(codec, tfa98xx->reg_addr, ucontrol->value.integer.value[0]);
-}
-
 static int tfa98xx_chsa_put(struct snd_kcontrol *kcontrol,
 			    struct snd_ctl_elem_value *ucontrol)
 {
@@ -1098,21 +1092,23 @@ static int tfa98xx_bsst_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
 	unsigned int bsss = ucontrol->value.enumerated.item[0] & 1;
 	unsigned int bsst = ucontrol->value.enumerated.item[0] >> 1;
-	int ret;
+	int ret, changed;
 
 	ret = snd_soc_update_bits_locked(codec, TFA98XX_AUDIO_CTR,
 			TFA989X_AUDIO_CTR_BSSS_MSK,
 			bsss << TFA989X_AUDIO_CTR_BSSS_POS);
 	if (ret < 0)
 		return ret;
+	changed = ret;
 
-	ret = snd_soc_update_bits(codec, TFA98XX_BAT_PROT,
+	ret = snd_soc_update_bits_locked(codec, TFA98XX_BAT_PROT,
 			TFA989X_BAT_PROT_BSST_MSK,
 			bsst << TFA989X_BAT_PROT_BSST_POS);
 	if (ret < 0)
 		return ret;
 
-	return ret;
+	/* 1 when either half changed, so ALSA notifies listeners */
+	return changed || ret;
 }
 
 static int tfa98xx_recalib_get(struct snd_kcontrol *kcontrol,
@@ -1131,11 +1127,14 @@ static int tfa98xx_recalib_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
 
-	tfa98xx->recalib = !!ucontrol->value.integer.value[0];
+	bool recalib = !!ucontrol->value.integer.value[0];
+	int changed = recalib != tfa98xx->recalib;
+
+	tfa98xx->recalib = recalib;
 	if (tfa98xx->recalib)
 		tfa98xx_start_download(tfa98xx, true);
 
-	return 0;
+	return changed;
 }
 
 static int tfa98xx_firmware_put(struct tfa98xx_priv *tfa98xx, unsigned long id, const char *name)
@@ -1144,7 +1143,7 @@ static int tfa98xx_firmware_put(struct tfa98xx_priv *tfa98xx, unsigned long id, 
 	const struct firmware *fw;
 	int ret;
 
-	printk("tfa98xx_firmware_put id: %u name: %s\n", (unsigned int) id, name );
+	dev_dbg(tfa98xx->codec->dev, "Request firmware %lu: %s\n", id, name);
 	codec = tfa98xx->codec;
 
 	ret = request_firmware(&fw, name, codec->dev);
@@ -1265,10 +1264,6 @@ static const SOC_ENUM_DOUBLE_DECL(
 	tfa98xx_dos_text);
 
 static const struct snd_kcontrol_new tfa98xx_controls[] = {
-	SOC_SINGLE_EXT("Reg Addr", SND_SOC_NOPM, 0, 0x8F, 0,
-		tfa98xx_reg_addr_get, tfa98xx_reg_addr_put),
-	SOC_SINGLE_EXT("Reg Value", SND_SOC_NOPM, 0, 0xFFFFFF, 0,
-		tfa98xx_reg_value_get, tfa98xx_reg_value_put),
 	SOC_SINGLE("Battery Voltage", TFA98XX_BATTERYVOLTAGE,
 		TFA98XX_BATTERYVOLTAGE_BATS_POS, TFA98XX_BATTERYVOLTAGE_BATS_MAX, 0),
 	SOC_SINGLE("Temperature", TFA98XX_TEMPERATURE,
@@ -1547,32 +1542,38 @@ static int tfa98xx_parse_dt(struct device *dev, struct tfa98xx_priv *tfa98xx,
 	char const *pstr;
 
 	if (!of_property_read_string(np, "nxt,fw-boot", &pstr))
-		strcpy(tfa98xx->fw_name[TFA98XX_FW_BOOT], pstr);
+		strlcpy(tfa98xx->fw_name[TFA98XX_FW_BOOT], pstr,
+			sizeof(tfa98xx->fw_name[TFA98XX_FW_BOOT]));
 	else
 		dev_warn(dev, "Failed to read fw-boot\n");
 
 	if (!of_property_read_string(np, "nxt,fw-rom", &pstr))
-		strcpy(tfa98xx->fw_name[TFA98XX_FW_ROM], pstr);
+		strlcpy(tfa98xx->fw_name[TFA98XX_FW_ROM], pstr,
+			sizeof(tfa98xx->fw_name[TFA98XX_FW_ROM]));
 	else
 		dev_warn(dev, "Failed to read fw-rom\n");
 
 	if (!of_property_read_string(np, "nxt,fw-speaker", &pstr))
-		strcpy(tfa98xx->fw_name[TFA98XX_FW_SPEAKER], pstr);
+		strlcpy(tfa98xx->fw_name[TFA98XX_FW_SPEAKER], pstr,
+			sizeof(tfa98xx->fw_name[TFA98XX_FW_SPEAKER]));
 	else
 		dev_warn(dev, "Failed to read fw-speaker\n");
 
 	if (!of_property_read_string(np, "nxt,fw-config", &pstr))
-		strcpy(tfa98xx->fw_name[TFA98XX_FW_CONFIG], pstr);
+		strlcpy(tfa98xx->fw_name[TFA98XX_FW_CONFIG], pstr,
+			sizeof(tfa98xx->fw_name[TFA98XX_FW_CONFIG]));
 	else
 		dev_warn(dev, "Failed to read fw-config\n");
 
 	if (!of_property_read_string(np, "nxt,fw-preset", &pstr))
-		strcpy(tfa98xx->fw_name[TFA98XX_FW_PRESET], pstr);
+		strlcpy(tfa98xx->fw_name[TFA98XX_FW_PRESET], pstr,
+			sizeof(tfa98xx->fw_name[TFA98XX_FW_PRESET]));
 	else
 		dev_warn(dev, "Failed to read fw-preset\n");
 
 	if (!of_property_read_string(np, "nxt,fw-eq", &pstr))
-		strcpy(tfa98xx->fw_name[TFA98XX_FW_EQUALIZER], pstr);
+		strlcpy(tfa98xx->fw_name[TFA98XX_FW_EQUALIZER], pstr,
+			sizeof(tfa98xx->fw_name[TFA98XX_FW_EQUALIZER]));
 	else
 		dev_warn(dev, "Failed to read fw-eq\n");
 
@@ -1639,11 +1640,11 @@ static const struct i2c_device_id tfa98xx_i2c_id[] = {
 MODULE_DEVICE_TABLE(i2c, tfa98xx_i2c_id);
 
 #ifdef CONFIG_OF
-static struct of_device_id tfa98xx_match[] = {
+static const struct of_device_id tfa98xx_match[] = {
 	{ .compatible = "nxp,tfa9890" },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, tfa98xx_match_tbl);
+MODULE_DEVICE_TABLE(of, tfa98xx_match);
 #endif
 
 static struct i2c_driver tfa98xx_i2c_driver = {
