@@ -72,6 +72,7 @@
 
 /* DAM_CHx_CTRL DATA_SYNC: one bit per channel to wait for */
 #define DAM_SYNC_NONE		0
+#define DAM_SYNC_WAIT_CH0	BIT(0)
 
 const char *tegra_rt5671_i2s_dai_name[TEGRA30_NR_I2S_IFC] = {
 	"tegra30-i2s.0",
@@ -97,6 +98,7 @@ struct tegra_rt5671 {
 	struct mutex dam_lock;		/* DAM setup against BE users */
 	int dam_users;
 	spinlock_t dam_trigger_lock;	/* DAM enables, from two streams */
+	bool fe_running[NUM_FE];	/* under dam_trigger_lock */
 	struct tegra30_i2s *be_i2s;
 	enum tegra30_ahub_txcif fe_fifo_cif[NUM_FE];
 	struct tegra_pcm_dma_params fe_dma_data[NUM_FE];
@@ -567,12 +569,24 @@ static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
 }
 
 /*
+ * DATA_SYNC as TRM 20.10.4.3/5 recommend: CH0 waits for nothing, CH1 waits
+ * for CH0. CH1 may wait only while CH0 runs, or it would stall on a channel
+ * that sends nothing; so the wait is set once the deep buffer has started
+ * and cleared before it stops. Called under dam_trigger_lock.
+ */
+static void tegra_rt5671_dam_sync(struct tegra_rt5671 *machine)
+{
+	tegra30_dam_ch1_set_datasync(machine->dam_ifc,
+			machine->fe_running[FE_DEEP] ?
+				DAM_SYNC_WAIT_CH0 : DAM_SYNC_NONE);
+}
+
+/*
  * Called by the platform before the DMA starts and after it stops.
  *
- * Neither channel waits for the other (DATA_SYNC 0 on both, set up with the
- * DAM): the deep buffer and the fast stream are unrelated sounds with no
- * sample alignment to keep, and a wait would let a late period on one stall
- * the other.
+ * Making neither channel wait does not work: CH0 stalls as soon as CH1
+ * starts. Having CH0 wait for CH1, as flounder does, makes the music on CH0
+ * click whenever a short sound starts or stops on CH1.
  */
 static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 				   int cmd, int fe)
@@ -588,13 +602,21 @@ static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		machine->fe_running[fe] = true;
+		if (fe == FE_FAST)
+			tegra_rt5671_dam_sync(machine);
 		tegra30_dam_enable(ifc, TEGRA30_DAM_ENABLE, ch);
 		tegra30_ahub_enable_tx_fifo(machine->fe_fifo_cif[fe]);
+		if (fe == FE_DEEP)
+			tegra_rt5671_dam_sync(machine);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		machine->fe_running[fe] = false;
+		if (fe == FE_DEEP)
+			tegra_rt5671_dam_sync(machine);
 		tegra30_ahub_disable_tx_fifo(machine->fe_fifo_cif[fe]);
 		tegra30_dam_enable(ifc, TEGRA30_DAM_DISABLE, ch);
 		break;
