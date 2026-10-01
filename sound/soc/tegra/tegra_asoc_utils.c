@@ -419,59 +419,73 @@ int tegra_asoc_utils_set_rate(struct tegra_asoc_utils_data *data, int srate,
 		return -EINVAL;
 	}
 
+	mutex_lock(&data->lock);
+
 	clk_change = ((new_baseclock != data->set_baseclock) ||
 			(mclk != data->set_mclk));
-	if (!clk_change)
-		return 0;
+	if (!clk_change) {
+		err = 0;
+		goto out;
+	}
 
 	/* Don't change rate if already one dai-link is using it */
-	if (data->lock_count)
-		return -EINVAL;
+	if (data->lock_count) {
+		err = -EINVAL;
+		goto out;
+	}
 
-	data->set_baseclock = 0;
-	data->set_mclk = 0;
-
+	/*
+	 * The PLLs are stopped across each rate change and must be running
+	 * again afterwards whether the change took or not. On failure the
+	 * recorded rates are what the clocks actually run at, so the next
+	 * call compares against the truth and retries.
+	 */
 	reenable_clock = false;
-	if(tegra_is_clk_enabled(data->clk_pll_a)) {
+	if (tegra_is_clk_enabled(data->clk_pll_a)) {
 		clk_disable_unprepare(data->clk_pll_a);
 		reenable_clock = true;
 	}
 
 	err = clk_set_rate(data->clk_pll_a, new_baseclock);
+	if (reenable_clock && clk_prepare_enable(data->clk_pll_a))
+		dev_err(data->dev, "Can't re-enable pll_a\n");
 	if (err) {
 		dev_err(data->dev, "Can't set pll_a rate: %d\n", err);
-		return err;
+		goto out;
 	}
-	if(reenable_clock)
-		clk_prepare_enable(data->clk_pll_a);
+	data->set_baseclock = new_baseclock;
 
 	reenable_clock = false;
-	if(tegra_is_clk_enabled(data->clk_pll_a_out0)) {
+	if (tegra_is_clk_enabled(data->clk_pll_a_out0)) {
 		clk_disable_unprepare(data->clk_pll_a_out0);
 		reenable_clock = true;
 	}
+
 	err = clk_set_rate(data->clk_pll_a_out0, mclk);
+	if (reenable_clock && clk_prepare_enable(data->clk_pll_a_out0))
+		dev_err(data->dev, "Can't re-enable pll_a_out0\n");
 	if (err) {
 		dev_err(data->dev, "Can't set clk_pll_a_out0 rate: %d\n", err);
-		return err;
+		data->set_mclk = clk_get_rate(data->clk_pll_a_out0);
+		goto out;
 	}
-	if(reenable_clock)
-		clk_prepare_enable(data->clk_pll_a_out0);
-
-	data->set_baseclock = new_baseclock;
 	data->set_mclk = mclk;
 
-	return 0;
+out:
+	mutex_unlock(&data->lock);
+	return err;
 }
 EXPORT_SYMBOL_GPL(tegra_asoc_utils_set_rate);
 
 void tegra_asoc_utils_lock_clk_rate(struct tegra_asoc_utils_data *data,
 				    int lock)
 {
+	mutex_lock(&data->lock);
 	if (lock)
 		data->lock_count++;
 	else if (data->lock_count)
 		data->lock_count--;
+	mutex_unlock(&data->lock);
 }
 EXPORT_SYMBOL_GPL(tegra_asoc_utils_lock_clk_rate);
 
@@ -556,6 +570,7 @@ int tegra_asoc_utils_init(struct tegra_asoc_utils_data *data,
 
 	data->dev = dev;
 	data->card = card;
+	mutex_init(&data->lock);
 
 	data->clk_audio_emc = clk_get_sys("audio", "emc");
  	if (IS_ERR(data->clk_audio_emc)) {

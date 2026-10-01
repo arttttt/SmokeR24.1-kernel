@@ -75,6 +75,8 @@ struct tegra_rt5671 {
 	struct tegra_asoc_platform_data *pdata;
 	int gpio_requested;
 	int clock_enabled;
+	/* Streams holding the audio PLL rate, one bit per direction */
+	unsigned int rate_locked;
 	struct regulator *codec_reg;
 	struct regulator *digital_reg;
 	struct regulator *analog_reg;
@@ -98,7 +100,10 @@ static int tegra_rt5671_set_clock(struct snd_soc_pcm_runtime *rtd,
 	mclk = 256 * srate;
 	err = tegra_asoc_utils_set_rate(&machine->util_data, srate, mclk);
 	if (err < 0) {
-		if (!(machine->util_data.set_mclk % mclk)) {
+		/* Another stream holds the rate: go on only if its MCLK also
+		 * divides down to ours. A set_mclk of 0 is no rate at all. */
+		if (machine->util_data.set_mclk &&
+		    !(machine->util_data.set_mclk % mclk)) {
 			mclk = machine->util_data.set_mclk;
 		} else {
 			dev_err(card->dev, "Can't configure clocks\n");
@@ -180,6 +185,14 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 
 	srate = params_rate(params);
 
+	/* hw_params may come again without hw_free between; drop this
+	 * stream's hold on the rate so it may change it, and take it back
+	 * below once the stream is configured */
+	if (machine->rate_locked & BIT(substream->stream)) {
+		tegra_asoc_utils_lock_clk_rate(&machine->util_data, 0);
+		machine->rate_locked &= ~BIT(substream->stream);
+	}
+
 	/* Keep the speaker link on the same rate as this one. sysclk is set
 	 * below to PLL1 = 512 * srate, and the codec's get_clk_info() accepts
 	 * only an exact sysclk/rate ratio, so AIF2 has no freedom here: any
@@ -237,8 +250,6 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 		return err;
 	}
 
-	tegra_asoc_utils_lock_clk_rate(&machine->util_data, 1);
-
 	codec_daifmt = i2s_daifmt;
 
 	/*invert the codec bclk polarity when codec is master
@@ -264,6 +275,9 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 		return err;
 	}
 
+	tegra_asoc_utils_lock_clk_rate(&machine->util_data, 1);
+	machine->rate_locked |= BIT(substream->stream);
+
 	return 0;
 }
 
@@ -272,7 +286,10 @@ static int tegra_hw_free(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
 
-	tegra_asoc_utils_lock_clk_rate(&machine->util_data, 0);
+	if (machine->rate_locked & BIT(substream->stream)) {
+		tegra_asoc_utils_lock_clk_rate(&machine->util_data, 0);
+		machine->rate_locked &= ~BIT(substream->stream);
+	}
 
 	return 0;
 }

@@ -23,6 +23,7 @@
 #define __TEGRA_ASOC_UTILS_H_
 
 #ifdef CONFIG_SWITCH
+#include <linux/mutex.h>
 #include <linux/switch.h>
 #endif
 
@@ -52,6 +53,9 @@ struct tegra_asoc_utils_data {
 	struct clk *clk_out1;
 	struct clk *clk_m;
 	struct clk *clk_pll_p_out1;
+	/* Serialises set_rate and the rate lock: each PCM that opens can
+	 * reach them from its own hw_params */
+	struct mutex lock;
 	int set_baseclock;
 	int set_mclk;
 	int lock_count;
