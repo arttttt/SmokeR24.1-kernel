@@ -69,8 +69,6 @@ struct rt5671_dsp_param {
 };
 
 int rt5671_dsp_probe(struct snd_soc_codec *codec);
-int rt5671_dsp_ioctl_common(struct snd_hwdep *hw,
-	struct file *file, unsigned int cmd, unsigned long arg);
 #ifdef CONFIG_PM
 int rt5671_dsp_suspend(struct snd_soc_codec *codec);
 int rt5671_dsp_resume(struct snd_soc_codec *codec);

@@ -29,14 +29,6 @@
 #include <sound/tlv.h>
 #include <linux/of_gpio.h>
 
-#define RTK_IOCTL
-#ifdef RTK_IOCTL
-#if defined(CONFIG_SND_HWDEP) || defined(CONFIG_SND_HWDEP_MODULE)
-#include "rt_codec_ioctl.h"
-#include "rt5671_ioctl.h"
-#endif
-#endif
-
 #include "rt5671.h"
 #include "rt5671-dsp.h"
 
@@ -4131,11 +4123,6 @@ static int rt5671_set_bias_level(struct snd_soc_codec *codec,
 static int rt5671_probe(struct snd_soc_codec *codec)
 {
 	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
-#ifdef RTK_IOCTL
-#if defined(CONFIG_SND_HWDEP) || defined(CONFIG_SND_HWDEP_MODULE)
-	struct rt_codec_ops *ioctl_ops = rt_codec_get_ioctl_ops();
-#endif
-#endif
 	int ret;
 
 	pr_info("Codec driver version %s\n", VERSION);
@@ -4231,16 +4218,6 @@ static int rt5671_probe(struct snd_soc_codec *codec)
 	snd_soc_dapm_add_routes(&codec->dapm, rt5671_dapm_routes,
 			ARRAY_SIZE(rt5671_dapm_routes));
 	rt5671_dsp_probe(codec);
-
-#ifdef RTK_IOCTL
-#if defined(CONFIG_SND_HWDEP) || defined(CONFIG_SND_HWDEP_MODULE)
-	ioctl_ops->index_write = rt5671_index_write;
-	ioctl_ops->index_read = rt5671_index_read;
-	ioctl_ops->index_update_bits = rt5671_index_update_bits;
-	ioctl_ops->ioctl_common = rt5671_ioctl_common;
-	realtek_ce_init_hwdep(codec);
-#endif
-#endif
 
 	ret = device_create_file(codec->dev, &dev_attr_index_reg);
 	if (ret != 0) {

@@ -16,12 +16,6 @@
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 
-#define RTK_IOCTL
-#ifdef RTK_IOCTL
-#include <linux/spi/spi.h>
-#include "rt_codec_ioctl.h"
-#endif
-
 #include "rt5671.h"
 #include "rt5671-dsp.h"
 
@@ -1877,78 +1871,6 @@ int rt5671_dsp_probe(struct snd_soc_codec *codec)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rt5671_dsp_probe);
-
-#ifdef RTK_IOCTL
-int rt5671_dsp_ioctl_common(struct snd_hwdep *hw,
-	struct file *file, unsigned int cmd, unsigned long arg)
-{
-	struct rt_codec_cmd rt_codec;
-	int *buf;
-	int *p;
-	int ret;
-
-	struct rt_codec_cmd __user *_rt_codec = (struct rt_codec_cmd *)arg;
-	struct snd_soc_codec *codec = hw->private_data;
-	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
-
-	if (copy_from_user(&rt_codec, _rt_codec, sizeof(rt_codec))) {
-		dev_err(codec->dev, "copy_from_user faild\n");
-		return -EFAULT;
-	}
-	dev_dbg(codec->dev, "rt_codec.number=%d\n", rt_codec.number);
-	buf = kmalloc(sizeof(*buf) * rt_codec.number, GFP_KERNEL);
-	if (buf == NULL)
-		return -ENOMEM;
-	if (copy_from_user(buf, rt_codec.buf, sizeof(*buf) * rt_codec.number))
-		goto err;
-
-	ret = snd_soc_update_bits(codec, RT5671_PWR_DIG2,
-		RT5671_PWR_I2S_DSP, RT5671_PWR_I2S_DSP);
-	if (ret < 0) {
-		dev_err(codec->dev,
-			"Failed to power up DSP IIS interface: %d\n", ret);
-		goto err;
-	}
-
-	switch (cmd) {
-	case RT_READ_CODEC_DSP_IOCTL:
-		for (p = buf; p < buf + rt_codec.number / 2; p++)
-			*(p + rt_codec.number / 2) = rt5671_dsp_read(codec, *p);
-		if (copy_to_user(rt_codec.buf, buf,
-			sizeof(*buf) * rt_codec.number))
-			goto err;
-		break;
-
-	case RT_WRITE_CODEC_DSP_IOCTL:
-		if (codec == NULL) {
-			dev_dbg(codec->dev, "codec is null\n");
-			break;
-		}
-		for (p = buf; p < buf + rt_codec.number / 2; p++)
-			rt5671_dsp_write(codec, *p, *(p + rt_codec.number / 2));
-		break;
-
-	case RT_GET_CODEC_DSP_MODE_IOCTL:
-		*buf = rt5671->dsp_sw;
-		if (copy_to_user(rt_codec.buf, buf,
-			sizeof(*buf) * rt_codec.number))
-			goto err;
-		break;
-
-	default:
-		dev_info(codec->dev, "unsported dsp command\n");
-		break;
-	}
-
-	kfree(buf);
-	return 0;
-
-err:
-	kfree(buf);
-	return -EFAULT;
-}
-EXPORT_SYMBOL_GPL(rt5671_dsp_ioctl_common);
-#endif
 
 #ifdef CONFIG_PM
 int rt5671_dsp_suspend(struct snd_soc_codec *codec)

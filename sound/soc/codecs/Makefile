@@ -127,7 +127,7 @@ snd-soc-rt5639-objs := rt5639.o rt56xx_ioctl.o rt5639_ioctl.o
 snd-soc-rt5640-objs := rt5640.o
 snd-soc-rt5645-objs := rt5645.o rt5645_ioctl.o rt_codec_ioctl.o
 snd-soc-rt5659-objs := rt5659.o
-snd-soc-rt5671-objs := rt5671.o rt5671_ioctl.o rt_codec_ioctl.o rt5671-dsp.o
+snd-soc-rt5671-objs := rt5671.o rt5671-dsp.o
 
 # Amp
 snd-soc-max9877-objs := max9877.o
