@@ -20,6 +20,7 @@
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -84,7 +85,7 @@ static int tegra30_ahub_runtime_resume(struct device *dev)
 	ret = clk_prepare_enable(ahub->clk_apbif);
 	if (ret) {
 		dev_err(dev, "clk_enable apbif failed: %d\n", ret);
-		clk_disable(ahub->clk_d_audio);
+		clk_disable_unprepare(ahub->clk_d_audio);
 		return ret;
 	}
 
@@ -138,6 +139,14 @@ static int tegra30_ahub_soft_reset_tx_channel(int channel)
 	return 0;
 }
 
+/*
+ * The APBIF channels are handed out to I2S, SPDIF and DMIC from their
+ * startup and taken back from their shutdown, each on its own. All of it
+ * is process context; one mutex keeps two streams from taking the same
+ * channel.
+ */
+static DEFINE_MUTEX(fifo_usage_lock);
+
 int tegra30_ahub_allocate_rx_fifo(enum tegra30_ahub_rxcif *rxcif,
 				  unsigned long *fiforeg,
 				  unsigned long *reqsel)
@@ -145,12 +154,16 @@ int tegra30_ahub_allocate_rx_fifo(enum tegra30_ahub_rxcif *rxcif,
 	int channel;
 	u32 reg, val;
 
+	mutex_lock(&fifo_usage_lock);
 	channel = find_first_zero_bit(ahub->rx_usage,
 				      TEGRA30_AHUB_CHANNEL_CTRL_COUNT);
-	if (channel >= TEGRA30_AHUB_CHANNEL_CTRL_COUNT)
+	if (channel >= TEGRA30_AHUB_CHANNEL_CTRL_COUNT) {
+		mutex_unlock(&fifo_usage_lock);
 		return -EBUSY;
+	}
 
 	__set_bit(channel, ahub->rx_usage);
+	mutex_unlock(&fifo_usage_lock);
 
 	*rxcif = TEGRA30_AHUB_RXCIF_APBIF_RX0 + channel;
 	*fiforeg = ahub->apbif_addr + TEGRA30_AHUB_CHANNEL_RXFIFO +
@@ -391,7 +404,9 @@ int tegra30_ahub_free_rx_fifo(enum tegra30_ahub_rxcif rxcif)
 {
 	int channel = rxcif - TEGRA30_AHUB_RXCIF_APBIF_RX0;
 
+	mutex_lock(&fifo_usage_lock);
 	__clear_bit(channel, ahub->rx_usage);
+	mutex_unlock(&fifo_usage_lock);
 
 	return 0;
 }
@@ -404,12 +419,16 @@ int tegra30_ahub_allocate_tx_fifo(enum tegra30_ahub_txcif *txcif,
 	int channel;
 	u32 reg, val;
 
+	mutex_lock(&fifo_usage_lock);
 	channel = find_first_zero_bit(ahub->tx_usage,
 				      TEGRA30_AHUB_CHANNEL_CTRL_COUNT);
-	if (channel >= TEGRA30_AHUB_CHANNEL_CTRL_COUNT)
+	if (channel >= TEGRA30_AHUB_CHANNEL_CTRL_COUNT) {
+		mutex_unlock(&fifo_usage_lock);
 		return -EBUSY;
+	}
 
 	__set_bit(channel, ahub->tx_usage);
+	mutex_unlock(&fifo_usage_lock);
 
 	*txcif = TEGRA30_AHUB_TXCIF_APBIF_TX0 + channel;
 	*fiforeg = ahub->apbif_addr + TEGRA30_AHUB_CHANNEL_TXFIFO +
@@ -476,7 +495,9 @@ int tegra30_ahub_free_tx_fifo(enum tegra30_ahub_txcif txcif)
 {
 	int channel = txcif - TEGRA30_AHUB_TXCIF_APBIF_TX0;
 
+	mutex_lock(&fifo_usage_lock);
 	__clear_bit(channel, ahub->tx_usage);
+	mutex_unlock(&fifo_usage_lock);
 
 	return 0;
 }

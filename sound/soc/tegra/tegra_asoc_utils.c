@@ -633,7 +633,7 @@ int tegra_asoc_utils_init(struct tegra_asoc_utils_data *data,
 	if (IS_ERR(data->clk_m)) {
 		dev_err(data->dev, "Can't retrieve clk clk_m\n");
 		ret = PTR_ERR(data->clk_m);
-		goto err;
+		goto err_put_pll_a_out0;
 	}
 
 	if (data->soc == TEGRA_ASOC_UTILS_SOC_TEGRA20)
@@ -644,7 +644,7 @@ int tegra_asoc_utils_init(struct tegra_asoc_utils_data *data,
 	if (IS_ERR(data->clk_cdev1)) {
 		dev_err(data->dev, "Can't retrieve clk cdev1\n");
 		ret = PTR_ERR(data->clk_cdev1);
-		goto err_put_pll_a_out0;
+		goto err_put_clk_m;
 	}
 
 	if (data->soc == TEGRA_ASOC_UTILS_SOC_TEGRA20)
@@ -659,36 +659,46 @@ int tegra_asoc_utils_init(struct tegra_asoc_utils_data *data,
 	}
 
 	ret = clk_prepare_enable(data->clk_audio_emc);
- 	if (ret) {
- 		dev_err(data->dev, "Can't enable clk emc");
- 		goto err_put_out1;
- 	}
+	if (ret) {
+		dev_err(data->dev, "Can't enable clk emc");
+		goto err_put_out1;
+	}
 
 	ret = clk_prepare_enable(data->clk_cdev1);
 	if (ret) {
 		dev_err(data->dev, "Can't enable clk cdev1/extern1");
-		goto err_put_out1;
+		goto err_disable_emc;
 	}
 
 	if (!IS_ERR(data->clk_out1)) {
 		ret = clk_prepare_enable(data->clk_out1);
 		if (ret) {
 			dev_err(data->dev, "Can't enable clk out1");
-			goto err_put_out1;
+			goto err_disable_cdev1;
 		}
 	}
 
 	ret = tegra_asoc_utils_set_rate(data, 48000, 256 * 48000);
 	if (ret)
-		goto err_put_out1;
+		goto err_disable_out1;
 
 	return 0;
 
+	/* Clocks enabled here are disabled before they are put */
+err_disable_out1:
+	if (!IS_ERR(data->clk_out1))
+		clk_disable_unprepare(data->clk_out1);
+err_disable_cdev1:
+	clk_disable_unprepare(data->clk_cdev1);
+err_disable_emc:
+	clk_disable_unprepare(data->clk_audio_emc);
 err_put_out1:
 	if (!IS_ERR(data->clk_out1))
 		clk_put(data->clk_out1);
 err_put_cdev1:
 	clk_put(data->clk_cdev1);
+err_put_clk_m:
+	clk_put(data->clk_m);
 err_put_pll_a_out0:
 	clk_put(data->clk_pll_a_out0);
 err_put_pll_a:
@@ -747,6 +757,9 @@ void tegra_asoc_utils_fini(struct tegra_asoc_utils_data *data)
 
 	if (!IS_ERR(data->clk_pll_a))
 		clk_put(data->clk_pll_a);
+
+	if (!IS_ERR(data->clk_m))
+		clk_put(data->clk_m);
 
 	if (!IS_ERR(data->clk_pll_p_out1))
 		clk_put(data->clk_pll_p_out1);

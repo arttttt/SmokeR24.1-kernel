@@ -101,10 +101,14 @@ int tegra30_i2s_startup(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 
+	/*
+	 * Nothing is counted until the FIFO is ours: when startup fails,
+	 * ASoC does not call shutdown, so whatever was counted here would
+	 * stay counted.
+	 */
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		int allocate_fifo = 1;
-		/* increment the playback ref count */
-		i2s->playback_ref_count++;
+		bool claimed_fe = false;
 
 		mutex_lock(&apbif_mutex);
 		if (dai_link->no_pcm) {
@@ -122,6 +126,7 @@ int tegra30_i2s_startup(struct snd_pcm_substream *substream,
 
 				if (allocated_fe == NULL) {
 					allocated_fe = fe;
+					claimed_fe = true;
 					snd_soc_pcm_set_drvdata(allocated_fe,
 						i2s);
 				}
@@ -133,6 +138,15 @@ int tegra30_i2s_startup(struct snd_pcm_substream *substream,
 					&i2s->playback_fifo_cif,
 					&i2s->playback_dma_data.addr,
 					&i2s->playback_dma_data.req_sel);
+			if (ret < 0) {
+				dev_err(dai->dev,
+					"No APBIF FIFO for playback: %d\n",
+					ret);
+				if (claimed_fe)
+					allocated_fe = NULL;
+				mutex_unlock(&apbif_mutex);
+				return ret;
+			}
 			i2s->playback_dma_data.wrap = 4;
 			i2s->playback_dma_data.width = 32;
 		} else {
@@ -149,15 +163,23 @@ int tegra30_i2s_startup(struct snd_pcm_substream *substream,
 		apbif_ref_cnt++;
 		mutex_unlock(&apbif_mutex);
 
+		/* increment the playback ref count */
+		i2s->playback_ref_count++;
+
 		if (!i2s->is_dam_used)
 			tegra30_ahub_set_rx_cif_source(
 				i2s->playback_i2s_cif,
 				i2s->playback_fifo_cif);
 	} else {
-		i2s->capture_ref_count++;
 		ret = tegra30_ahub_allocate_rx_fifo(&i2s->capture_fifo_cif,
 					&i2s->capture_dma_data.addr,
 					&i2s->capture_dma_data.req_sel);
+		if (ret < 0) {
+			dev_err(dai->dev, "No APBIF FIFO for capture: %d\n",
+				ret);
+			return ret;
+		}
+		i2s->capture_ref_count++;
 		i2s->capture_dma_data.wrap = 4;
 		i2s->capture_dma_data.width = 32;
 		tegra30_ahub_set_rx_cif_source(i2s->capture_fifo_cif,
