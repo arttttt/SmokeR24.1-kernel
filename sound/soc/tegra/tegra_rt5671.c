@@ -27,7 +27,6 @@
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
-#include <linux/regulator/consumer.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <mach/tegra_asoc_pdata.h>
@@ -77,12 +76,6 @@ struct tegra_rt5671 {
 	int clock_enabled;
 	/* Streams holding the audio PLL rate, one bit per direction */
 	unsigned int rate_locked;
-	struct regulator *codec_reg;
-	struct regulator *digital_reg;
-	struct regulator *analog_reg;
-	struct regulator *spk_reg;
-	struct regulator *mic_reg;
-	struct regulator *dmic_reg;
 	struct snd_soc_card *pcard;
 };
 
@@ -308,14 +301,6 @@ static int tegra_rt5671_event_int_spk(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = dapm->card;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
 	struct tegra_asoc_platform_data *pdata = machine->pdata;
-	int ret;
-
-	if (machine->spk_reg) {
-		if (SND_SOC_DAPM_EVENT_ON(event))
-			ret = regulator_enable(machine->spk_reg);
-		else
-			regulator_disable(machine->spk_reg);
-	}
 
 	if (!(machine->gpio_requested & GPIO_SPKR_EN))
 		return 0;
@@ -350,14 +335,6 @@ static int tegra_rt5671_event_int_mic(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = dapm->card;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
 	struct tegra_asoc_platform_data *pdata = machine->pdata;
-	int ret;
-
-	if (machine->dmic_reg) {
-		if (SND_SOC_DAPM_EVENT_ON(event))
-			ret = regulator_enable(machine->dmic_reg);
-		else
-			regulator_disable(machine->dmic_reg);
-	}
 
 	if (!(machine->gpio_requested & GPIO_INT_MIC_EN))
 		return 0;
@@ -818,66 +795,12 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	tegra_asoc_utils_clk_disable(&machine->util_data);
 
 	/*
-	*codec_reg - its a GPIO (in the form of a fixed regulator) that enables
-	*the basic(I2C) power for the codec and must be ON always
-	*/
-	if (!gpio_is_valid(pdata->gpio_ldo1_en)) {
-		machine->codec_reg = regulator_get(&pdev->dev, "ldoen");
-		if (IS_ERR(machine->codec_reg))
-			machine->codec_reg = 0;
-		else
-			ret = regulator_enable(machine->codec_reg);
-	}
-
-	/*
-	*digital_reg - provided the digital power for the codec and must be
-	*ON always
-	*/
-	machine->digital_reg = regulator_get(&pdev->dev, "dbvdd");
-	if (IS_ERR(machine->digital_reg))
-		machine->digital_reg = 0;
-	else
-		ret = regulator_enable(machine->digital_reg);
-
-	/*
-	*analog_reg - provided the analog power for the codec and must be
-	*ON always
-	*/
-	machine->analog_reg = regulator_get(&pdev->dev, "avdd");
-	if (IS_ERR(machine->analog_reg))
-		machine->analog_reg = 0;
-	else
-		ret = regulator_enable(machine->analog_reg);
-
-	/*
-	*mic_reg - provided the micbias power and jack detection power
-	*for the codec and must be ON always
-	*/
-	machine->mic_reg = regulator_get(&pdev->dev, "micvdd");
-	if (IS_ERR(machine->mic_reg))
-		machine->mic_reg = 0;
-	else
-		ret = regulator_enable(machine->mic_reg);
-
-	/*
-	*spk_reg - provided the speaker power and can be turned ON
-	*on need basis, when required
-	*/
-	machine->spk_reg = regulator_get(&pdev->dev, "spkvdd");
-	if (IS_ERR(machine->spk_reg))
-		machine->spk_reg = 0;
-	else
-		regulator_disable(machine->spk_reg);
-
-	/*
-	*dmic_reg - provided the DMIC power and can be turned ON
-	*on need basis, when required
-	*/
-	machine->dmic_reg = regulator_get(&pdev->dev, "dmicvdd");
-	if (IS_ERR(machine->dmic_reg))
-		machine->dmic_reg = 0;
-	else
-		regulator_disable(machine->dmic_reg);
+	 * No regulator here is the driver's to switch. The codec runs from
+	 * AVDD_1V8_CDC (an LDO enabled from VDD_1V8_SMPS8) and AVDD_3V3_CDC
+	 * (a load switch enabled from AVDD_1V8_CDC); the microphones are
+	 * analogue, biased by the codec; the amplifiers' supplies are
+	 * VDD_SYS and SMPS8. All of it comes up in hardware with the PMIC.
+	 */
 
 	card->dev = &pdev->dev;
 	platform_set_drvdata(pdev, card);
@@ -941,19 +864,6 @@ static int tegra_rt5671_driver_remove(struct platform_device *pdev)
 		gpio_free(pdata->gpio_hp_mute);
 	if (machine->gpio_requested & GPIO_SPKR_EN)
 		gpio_free(pdata->gpio_spkr_en);
-
-	if (machine->digital_reg)
-		regulator_put(machine->digital_reg);
-	if (machine->analog_reg)
-		regulator_put(machine->analog_reg);
-	if (machine->mic_reg)
-		regulator_put(machine->mic_reg);
-	if (machine->spk_reg)
-		regulator_put(machine->spk_reg);
-	if (machine->dmic_reg)
-		regulator_put(machine->dmic_reg);
-	if (machine->codec_reg)
-		regulator_put(machine->codec_reg);
 
 	if (gpio_is_valid(pdata->gpio_ldo1_en)) {
 		gpio_set_value(pdata->gpio_ldo1_en, 0);

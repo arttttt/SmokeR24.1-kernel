@@ -138,24 +138,6 @@
 			};
 		};
 
-		ldoen: regulator@6 {
-			compatible = "regulator-fixed-sync";
-			reg = <6>;
-			regulator-name = "ldoen";
-			regulator-min-microvolt = <1200000>;
-			regulator-max-microvolt = <1200000>;
-			enable-active-high;
-			gpio = <&palmas_gpio 6 0>;
-			vin-supply = <&palmas_smps8>;
-
-			consumers {
-				c1 {
-					regulator-consumer-supply = "ldoen";
-					regulator-consumer-device = "tegra-snd-rt5639";
-				};
-			};
-		};
-
 		en_lcd_bl: regulator@8 {
 			compatible = "regulator-fixed-sync";
 			reg = <8>;

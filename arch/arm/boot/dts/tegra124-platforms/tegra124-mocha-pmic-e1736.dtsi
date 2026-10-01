@@ -272,30 +272,6 @@
 						regulator-max-microvolt = <1800000>;
 
 						consumers {
-							c1 {
-								regulator-consumer-supply = "dbvdd";
-								regulator-consumer-device = "tegra-snd-rt5639.0";
-							};
-							c2 {
-								regulator-consumer-supply = "dbvdd";
-								regulator-consumer-device = "tegra-snd-rt5645.0";
-							};
-							c3 {
-								regulator-consumer-supply = "avdd";
-								regulator-consumer-device = "tegra-snd-rt5639.0";
-							};
-							c4 {
-								regulator-consumer-supply = "avdd";
-								regulator-consumer-device = "tegra-snd-rt5645.0";
-							};
-							c5 {
-								regulator-consumer-supply = "dmicvdd";
-								regulator-consumer-device = "tegra-snd-rt5639.0";
-							};
-							c6 {
-								regulator-consumer-supply = "dmicvdd";
-								regulator-consumer-device = "tegra-snd-rt5645.0";
-							};
 							c7 {
 								regulator-consumer-supply = "avdd_osc";
 							};

@@ -84,10 +84,6 @@
 		};
 	};
 
-	sound {
-		ldoen-supply = <&ldoen>;
-	};
-
 	sdhci@700b0600 {
 		vddio_sd_slot-supply = <&palmas_smps9>;
 		vddio_sdmmc-supply = <&palmas_smps8>;
