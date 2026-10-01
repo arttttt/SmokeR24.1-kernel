@@ -1562,10 +1562,10 @@ static int rt5671_dsp_snd_effect(struct snd_soc_codec *codec)
 
 	snd_soc_update_bits(codec, RT5671_GEN_CTRL1, RT5671_RST_DSP,
 		RT5671_RST_DSP);
-	mdelay(5);
+	msleep(5);
 	snd_soc_update_bits(codec, RT5671_GEN_CTRL1, RT5671_RST_DSP, 0);
 
-	mdelay(10);
+	msleep(10);
 
 	if (!rt5671->dsp_inited) {
 		ret = rt5671_dsp_do_patch(codec, 0);
@@ -1795,49 +1795,8 @@ dsp_done:
 	return cnt;
 }
 
-static ssize_t dsp_reg_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct rt5671_priv *rt5671 = i2c_get_clientdata(client);
-	struct snd_soc_codec *codec = rt5671->codec;
-	unsigned int val = 0, addr = 0;
-	int i;
-
-	pr_debug("register \"%s\" count = %d\n", buf, count);
-
-	/* address */
-	for (i = 0; i < count; i++)
-		if (*(buf + i) <= '9' && *(buf + i) >= '0')
-			addr = (addr << 4) | (*(buf + i) - '0');
-		else if (*(buf + i) <= 'f' && *(buf + i) >= 'a')
-			addr = (addr << 4) | ((*(buf + i) - 'a') + 0xa);
-		else if (*(buf + i) <= 'A' && *(buf + i) >= 'A')
-			addr = (addr << 4) | ((*(buf + i) - 'A') + 0xa);
-		else
-			break;
-
-	/* Value*/
-	for (i = i + 1; i < count; i++)
-		if (*(buf + i) <= '9' && *(buf + i) >= '0')
-			val = (val << 4) | (*(buf + i) - '0');
-		else if (*(buf + i) <= 'f' && *(buf + i) >= 'a')
-			val = (val << 4) | ((*(buf + i) - 'a') + 0xa);
-		else if (*(buf + i) <= 'F' && *(buf + i) >= 'A')
-			val = (val << 4) | ((*(buf + i) - 'A') + 0xa);
-		else
-			break;
-
-	pr_debug("addr=0x%x val=0x%x\n", addr, val);
-	if (i == count)
-		pr_debug("0x%04x = 0x%04x\n",
-			addr, rt5671_dsp_read(codec, addr));
-	else
-		rt5671_dsp_write(codec, addr, val);
-
-	return count;
-}
-static DEVICE_ATTR(dsp_reg, 0664, rt5671_dsp_show, dsp_reg_store);
+/* read-only: a dump for debugging */
+static DEVICE_ATTR(dsp_reg, 0444, rt5671_dsp_show, NULL);
 
 /**
  * rt5671_dsp_probe - register DSP for rt5671
@@ -1871,6 +1830,12 @@ int rt5671_dsp_probe(struct snd_soc_codec *codec)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rt5671_dsp_probe);
+
+void rt5671_dsp_remove(struct snd_soc_codec *codec)
+{
+	device_remove_file(codec->dev, &dev_attr_dsp_reg);
+}
+EXPORT_SYMBOL_GPL(rt5671_dsp_remove);
 
 #ifdef CONFIG_PM
 int rt5671_dsp_suspend(struct snd_soc_codec *codec)

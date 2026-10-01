@@ -649,6 +649,10 @@ static int rt5671_irq_detection(struct snd_soc_jack_gpio *gpio)
 	case RT5671_UN_EVENT:
 		pr_debug("Reported invalid/RT5671_UN_EVENT");
 		break;
+	case RT5671_VAD_EVENT:
+		/* voice activity, not a jack change: nothing uses it here */
+		pr_debug("VAD event");
+		break;
 	default:
 		dev_err(codec->dev, "Error: Invalid event");
 	}
@@ -1999,7 +2003,7 @@ static void hp_amp_power(struct snd_soc_codec *codec, int on)
 		snd_soc_write(codec, RT5671_DEPOP_M1, 0x8009);
 		rt5671_index_write(codec, RT5671_HP_DCC_INT1, 0x9f00);
 		pr_debug("hp_amp_time=%d\n", hp_amp_time);
-		mdelay(hp_amp_time);
+		msleep(hp_amp_time);
 		snd_soc_write(codec, RT5671_DEPOP_M1, 0x8019);
 	} else {
 		snd_soc_write(codec, RT5671_DEPOP_M1, 0x0004);
@@ -2029,9 +2033,9 @@ static void rt5671_pmd_depop(struct snd_soc_codec *codec)
 	rt5671_index_write(codec, RT5671_MAMP_INT_REG2, 0xb400);
 	snd_soc_write(codec, RT5671_DEPOP_M3, 0x0772);
 	snd_soc_write(codec, RT5671_DEPOP_M1, 0x803d);
-	mdelay(10);
+	msleep(10);
 	snd_soc_write(codec, RT5671_DEPOP_M1, 0x831d);
-	mdelay(10);
+	msleep(10);
 	snd_soc_update_bits(codec, RT5671_HP_VOL,
 		RT5671_L_MUTE | RT5671_R_MUTE, RT5671_L_MUTE | RT5671_R_MUTE);
 	msleep(20);
@@ -3797,50 +3801,8 @@ static ssize_t rt5671_index_show(struct device *dev,
 	return cnt;
 }
 
-static ssize_t rt5671_index_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct rt5671_priv *rt5671 = i2c_get_clientdata(client);
-	struct snd_soc_codec *codec = rt5671->codec;
-	unsigned int val = 0, addr = 0;
-	int i;
-
-	for (i = 0; i < count; i++) {
-		if (*(buf+i) <= '9' && *(buf + i) >= '0')
-			addr = (addr << 4) | (*(buf + i) - '0');
-		else if (*(buf+i) <= 'f' && *(buf + i) >= 'a')
-			addr = (addr << 4) | ((*(buf + i) - 'a')+0xa);
-		else if (*(buf+i) <= 'F' && *(buf+i) >= 'A')
-			addr = (addr << 4) | ((*(buf + i) - 'A')+0xa);
-		else
-			break;
-	}
-
-	for (i = i + 1; i < count; i++) {
-		if (*(buf+i) <= '9' && *(buf+i) >= '0')
-			val = (val << 4) | (*(buf + i) - '0');
-		else if (*(buf+i) <= 'f' && *(buf + i) >= 'a')
-			val = (val << 4) | ((*(buf + i)-'a')+0xa);
-		else if (*(buf+i) <= 'F' && *(buf + i) >= 'A')
-			val = (val << 4) | ((*(buf + i) - 'A')+0xa);
-		else
-			break;
-	}
-	pr_debug("addr=0x%x val=0x%x\n", addr, val);
-	if (addr > RT5671_VENDOR_ID2 || val > 0xffff || val < 0)
-		return count;
-
-	if (i == count)
-		pr_debug("0x%02x = 0x%04x\n", addr,
-			rt5671_index_read(codec, addr));
-	else
-		rt5671_index_write(codec, addr, val);
-
-
-	return count;
-}
-static DEVICE_ATTR(index_reg, 0664, rt5671_index_show, rt5671_index_store);
+/* read-only: register dumps for debugging; writes went around the driver */
+static DEVICE_ATTR(index_reg, 0444, rt5671_index_show, NULL);
 
 static ssize_t rt5671_codec_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -3869,175 +3831,9 @@ static ssize_t rt5671_codec_show(struct device *dev,
 	return cnt;
 }
 
-static ssize_t rt5671_codec_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct rt5671_priv *rt5671 = i2c_get_clientdata(client);
-	struct snd_soc_codec *codec = rt5671->codec;
-	unsigned int val = 0, addr = 0;
-	int i;
 
-	pr_debug("register \"%s\" count=%d\n", buf, count);
-	for (i = 0; i < count; i++) {
-		if (*(buf+i) <= '9' && *(buf + i) >= '0')
-			addr = (addr << 4) | (*(buf + i) - '0');
-		else if (*(buf+i) <= 'f' && *(buf + i) >= 'a')
-			addr = (addr << 4) | ((*(buf + i) - 'a')+0xa);
-		else if (*(buf+i) <= 'F' && *(buf + i) >= 'A')
-			addr = (addr << 4) | ((*(buf + i) - 'A')+0xa);
-		else
-			break;
-	}
+static DEVICE_ATTR(codec_reg, 0444, rt5671_codec_show, NULL);
 
-	for (i = i+1; i < count; i++) {
-		if (*(buf+i) <= '9' && *(buf + i) >= '0')
-			val = (val << 4) | (*(buf + i) - '0');
-		else if (*(buf+i) <= 'f' && *(buf + i) >= 'a')
-			val = (val << 4) | ((*(buf + i) - 'a')+0xa);
-		else if (*(buf+i) <= 'F' && *(buf + i) >= 'A')
-			val = (val << 4) | ((*(buf + i) - 'A')+0xa);
-		else
-			break;
-	}
-	pr_debug("addr=0x%x val=0x%x\n", addr, val);
-	if (addr > RT5671_VENDOR_ID2 || val > 0xffff || val < 0)
-		return count;
-
-	if (i == count)
-		pr_debug("0x%02x = 0x%04x\n", addr,
-			snd_soc_read(codec, addr));
-	else
-		snd_soc_write(codec, addr, val);
-
-	return count;
-}
-
-static DEVICE_ATTR(codec_reg, 0664, rt5671_codec_show, rt5671_codec_store);
-
-static ssize_t rt5671_codec_adb_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct rt5671_priv *rt5671 = i2c_get_clientdata(client);
-	struct snd_soc_codec *codec = rt5671->codec;
-	unsigned int val;
-	int cnt = 0, i;
-
-	for (i = 0; i < rt5671->adb_reg_num; i++) {
-		if (cnt + RT5671_REG_DISP_LEN >= PAGE_SIZE)
-			break;
-
-		switch (rt5671->adb_reg_addr[i] & 0x30000) {
-		case 0x10000:
-			val = rt5671_index_read(codec, rt5671->adb_reg_addr[i] & 0xffff);
-			break;
-		case 0x20000:
-			val = rt5671_dsp_read(codec, rt5671->adb_reg_addr[i] & 0xffff);
-			break;
-		default:
-			val = snd_soc_read(codec, rt5671->adb_reg_addr[i] & 0xffff);
-		}
-
-		cnt += snprintf(buf + cnt, RT5671_REG_DISP_LEN, "%05x: %04x\n",
-			rt5671->adb_reg_addr[i], val);
-	}
-
-	return cnt;
-}
-
-static ssize_t rt5671_codec_adb_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct rt5671_priv *rt5671 = i2c_get_clientdata(client);
-	struct snd_soc_codec *codec = rt5671->codec;
-	unsigned int value = 0;
-	int i = 2, j = 0;
-
-	if (buf[0] == 'R' || buf[0] == 'r') {
-		while (j < 0x100 && i < count) {
-			rt5671->adb_reg_addr[j] = 0;
-			value = 0;
-			for (; i < count; i++) {
-				if (*(buf + i) <= '9' && *(buf + i) >= '0')
-					value = (value << 4) | (*(buf + i) - '0');
-				else if (*(buf + i) <= 'f' && *(buf + i) >= 'a')
-					value = (value << 4) | ((*(buf + i) - 'a')+0xa);
-				else if (*(buf + i) <= 'F' && *(buf + i) >= 'A')
-					value = (value << 4) | ((*(buf + i) - 'A')+0xa);
-				else
-					break;
-			}
-			i++;
-
-			rt5671->adb_reg_addr[j] = value;
-			j++;
-		}
-		rt5671->adb_reg_num = j;
-	} else if (buf[0] == 'W' || buf[0] == 'w') {
-		while (j < 0x100 && i < count) {
-			/* Get address */
-			rt5671->adb_reg_addr[j] = 0;
-			value = 0;
-			for (; i < count; i++) {
-				if (*(buf + i) <= '9' && *(buf + i) >= '0')
-					value = (value << 4) | (*(buf + i) - '0');
-				else if (*(buf + i) <= 'f' && *(buf + i) >= 'a')
-					value = (value << 4) | ((*(buf + i) - 'a')+0xa);
-				else if (*(buf + i) <= 'F' && *(buf + i) >= 'A')
-					value = (value << 4) | ((*(buf + i) - 'A')+0xa);
-				else
-					break;
-			}
-			i++;
-			rt5671->adb_reg_addr[j] = value;
-
-			/* Get value */
-			rt5671->adb_reg_value[j] = 0;
-			value = 0;
-			for (; i < count; i++) {
-				if (*(buf + i) <= '9' && *(buf + i) >= '0')
-					value = (value << 4) | (*(buf + i) - '0');
-				else if (*(buf + i) <= 'f' && *(buf + i) >= 'a')
-					value = (value << 4) | ((*(buf + i) - 'a')+0xa);
-				else if (*(buf + i) <= 'F' && *(buf + i) >= 'A')
-					value = (value << 4) | ((*(buf + i) - 'A')+0xa);
-				else
-					break;
-			}
-			i++;
-			rt5671->adb_reg_value[j] = value;
-
-			j++;
-		}
-
-		rt5671->adb_reg_num = j;
-
-		for (i = 0; i < rt5671->adb_reg_num; i++) {
-			switch (rt5671->adb_reg_addr[i] & 0x30000) {
-			case 0x10000:
-				rt5671_index_write(codec,
-					rt5671->adb_reg_addr[i] & 0xffff,
-					rt5671->adb_reg_value[i]);
-				break;
-			case 0x20000:
-				rt5671_dsp_write(codec,
-					rt5671->adb_reg_addr[i] & 0xffff,
-					rt5671->adb_reg_value[i]);
-				break;
-			default:
-				snd_soc_write(codec,
-					rt5671->adb_reg_addr[i] & 0xffff,
-					rt5671->adb_reg_value[i]);
-			}
-		}
-
-	}
-
-	return count;
-}
-static DEVICE_ATTR(codec_reg_adb, 0664, rt5671_codec_adb_show, rt5671_codec_adb_store);
 
 static int rt5671_set_bias_level(struct snd_soc_codec *codec,
 			enum snd_soc_bias_level level)
@@ -4061,7 +3857,7 @@ static int rt5671_set_bias_level(struct snd_soc_codec *codec,
 				RT5671_PWR_BG | RT5671_PWR_VREF2,
 				RT5671_PWR_VREF1 | RT5671_PWR_MB |
 				RT5671_PWR_BG | RT5671_PWR_VREF2);
-			mdelay(10);
+			msleep(10);
 			snd_soc_update_bits(codec, RT5671_PWR_ANLG1,
 				RT5671_PWR_FV1 | RT5671_PWR_FV2,
 				RT5671_PWR_FV1 | RT5671_PWR_FV2);
@@ -4144,7 +3940,7 @@ static int rt5671_probe(struct snd_soc_codec *codec)
 		RT5671_PWR_BG | RT5671_PWR_VREF2,
 		RT5671_PWR_VREF1 | RT5671_PWR_MB |
 		RT5671_PWR_BG | RT5671_PWR_VREF2);
-	mdelay(10);
+	msleep(10);
 	snd_soc_update_bits(codec, RT5671_PWR_ANLG1,
 		RT5671_PWR_FV1 | RT5671_PWR_FV2,
 		RT5671_PWR_FV1 | RT5671_PWR_FV2);
@@ -4217,48 +4013,65 @@ static int rt5671_probe(struct snd_soc_codec *codec)
 			ARRAY_SIZE(rt5671_dapm_widgets));
 	snd_soc_dapm_add_routes(&codec->dapm, rt5671_dapm_routes,
 			ARRAY_SIZE(rt5671_dapm_routes));
-	rt5671_dsp_probe(codec);
+	ret = rt5671_dsp_probe(codec);
+	if (ret)
+		return ret;
 
 	ret = device_create_file(codec->dev, &dev_attr_index_reg);
-	if (ret != 0) {
+	if (ret) {
 		dev_err(codec->dev,
 			"Failed to create index_reg sysfs files: %d\n", ret);
-		return ret;
+		goto err_dsp;
 	}
 
 	ret = device_create_file(codec->dev, &dev_attr_codec_reg);
-	if (ret != 0) {
+	if (ret) {
 		dev_err(codec->dev,
-			"Failed to create codex_reg sysfs files: %d\n", ret);
-		return ret;
-	}
-
-	ret = device_create_file(codec->dev, &dev_attr_codec_reg_adb);
-	if (ret != 0) {
-		dev_err(codec->dev,
-			"Failed to create codec_reg_adb sysfs files: %d\n", ret);
-		return ret;
+			"Failed to create codec_reg sysfs files: %d\n", ret);
+		goto err_index;
 	}
 
 	rt5671->jack_type = 0;
+	rt5671->jack_added = false;
 	if (rt5671->pdata.codec_gpio != -1) {
 		rt5671->hp_gpio.gpio = rt5671->pdata.codec_gpio;
 		rt5671->hp_gpio.name = "headphone detect";
 		rt5671->hp_gpio.report = SND_JACK_HEADSET |
 			SND_JACK_BTN_0 | SND_JACK_BTN_1 | SND_JACK_BTN_2;
-		rt5671->hp_gpio.debounce_time = 150,
-		rt5671->hp_gpio.wake = true,
-		rt5671->hp_gpio.jack_status_check = rt5671_irq_detection,
-		snd_soc_jack_new(codec, rt5671->hp_gpio.name,
+		rt5671->hp_gpio.debounce_time = 150;
+		rt5671->hp_gpio.wake = true;
+		rt5671->hp_gpio.jack_status_check = rt5671_irq_detection;
+
+		ret = snd_soc_jack_new(codec, rt5671->hp_gpio.name,
 				rt5671->hp_gpio.report,
 				&rt5671->hp_jack);
-		snd_soc_jack_add_gpios(&rt5671->hp_jack, 1,
+		if (ret) {
+			dev_err(codec->dev, "Failed to create jack: %d\n", ret);
+			goto err_codec_reg;
+		}
+
+		ret = snd_soc_jack_add_gpios(&rt5671->hp_jack, 1,
 					&rt5671->hp_gpio);
+		if (ret) {
+			dev_err(codec->dev,
+				"Failed to add jack detect GPIO %d: %d\n",
+				rt5671->hp_gpio.gpio, ret);
+			goto err_codec_reg;
+		}
+		rt5671->jack_added = true;
 	}
 
 	rt5671_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
 	return 0;
+
+err_codec_reg:
+	device_remove_file(codec->dev, &dev_attr_codec_reg);
+err_index:
+	device_remove_file(codec->dev, &dev_attr_index_reg);
+err_dsp:
+	rt5671_dsp_remove(codec);
+	return ret;
 }
 
 static int rt5671_remove(struct snd_soc_codec *codec)
@@ -4266,7 +4079,11 @@ static int rt5671_remove(struct snd_soc_codec *codec)
 	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
 
 	rt5671_set_bias_level(codec, SND_SOC_BIAS_OFF);
-	snd_soc_jack_free_gpios(&rt5671->hp_jack, 1, &rt5671->hp_gpio);
+	if (rt5671->jack_added)
+		snd_soc_jack_free_gpios(&rt5671->hp_jack, 1, &rt5671->hp_gpio);
+	device_remove_file(codec->dev, &dev_attr_codec_reg);
+	device_remove_file(codec->dev, &dev_attr_index_reg);
+	rt5671_dsp_remove(codec);
 	return 0;
 }
 
@@ -4305,7 +4122,7 @@ static int rt5671_resume(struct snd_soc_codec *codec)
 #define RT5671_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | \
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S8)
 
-struct snd_soc_dai_ops rt5671_aif_dai_ops = {
+static const struct snd_soc_dai_ops rt5671_aif_dai_ops = {
 	.hw_params = rt5671_hw_params,
 	.prepare = rt5671_prepare,
 	.set_fmt = rt5671_set_dai_fmt,

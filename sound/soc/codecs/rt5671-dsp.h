@@ -69,6 +69,7 @@ struct rt5671_dsp_param {
 };
 
 int rt5671_dsp_probe(struct snd_soc_codec *codec);
+void rt5671_dsp_remove(struct snd_soc_codec *codec);
 #ifdef CONFIG_PM
 int rt5671_dsp_suspend(struct snd_soc_codec *codec);
 int rt5671_dsp_resume(struct snd_soc_codec *codec);

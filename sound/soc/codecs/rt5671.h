@@ -2079,10 +2079,7 @@ struct rt5671_priv {
 	int drc_mode;
 	bool dsp_inited;
 	int jack_type;
-	unsigned int adb_register;
-	unsigned int adb_reg_addr[0x100];
-	unsigned int adb_reg_value[0x100];
-	unsigned char adb_reg_num;
+	bool jack_added;	/* the jack GPIO is registered, free it on remove */
 };
 
 int rt5671_conn_mux_path(struct snd_soc_codec *codec,
