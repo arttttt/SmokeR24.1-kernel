@@ -103,9 +103,11 @@ static __initdata struct tegra_clk_init_table ardbeg_clk_init_table[] = {
 	{ "i2s4",	"pll_a_out0",	0,		false},
 	{ "spdif_out",	"pll_a_out0",	0,		false},
 	{ "d_audio",	"pll_a_out0",	12288000,	false},
-	{ "dam0",	"clk_m",	12000000,	false},
-	{ "dam1",	"clk_m",	12000000,	false},
-	{ "dam2",	"clk_m",	12000000,	false},
+	/* The DAM's rate converter needs more than clk_m for its heaviest
+	 * programs; 40 MHz is the clock's limit, as on vcm30_t124 */
+	{ "dam0",	"pll_p",	40000000,	false},
+	{ "dam1",	"pll_p",	40000000,	false},
+	{ "dam2",	"pll_p",	40000000,	false},
 	{ "audio1",	"i2s1_sync",	0,		false},
 	{ "audio3",	"i2s3_sync",	0,		false},
 	{ "vi_sensor",	"pll_p",	150000000,	false},
