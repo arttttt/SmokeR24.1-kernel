@@ -377,6 +377,24 @@ static bool tegra30_dam_wr_rd_reg(struct device *dev, unsigned int reg)
 	};
 }
 
+/*
+ * The coefficient RAM is reached through an address register that the
+ * hardware auto-increments on every data access: a cached copy of either says
+ * nothing about the RAM, and replaying them would write a stray word into it.
+ */
+static bool tegra30_dam_volatile_reg(struct device *dev, unsigned int reg)
+{
+	switch (reg) {
+#ifndef CONFIG_ARCH_TEGRA_3x_SOC
+	case TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0:
+	case TEGRA30_DAM_AUDIORAMCTL_DAM_DATA_0:
+		return true;
+#endif
+	default:
+		return false;
+	}
+}
+
 static const struct regmap_config tegra30_dam_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
@@ -388,6 +406,7 @@ static const struct regmap_config tegra30_dam_regmap_config = {
 #endif
 	.writeable_reg = tegra30_dam_wr_rd_reg,
 	.readable_reg = tegra30_dam_wr_rd_reg,
+	.volatile_reg = tegra30_dam_volatile_reg,
 	.cache_type = REGCACHE_RBTREE,
 };
 
