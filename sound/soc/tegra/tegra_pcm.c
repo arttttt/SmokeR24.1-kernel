@@ -411,9 +411,19 @@ EXPORT_SYMBOL_GPL(tegra_pcm_platform_unregister);
 /*
  * Front-end DAIs for DPCM. They stand for no hardware of their own: the
  * machine driver gives each one an APBIF FIFO and routes it, e.g. into a
- * DAM input, and the DMA runs through the platform above. The format is
- * what the DAM mixes in bypass, 48 kHz S16 stereo.
+ * DAM input, and the DMA runs through the platform above.
+ *
+ * fe0 is meant for DAM CH0, whose rate converter takes the DAM's rates
+ * (24 kHz has no ALSA rate bit, and 64 kHz is not among them); fe1 for CH1,
+ * which has no converter and runs at the DAM output rate.
  */
+#define TEGRA_PCM_FE0_RATES	(SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 | \
+				 SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 | \
+				 SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 | \
+				 SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_88200 | \
+				 SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_176400 | \
+				 SNDRV_PCM_RATE_192000)
+
 static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 	{
 		.name = "tegra-pcm-fe0",
@@ -422,7 +432,7 @@ static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 			.stream_name = "FE0 Playback",
 			.channels_min = 2,
 			.channels_max = 2,
-			.rates = SNDRV_PCM_RATE_48000,
+			.rates = TEGRA_PCM_FE0_RATES,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE,
 		},
 	},
