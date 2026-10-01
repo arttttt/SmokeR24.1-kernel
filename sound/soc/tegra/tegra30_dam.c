@@ -941,10 +941,10 @@ int tegra30_dam_set_acif(int ifc, int chid, unsigned int audio_channels,
 		return -EINVAL;
 
 #ifndef CONFIG_ARCH_TEGRA_3x_SOC
-	/*ch0 takes input as mono always*/
-	if ((chid == dam_ch_in0) &&
-		((client_channels != 1)))
-		return -EINVAL;
+	/*
+	 * CH0 is not mono-only here: stereo mixing (bypass) and
+	 * STEREO_SRC_EN both take a stereo CH0.
+	 */
 	/*as per dam spec file chout is fixed to 32 bits*/
 	/*so accept ch0, ch1 and chout as 32bit always*/
 	if (client_bits != 32)
@@ -1131,6 +1131,88 @@ int tegra30_dam_set_acif_stereo_conv(int ifc, int chtype, int conv)
 
 	return 0;
 }
+
+#ifndef CONFIG_ARCH_TEGRA_3x_SOC
+/*
+ * Stereo mixing works only in bypass, so CH0 must already run at the
+ * output rate. Call with the DAM clock enabled.
+ */
+int tegra30_dam_enable_stereo_mixing(int ifc, int on)
+{
+	struct tegra30_dam_context *dam;
+	u32 val;
+
+	if ((ifc < 0) || (ifc >= TEGRA30_NR_DAM_IFC))
+		return -EINVAL;
+
+	dam = dams_cont_info[ifc];
+
+	if (on && (dam->ch_insamplerate[dam_ch_in0] != dam->outsamplerate))
+		return -EINVAL;
+
+	val = tegra30_dam_readl(dam, TEGRA30_DAM_CTRL);
+	if (on)
+		val |= TEGRA30_DAM_CTRL_STEREO_MIXING_ENABLE;
+	else
+		val &= ~TEGRA30_DAM_CTRL_STEREO_MIXING_ENABLE;
+	tegra30_dam_writel(dam, val, TEGRA30_DAM_CTRL);
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra30_dam_enable_stereo_mixing);
+#endif
+
+/*
+ * Resets the DAM logic and its CIFs. The hardware keeps the configuration
+ * and clears only the DAM and channel enables, so call it while no channel
+ * is enabled. Call with the DAM clock enabled.
+ */
+int tegra30_dam_soft_reset(int ifc)
+{
+	struct tegra30_dam_context *dam;
+	unsigned int val, cur;
+	int dcnt = 100;
+
+	if ((ifc < 0) || (ifc >= TEGRA30_NR_DAM_IFC))
+		return -EINVAL;
+
+	dam = dams_cont_info[ifc];
+
+	if (dam->ch_enable_refcnt[dam_ch_in0] ||
+	    dam->ch_enable_refcnt[dam_ch_in1])
+		return -EBUSY;
+
+	val = tegra30_dam_readl(dam, TEGRA30_DAM_CTRL);
+
+	/* The bit clears itself, so neither the write nor the poll may
+	 * go through the register cache. */
+	regcache_cache_bypass(dam->regmap, true);
+	regmap_write(dam->regmap, TEGRA30_DAM_CTRL,
+		     val | TEGRA30_DAM_CTRL_SOFT_RESET_ENABLE);
+	do {
+		udelay(10);
+		regmap_read(dam->regmap, TEGRA30_DAM_CTRL, &cur);
+	} while ((cur & TEGRA30_DAM_CTRL_SOFT_RESET_ENABLE) && --dcnt);
+	regcache_cache_bypass(dam->regmap, false);
+
+	/* Bring the cache in line with what the reset left behind */
+	tegra30_dam_writel(dam, val & ~TEGRA30_DAM_CTRL_DAM_EN,
+			   TEGRA30_DAM_CTRL);
+	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH0_CTRL);
+	tegra30_dam_writel(dam, val & ~TEGRA30_DAM_CH0_CTRL_EN,
+			   TEGRA30_DAM_CH0_CTRL);
+	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH1_CTRL);
+	tegra30_dam_writel(dam, val & ~TEGRA30_DAM_CH1_CTRL_EN,
+			   TEGRA30_DAM_CH1_CTRL);
+
+	if (!dcnt) {
+		dev_err(dam->dev, "soft reset timed out\n");
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra30_dam_soft_reset);
 
 
 /*

@@ -189,7 +189,8 @@ int tegra30_dam_set_acif_stereo_conv(int ifc, int chtype, int conv);
 void tegra30_dam_ch0_set_datasync(int ifc, int datasync);
 void tegra30_dam_ch1_set_datasync(int ifc, int datasync);
 #ifndef CONFIG_ARCH_TEGRA_3x_SOC
-void tegra30_dam_enable_stereo_mixing(int ifc);
+int tegra30_dam_enable_stereo_mixing(int ifc, int on);
 #endif
+int tegra30_dam_soft_reset(int ifc);
 
 #endif
