@@ -996,7 +996,6 @@ static int tegra30_dam_probe(struct platform_device *pdev)
 	struct resource *res,  *region;
 	struct tegra30_dam_context *dam;
 	int ret = 0;
-	int clkm_rate;
 	u32 val32;
 
 	if (pdev->dev.of_node) {
@@ -1030,11 +1029,12 @@ static int tegra30_dam_probe(struct platform_device *pdev)
 		ret = PTR_ERR(dam->dam_clk);
 		goto err_free;
 	}
-	clkm_rate = clk_get_rate(clk_get_parent(dam->dam_clk));
-	while (clkm_rate > 13000000)
-		clkm_rate >>= 1;
-
-	clk_set_rate(dam->dam_clk,clkm_rate);
+	/*
+	 * The clock is left as the board configured it. The converter's
+	 * heaviest programs (a farrow stage at 176.4 kHz, as in 44.1 -> 48 kHz)
+	 * need more than the ~12 MHz this used to force on it.
+	 */
+	dev_dbg(&pdev->dev, "clock %lu Hz\n", clk_get_rate(dam->dam_clk));
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
