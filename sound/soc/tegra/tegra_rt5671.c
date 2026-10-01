@@ -72,7 +72,6 @@
 
 /* DAM_CHx_CTRL DATA_SYNC: one bit per channel to wait for */
 #define DAM_SYNC_NONE		0
-#define DAM_SYNC_WAIT_CH1	BIT(1)
 
 const char *tegra_rt5671_i2s_dai_name[TEGRA30_NR_I2S_IFC] = {
 	"tegra30-i2s.0",
@@ -568,9 +567,12 @@ static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
 }
 
 /*
- * Called by the platform before the DMA starts and after it stops. While
- * the fast stream runs, CH0 waits for CH1 so the two mix sample-aligned;
- * alone, neither channel waits.
+ * Called by the platform before the DMA starts and after it stops.
+ *
+ * Neither channel waits for the other (DATA_SYNC 0 on both, set up with the
+ * DAM): the deep buffer and the fast stream are unrelated sounds with no
+ * sample alignment to keep, and a wait would let a late period on one stall
+ * the other.
  */
 static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 				   int cmd, int fe)
@@ -586,8 +588,6 @@ static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		if (fe == FE_FAST)
-			tegra30_dam_ch0_set_datasync(ifc, DAM_SYNC_WAIT_CH1);
 		tegra30_dam_enable(ifc, TEGRA30_DAM_ENABLE, ch);
 		tegra30_ahub_enable_tx_fifo(machine->fe_fifo_cif[fe]);
 		break;
@@ -597,8 +597,6 @@ static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		tegra30_ahub_disable_tx_fifo(machine->fe_fifo_cif[fe]);
 		tegra30_dam_enable(ifc, TEGRA30_DAM_DISABLE, ch);
-		if (fe == FE_FAST)
-			tegra30_dam_ch0_set_datasync(ifc, DAM_SYNC_NONE);
 		break;
 
 	default:
