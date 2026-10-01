@@ -770,6 +770,7 @@ static void tegra30_dam_set_filter_stages(struct tegra30_dam_context *dam, int f
 			break;
 	}
 
+	val &= ~TEGRA30_DAM_CH0_CTRL_FILT_STAGES_MASK;
 	val |= filt_stages << TEGRA30_DAM_CH0_CTRL_FILT_STAGES_SHIFT;
 
 	tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
