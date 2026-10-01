@@ -15,6 +15,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/firmware.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -79,6 +80,10 @@
 #define TFA98XX_FW_EQUALIZER	5
 #define TFA98XX_FW_NUMBER		6
 
+/* A failed download is retried after 10 ms, doubling up to 1.28 s, and
+ * given up after this many attempts until the next stream start. */
+#define TFA98XX_DOWNLOAD_RETRIES	8
+
 struct tfa98xx_priv {
 	struct mutex fw_lock;
 	bool fw_chg[TFA98XX_FW_NUMBER];
@@ -93,7 +98,17 @@ struct tfa98xx_priv {
 	unsigned int fmt;
 	bool dsp_crash;
 	bool recalib;
+	unsigned int download_retries;
 };
+
+/*
+ * snd_soc_read() returns unsigned int, so a failed I2C read comes back as
+ * a negative errno cast to a large value with every high bit set. These
+ * registers are 16 bits wide (CF_MEM 24), so such a value must not be
+ * taken for register content: as a status it reads as every error flag
+ * at once, and as MTP content it would be written back to MTP.
+ */
+#define TFA98XX_READ_FAILED(v)	IS_ERR_VALUE((unsigned long)(v))
 
 static int tfa98xx_bulk_read(struct snd_soc_codec *codec,
 			     unsigned int reg_,
@@ -126,8 +141,13 @@ static int tfa98xx_bulk_write(struct snd_soc_codec *codec,
 {
 	struct i2c_client *client = to_i2c_client(codec->dev);
 	struct i2c_msg msg;
-	u8 buf[len + 1];
+	u8 *buf;
 	int ret;
+
+	/* len is a patch chunk, up to 64 KiB: too big for the stack */
+	buf = kmalloc(len + 1, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	buf[0] = reg;
 	memcpy(buf + 1, data, len);
@@ -141,6 +161,7 @@ static int tfa98xx_bulk_write(struct snd_soc_codec *codec,
 	if (ret > 0)
 		ret = 0;
 
+	kfree(buf);
 	return ret;
 }
 
@@ -351,6 +372,8 @@ static int tfa98xx_enable_otc(struct snd_soc_codec *codec, bool recalib)
 	int ret = 0, tries;
 
 	mtp = snd_soc_read(codec, TFA98XX_MTP_SPKR_CAL);
+	if (TFA98XX_READ_FAILED(mtp))
+		return (int)mtp;
 	if (recalib || !(mtp & TFA98XX_MTP_SPKR_CAL_MTPOTC_MSK)) {
 		ret = snd_soc_write(codec, TFA98XX_MTPKEY2_REG, 0x5A);
 		if (ret < 0) {
@@ -394,25 +417,33 @@ static int tfa98xx_download_patch(struct snd_soc_codec *codec,
 	int ret = -EINVAL;
 	size_t i, sz;
 
-	/* start from 6 to skip the patch header */
+	/* start from 6 to skip the patch header; then records of a 16-bit
+	 * little-endian length and that many bytes: a register address
+	 * followed by at least one byte of data */
 	for (i = 6; i < fw->size; i += sz) {
+		if (fw->size - i < 2) {
+			dev_err(codec->dev,
+				"Invalid patch format: truncated length at %zx\n", i);
+			return -EINVAL;
+		}
+
 		sz  = fw->data[i++];
 		sz += fw->data[i++] << 8;
 
-		if (i + sz > fw->size) {
+		if (sz < 2 || sz > fw->size - i) {
 			dev_err(codec->dev,
-				"Invalid patch format(%x, %x)\n", i, sz);
+				"Invalid patch format(%zx, %zx)\n", i, sz);
 			return -EINVAL;
 		}
 
 		dev_dbg(codec->dev,
-			"Download patch offset = %x, size = %x\n", i, sz);
+			"Download patch offset = %zx, size = %zx\n", i, sz);
 
 		ret = snd_soc_bulk_write_raw(codec,
 				fw->data[i], &fw->data[i + 1], sz - 1);
 		if (ret < 0) {
 			dev_err(codec->dev,
-				"Fail to download patch(%x, %x, %d)\n", i, sz, ret);
+				"Fail to download patch(%zx, %zx, %d)\n", i, sz, ret);
 			return ret;
 		}
 	}
@@ -570,24 +601,30 @@ static int tfa98xx_download_and_verify_file(struct snd_soc_codec *codec,
 					    int module_id, int param_id,
 					    const void *data, size_t size)
 {
-	u8 buf[size];
+	u8 *buf;
 	int ret;
+
+	/* size is the firmware file's: keep the read-back off the stack */
+	buf = kmalloc(size, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	ret = tfa98xx_download_file(codec, module_id, param_id, data, size);
 	if (ret < 0)
-		return ret;
+		goto out;
 	ret = tfa98xx_upload_file(codec, module_id, param_id, buf, size);
 	if (ret < 0)
-		return ret;
+		goto out;
 	if (memcmp(data, buf, size) != 0) {
 		dev_err(codec->dev, "Write then read mismatch:\n");
 		print_hex_dump(KERN_ERR, "WR ",
 			DUMP_PREFIX_ADDRESS, 16, 1, data, size, true);
 		print_hex_dump(KERN_ERR, "RD ",
 			DUMP_PREFIX_ADDRESS, 16, 1, buf, size, true);
-		return -EINVAL;
+		ret = -EINVAL;
 	}
-
+out:
+	kfree(buf);
 	return ret;
 }
 
@@ -596,7 +633,7 @@ static void tfa98xx_download(struct work_struct *work)
 	struct tfa98xx_priv *tfa98xx;
 	struct snd_soc_codec *codec;
 	struct delayed_work *dwork;
-	unsigned int mtp;
+	unsigned int mtp, delay = 0;
 	int ret = 0, id, tries;
 
 	dwork = to_delayed_work(work);
@@ -622,9 +659,18 @@ static void tfa98xx_download(struct work_struct *work)
 	if (ret < 0)
 		goto unlock;
 
+	/*
+	 * From here on the amplifier stays muted unless every file is in
+	 * and the DSP has taken its settings. Unmuting a half-configured
+	 * DSP would drive the speaker without its model and protection.
+	 */
 	for (id = 0; id < TFA98XX_FW_NUMBER; id++) {
-		if (tfa98xx->fw[id] == NULL)
-			goto unmute;
+		if (tfa98xx->fw[id] == NULL) {
+			/* Not loaded: nothing to retry until it is */
+			dev_err(codec->dev, "Firmware %s missing, keeping muted\n",
+				tfa98xx->fw_name[id]);
+			goto unlock;
+		}
 		if (!tfa98xx->fw_chg[id])
 			continue;
 
@@ -635,20 +681,20 @@ static void tfa98xx_download(struct work_struct *work)
 		case TFA98XX_FW_BOOT:
 			ret = tfa98xx_reset_dsp(codec);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			ret = tfa98xx_wait_clock(codec);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			ret = tfa98xx_download_patch(codec, tfa98xx->fw[id]);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			/* reload rom patch */
 			tfa98xx->fw_chg[TFA98XX_FW_ROM] = true;
 			break;
 		case TFA98XX_FW_ROM:
 			ret = tfa98xx_download_patch(codec, tfa98xx->fw[id]);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			/* reload all setting */
 			tfa98xx->fw_chg[TFA98XX_FW_SPEAKER]   = true;
 			tfa98xx->fw_chg[TFA98XX_FW_CONFIG]    = true;
@@ -662,7 +708,7 @@ static void tfa98xx_download(struct work_struct *work)
 						    tfa98xx->fw[id]->data,
 						    tfa98xx->fw[id]->size);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			break;
 		case TFA98XX_FW_CONFIG:
 			ret = tfa98xx_download_and_verify_file(codec,
@@ -671,7 +717,7 @@ static void tfa98xx_download(struct work_struct *work)
 						    tfa98xx->fw[id]->data,
 						    tfa98xx->fw[id]->size);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			break;
 		case TFA98XX_FW_PRESET:
 			ret = tfa98xx_download_and_verify_file(codec,
@@ -680,7 +726,7 @@ static void tfa98xx_download(struct work_struct *work)
 						    tfa98xx->fw[id]->data,
 						    tfa98xx->fw[id]->size);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			break;
 		case TFA98XX_FW_EQUALIZER:
 			ret = tfa98xx_download_and_verify_file(codec,
@@ -689,7 +735,7 @@ static void tfa98xx_download(struct work_struct *work)
 						    tfa98xx->fw[id]->data,
 						    tfa98xx->fw[id]->size);
 			if (ret < 0)
-				goto unmute;
+				goto unlock;
 			break;
 		}
 
@@ -699,17 +745,24 @@ static void tfa98xx_download(struct work_struct *work)
 
 	/* signal dsp to load the setting */
 	mtp = snd_soc_read(codec, TFA98XX_MTP_SPKR_CAL);
+	if (TFA98XX_READ_FAILED(mtp)) {
+		ret = (int)mtp;
+		goto unlock;
+	}
 	if (!(mtp & TFA98XX_MTP_SPKR_CAL_MTPEX_MSK))
 		dev_info(codec->dev, "Start one time calibration\n");
 	else
 		dev_info(codec->dev, "Load the calibration value from mtp\n");
 
-	snd_soc_update_bits_locked(codec, TFA98XX_SYS_CTRL,
+	ret = snd_soc_update_bits_locked(codec, TFA98XX_SYS_CTRL,
 		TFA98XX_SYS_CTRL_SBSL_MSK, TFA98XX_SYS_CTRL_SBSL);
+	if (ret < 0)
+		goto unlock;
 
 	for (tries = 10; tries > 0; tries--) {
 		mtp = snd_soc_read(codec, TFA98XX_MTP_SPKR_CAL);
-		if (mtp & TFA98XX_MTP_SPKR_CAL_MTPEX_MSK)
+		if (!TFA98XX_READ_FAILED(mtp) &&
+		    (mtp & TFA98XX_MTP_SPKR_CAL_MTPEX_MSK))
 			break;
 		msleep(100);
 	}
@@ -719,16 +772,29 @@ static void tfa98xx_download(struct work_struct *work)
 	else
 		dev_info(codec->dev, "Finish one time calibration\n");
 
-unmute:
-	tfa98xx_mute(codec, TFA98XX_MUTE_OFF);
+	/* update_bits answers 1 when a bit changed: only < 0 is a failure */
+	ret = tfa98xx_mute(codec, TFA98XX_MUTE_OFF);
+	if (ret >= 0)
+		tfa98xx->download_retries = 0;
+
 unlock:
+	/* retry later, backing off, while the amplifier stays muted */
+	if (ret < 0) {
+		if (tfa98xx->download_retries < TFA98XX_DOWNLOAD_RETRIES) {
+			delay = 10 << tfa98xx->download_retries++;
+			dev_warn(codec->dev, "Download failed (%d), retry in %u ms\n",
+				 ret, delay);
+		} else {
+			dev_err(codec->dev,
+				"Download failed (%d), giving up; amplifier muted\n",
+				ret);
+		}
+	}
 	mutex_unlock(&tfa98xx->fw_lock);
 
-	/* retry in a late time if fail */
-	if (ret < 0) {
+	if (delay)
 		queue_delayed_work(tfa98xx->workqueue,
-			&tfa98xx->download_work, msecs_to_jiffies(10));
-	}
+			&tfa98xx->download_work, msecs_to_jiffies(delay));
 }
 
 static bool tfa98xx_start_download(struct tfa98xx_priv *tfa98xx, bool force)
@@ -737,6 +803,7 @@ static bool tfa98xx_start_download(struct tfa98xx_priv *tfa98xx, bool force)
 	int id;
 
 	mutex_lock(&tfa98xx->fw_lock);
+	tfa98xx->download_retries = 0;
 	if (force) { /* re-download all firmware */
 		for (id = 0; id < TFA98XX_FW_NUMBER; id++)
 			tfa98xx->fw_chg[id] = true;
@@ -776,12 +843,16 @@ static int tfa98xx_check_error(struct snd_soc_codec *codec)
 	unsigned int status;
 
 	status = snd_soc_read(codec, TFA98XX_STATUSREG);
+	if (TFA98XX_READ_FAILED(status))
+		return (int)status;
 	if (status & TFA98XX_STATUSREG_ERR2_MSK)
 		return 2;
 	else if (status & TFA98XX_STATUSREG_ERR1_MSK)
 		return 1;
 
 	status = tfa98xx_read_dsp(codec, 0x666);
+	if (TFA98XX_READ_FAILED(status))
+		return (int)status;
 	if (status == 0x7FFFFF)
 		return 2;
 
@@ -793,12 +864,14 @@ static void tfa98xx_monitor(struct work_struct *work)
 	struct tfa98xx_priv *tfa98xx;
 	struct snd_soc_codec *codec;
 	struct delayed_work *dwork;
+	int ret;
 
 	dwork = to_delayed_work(work);
 	tfa98xx = container_of(dwork, struct tfa98xx_priv, monitor_work);
 	codec = tfa98xx->codec;
 
-	switch (tfa98xx_check_error(codec)) {
+	ret = tfa98xx_check_error(codec);
+	switch (ret) {
 	case 2:
 		dev_err(codec->dev, "Restart due to dsp crash\n");
 		tfa98xx->dsp_crash = true; /* save crash info */
@@ -811,6 +884,13 @@ static void tfa98xx_monitor(struct work_struct *work)
 		tfa98xx_power(codec, false);
 		usleep_range(5000, 5000);
 		tfa98xx_power(codec, true);
+		break;
+	case 0:
+		break;
+	default:
+		/* The read failed: no state to act on, look again next time */
+		dev_warn_ratelimited(codec->dev,
+				     "Monitor cannot read status (%d)\n", ret);
 		break;
 	}
 
