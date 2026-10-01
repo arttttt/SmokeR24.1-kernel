@@ -63,11 +63,7 @@ const char *tegra_rt5671_i2s_dai_name[TEGRA30_NR_I2S_IFC] = {
 	"tegra30-i2s.4",
 };
 
-#define GPIO_SPKR_EN    BIT(0)
 #define GPIO_HP_MUTE    BIT(1)
-#define GPIO_INT_MIC_EN BIT(2)
-#define GPIO_EXT_MIC_EN BIT(3)
-#define GPIO_HP_DET     BIT(4)
 
 struct tegra_rt5671 {
 	struct tegra_asoc_utils_data util_data;
@@ -294,23 +290,6 @@ static struct snd_soc_ops tegra_rt5671_ops = {
 	.shutdown = tegra_rt5671_shutdown,
 };
 
-static int tegra_rt5671_event_int_spk(struct snd_soc_dapm_widget *w,
-					struct snd_kcontrol *k, int event)
-{
-	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct snd_soc_card *card = dapm->card;
-	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
-	struct tegra_asoc_platform_data *pdata = machine->pdata;
-
-	if (!(machine->gpio_requested & GPIO_SPKR_EN))
-		return 0;
-
-	gpio_set_value_cansleep(pdata->gpio_spkr_en,
-				!!SND_SOC_DAPM_EVENT_ON(event));
-
-	return 0;
-}
-
 static int tegra_rt5671_event_hp(struct snd_soc_dapm_widget *w,
 					struct snd_kcontrol *k, int event)
 {
@@ -328,46 +307,12 @@ static int tegra_rt5671_event_hp(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static int tegra_rt5671_event_int_mic(struct snd_soc_dapm_widget *w,
-					struct snd_kcontrol *k, int event)
-{
-	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct snd_soc_card *card = dapm->card;
-	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
-	struct tegra_asoc_platform_data *pdata = machine->pdata;
-
-	if (!(machine->gpio_requested & GPIO_INT_MIC_EN))
-		return 0;
-
-	gpio_set_value_cansleep(pdata->gpio_int_mic_en,
-				!!SND_SOC_DAPM_EVENT_ON(event));
-
-	return 0;
-}
-
-static int tegra_rt5671_event_ext_mic(struct snd_soc_dapm_widget *w,
-					struct snd_kcontrol *k, int event)
-{
-	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct snd_soc_card *card = dapm->card;
-	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
-	struct tegra_asoc_platform_data *pdata = machine->pdata;
-
-	if (!(machine->gpio_requested & GPIO_EXT_MIC_EN))
-		return 0;
-
-	gpio_set_value_cansleep(pdata->gpio_ext_mic_en,
-				!SND_SOC_DAPM_EVENT_ON(event));
-
-	return 0;
-}
-
 static const struct snd_soc_dapm_widget ardbeg_dapm_widgets[] = {
-	SND_SOC_DAPM_SPK("Int Left Spk", tegra_rt5671_event_int_spk),
-	SND_SOC_DAPM_SPK("Int Right Spk", tegra_rt5671_event_int_spk),
+	SND_SOC_DAPM_SPK("Int Left Spk", NULL),
+	SND_SOC_DAPM_SPK("Int Right Spk", NULL),
 	SND_SOC_DAPM_HP("Headphone Jack", tegra_rt5671_event_hp),
-	SND_SOC_DAPM_MIC("Mic Jack", tegra_rt5671_event_ext_mic),
-	SND_SOC_DAPM_MIC("Int Mic", tegra_rt5671_event_int_mic),
+	SND_SOC_DAPM_MIC("Mic Jack", NULL),
+	SND_SOC_DAPM_MIC("Int Mic", NULL),
 	SND_SOC_DAPM_HP("BT Headphone", NULL),
 	SND_SOC_DAPM_MIC("BT Mic", NULL),
 	SND_SOC_DAPM_LINE("FM", NULL),
@@ -409,50 +354,20 @@ static int tegra_rt5671_init(struct snd_soc_pcm_runtime *rtd)
 	struct tegra_asoc_platform_data *pdata = machine->pdata;
 	int ret;
 
-	if (gpio_is_valid(pdata->gpio_spkr_en)) {
-		ret = gpio_request(pdata->gpio_spkr_en, "spkr_en");
-		if (ret) {
-			dev_err(card->dev, "cannot get spkr_en gpio\n");
-			return ret;
-		}
-		machine->gpio_requested |= GPIO_SPKR_EN;
-
-		gpio_direction_output(pdata->gpio_spkr_en, 0);
-	}
-
+	/*
+	 * The headphone mute is the board's one audio GPIO. Speaker enable,
+	 * microphone enables and the LDO and headphone-detect lines of
+	 * NVIDIA's boards do not exist here: the amplifiers and codec are
+	 * powered in hardware and jack detection lives in the codec driver.
+	 */
 	if (gpio_is_valid(pdata->gpio_hp_mute)) {
-		ret = gpio_request(pdata->gpio_hp_mute, "hp_mute");
+		ret = gpio_request_one(pdata->gpio_hp_mute,
+				       GPIOF_OUT_INIT_LOW, "hp_mute");
 		if (ret) {
-			dev_err(card->dev, "cannot get hp_mute gpio\n");
+			dev_err(card->dev, "cannot get hp_mute gpio: %d\n", ret);
 			return ret;
 		}
 		machine->gpio_requested |= GPIO_HP_MUTE;
-
-		gpio_direction_output(pdata->gpio_hp_mute, 0);
-	}
-
-	if (gpio_is_valid(pdata->gpio_int_mic_en)) {
-		ret = gpio_request(pdata->gpio_int_mic_en, "int_mic_en");
-		if (ret) {
-			dev_err(card->dev, "cannot get int_mic_en gpio\n");
-		} else {
-			machine->gpio_requested |= GPIO_INT_MIC_EN;
-
-			/* Disable int mic; enable signal is active-high */
-			gpio_direction_output(pdata->gpio_int_mic_en, 0);
-		}
-	}
-
-	if (gpio_is_valid(pdata->gpio_ext_mic_en)) {
-		ret = gpio_request(pdata->gpio_ext_mic_en, "ext_mic_en");
-		if (ret) {
-			dev_err(card->dev, "cannot get ext_mic_en gpio\n");
-		} else {
-			machine->gpio_requested |= GPIO_EXT_MIC_EN;
-
-			/* Disable ext mic; enable signal is active-low */
-			gpio_direction_output(pdata->gpio_ext_mic_en, 1);
-		}
 	}
 
 	ret = tegra_asoc_utils_register_ctls(&machine->util_data);
@@ -720,24 +635,10 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 		of_property_read_string(np, "nvidia,codec_dai_name",
 					&pdata->codec_dai_name);
 
-		pdata->gpio_ldo1_en = of_get_named_gpio(np,
-						"nvidia,ldo-gpios", 0);
-		if (pdata->gpio_ldo1_en < 0)
-			dev_warn(&pdev->dev, "Failed to get LDO_EN GPIO\n");
-
-		pdata->gpio_hp_det = of_get_named_gpio(np,
-						"nvidia,hp-det-gpios", 0);
-		if (pdata->gpio_hp_det < 0)
-			dev_warn(&pdev->dev, "Failed to get HP Det GPIO\n");
-
 		pdata->gpio_hp_mute = of_get_named_gpio(np,
 						"nvidia,hp-mute-gpios", 0);
 		if (pdata->gpio_hp_mute < 0)
 			dev_warn(&pdev->dev, "Failed to get HP Mute GPIO\n");
-
-		pdata->gpio_codec1 = pdata->gpio_codec2 = pdata->gpio_codec3 =
-		pdata->gpio_spkr_en = pdata->gpio_int_mic_en = 
-                pdata->gpio_ext_mic_en = -1;
 
 		of_property_read_u32_array(np, "nvidia,i2s-param-hifi", val32,
 							   ARRAY_SIZE(val32));
@@ -772,18 +673,6 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 		if (np)
 			kfree(pdata);
 		return -ENOMEM;
-	}
-
-	if (gpio_is_valid(pdata->gpio_ldo1_en)) {
-		ret = gpio_request(pdata->gpio_ldo1_en, "rt5671");
-		if (ret)
-			dev_err(&pdev->dev, "Fail gpio_request AUDIO_LDO1\n");
-
-		ret = gpio_direction_output(pdata->gpio_ldo1_en, 1);
-		if (ret)
-			dev_err(&pdev->dev, "Fail gpio_direction AUDIO_LDO1\n");
-
-		msleep(200);
 	}
 
 	machine->pdata = pdata;
@@ -839,6 +728,9 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 err_unregister_card:
 	snd_soc_unregister_card(card);
 err_fini_utils:
+	/* requested by the card's init, which may have run before a failure */
+	if (machine->gpio_requested & GPIO_HP_MUTE)
+		gpio_free(pdata->gpio_hp_mute);
 	tegra_asoc_utils_fini(&machine->util_data);
 err_free_machine:
 	if (np)
@@ -856,21 +748,10 @@ static int tegra_rt5671_driver_remove(struct platform_device *pdev)
 	struct tegra_asoc_platform_data *pdata = machine->pdata;
 	struct device_node *np = pdev->dev.of_node;
 
-	if (machine->gpio_requested & GPIO_EXT_MIC_EN)
-		gpio_free(pdata->gpio_ext_mic_en);
-	if (machine->gpio_requested & GPIO_INT_MIC_EN)
-		gpio_free(pdata->gpio_int_mic_en);
+	snd_soc_unregister_card(card);
+
 	if (machine->gpio_requested & GPIO_HP_MUTE)
 		gpio_free(pdata->gpio_hp_mute);
-	if (machine->gpio_requested & GPIO_SPKR_EN)
-		gpio_free(pdata->gpio_spkr_en);
-
-	if (gpio_is_valid(pdata->gpio_ldo1_en)) {
-		gpio_set_value(pdata->gpio_ldo1_en, 0);
-		gpio_free(pdata->gpio_ldo1_en);
-	}
-
-	snd_soc_unregister_card(card);
 
 	tegra_asoc_utils_fini(&machine->util_data);
 
