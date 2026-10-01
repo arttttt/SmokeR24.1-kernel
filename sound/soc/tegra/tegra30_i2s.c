@@ -93,6 +93,15 @@ static int tegra30_i2s_runtime_resume(struct device *dev)
 	return 0;
 }
 
+/*
+ * The enum holds no negative value, so the compiler may make it unsigned
+ * and a plain "< 0" test on the -1 marker would never be true.
+ */
+static bool tegra30_i2s_has_pb_fifo(struct tegra30_i2s *i2s)
+{
+	return (int)i2s->playback_fifo_cif >= 0;
+}
+
 int tegra30_i2s_startup(struct snd_pcm_substream *substream,
 			struct snd_soc_dai *dai)
 {
@@ -106,7 +115,11 @@ int tegra30_i2s_startup(struct snd_pcm_substream *substream,
 	 * ASoC does not call shutdown, so whatever was counted here would
 	 * stay counted.
 	 */
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+	    !i2s->allocate_pb_fifo_cif) {
+		/* The machine driver routes the RX CIF (e.g. from a DAM) */
+		i2s->playback_ref_count++;
+	} else if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		int allocate_fifo = 1;
 		bool claimed_fe = false;
 
@@ -194,7 +207,10 @@ void tegra30_i2s_shutdown(struct snd_pcm_substream *substream,
 {
 	struct tegra30_i2s *i2s = snd_soc_dai_get_drvdata(dai);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+	    !i2s->allocate_pb_fifo_cif) {
+		i2s->playback_ref_count--;
+	} else if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		if (i2s->playback_ref_count == 1)
 			tegra30_ahub_unset_rx_cif_source(
 				i2s->playback_i2s_cif);
@@ -497,13 +513,16 @@ static int tegra30_i2s_tdm_hw_params(struct snd_pcm_substream *substream,
 		regmap_update_bits(i2s->regmap, TEGRA30_I2S_CIF_RX_CTRL,
 				   mask, val);
 
-		tegra30_ahub_set_tx_cif_channels(i2s->playback_fifo_cif,
-						i2s_audio_ch,
-						i2s_client_ch);
-		tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
-						i2s_audio_bits,
-						i2s_client_bits);
-		tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif, 0);
+		if (tegra30_i2s_has_pb_fifo(i2s)) {
+			tegra30_ahub_set_tx_cif_channels(i2s->playback_fifo_cif,
+							i2s_audio_ch,
+							i2s_client_ch);
+			tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
+							i2s_audio_bits,
+							i2s_client_bits);
+			tegra30_ahub_set_tx_fifo_pack_mode(
+					i2s->playback_fifo_cif, 0);
+		}
 
 	} else {
 		val |= TEGRA30_AUDIOCIF_CTRL_DIRECTION_TX;
@@ -529,6 +548,46 @@ static int tegra30_i2s_tdm_hw_params(struct snd_pcm_substream *substream,
 	regmap_update_bits(i2s->regmap, TEGRA30_I2S_CH_CTRL, mask, val);
 
 	return 0;
+}
+
+static void tegra30_i2s_set_pb_fifo_format(struct tegra30_i2s *i2s,
+					   int channels, int sample_size)
+{
+	tegra30_ahub_set_tx_cif_channels(i2s->playback_fifo_cif,
+					 channels,
+					 channels);
+
+	switch (sample_size) {
+	case 8:
+		tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
+		  TEGRA30_AUDIOCIF_BITS_8, TEGRA30_AUDIOCIF_BITS_8);
+		tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif,
+		  TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_8_4);
+		break;
+
+	case 16:
+		tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
+		  TEGRA30_AUDIOCIF_BITS_16, TEGRA30_AUDIOCIF_BITS_16);
+		tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif,
+		  TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_16);
+		break;
+
+	case 24:
+		tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
+		  TEGRA30_AUDIOCIF_BITS_24, TEGRA30_AUDIOCIF_BITS_24);
+		tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif, 0);
+		break;
+
+	case 32:
+		tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
+		  TEGRA30_AUDIOCIF_BITS_32, TEGRA30_AUDIOCIF_BITS_32);
+		tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif, 0);
+		break;
+
+	default:
+		pr_err("Error in sample_size\n");
+		break;
+	}
 }
 
 static int tegra30_i2s_hw_params(struct snd_pcm_substream *substream,
@@ -705,41 +764,9 @@ static int tegra30_i2s_hw_params(struct snd_pcm_substream *substream,
 		val |= TEGRA30_AUDIOCIF_CTRL_DIRECTION_RX;
 		reg = TEGRA30_I2S_CIF_RX_CTRL;
 
-		tegra30_ahub_set_tx_cif_channels(i2s->playback_fifo_cif,
-						 params_channels(params),
-						 params_channels(params));
-
-		switch (sample_size) {
-		case 8:
-			tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
-			  TEGRA30_AUDIOCIF_BITS_8, TEGRA30_AUDIOCIF_BITS_8);
-			tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif,
-			  TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_8_4);
-			break;
-
-		case 16:
-			tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
-			  TEGRA30_AUDIOCIF_BITS_16, TEGRA30_AUDIOCIF_BITS_16);
-			tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif,
-			  TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_16);
-			break;
-
-		case 24:
-			tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
-			  TEGRA30_AUDIOCIF_BITS_24, TEGRA30_AUDIOCIF_BITS_24);
-			tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif, 0);
-			break;
-
-		case 32:
-			tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
-			  TEGRA30_AUDIOCIF_BITS_32, TEGRA30_AUDIOCIF_BITS_32);
-			tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif, 0);
-			break;
-
-		default:
-			pr_err("Error in sample_size\n");
-			break;
-		}
+		if (tegra30_i2s_has_pb_fifo(i2s))
+			tegra30_i2s_set_pb_fifo_format(i2s,
+					params_channels(params), sample_size);
 	} else {
 		val |= TEGRA30_AUDIOCIF_CTRL_DIRECTION_TX;
 		reg = TEGRA30_I2S_CIF_TX_CTRL;
@@ -866,7 +893,8 @@ static int tegra30_i2s_soft_reset(struct tegra30_i2s *i2s)
 
 static void tegra30_i2s_start_playback(struct tegra30_i2s *i2s)
 {
-	tegra30_ahub_enable_tx_fifo(i2s->playback_fifo_cif);
+	if (tegra30_i2s_has_pb_fifo(i2s))
+		tegra30_ahub_enable_tx_fifo(i2s->playback_fifo_cif);
 	/* if this is the only user of i2s tx then enable it*/
 	if (i2s->playback_ref_count == 1)
 		regmap_update_bits(i2s->regmap, TEGRA30_I2S_CTRL,
@@ -878,7 +906,8 @@ static void tegra30_i2s_stop_playback(struct tegra30_i2s *i2s)
 {
 	int dcnt = 10;
 	/* if this is the only user of i2s tx then disable it*/
-	tegra30_ahub_disable_tx_fifo(i2s->playback_fifo_cif);
+	if (tegra30_i2s_has_pb_fifo(i2s))
+		tegra30_ahub_disable_tx_fifo(i2s->playback_fifo_cif);
 	if (i2s->playback_ref_count == 1) {
 		regmap_update_bits(i2s->regmap, TEGRA30_I2S_CTRL,
 				   TEGRA30_I2S_CTRL_XFER_EN_TX, 0);
@@ -2264,6 +2293,8 @@ static int tegra30_i2s_platform_probe(struct platform_device *pdev)
 	}
 	dev_set_drvdata(&pdev->dev, i2s);
 	i2s->dev = &pdev->dev;
+	i2s->playback_fifo_cif = -1;
+	i2s->allocate_pb_fifo_cif = true;
 	i2s->dai = tegra30_i2s_dai_template;
 	i2s->dai.name = dev_name(&pdev->dev);
 

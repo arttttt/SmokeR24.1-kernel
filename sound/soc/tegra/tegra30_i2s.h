@@ -286,6 +286,8 @@ struct tegra30_i2s {
 	int  playback_ref_count;
 	int  capture_ref_count;
 	bool is_dam_used;
+	/* false: the machine driver feeds the playback RX CIF itself */
+	bool allocate_pb_fifo_cif;
 #ifdef CONFIG_PM
 	#ifdef CONFIG_ARCH_TEGRA_3x_SOC
 		u32  reg_cache[(TEGRA30_I2S_LCOEF_2_4_2 >> 2) + 1];
