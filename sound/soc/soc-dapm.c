@@ -805,10 +805,22 @@ static int dapm_list_add_widget(struct snd_soc_dapm_widget_list **list,
  * output widget. Returns number of complete paths.
  */
 static int is_connected_output_ep(struct snd_soc_dapm_widget *widget,
-	struct snd_soc_dapm_widget_list **list)
+	struct snd_soc_dapm_widget_list **list,
+	bool (*custom_stop_condition)(struct snd_soc_dapm_widget *, int))
 {
 	struct snd_soc_dapm_path *path;
 	int con = 0;
+
+	/*
+	 * Past the stop widget nothing more goes on the list, but the walk
+	 * itself carries on: cutting it short would leave the endpoint counts
+	 * cached along the way wrong.
+	 */
+	if (custom_stop_condition &&
+	    custom_stop_condition(widget, SNDRV_PCM_STREAM_PLAYBACK)) {
+		list = NULL;
+		custom_stop_condition = NULL;
+	}
 
 	if (widget->outputs >= 0)
 		return widget->outputs;
@@ -884,7 +896,8 @@ static int is_connected_output_ep(struct snd_soc_dapm_widget *widget,
 				}
 			}
 
-			con += is_connected_output_ep(path->sink, list);
+			con += is_connected_output_ep(path->sink, list,
+						 custom_stop_condition);
 
 			path->walking = 0;
 		}
@@ -900,10 +913,22 @@ static int is_connected_output_ep(struct snd_soc_dapm_widget *widget,
  * input widget. Returns number of complete paths.
  */
 static int is_connected_input_ep(struct snd_soc_dapm_widget *widget,
-	struct snd_soc_dapm_widget_list **list)
+	struct snd_soc_dapm_widget_list **list,
+	bool (*custom_stop_condition)(struct snd_soc_dapm_widget *, int))
 {
 	struct snd_soc_dapm_path *path;
 	int con = 0;
+
+	/*
+	 * Past the stop widget nothing more goes on the list, but the walk
+	 * itself carries on: cutting it short would leave the endpoint counts
+	 * cached along the way wrong.
+	 */
+	if (custom_stop_condition &&
+	    custom_stop_condition(widget, SNDRV_PCM_STREAM_CAPTURE)) {
+		list = NULL;
+		custom_stop_condition = NULL;
+	}
 
 	if (widget->inputs >= 0)
 		return widget->inputs;
@@ -991,7 +1016,8 @@ static int is_connected_input_ep(struct snd_soc_dapm_widget *widget,
 				}
 			}
 
-			con += is_connected_input_ep(path->source, list);
+			con += is_connected_input_ep(path->source, list,
+						 custom_stop_condition);
 
 			path->walking = 0;
 		}
@@ -1012,10 +1038,16 @@ static int is_connected_input_ep(struct snd_soc_dapm_widget *widget,
  * the initial stream specified by name. This takes into account
  * current mixer and mux kcontrol settings. Creates list of valid widgets.
  *
+ * Optionally, can be supplied with a function acting as a stopping condition.
+ * This function takes the dapm widget currently being examined and the
+ * stream direction of the walk, it should return true if widgets from that
+ * point in the graph onwards should not be added to the widget list.
+ *
  * Returns the number of valid paths or negative error.
  */
 int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
-	struct snd_soc_dapm_widget_list **list)
+	struct snd_soc_dapm_widget_list **list,
+	bool (*custom_stop_condition)(struct snd_soc_dapm_widget *, int))
 {
 	struct snd_soc_card *card = dai->card;
 	int paths;
@@ -1024,11 +1056,13 @@ int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
 	dapm_reset(card);
 
 	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		paths = is_connected_output_ep(dai->playback_widget, list);
+		paths = is_connected_output_ep(dai->playback_widget, list,
+					       custom_stop_condition);
 		dapm_clear_walk_output(&card->dapm,
 				       &dai->playback_widget->sinks);
 	} else {
-		paths = is_connected_input_ep(dai->capture_widget, list);
+		paths = is_connected_input_ep(dai->capture_widget, list,
+					      custom_stop_condition);
 		dapm_clear_walk_input(&card->dapm,
 				      &dai->capture_widget->sources);
 	}
@@ -1135,9 +1169,9 @@ static int dapm_generic_check_power(struct snd_soc_dapm_widget *w)
 
 	DAPM_UPDATE_STAT(w, power_checks);
 
-	in = is_connected_input_ep(w, NULL);
+	in = is_connected_input_ep(w, NULL, NULL);
 	dapm_clear_walk_input(w->dapm, &w->sources);
-	out = is_connected_output_ep(w, NULL);
+	out = is_connected_output_ep(w, NULL, NULL);
 	dapm_clear_walk_output(w->dapm, &w->sinks);
 	return out != 0 && in != 0;
 }
@@ -1150,7 +1184,7 @@ static int dapm_adc_check_power(struct snd_soc_dapm_widget *w)
 	DAPM_UPDATE_STAT(w, power_checks);
 
 	if (w->active) {
-		in = is_connected_input_ep(w, NULL);
+		in = is_connected_input_ep(w, NULL, NULL);
 		dapm_clear_walk_input(w->dapm, &w->sources);
 		return in != 0;
 	} else {
@@ -1166,7 +1200,7 @@ static int dapm_dac_check_power(struct snd_soc_dapm_widget *w)
 	DAPM_UPDATE_STAT(w, power_checks);
 
 	if (w->active) {
-		out = is_connected_output_ep(w, NULL);
+		out = is_connected_output_ep(w, NULL, NULL);
 		dapm_clear_walk_output(w->dapm, &w->sinks);
 		return out != 0;
 	} else {
@@ -1791,9 +1825,9 @@ static ssize_t dapm_widget_power_read_file(struct file *file,
 	if (!buf)
 		return -ENOMEM;
 
-	in = is_connected_input_ep(w, NULL);
+	in = is_connected_input_ep(w, NULL, NULL);
 	dapm_clear_walk_input(w->dapm, &w->sources);
-	out = is_connected_output_ep(w, NULL);
+	out = is_connected_output_ep(w, NULL, NULL);
 	dapm_clear_walk_output(w->dapm, &w->sinks);
 
 	ret = snprintf(buf, PAGE_SIZE, "%s: %s%s  in %d out %d",
