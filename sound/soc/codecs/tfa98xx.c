@@ -289,7 +289,7 @@ static int tfa98xx_wait_clock(struct snd_soc_codec *codec)
 		status = snd_soc_read(codec, TFA98XX_STATUSREG);
 		if ((status & TFA98XX_STATUSREG_UP_MSK) == TFA98XX_STATUSREG_UP)
 			break;
-		mdelay(1);
+		usleep_range(1000, 2000);
 	}
 	if (tries == 0) {
 		dev_err(codec->dev, "Fail to sync i2s clock on time(%x)\n", status);
@@ -486,7 +486,7 @@ static int tfa98xx_upload_file(struct snd_soc_codec *codec,
 		status = snd_soc_read(codec, TFA98XX_CF_STATUS);
 		if ((status & TFA98XX_CF_STATUS_ACK_MSK) == 0x0100)
 			break;
-		mdelay(1);
+		usleep_range(1000, 2000);
 	}
 	if (tries == 0) {
 		dev_err(codec->dev, "Fail to response on time\n");
@@ -569,7 +569,7 @@ static int tfa98xx_download_file(struct snd_soc_codec *codec,
 		status = snd_soc_read(codec, TFA98XX_CF_STATUS);
 		if ((status & TFA98XX_CF_STATUS_ACK_MSK) == 0x0100)
 			break;
-		mdelay(1);
+		usleep_range(1000, 2000);
 	}
 	if (tries == 0) {
 		dev_err(codec->dev, "Fail to response on time\n");
@@ -876,14 +876,25 @@ static void tfa98xx_monitor(struct work_struct *work)
 		dev_err(codec->dev, "Restart due to dsp crash\n");
 		tfa98xx->dsp_crash = true; /* save crash info */
 		tfa98xx->pilot_tone = tfa98xx_read_dsp(codec, 0x1029A);
+		/*
+		 * Stop the amplifier first: the reset restores the register
+		 * cache, and with it an amplifier left enabled would play
+		 * through a DSP that is not configured yet. The download
+		 * unmutes once the DSP has its settings.
+		 */
+		tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
 		tfa98xx_reset(codec);
 		tfa98xx_start_download(tfa98xx, true);
 		break;
 	case 1:
 		dev_err(codec->dev, "Repower due to over condition\n");
+		/* the same order as a stream stop and start: silent edges */
+		tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
 		tfa98xx_power(codec, false);
-		usleep_range(5000, 5000);
-		tfa98xx_power(codec, true);
+		usleep_range(5000, 6000);
+		if (tfa98xx_power(codec, true) == 0 &&
+		    !tfa98xx_start_download(tfa98xx, false))
+			tfa98xx_mute(codec, TFA98XX_MUTE_OFF);
 		break;
 	case 0:
 		break;
@@ -1414,10 +1425,12 @@ static int tfa98xx_digital_mute(struct snd_soc_dai *codec_dai, int mute)
 		tfa98xx_stop_download(tfa98xx);
 		tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
 		tfa98xx_power(codec, false);
-		usleep_range(5000, 5000);
+		usleep_range(5000, 6000);
 	} else {
-		usleep_range(5000, 5000);
-		tfa98xx_power(codec, true);
+		usleep_range(5000, 6000);
+		/* without the I2S clocks the amplifier stays muted */
+		if (tfa98xx_power(codec, true) < 0)
+			return 0;
 		if (tfa98xx_start_download(tfa98xx, false))
 			; /* will turn off the mute after download */
 		else
