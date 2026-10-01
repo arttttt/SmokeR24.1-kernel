@@ -909,6 +909,38 @@ static int widget_in_list(struct snd_soc_dapm_widget_list *list,
 	return 0;
 }
 
+/*
+ * The walk from a front end only needs to reach the back ends; whatever lies
+ * past a back end DAI (a codec's insides, a CODEC<->CODEC link) is not DPCM's,
+ * and a DAI found there would be mistaken for a missing back end.
+ */
+static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
+		int stream)
+{
+	struct snd_soc_card *card = widget->dapm->card;
+	struct snd_soc_pcm_runtime *rtd;
+	int i;
+
+	for (i = 0; i < card->num_rtd; i++) {
+		rtd = &card->rtd[i];
+
+		if (!rtd->dai_link->no_pcm)
+			continue;
+
+		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+			if (rtd->cpu_dai->playback_widget == widget ||
+			    rtd->codec_dai->playback_widget == widget)
+				return true;
+		} else {
+			if (rtd->cpu_dai->capture_widget == widget ||
+			    rtd->codec_dai->capture_widget == widget)
+				return true;
+		}
+	}
+
+	return false;
+}
+
 int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 	int stream, struct snd_soc_dapm_widget_list **list_)
 {
@@ -923,7 +955,7 @@ int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 
 	/* get number of valid DAI paths and their widgets */
 	paths = snd_soc_dapm_dai_get_connected_widgets(cpu_dai, stream, &list,
-			NULL);
+			dpcm_end_walk_at_be);
 
 	dev_dbg(fe->dev, "ASoC: found %d audio %s paths\n", paths,
 			stream ? "capture" : "playback");
