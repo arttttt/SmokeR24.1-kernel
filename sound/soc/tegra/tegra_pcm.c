@@ -33,6 +33,7 @@
 #include <asm/mach-types.h>
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -195,10 +196,22 @@ int tegra_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	if (!dmap)
 		return 0;
 
+	/*
+	 * soc-pcm never calls a link's own trigger, yet a front end on the
+	 * virtual DAIs below has its APBIF FIFO and DAM channel to switch,
+	 * and they must run before the DMA starts and after it stops.
+	 */
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (rtd->dai_link->ops && rtd->dai_link->ops->trigger) {
+			int ret = rtd->dai_link->ops->trigger(substream, cmd);
+
+			if (ret < 0)
+				return ret;
+		}
+
 		prtd->running = 1;
 		if (prtd->disable_intr) {
 			substream->runtime->dma_addr = prtd->avp_dma_addr;
@@ -215,8 +228,11 @@ int tegra_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		prtd->running = 0;
 
-		return snd_dmaengine_pcm_trigger(substream,
-					SNDRV_PCM_TRIGGER_STOP);
+		snd_dmaengine_pcm_trigger(substream, SNDRV_PCM_TRIGGER_STOP);
+
+		if (rtd->dai_link->ops && rtd->dai_link->ops->trigger)
+			rtd->dai_link->ops->trigger(substream, cmd);
+		return 0;
 	default:
 		return -EINVAL;
 	}
@@ -392,6 +408,81 @@ void tegra_pcm_platform_unregister(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(tegra_pcm_platform_unregister);
 
+/*
+ * Front-end DAIs for DPCM. They stand for no hardware of their own: the
+ * machine driver gives each one an APBIF FIFO and routes it, e.g. into a
+ * DAM input, and the DMA runs through the platform above. The format is
+ * what the DAM mixes in bypass, 48 kHz S16 stereo.
+ */
+static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
+	{
+		.name = "tegra-pcm-fe0",
+		.id = 0,
+		.playback = {
+			.stream_name = "FE0 Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_48000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		},
+	},
+	{
+		.name = "tegra-pcm-fe1",
+		.id = 1,
+		.playback = {
+			.stream_name = "FE1 Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_48000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		},
+	},
+};
+
+static const struct snd_soc_component_driver tegra_pcm_fe_component = {
+	.name = "tegra-pcm-audio",
+};
+
+static int tegra_pcm_audio_probe(struct platform_device *pdev)
+{
+	int ret;
+
+	ret = tegra_pcm_platform_register(&pdev->dev);
+	if (ret) {
+		dev_err(&pdev->dev, "Could not register platform: %d\n", ret);
+		return ret;
+	}
+
+	ret = snd_soc_register_component(&pdev->dev, &tegra_pcm_fe_component,
+					 tegra_pcm_fe_dai,
+					 ARRAY_SIZE(tegra_pcm_fe_dai));
+	if (ret) {
+		dev_err(&pdev->dev, "Could not register DAIs: %d\n", ret);
+		tegra_pcm_platform_unregister(&pdev->dev);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int tegra_pcm_audio_remove(struct platform_device *pdev)
+{
+	snd_soc_unregister_component(&pdev->dev);
+	tegra_pcm_platform_unregister(&pdev->dev);
+	return 0;
+}
+
+static struct platform_driver tegra_pcm_audio_driver = {
+	.driver = {
+		.name = "tegra-pcm-audio",
+		.owner = THIS_MODULE,
+	},
+	.probe = tegra_pcm_audio_probe,
+	.remove = tegra_pcm_audio_remove,
+};
+module_platform_driver(tegra_pcm_audio_driver);
+
 MODULE_AUTHOR("Stephen Warren <swarren@nvidia.com>");
 MODULE_DESCRIPTION("Tegra PCM ASoC driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:tegra-pcm-audio");
