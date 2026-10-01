@@ -780,14 +780,20 @@ static void tegra30_dam_set_filter_stages(struct tegra30_dam_context *dam, int f
 DAM Driver API's
 */
 
-int tegra30_dam_allocate_controller()
+int tegra30_dam_allocate_controller(void)
 {
 	int i = 0;
+	bool probed = false;
 	struct tegra30_dam_context *dam = NULL;
 
 	for (i = 0; i < TEGRA30_NR_DAM_IFC; i++) {
 
 		dam =  dams_cont_info[i];
+
+		/* Not probed (yet) */
+		if (!dam)
+			continue;
+		probed = true;
 
 		if (!dam->in_use) {
 			dam->in_use = true;
@@ -795,7 +801,7 @@ int tegra30_dam_allocate_controller()
 		}
 	}
 
-	return -ENOENT;
+	return probed ? -EBUSY : -EPROBE_DEFER;
 }
 EXPORT_SYMBOL(tegra30_dam_allocate_controller);
 
