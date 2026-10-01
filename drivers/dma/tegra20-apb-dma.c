@@ -165,6 +165,7 @@ struct tegra_dma_sg_req {
 	bool				half_done;
 	struct list_head		node;
 	struct tegra_dma_desc		*dma_desc;
+	unsigned int			words_xferred;
 };
 
 /*
@@ -491,6 +492,7 @@ static void tegra_dma_configure_for_next(struct tegra_dma_channel *tdc,
 				nsg_req->ch_regs.csr | TEGRA_APBDMA_CSR_ENB);
 	nsg_req->configured = true;
 	nsg_req->skipped = false;
+	nsg_req->words_xferred = 0;
 
 	tegra_dma_resume(tdc);
 }
@@ -507,6 +509,7 @@ static void tdc_start_head_req(struct tegra_dma_channel *tdc)
 	tegra_dma_start(tdc, sg_req);
 	sg_req->configured = true;
 	sg_req->skipped = false;
+	sg_req->words_xferred = 0;
 	tdc->busy = true;
 }
 
@@ -642,6 +645,8 @@ static void handle_cont_sngl_cycle_dma_done(struct tegra_dma_channel *tdc,
 	if (!dma_desc->cb_count)
 		list_add_tail(&dma_desc->cb_node, &tdc->cb_desc);
 	dma_desc->cb_count++;
+
+	sgreq->words_xferred = 0;
 
 	/* If not last req then put at end of pending list */
 	if (!list_is_last(&sgreq->node, &tdc->pending_sg_req)) {
@@ -819,6 +824,71 @@ empty_cblist:
 	spin_unlock_irqrestore(&tdc->lock, flags);
 }
 
+/*
+ * Bytes the head request has transferred so far, read from the hardware's
+ * word counter, which moves after every burst. From mainline 156a599b07
+ * ("dmaengine: tegra-apb: Support per-burst residue granularity").
+ */
+static unsigned int tegra_dma_sg_bytes_xferred(struct tegra_dma_channel *tdc,
+					       struct tegra_dma_sg_req *sg_req)
+{
+	unsigned long status, wcount = 0;
+
+	/* only the head request is in flight */
+	if (tdc->pending_sg_req.next != &sg_req->node)
+		return 0;
+
+	if (tdc->tdma->chip_data->support_separate_wcount_reg)
+		wcount = tdc_read(tdc, TEGRA_APBDMA_CHAN_WORD_TRANSFER);
+
+	status = tdc_read(tdc, TEGRA_APBDMA_CHAN_STATUS);
+
+	if (!tdc->tdma->chip_data->support_separate_wcount_reg)
+		wcount = status;
+
+	if (status & TEGRA_APBDMA_STATUS_ISE_EOC)
+		return sg_req->req_len;
+
+	wcount = get_current_xferred_count(tdc, sg_req, wcount);
+
+	if (!wcount) {
+		/*
+		 * If wcount wasn't ever polled for this SG before, then
+		 * simply assume that transfer hasn't started yet.
+		 *
+		 * Otherwise it's the end of the transfer.
+		 *
+		 * The alternative would be to poll the status register
+		 * until EOC bit is set or wcount goes UP. That's so
+		 * because EOC bit is getting set only after the last
+		 * burst's completion and counter is less than the actual
+		 * transfer size by 4 bytes. The counter value wraps around
+		 * in a cyclic mode before EOC is set(!), so we can't easily
+		 * distinguish start of transfer from its end.
+		 */
+		if (sg_req->words_xferred)
+			wcount = sg_req->req_len - 4;
+
+	} else if (wcount < sg_req->words_xferred) {
+		/*
+		 * This case will never happen for a non-cyclic transfer.
+		 *
+		 * For a cyclic transfer, although it is possible for the
+		 * next transfer to have already started (resetting the word
+		 * count), this case should still not happen because we should
+		 * have detected that the EOC bit is set and hence the transfer
+		 * was completed.
+		 */
+		WARN_ON_ONCE(1);
+
+		wcount = sg_req->req_len - 4;
+	} else {
+		sg_req->words_xferred = wcount;
+	}
+
+	return wcount;
+}
+
 static enum dma_status tegra_dma_tx_status(struct dma_chan *dc,
 	dma_cookie_t cookie, struct dma_tx_state *txstate)
 {
@@ -853,19 +923,12 @@ static enum dma_status tegra_dma_tx_status(struct dma_chan *dc,
 	list_for_each_entry(sg_req, &tdc->pending_sg_req, node) {
 		dma_desc = sg_req->dma_desc;
 		if (dma_desc->txd.cookie == cookie) {
-			if (tdc->tdma->chip_data->support_separate_wcount_reg) {
-				u32 wcount = tdc_read(tdc,
-					TEGRA_APBDMA_CHAN_WORD_TRANSFER);
-				u32 dma_pos = get_current_xferred_count(tdc,
-								sg_req, wcount);
-				dma_pos += dma_desc->bytes_transferred;
+			unsigned int bytes = tegra_dma_sg_bytes_xferred(tdc,
+								       sg_req);
 
-				/* Ensure position does not move backwards */
-				if (dma_pos > dma_desc->dma_position)
-					dma_desc->dma_position = dma_pos;
-			}
-			residual =  dma_desc->bytes_requested -
-					dma_desc->dma_position;
+			residual = dma_desc->bytes_requested -
+				   ((dma_desc->bytes_transferred + bytes) %
+				    dma_desc->bytes_requested);
 			dma_set_residue(txstate, residual);
 			ret = dma_desc->dma_status;
 			spin_unlock_irqrestore(&tdc->lock, flags);
