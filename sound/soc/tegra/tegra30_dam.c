@@ -30,6 +30,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/io.h>
 #include <linux/pm_runtime.h>
 #include <sound/soc.h>
@@ -63,257 +64,25 @@ static struct tegra30_dam_src_step_table  step_table[] = {
 	{ 48000, 16000, 0 },
 };
 #else
-static int coefRam16To44[64] = {
-				0x156105, // IIR Filter + interpolation
-				0x0000d649,
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x2,
-				0x21a102, // IIR Filter + interplation
-				0x00000e00,
-				0x00e2e000,0xff6e1a00,0x002aaa00,
-				0x00610a00,0xff5dda00,0x003ccc00,
-				0x00163a00,0xff3c0400,0x00633200,
-				0x3,
-				0x2c0204, // Farrow Filter
-				0x000aaaab,
-				0xffaaaaab,
-				0xfffaaaab,
-				0x00555555,
-				0xff600000,
-				0xfff55555,
-				0x00155555,
-				0x00055555,
-				0xffeaaaab,
-				0x00200000,
-				0x005101, //IIR Filter + Decimator
-				8252,
-				16067893,-13754014,5906912,
-				13037808,-13709975,7317389,
-				1,
-				0,0,0,0,0,
-				0,0,0,0,0,0
-};
+#include "tegra30_dam_coef.h"
 
-static int coefRam8To48[64] = {
-				0x156105, // interpolation + FIlter
-				0x0000d649,
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x2, // ouptut gain
-				0x00a102, // filter + interpolation
-				0x00000e00,
-				0x00e2e000,0xff6e1a00,0x002aaa00,
-				0x00610a00,0xff5dda00,0x003ccc00,
-				0x00163a00,0xff3c0400,0x00633200,
-				0x3,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0
-};
-
-static int coefRam16To48[64] = {
-				0x00a105, // interpolation + Filter
-				1924,
-				13390190,-13855175,5952947,
-				1289485,-12761191,6540917,
-				-4787304,-11454255,7249439,
-				-7239963,-10512732,7776366,
-				-8255332,-9999487,8101770,
-				-8632155,-9817625,8305531,
-				0x3,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0,0,
-				0,0
-};
-
-static int coefRam44To16[64] = {
-				0x126104, // IIR Filter + interp0lation
-				2802,
-				5762750,-14772125,6628868,
-				-9304342,-14504578,7161825,
-				-12409641,-14227678,7732611,
-				-13291674,-14077653,8099947,
-				-13563385,-14061743,8309372,
-				2,
-				0x1d9204, // Farrwo Filter + Decimation
-				0x000aaaab,
-				0xffaaaaab,
-				0xfffaaaab,
-				0x00555555,
-				0xff600000,
-				0xfff55555,
-				0x00155555,
-				0x00055555,
-				0xffeaaaab,
-				0x00200000,
-				0x005105, // IIR Filter+decimation
-				0x0000d649,
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x1,
-				0,0,0,0,0,
-				0,0,0,0,0,
-				0,0,0,0
-};
-
-static int coefRam44To8[64] = {
-				0x120104, // IIR Filter
-				2802,
-				5762750,-14772125,6628868,
-				-9304342,-14504578,7161825,
-				-12409641,-14227678,7732611,
-				-13291674,-14077653,8099947,
-				-13563385,-14061743,8309372,
-				1,
-				0x1d9204, // Farrwo Filter
-				0x000aaaab,
-				0xffaaaaab,
-				0xfffaaaab,
-				0x00555555,
-				0xff600000,
-				0xfff55555,
-				0x00155555,
-				0x00055555,
-				0xffeaaaab,
-				0x00200000,
-				0x005105, // IIR Filter
-				0x0000d649,
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x1,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0
-};
-
-static int coefRam48To16[64] = {
-				0x009105, // IIR FIlter + Decimation
-				1924,
-				13390190,-13855175,5952947,
-				1289485,-12761191,6540917,
-				-4787304,-11454255,7249439,
-				-7239963,-10512732,7776366,
-				-8255332,-9999487,8101770,
-				-8632155,-9817625,8305531,
-				0x1,
-				0,0,0,
-				0,0,0,0,0,0,0,0,
-				0,0,0,0,0,0,0,0,
-				0,0,0,0,0,0,0,0,
-				0,0,0,0,0,0,0,0,
-				0,0,0,0,0,0,0,0
-};
-
-static int coefRam48To8[64] = {
-				0x0c9102,	//IIR Filter + decimation
-				0x00000e00,
-				0x00e2e000,0xff6e1a00,0x002aaa00,
-				0x00610a00,0xff5dda00,0x003ccc00,
-				0x00163a00,0xff3c0400,0x00633200,
-				0x1,
-				0x005105,   //IIR Filter + Decimator
-				0x0000d649,
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x1, // ouptut gain
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0
-};
-
-static int coefRam8To44[64] = {
-				0x0156105, // IIR filter +interpllation
-				0x0000d649,
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x2, // ouptut gain
-				0x21a102, // filter + interp0lation
-				0x00000e00,
-				0x00e2e000,0xff6e1a00,0x002aaa00,
-				0x00610a00,0xff5dda00,0x003ccc00,
-				0x00163a00,0xff3c0400,0x00633200,
-				0x3,
-				0x000204,
-				0x000aaaab,
-				0xffaaaaab,
-				0xfffaaaab,
-				0x00555555,
-				0xff600000,
-				0xfff55555,
-				0x00155555,
-				0x00055555,
-				0xffeaaaab,
-				0x00200000,
-				0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0,
-				0,0,0,0,0,0
-};
-
-static int coefRam8To16[64] = {
-				0x00006105, // interpolation + IIR Filter
-				0x0000d649, // input gain
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x00000002, // ouptut gain
-};
-
-static int coefRam16To8[64] = {
-				0x00005105,   //IIR Filter + Decimator
-				0x0000d649, //input gain
-				0x00e87afb, 0xff5f69d0, 0x003df3cf,
-				0x007ce488, 0xff99a5c8, 0x0056a6a0,
-				0x00344928, 0xffcba3e5, 0x006be470,
-				0x00137aa7, 0xffe60276, 0x00773410,
-				0x0005fa2a, 0xfff1ac11, 0x007c795b,
-				0x00012d36, 0xfff5eca2, 0x007f10ef,
-				0x00000001, // ouptut gain
+/* Rates in the order of the coefficient matrix, with their FSIN/FSOUT codes */
+static const struct {
+	int rate;
+	u32 fs;
+} tegra30_dam_rates[TEGRA30_DAM_NUM_RATES] = {
+	{   8000,  0 },
+	{  11025,  4 },
+	{  16000,  1 },
+	{  22050,  5 },
+	{  24000,  6 },
+	{  32000,  7 },
+	{  44100,  2 },
+	{  48000,  3 },
+	{  88200,  8 },
+	{  96000,  9 },
+	{ 176400, 10 },
+	{ 192000, 11 },
 };
 #endif
 
@@ -325,26 +94,15 @@ static inline void tegra30_dam_writel(struct tegra30_dam_context *dam,
 			u32 val, u32 reg);
 static inline u32 tegra30_dam_readl(struct tegra30_dam_context *dam,
 															u32 reg);
-static void tegra30_dam_set_output_samplerate(
+static int tegra30_dam_set_output_samplerate(
 						struct tegra30_dam_context *dam, int fsout);
-static void tegra30_dam_set_input_samplerate(
+static int tegra30_dam_set_input_samplerate(
 						struct tegra30_dam_context *dam, int fsin);
 static int tegra30_dam_set_step_reset(struct tegra30_dam_context *dam,
 										int insample, int outsample);
 #ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra30_dam_ch0_set_step(struct tegra30_dam_context *dam,
 															int step);
-#else
-static void tegra30_dam_write_coeff_ram(struct tegra30_dam_context *dam,
-												int fsin, int fsout);
-static void tegra30_dam_set_farrow_param(
-				struct tegra30_dam_context *dam, int fsin, int fsout);
-static void tegra30_dam_set_biquad_fixed_coef(
-									struct tegra30_dam_context *dam);
-static void tegra30_dam_enable_coeff_ram(
-									struct tegra30_dam_context *dam);
-static void tegra30_dam_set_filter_stages(
-				struct tegra30_dam_context *dam, int fsin, int fsout);
 #endif
 
 
@@ -533,61 +291,143 @@ static inline u32 tegra30_dam_readl(struct tegra30_dam_context *dam, u32 reg)
 	return val;
 }
 
-static void tegra30_dam_set_output_samplerate(struct tegra30_dam_context *dam,
+/* FSIN/FSOUT code for a rate, or -EINVAL */
+static int tegra30_dam_rate_fs(int rate)
+{
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
+	switch (rate) {
+	case TEGRA30_AUDIO_SAMPLERATE_8000:
+		return TEGRA30_DAM_FS_8KHZ;
+	case TEGRA30_AUDIO_SAMPLERATE_16000:
+		return TEGRA30_DAM_FS_16KHZ;
+	case TEGRA30_AUDIO_SAMPLERATE_44100:
+		return TEGRA30_DAM_FS_44KHZ;
+	case TEGRA30_AUDIO_SAMPLERATE_48000:
+		return TEGRA30_DAM_FS_48KHZ;
+	default:
+		return -EINVAL;
+	}
+#else
+	int i;
+
+	for (i = 0; i < TEGRA30_DAM_NUM_RATES; i++)
+		if (tegra30_dam_rates[i].rate == rate)
+			return tegra30_dam_rates[i].fs;
+	return -EINVAL;
+#endif
+}
+
+static int tegra30_dam_set_output_samplerate(struct tegra30_dam_context *dam,
 					int fsout)
 {
+	int fs = tegra30_dam_rate_fs(fsout);
 	u32 val;
+
+	if (fs < 0)
+		return fs;
 
 	val = tegra30_dam_readl(dam, TEGRA30_DAM_CTRL);
 	val &= ~TEGRA30_DAM_CTRL_FSOUT_MASK;
-
-	switch (fsout) {
-	case TEGRA30_AUDIO_SAMPLERATE_8000:
-		val |= TEGRA30_DAM_CTRL_FSOUT_FS8;
-		break;
-	case TEGRA30_AUDIO_SAMPLERATE_16000:
-		val |= TEGRA30_DAM_CTRL_FSOUT_FS16;
-		break;
-	case TEGRA30_AUDIO_SAMPLERATE_44100:
-		val |= TEGRA30_DAM_CTRL_FSOUT_FS44;
-		break;
-	case TEGRA30_AUDIO_SAMPLERATE_48000:
-		val |= TEGRA30_DAM_CTRL_FSOUT_FS48;
-		break;
-	default:
-		break;
-	}
-
+	val |= fs << TEGRA30_DAM_CTRL_FSOUT_SHIFT;
 	tegra30_dam_writel(dam, val, TEGRA30_DAM_CTRL);
+
+	return 0;
 }
 
-static void tegra30_dam_set_input_samplerate(struct tegra30_dam_context *dam,
+static int tegra30_dam_set_input_samplerate(struct tegra30_dam_context *dam,
 	int fsin)
 {
+	int fs = tegra30_dam_rate_fs(fsin);
 	u32 val;
+
+	if (fs < 0)
+		return fs;
 
 	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH0_CTRL);
 	val &= ~TEGRA30_DAM_CH0_CTRL_FSIN_MASK;
-
-	switch (fsin) {
-	case TEGRA30_AUDIO_SAMPLERATE_8000:
-		val |= TEGRA30_DAM_CH0_CTRL_FSIN_FS8;
-		break;
-	case TEGRA30_AUDIO_SAMPLERATE_16000:
-		val |= TEGRA30_DAM_CH0_CTRL_FSIN_FS16;
-		break;
-	case TEGRA30_AUDIO_SAMPLERATE_44100:
-		val |= TEGRA30_DAM_CH0_CTRL_FSIN_FS44;
-		break;
-	case TEGRA30_AUDIO_SAMPLERATE_48000:
-		val |= TEGRA30_DAM_CH0_CTRL_FSIN_FS48;
-		break;
-	default:
-		break;
-	}
-
+	val |= fs << TEGRA30_DAM_CH0_CTRL_FSIN_SHIFT;
 	tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
+
+	return 0;
 }
+
+#ifndef CONFIG_ARCH_TEGRA_3x_SOC
+/* Index of a rate in tegra30_dam_rates[], or -EINVAL */
+static int tegra30_dam_rate_index(int rate)
+{
+	int i;
+
+	for (i = 0; i < TEGRA30_DAM_NUM_RATES; i++)
+		if (tegra30_dam_rates[i].rate == rate)
+			return i;
+	return -EINVAL;
+}
+
+/*
+ * FARROW_PARAM for a conversion. The farrow stage is what bridges the 48 kHz
+ * and 44.1 kHz families, so only its direction matters. NVIDIA's three values
+ * decode as bits 15:8 = L and 7:0 = M of the farrow ratio L/M, and bits 31:16
+ * = 2^23 / L: PARAM_2 is 147/160 (towards 44.1 kHz), PARAM_3 is 160/147 (away
+ * from it). Every chain in the matrix has a farrow stage exactly when the two
+ * rates are of different families.
+ */
+static u32 tegra30_dam_farrow_param(int fsin, int fsout)
+{
+	bool in_44 = !(fsin % 11025);
+	bool out_44 = !(fsout % 11025);
+
+	if (in_44 == out_44)
+		return TEGRA30_FARROW_PARAM_1;
+
+	return out_44 ? TEGRA30_FARROW_PARAM_2 : TEGRA30_FARROW_PARAM_3;
+}
+
+/*
+ * Number of stages in a coefficient program. Each stage starts with a header
+ * whose bits 23:16 give the offset of the next stage, 0 ending the chain.
+ */
+static int tegra30_dam_coef_stages(const u32 *coef)
+{
+	int stages = 0;
+	int i = 0;
+
+	do {
+		if (++stages > TEGRA30_DAM_CH0_CTRL_FILT_STAGES_MAX)
+			return -EINVAL;
+		i = (coef[i] >> 16) & 0xff;
+		if (i >= TEGRA30_DAM_COEF_RAM_DEPTH)
+			return -EINVAL;
+	} while (i);
+
+	return stages;
+}
+
+static int tegra30_dam_write_coeff_ram(struct tegra30_dam_context *dam,
+				       const u32 *coef)
+{
+	unsigned int ctrl;
+	int dcnt = 10;
+	int i;
+
+	/* Rewind the RAM address, then write it word by word from 0 */
+	tegra30_dam_writel(dam, TEGRA30_DAM_RAMCTL_RESET_HW_ADR,
+			   TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0);
+	do {
+		ctrl = tegra30_dam_readl(dam, TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0);
+	} while ((ctrl & TEGRA30_DAM_RAMCTL_RESET_HW_ADR) && --dcnt);
+	if (!dcnt)
+		return -ETIMEDOUT;
+
+	tegra30_dam_writel(dam, TEGRA30_DAM_RAMCTL_RW_WRITE |
+			   TEGRA30_DAM_RAMCTL_HW_ADR_EN,
+			   TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0);
+	for (i = 0; i < TEGRA30_DAM_COEF_RAM_DEPTH; i++)
+		tegra30_dam_writel(dam, coef[i],
+				   TEGRA30_DAM_AUDIORAMCTL_DAM_DATA_0);
+
+	return 0;
+}
+#endif
 
 static int tegra30_dam_set_step_reset(struct tegra30_dam_context *dam,
 		int insample, int outsample)
@@ -604,11 +444,48 @@ static int tegra30_dam_set_step_reset(struct tegra30_dam_context *dam,
 
 	tegra30_dam_ch0_set_step(dam, step_reset);
 #else
-	tegra30_dam_write_coeff_ram(dam, insample, outsample);
-	tegra30_dam_set_farrow_param(dam, insample, outsample);
-	tegra30_dam_set_biquad_fixed_coef(dam);
-	tegra30_dam_enable_coeff_ram(dam);
-	tegra30_dam_set_filter_stages(dam, insample, outsample);
+	int in = tegra30_dam_rate_index(insample);
+	int out = tegra30_dam_rate_index(outsample);
+	const u32 *coef;
+	int stages, ret;
+	u32 val;
+
+	if (in < 0 || out < 0)
+		return -EINVAL;
+
+	coef = tegra30_dam_coef_table[in][out];
+	if (IS_ERR(coef))
+		return PTR_ERR(coef);
+
+	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH0_CTRL);
+	val &= ~(TEGRA30_DAM_CH0_CTRL_COEFF_RAM_ENABLE |
+		 TEGRA30_DAM_CH0_CTRL_FILT_STAGES_MASK);
+
+	/* Equal rates: CH0 passes through, no program to run */
+	if (coef == DAM_BYPASS_CONV) {
+		tegra30_dam_writel(dam, TEGRA30_FARROW_PARAM_RESET,
+				   TEGRA30_DAM_FARROW_PARAM_0);
+		tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
+		return 0;
+	}
+
+	stages = tegra30_dam_coef_stages(coef);
+	if (stages < 0)
+		return stages;
+
+	ret = tegra30_dam_write_coeff_ram(dam, coef);
+	if (ret)
+		return ret;
+
+	tegra30_dam_writel(dam, tegra30_dam_farrow_param(insample, outsample),
+			   TEGRA30_DAM_FARROW_PARAM_0);
+	tegra30_dam_writel(dam, TEGRA30_DAM_CH0_BIQUAD_FIXED_COEF_0_VAL,
+			   TEGRA30_DAM_CH0_BIQUAD_FIXED_COEF_0);
+
+	/* FILT_STAGES counts the stages of the program, less one */
+	val |= TEGRA30_DAM_CH0_CTRL_COEFF_RAM_ENABLE;
+	val |= (stages - 1) << TEGRA30_DAM_CH0_CTRL_FILT_STAGES_SHIFT;
+	tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
 #endif
 
 	return 0;
@@ -622,176 +499,6 @@ static void tegra30_dam_ch0_set_step(struct tegra30_dam_context *dam, int step)
 	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH0_CTRL);
 	val &= ~TEGRA30_DAM_CH0_CTRL_STEP_MASK;
 	val |= step << TEGRA30_DAM_CH0_CTRL_STEP_SHIFT;
-	tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
-}
-#else
-static void tegra30_dam_write_coeff_ram(struct tegra30_dam_context *dam, int fsin, int fsout)
-{
-	u32 val;
-	int i, *coefRam = NULL;
-
-	tegra30_dam_writel(dam, 0x00002000,
-			TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0);
-
-	switch(fsin) {
-		case TEGRA30_AUDIO_SAMPLERATE_8000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_48000)
-				coefRam = coefRam8To48;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_44100)
-				coefRam = coefRam8To44;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				coefRam = coefRam8To16;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_16000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_48000)
-				coefRam = coefRam16To48;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_44100)
-				coefRam = coefRam16To44;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				coefRam = coefRam16To8;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_44100:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				coefRam = coefRam44To8;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				coefRam = coefRam44To16;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_48000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				coefRam = coefRam48To8;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				coefRam = coefRam48To16;
-			break;
-
-		default:
-			break;
-	}
-
-	tegra30_dam_writel(dam, 0x00005000,
-			TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0);
-
-	if (coefRam) {
-		for (i = 0; i < 64; i++) {
-			val = coefRam[i];
-			tegra30_dam_writel(dam, val,
-				TEGRA30_DAM_AUDIORAMCTL_DAM_DATA_0);
-		}
-	}
-}
-
-static void tegra30_dam_set_farrow_param(struct tegra30_dam_context *dam, int fsin, int fsout)
-{
-	u32 val = TEGRA30_FARROW_PARAM_RESET;
-
-	switch(fsin) {
-		case TEGRA30_AUDIO_SAMPLERATE_8000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_48000)
-				val = TEGRA30_FARROW_PARAM_1;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_44100)
-				val = TEGRA30_FARROW_PARAM_2;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				val = TEGRA30_FARROW_PARAM_1;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_16000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_48000)
-				val = TEGRA30_FARROW_PARAM_1;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_44100)
-				val = TEGRA30_FARROW_PARAM_2;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				val = TEGRA30_FARROW_PARAM_1;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_44100:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				val = TEGRA30_FARROW_PARAM_3;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				val = TEGRA30_FARROW_PARAM_3;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_48000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				val = TEGRA30_FARROW_PARAM_1;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				val = TEGRA30_FARROW_PARAM_1;
-			break;
-
-		default:
-			break;
-	}
-
-	tegra30_dam_writel(dam, val,
-			TEGRA30_DAM_FARROW_PARAM_0);
-}
-
-static void tegra30_dam_set_biquad_fixed_coef(struct tegra30_dam_context *dam)
-{
-	u32 val = TEGRA30_DAM_CH0_BIQUAD_FIXED_COEF_0_VAL;
-
-	tegra30_dam_writel(dam, val,
-			TEGRA30_DAM_CH0_BIQUAD_FIXED_COEF_0);
-}
-
-static void tegra30_dam_enable_coeff_ram(struct tegra30_dam_context *dam)
-{
-	u32 val;
-
-	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH0_CTRL);
-	val |= TEGRA30_DAM_CH0_CTRL_COEFF_RAM_ENABLE;
-
-	tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
-}
-
-static void tegra30_dam_set_filter_stages(struct tegra30_dam_context *dam, int fsin, int fsout)
-{
-	u32 val;
-	int filt_stages = 0;
-
-	val = tegra30_dam_readl(dam, TEGRA30_DAM_CH0_CTRL);
-
-	switch(fsin) {
-		case TEGRA30_AUDIO_SAMPLERATE_8000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_48000)
-				filt_stages = 1;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_44100)
-				filt_stages = 2;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				filt_stages = 0;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_16000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_48000)
-				filt_stages = 0;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_44100)
-				filt_stages = 3;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				filt_stages = 0;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_44100:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				filt_stages = 2;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				filt_stages = 2;
-			break;
-
-		case TEGRA30_AUDIO_SAMPLERATE_48000:
-			if (fsout == TEGRA30_AUDIO_SAMPLERATE_8000)
-				filt_stages = 1;
-			else if (fsout == TEGRA30_AUDIO_SAMPLERATE_16000)
-				filt_stages = 0;
-			break;
-
-		default:
-			break;
-	}
-
-	val &= ~TEGRA30_DAM_CH0_CTRL_FILT_STAGES_MASK;
-	val |= filt_stages << TEGRA30_DAM_CH0_CTRL_FILT_STAGES_SHIFT;
-
 	tegra30_dam_writel(dam, val, TEGRA30_DAM_CH0_CTRL);
 }
 #endif
@@ -906,31 +613,48 @@ int tegra30_dam_free_controller(int ifc)
 }
 EXPORT_SYMBOL(tegra30_dam_free_controller);
 
-void tegra30_dam_set_samplerate(int ifc, int chid, int samplerate)
+/*
+ * Set the rate of a channel. CH0 goes through the sample rate converter, so
+ * set CHOUT first: the converter is programmed for CH0's rate against it.
+ * CH1 has no converter and must run at the output rate.
+ */
+int tegra30_dam_set_samplerate(int ifc, int chid, int samplerate)
 {
-	struct tegra30_dam_context *dam = dams_cont_info[ifc];
+	struct tegra30_dam_context *dam;
+	int ret;
 
-	if (ifc >= TEGRA30_NR_DAM_IFC)
-		return;
+	if ((ifc < 0) || (ifc >= TEGRA30_NR_DAM_IFC))
+		return -EINVAL;
+
+	dam = dams_cont_info[ifc];
 
 	switch (chid) {
 	case dam_ch_in0:
-		tegra30_dam_set_input_samplerate(dam, samplerate);
+		ret = tegra30_dam_set_input_samplerate(dam, samplerate);
+		if (ret)
+			return ret;
+		ret = tegra30_dam_set_step_reset(dam, samplerate,
+						 dam->outsamplerate);
+		if (ret)
+			return ret;
 		dam->ch_insamplerate[dam_ch_in0] = samplerate;
-		tegra30_dam_set_step_reset(dam, samplerate, dam->outsamplerate);
 		break;
 	case dam_ch_in1:
 		if (samplerate != dam->outsamplerate)
-			return;
+			return -EINVAL;
 		dam->ch_insamplerate[dam_ch_in1] = samplerate;
 		break;
 	case dam_ch_out:
-		tegra30_dam_set_output_samplerate(dam, samplerate);
+		ret = tegra30_dam_set_output_samplerate(dam, samplerate);
+		if (ret)
+			return ret;
 		dam->outsamplerate = samplerate;
 		break;
 	default:
-		break;
+		return -EINVAL;
 	}
+
+	return 0;
 }
 EXPORT_SYMBOL(tegra30_dam_set_samplerate);
 
@@ -1186,6 +910,28 @@ int tegra30_dam_enable_stereo_mixing(int ifc, int on)
 	return 0;
 }
 EXPORT_SYMBOL(tegra30_dam_enable_stereo_mixing);
+
+/* Convert CH0 as stereo rather than mono (TRM 20.10.4.1 STEREO_SRC_EN) */
+int tegra30_dam_enable_stereo_src(int ifc, int on)
+{
+	struct tegra30_dam_context *dam;
+	u32 val;
+
+	if ((ifc < 0) || (ifc >= TEGRA30_NR_DAM_IFC))
+		return -EINVAL;
+
+	dam = dams_cont_info[ifc];
+
+	val = tegra30_dam_readl(dam, TEGRA30_DAM_CTRL);
+	if (on)
+		val |= TEGRA30_DAM_CTRL_STEREO_SRC_ENABLE;
+	else
+		val &= ~TEGRA30_DAM_CTRL_STEREO_SRC_ENABLE;
+	tegra30_dam_writel(dam, val, TEGRA30_DAM_CTRL);
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra30_dam_enable_stereo_src);
 #endif
 
 /*

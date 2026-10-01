@@ -39,6 +39,12 @@
 #define TEGRA30_DAM_FARROW_PARAM_0			0xf4
 #define TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0		0xf8
 #define TEGRA30_DAM_AUDIORAMCTL_DAM_DATA_0		0xfc
+
+/* Fields in TEGRA30_DAM_AUDIORAMCTL_DAM_CTRL_0, laid out as AMX's RAM control
+ * (TRM 20.10.7.5) */
+#define TEGRA30_DAM_RAMCTL_RW_WRITE			(1 << 14)
+#define TEGRA30_DAM_RAMCTL_RESET_HW_ADR			(1 << 13)
+#define TEGRA30_DAM_RAMCTL_HW_ADR_EN			(1 << 12)
 #define TEGRA30_DAM_CTRL_REGINDEX			(TEGRA30_DAM_AUDIORAMCTL_DAM_DATA_0 >> 2)
 #else
 #define TEGRA30_DAM_CTRL_REGINDEX			(TEGRA30_DAM_AUDIOCIF_CH1_CTRL >> 2)
@@ -66,6 +72,7 @@
 #define TEGRA30_DAM_CTRL_DAM_EN				(1 << 0)
 #ifndef CONFIG_ARCH_TEGRA_3x_SOC
 #define TEGRA30_DAM_CTRL_STEREO_MIXING_ENABLE	(1 << 3)
+#define TEGRA30_DAM_CTRL_STEREO_SRC_ENABLE	(1 << 2)
 #endif
 
 
@@ -94,6 +101,8 @@
 #define TEGRA30_DAM_CH0_CTRL_COEFF_RAM_ENABLE		(1 << 15)
 #define TEGRA30_DAM_CH0_CTRL_FILT_STAGES_SHIFT	16
 #define TEGRA30_DAM_CH0_CTRL_FILT_STAGES_MASK	(0xf << TEGRA30_DAM_CH0_CTRL_FILT_STAGES_SHIFT)
+/* FILT_STAGES holds stages - 1, up to EIGHT (TRM 20.10.4.3) */
+#define TEGRA30_DAM_CH0_CTRL_FILT_STAGES_MAX	8
 #endif
 
 
@@ -180,7 +189,7 @@ int tegra30_dam_allocate_controller(void);
 int tegra30_dam_allocate_channel(int ifc, int chid);
 int tegra30_dam_free_channel(int ifc, int chid);
 int tegra30_dam_free_controller(int ifc);
-void tegra30_dam_set_samplerate(int ifc, int chtype, int samplerate);
+int tegra30_dam_set_samplerate(int ifc, int chtype, int samplerate);
 int tegra30_dam_set_gain(int ifc, int chtype, int gain);
 int tegra30_dam_set_acif(int ifc, int chtype, unsigned int audio_channels,
 	unsigned int audio_bits, unsigned int client_channels,
@@ -191,6 +200,7 @@ void tegra30_dam_ch0_set_datasync(int ifc, int datasync);
 void tegra30_dam_ch1_set_datasync(int ifc, int datasync);
 #ifndef CONFIG_ARCH_TEGRA_3x_SOC
 int tegra30_dam_enable_stereo_mixing(int ifc, int on);
+int tegra30_dam_enable_stereo_src(int ifc, int on);
 #endif
 int tegra30_dam_soft_reset(int ifc);
 
