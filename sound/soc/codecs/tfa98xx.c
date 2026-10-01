@@ -921,7 +921,7 @@ static ssize_t tfa98xx_crash_store(struct device *dev,
 
 	return count;
 }
-static DEVICE_ATTR(dsp_crash, 0664, tfa98xx_dsp_crash_show, tfa98xx_crash_store);
+static DEVICE_ATTR(dsp_crash, 0644, tfa98xx_dsp_crash_show, tfa98xx_crash_store);
 
 
 static ssize_t tfa98xx_pilot_tone_show(struct device *dev,
@@ -963,18 +963,25 @@ static int tfa98xx_probe(struct snd_soc_codec *codec)
 		goto reset_fail;
 	}
 
-	device_create_file(codec->dev, &dev_attr_dsp_crash);
-	device_create_file(codec->dev, &dev_attr_pilot_tone);
+	ret = device_create_file(codec->dev, &dev_attr_dsp_crash);
+	if (ret < 0)
+		goto reset_fail;
+	ret = device_create_file(codec->dev, &dev_attr_pilot_tone);
+	if (ret < 0)
+		goto attr_fail;
 
 	for (i = 0; i < TFA98XX_FW_NUMBER; i++)
 		tfa98xx_firmware_put(tfa98xx, i, tfa98xx->fw_name[i]);
 
-	return ret;
+	return 0;
 
+attr_fail:
+	device_remove_file(codec->dev, &dev_attr_dsp_crash);
 reset_fail:
 	destroy_workqueue(tfa98xx->workqueue);
 wq_fail:
-	kfree(tfa98xx);
+	/* tfa98xx belongs to the I2C device (devm); only drop the codec */
+	tfa98xx->codec = NULL;
 	return ret;
 }
 
@@ -987,9 +994,17 @@ static int tfa98xx_remove(struct snd_soc_codec *codec)
 	tfa98xx_stop_download(tfa98xx);
 	destroy_workqueue(tfa98xx->workqueue);
 
-	for (id = 0; id < TFA98XX_FW_NUMBER; id++)
+	device_remove_file(codec->dev, &dev_attr_pilot_tone);
+	device_remove_file(codec->dev, &dev_attr_dsp_crash);
+
+	for (id = 0; id < TFA98XX_FW_NUMBER; id++) {
 		release_firmware(tfa98xx->fw[id]);
-	kfree(tfa98xx);
+		tfa98xx->fw[id] = NULL;
+	}
+
+	/* tfa98xx itself is the I2C device's (devm) and outlives the codec;
+	 * shutdown must not reach a codec that is gone */
+	tfa98xx->codec = NULL;
 
 	return 0;
 }
@@ -1558,29 +1573,30 @@ static int tfa98xx_i2c_probe(struct i2c_client *client,
 	struct tfa98xx_priv *tfa98xx;
 	struct device_node *np = client->dev.of_node;
 
-	tfa98xx = kzalloc(sizeof(struct tfa98xx_priv), GFP_KERNEL);
-	if (tfa98xx == NULL) {
-		dev_err(&client->dev, "Failed to alloc tfa98xx_priv\n");
-		goto err;
+	if (!np) {
+		dev_err(&client->dev, "No DT node\n");
+		return -ENODEV;
 	}
 
-	if (np) {
-		ret = tfa98xx_parse_dt(&client->dev, tfa98xx, np);
-		if (ret) {
-			dev_err(&client->dev, "Failed to parse DT node\n");
-			goto free_mem;
-		}
-	} else
-		goto free_mem;
+	/*
+	 * The I2C device owns tfa98xx: it is clientdata, read again by
+	 * shutdown, and outlives any codec probe or remove. devm frees it
+	 * when the device goes.
+	 */
+	tfa98xx = devm_kzalloc(&client->dev, sizeof(*tfa98xx), GFP_KERNEL);
+	if (tfa98xx == NULL)
+		return -ENOMEM;
+
+	ret = tfa98xx_parse_dt(&client->dev, tfa98xx, np);
+	if (ret) {
+		dev_err(&client->dev, "Failed to parse DT node\n");
+		return ret;
+	}
 
 	i2c_set_clientdata(client, tfa98xx);
 
 	return snd_soc_register_codec(&client->dev,
 			&tfa98xx_drv, &tfa98xx_dai, 1);
-free_mem:
-	kfree(tfa98xx);
-err:
-	return -ENOMEM;
 }
 
 static int tfa98xx_i2c_remove(struct i2c_client *client)
@@ -1593,8 +1609,14 @@ static void tfa98xx_i2c_shutdown(struct i2c_client *client)
 {
 	struct tfa98xx_priv *tfa98xx = i2c_get_clientdata(client);
 
-	if (tfa98xx)
-		tfa98xx_power(tfa98xx->codec, false);
+	/* the codec never probed, or has been removed */
+	if (!tfa98xx || !tfa98xx->codec)
+		return;
+
+	/* no download or monitor may touch the amplifier after this */
+	tfa98xx_stop_monitor(tfa98xx);
+	tfa98xx_stop_download(tfa98xx);
+	tfa98xx_power(tfa98xx->codec, false);
 }
 
 static const struct i2c_device_id tfa98xx_i2c_id[] = {
