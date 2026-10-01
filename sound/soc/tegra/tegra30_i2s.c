@@ -2325,7 +2325,7 @@ static int tegra30_i2s_platform_probe(struct platform_device *pdev)
 		break;
 	case 2:
 		i2s->dai.playback.stream_name = DRV_NAME ".2 Playback";
-		i2s->dai.capture.stream_name = DRV_NAME ".3 Capture";
+		i2s->dai.capture.stream_name = DRV_NAME ".2 Capture";
 		break;
 	case 3:
 		i2s->dai.playback.stream_name = DRV_NAME ".3 Playback";
