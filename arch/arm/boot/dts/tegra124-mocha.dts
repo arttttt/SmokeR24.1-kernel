@@ -482,6 +482,12 @@
 		status = "disabled";
 	};
 
+	/* HDMI audio: the HDA controller only serves HDMI, which this board
+	 * does not have; tegra124-soc-shield.dtsi turns it on. */
+	hda@70030000 {
+		status = "disabled";
+	};
+
 	/*
 	 * tn8 turns both SPI controllers on, and nothing on this board sits
 	 * behind either: no child nodes here, no board-file devices, no
