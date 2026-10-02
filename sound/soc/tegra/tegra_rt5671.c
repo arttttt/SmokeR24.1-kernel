@@ -110,6 +110,7 @@ struct tegra_rt5671 {
 	int clock_enabled;
 	/* Streams holding the audio PLL rate, one bit per direction */
 	unsigned int rate_locked;
+	int aif1_rate;			/* the rate they hold */
 	struct snd_soc_card *pcard;
 
 	/* Playback mixer: the front ends go through the DAMs into I2S */
@@ -279,6 +280,21 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/*
+	 * I2S0 and AIF1 run both directions from one clock and one codec
+	 * sysclk (PLL1 = 512 * srate, set below). While the other direction
+	 * holds them, this one has to take their rate: a different one could
+	 * still pass the audio PLL check when its MCLK divides the held one
+	 * (48 kHz capture under 96 kHz playback), and setting PLL1 for it
+	 * would re-clock the stream already running.
+	 */
+	if ((machine->rate_locked & BIT(!substream->stream)) &&
+	    srate != machine->aif1_rate) {
+		dev_err(card->dev, "%s: AIF1 runs at %d Hz, can't take %d Hz\n",
+			rtd->dai_link->name, machine->aif1_rate, srate);
+		return -EBUSY;
+	}
+
+	/*
 	 * The speaker link follows this rate up to 48 kHz, the most the
 	 * TFA9890s take. Above it AIF2 runs at 44.1 or 48 kHz from the same
 	 * sysclk (PLL1 = 512 * srate, set below): the codec's get_clk_info()
@@ -380,6 +396,7 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 
 	tegra_asoc_utils_lock_clk_rate(&machine->util_data, 1);
 	machine->rate_locked |= BIT(substream->stream);
+	machine->aif1_rate = srate;
 
 	return 0;
 }
