@@ -250,8 +250,8 @@ static void tegra_rt5671_shutdown(struct snd_pcm_substream *substream)
 
 /* Defined with the other link params below. The speaker link is codec to
  * codec, so it carries its rate in .params instead of taking it from a
- * stream; probe seeds it from platform data and hw_params() below keeps it
- * in step with AIF1. */
+ * stream; probe seeds it from platform data and hw_params() below sets it
+ * from the AIF1 rate. */
 static struct snd_soc_pcm_stream tegra_rt5671_spk_params;
 
 static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
@@ -266,6 +266,7 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 	struct tegra_asoc_platform_data *pdata = machine->pdata;
 	int srate, i2s_daifmt, codec_daifmt;
 	int err, sample_size;
+	unsigned int spk_rate, da_clk, ad_clk;
 
 	srate = params_rate(params);
 
@@ -277,14 +278,32 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 		machine->rate_locked &= ~BIT(substream->stream);
 	}
 
-	/* Keep the speaker link on the same rate as this one. sysclk is set
-	 * below to PLL1 = 512 * srate, and the codec's get_clk_info() accepts
-	 * only an exact sysclk/rate ratio, so AIF2 has no freedom here: any
-	 * fixed value in tegra_rt5671_spk_params would be right for one srate
-	 * and would either mis-clock the amplifiers or fail hw_params with
-	 * -EINVAL for every other. */
-	tegra_rt5671_spk_params.rate_min = srate;
-	tegra_rt5671_spk_params.rate_max = srate;
+	/*
+	 * The speaker link follows this rate up to 48 kHz, the most the
+	 * TFA9890s take. Above it AIF2 runs at 44.1 or 48 kHz from the same
+	 * sysclk (PLL1 = 512 * srate, set below): the codec's get_clk_info()
+	 * takes sysclk / (256 * rate) as a pre-divider, and 4 is one of
+	 * them. The mono DAC filters then track I2S1 and the mono ADC
+	 * filters I2S2 through the codec's ASRC, which carries the speaker
+	 * mix from the AIF1 rate to the AIF2 one.
+	 */
+	if (srate > 48000) {
+		spk_rate = srate % 11025 ? 48000 : 44100;
+		da_clk = RT5671_CLK_SEL_I2S1_ASRC;
+		ad_clk = RT5671_CLK_SEL_I2S2_ASRC;
+	} else {
+		spk_rate = srate;
+		da_clk = RT5671_CLK_SEL_SYS;
+		ad_clk = RT5671_CLK_SEL_SYS;
+	}
+	tegra_rt5671_spk_params.rate_min = spk_rate;
+	tegra_rt5671_spk_params.rate_max = spk_rate;
+	rt5671_sel_asrc_clk_src(codec,
+			RT5671_DA_MONO_L_FILTER | RT5671_DA_MONO_R_FILTER,
+			da_clk);
+	rt5671_sel_asrc_clk_src(codec,
+			RT5671_AD_MONO_L_FILTER | RT5671_AD_MONO_R_FILTER,
+			ad_clk);
 
 	i2s_daifmt = SND_SOC_DAIFMT_NB_NF;
 	i2s_daifmt |= pdata->i2s_param[HIFI_CODEC].is_i2s_master ?
