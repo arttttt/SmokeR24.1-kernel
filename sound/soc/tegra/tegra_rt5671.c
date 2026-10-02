@@ -183,6 +183,21 @@ static int tegra_rt5671_startup(struct snd_pcm_substream *substream)
 		return -EINVAL;
 	}
 
+	/*
+	 * I2S0 and AIF1 each keep one word length for both directions (the
+	 * Tegra I2S BIT_SIZE, the codec's I2S1 data length), so capture must
+	 * run in the playback back end's S24, or opening one would re-clock
+	 * the other.
+	 */
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
+	    !rtd->dai_link->no_pcm) {
+		int ret = snd_pcm_hw_constraint_mask64(substream->runtime,
+				SNDRV_PCM_HW_PARAM_FORMAT, SNDRV_PCM_FMTBIT_S24_LE);
+
+		if (ret < 0)
+			return ret;
+	}
+
 	tegra_asoc_utils_tristate_dap(i2s->id, false);
 
 	return 0;
@@ -364,13 +379,15 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN0_SRC, DAM_GAIN_UNITY);
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN1, DAM_GAIN_UNITY);
 
+	/* Inputs start as S16; each front end's hw_params sets its own.
+	 * The output is the back end's S24. */
 	ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN0_SRC, 2, 16, 2, 32);
 	if (!ret)
 		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN1,
 					   2, 16, 2, 32);
 	if (!ret)
 		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHOUT,
-					   2, 16, 2, 32);
+					   2, 24, 2, 32);
 	if (ret)
 		goto err;
 
@@ -436,7 +453,11 @@ static void tegra_rt5671_be_shutdown(struct snd_pcm_substream *substream)
 	mutex_unlock(&machine->dam_lock);
 }
 
-/* The DAM mixes in bypass, so the I2S side runs at the DAM output format */
+/*
+ * The I2S side runs at the DAM output format: 48 kHz stereo, 24 bits, so
+ * that neither a 24-bit stream nor the software volume applied to a 16-bit
+ * one loses resolution on its way to the codec.
+ */
 static int tegra_rt5671_be_fixup(struct snd_soc_pcm_runtime *rtd,
 				 struct snd_pcm_hw_params *params)
 {
@@ -450,7 +471,7 @@ static int tegra_rt5671_be_fixup(struct snd_soc_pcm_runtime *rtd,
 	rate->min = rate->max = DAM_OUT_RATE;
 	channels->min = channels->max = 2;
 	snd_mask_none(format);
-	snd_mask_set(format, SNDRV_PCM_FORMAT_S16_LE);
+	snd_mask_set(format, SNDRV_PCM_FORMAT_S24_LE);
 
 	return 0;
 }
@@ -543,11 +564,24 @@ static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
 	enum tegra30_ahub_txcif cif = machine->fe_fifo_cif[fe];
+	int bits, cif_bits, pack;
 	int ret;
 
-	/* The front-end DAIs offer S16 only */
-	if (params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
+	/* The front-end DAIs offer S16 and S24 (in 32-bit words) */
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
+		bits = 16;
+		cif_bits = TEGRA30_AUDIOCIF_BITS_16;
+		pack = TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_16;
+		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
+		bits = 24;
+		cif_bits = TEGRA30_AUDIOCIF_BITS_24;
+		pack = 0;
+		break;
+	default:
 		return -EINVAL;
+	}
 
 	if (fe == FE_DEEP) {
 		ret = tegra_rt5671_dam_ch0_rate(machine, params_rate(params));
@@ -560,12 +594,16 @@ static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
 
 	tegra30_ahub_set_tx_cif_channels(cif, params_channels(params),
 					 params_channels(params));
-	tegra30_ahub_set_tx_cif_bits(cif, TEGRA30_AUDIOCIF_BITS_16,
-				     TEGRA30_AUDIOCIF_BITS_16);
-	tegra30_ahub_set_tx_fifo_pack_mode(cif,
-				TEGRA30_AHUB_CHANNEL_CTRL_TX_PACK_16);
+	tegra30_ahub_set_tx_cif_bits(cif, cif_bits, cif_bits);
+	tegra30_ahub_set_tx_fifo_pack_mode(cif, pack);
 
-	return 0;
+	/* The DAM input takes the stream as it comes; inside it is 32-bit */
+	mutex_lock(&machine->dam_lock);
+	ret = tegra30_dam_set_acif(machine->dam_ifc, tegra_rt5671_fe_dam_ch[fe],
+				   params_channels(params), bits, 2, 32);
+	mutex_unlock(&machine->dam_lock);
+
+	return ret;
 }
 
 /*
