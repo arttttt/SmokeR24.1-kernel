@@ -56,16 +56,35 @@
 #define DAI_LINK_FM		4
 #define DAI_LINK_FE_DEEP	5
 #define DAI_LINK_FE_FAST	6
-#define DAI_LINK_HIFI_BE	7
-#define NUM_DAI_LINKS		8
+#define DAI_LINK_FE_HIFI	7
+#define DAI_LINK_HIFI_BE	8
+#define NUM_DAI_LINKS		9
 
-/* Playback front ends, each feeding one DAM input */
+/* Playback front ends */
 #define FE_DEEP			0
 #define FE_FAST			1
-#define NUM_FE			2
+#define FE_HIFI			2
+#define NUM_FE			3
 
-/* The DAM output, and so I2S0 and AIF1 behind it */
-#define DAM_OUT_RATE		48000
+/*
+ * The three DAMs, by role. Every DAM runs in a mode TRM 20.6 allows: stereo
+ * mixing only in bypass, stereo SRC only with channel 1 idle.
+ *
+ *   deep ─► MIX CH0 ┐ 48 kHz, bypass,
+ *   fast ─► MIX CH1 ┘ stereo mixing  ─► SRC CH0: 48 kHz -> back-end rate ─┐
+ *                                                                        ├► OUT ─► I2S0
+ *   hifi ──────────────────────────────────────────────────► OUT CH0 ────┘   (OUT CH1 <- SRC)
+ *
+ * OUT mixes in bypass at the back-end rate. The hifi stream is on its CH0
+ * and reaches the I2S untouched while nothing else plays.
+ */
+#define DAM_MIX			0
+#define DAM_SRC			1
+#define DAM_OUT			2
+#define NUM_DAM			3
+
+/* The rate deep and fast are mixed at, before SRC to the back-end rate */
+#define DAM_CHAIN_RATE		48000
 
 /* NVIDIA's machine drivers all program 0x1000 as unity; TRM omits CONV */
 #define DAM_GAIN_UNITY		0x1000
@@ -93,21 +112,38 @@ struct tegra_rt5671 {
 	unsigned int rate_locked;
 	struct snd_soc_card *pcard;
 
-	/* Playback mixer: the front ends go through a DAM into I2S */
-	int dam_ifc;
+	/* Playback mixer: the front ends go through the DAMs into I2S */
+	int dam[NUM_DAM];		/* DAM controller per role */
 	struct mutex dam_lock;		/* DAM setup against BE users */
 	int dam_users;
-	spinlock_t dam_trigger_lock;	/* DAM enables, from two streams */
+	int be_rate;			/* under dam_lock */
+	spinlock_t dam_trigger_lock;	/* DAM enables, from three streams */
 	bool fe_running[NUM_FE];	/* under dam_trigger_lock */
+	int chain_users;		/* deep/fast running; dam_trigger_lock */
 	struct tegra30_i2s *be_i2s;
 	enum tegra30_ahub_txcif fe_fifo_cif[NUM_FE];
 	struct tegra_pcm_dma_params fe_dma_data[NUM_FE];
 };
 
-static const int tegra_rt5671_fe_dam_ch[NUM_FE] = {
-	[FE_DEEP] = TEGRA30_DAM_CHIN0_SRC,
-	[FE_FAST] = TEGRA30_DAM_CHIN1,
+/* Which DAM input each front end feeds */
+static const struct {
+	int dam;
+	int ch;
+} tegra_rt5671_fe_input[NUM_FE] = {
+	[FE_DEEP] = { DAM_MIX, TEGRA30_DAM_CHIN0_SRC },
+	[FE_FAST] = { DAM_MIX, TEGRA30_DAM_CHIN1 },
+	[FE_HIFI] = { DAM_OUT, TEGRA30_DAM_CHIN0_SRC },
 };
+
+static inline enum tegra30_ahub_rxcif tegra_rt5671_dam_rx(int ifc, int ch)
+{
+	return TEGRA30_AHUB_RXCIF_DAM0_RX0 + ifc * 2 + ch;
+}
+
+static inline enum tegra30_ahub_txcif tegra_rt5671_dam_tx(int ifc)
+{
+	return TEGRA30_AHUB_TXCIF_DAM0_TX0 + ifc;
+}
 
 static int tegra_rt5671_set_clock(struct snd_soc_pcm_runtime *rtd,
 				int sample_size, int channel, int srate)
@@ -350,51 +386,49 @@ static struct snd_soc_ops tegra_rt5671_ops = {
 };
 
 /*
- * Playback mixer. Two front ends (deep buffer and fast) each own an APBIF
- * FIFO routed into one DAM input; the DAM mixes them in bypass at 48 kHz
- * and its output feeds the I2S of the back end, which carries AIF1.
+ * Playback mixer: three front ends and three DAMs, see the diagram at the
+ * top. The back end (I2S0 + AIF1) runs at 48 kHz, or at the hifi stream's
+ * rate when that stream is the first to open it.
  */
 
-static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
+static int tegra_rt5671_dam_init_one(int ifc, int ch0_bits, int ch1_bits,
+				     bool mixing)
 {
-	int ifc = machine->dam_ifc;
 	int ret;
 
 	tegra30_dam_enable_clock(ifc);
 
 	ret = tegra30_dam_soft_reset(ifc);
-	if (ret)
-		goto err;
-
-	ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHOUT, DAM_OUT_RATE);
+	if (!ret)
+		ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHOUT,
+						 DAM_CHAIN_RATE);
 	if (!ret)
 		ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN0_SRC,
-						 DAM_OUT_RATE);
+						 DAM_CHAIN_RATE);
 	if (!ret)
 		ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN1,
-						 DAM_OUT_RATE);
+						 DAM_CHAIN_RATE);
 	if (ret)
 		goto err;
 
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN0_SRC, DAM_GAIN_UNITY);
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN1, DAM_GAIN_UNITY);
 
-	/* Inputs start as S16; each front end's hw_params sets its own.
-	 * The output is the back end's S24, which the I2S carries in 32-bit
-	 * slots: the DAM hands it over as 32 bits, the samples at the top. */
-	ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN0_SRC, 2, 16, 2, 32);
+	/* Every DAM-to-DAM and DAM-to-I2S hop carries 32-bit words, the
+	 * samples at the top; front-end inputs are set by their hw_params */
+	ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN0_SRC,
+				   2, ch0_bits, 2, 32);
 	if (!ret)
 		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN1,
-					   2, 16, 2, 32);
+					   2, ch1_bits, 2, 32);
 	if (!ret)
 		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHOUT,
 					   2, 32, 2, 32);
 	if (ret)
 		goto err;
 
-	/* CH0 starts in bypass; the deep buffer's hw_params may change it */
 	tegra30_dam_enable_stereo_src(ifc, 0);
-	ret = tegra30_dam_enable_stereo_mixing(ifc, 1);
+	ret = tegra30_dam_enable_stereo_mixing(ifc, mixing);
 	if (ret)
 		goto err;
 
@@ -405,6 +439,97 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
 
 err:
 	tegra30_dam_disable_clock(ifc);
+	return ret;
+}
+
+static void tegra_rt5671_dam_fini_one(int ifc)
+{
+	tegra30_dam_enable_stereo_mixing(ifc, 0);
+	tegra30_dam_enable_stereo_src(ifc, 0);
+	tegra30_dam_disable_clock(ifc);
+}
+
+static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine,
+				  struct tegra30_i2s *i2s)
+{
+	int *dam = machine->dam;
+	int ret;
+
+	ret = tegra_rt5671_dam_init_one(dam[DAM_MIX], 16, 16, true);
+	if (ret)
+		return ret;
+	ret = tegra_rt5671_dam_init_one(dam[DAM_SRC], 32, 32, false);
+	if (ret)
+		goto err_mix;
+	ret = tegra_rt5671_dam_init_one(dam[DAM_OUT], 16, 32, true);
+	if (ret)
+		goto err_src;
+
+	tegra30_ahub_set_rx_cif_source(
+			tegra_rt5671_dam_rx(dam[DAM_SRC], TEGRA30_DAM_CHIN0_SRC),
+			tegra_rt5671_dam_tx(dam[DAM_MIX]));
+	tegra30_ahub_set_rx_cif_source(
+			tegra_rt5671_dam_rx(dam[DAM_OUT], TEGRA30_DAM_CHIN1),
+			tegra_rt5671_dam_tx(dam[DAM_SRC]));
+	tegra30_ahub_set_rx_cif_source(i2s->playback_i2s_cif,
+			tegra_rt5671_dam_tx(dam[DAM_OUT]));
+
+	machine->be_rate = DAM_CHAIN_RATE;
+	return 0;
+
+err_src:
+	tegra_rt5671_dam_fini_one(dam[DAM_SRC]);
+err_mix:
+	tegra_rt5671_dam_fini_one(dam[DAM_MIX]);
+	return ret;
+}
+
+static void tegra_rt5671_dam_teardown(struct tegra_rt5671 *machine,
+				      struct tegra30_i2s *i2s)
+{
+	int *dam = machine->dam;
+
+	tegra30_ahub_unset_rx_cif_source(i2s->playback_i2s_cif);
+	tegra30_ahub_unset_rx_cif_source(
+			tegra_rt5671_dam_rx(dam[DAM_OUT], TEGRA30_DAM_CHIN1));
+	tegra30_ahub_unset_rx_cif_source(
+			tegra_rt5671_dam_rx(dam[DAM_SRC], TEGRA30_DAM_CHIN0_SRC));
+
+	tegra_rt5671_dam_fini_one(dam[DAM_OUT]);
+	tegra_rt5671_dam_fini_one(dam[DAM_SRC]);
+	tegra_rt5671_dam_fini_one(dam[DAM_MIX]);
+}
+
+/*
+ * Put the chain's tail at the back-end rate. SRC converts 48 kHz to it, as
+ * stereo with its CH1 idle, or passes 48 kHz through; OUT mixes in bypass at
+ * it. Only called with no front end running (the back end's hw_params).
+ */
+static int tegra_rt5671_dam_rate(struct tegra_rt5671 *machine, int rate)
+{
+	int src = machine->dam[DAM_SRC], out = machine->dam[DAM_OUT];
+	bool convert = rate != DAM_CHAIN_RATE;
+	int ret;
+
+	tegra30_dam_enable_stereo_mixing(out, 0);
+
+	ret = tegra30_dam_set_samplerate(src, TEGRA30_DAM_CHOUT, rate);
+	if (!ret)
+		ret = tegra30_dam_set_samplerate(src, TEGRA30_DAM_CHIN0_SRC,
+						 DAM_CHAIN_RATE);
+	if (ret)
+		return ret;
+	tegra30_dam_enable_stereo_src(src, convert);
+
+	ret = tegra30_dam_set_samplerate(out, TEGRA30_DAM_CHOUT, rate);
+	if (!ret)
+		ret = tegra30_dam_set_samplerate(out, TEGRA30_DAM_CHIN0_SRC,
+						 rate);
+	if (!ret)
+		ret = tegra30_dam_set_samplerate(out, TEGRA30_DAM_CHIN1, rate);
+	if (!ret)
+		ret = tegra30_dam_enable_stereo_mixing(out, 1);
+
 	return ret;
 }
 
@@ -420,13 +545,11 @@ static int tegra_rt5671_be_startup(struct snd_pcm_substream *substream)
 
 	mutex_lock(&machine->dam_lock);
 	if (!machine->dam_users) {
-		ret = tegra_rt5671_dam_setup(machine);
+		ret = tegra_rt5671_dam_setup(machine, i2s);
 		if (ret) {
 			dev_err(rtd->card->dev, "DAM setup failed: %d\n", ret);
 			goto out;
 		}
-		tegra30_ahub_set_rx_cif_source(i2s->playback_i2s_cif,
-				TEGRA30_AHUB_TXCIF_DAM0_TX0 + machine->dam_ifc);
 	}
 	machine->dam_users++;
 out:
@@ -446,30 +569,47 @@ static void tegra_rt5671_be_shutdown(struct snd_pcm_substream *substream)
 	tegra_rt5671_shutdown(substream);
 
 	mutex_lock(&machine->dam_lock);
-	if (!--machine->dam_users) {
-		tegra30_ahub_unset_rx_cif_source(i2s->playback_i2s_cif);
-		tegra30_dam_enable_stereo_mixing(machine->dam_ifc, 0);
-		tegra30_dam_disable_clock(machine->dam_ifc);
-	}
+	if (!--machine->dam_users)
+		tegra_rt5671_dam_teardown(machine, i2s);
 	mutex_unlock(&machine->dam_lock);
 }
 
+/* The back end runs at the rate of the front end that opened it first */
+static int tegra_rt5671_be_hw_params(struct snd_pcm_substream *substream,
+				     struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
+	int rate = params_rate(params);
+	int ret;
+
+	mutex_lock(&machine->dam_lock);
+	ret = tegra_rt5671_dam_rate(machine, rate);
+	if (!ret)
+		machine->be_rate = rate;
+	mutex_unlock(&machine->dam_lock);
+	if (ret) {
+		dev_err(rtd->card->dev, "DAMs can't run at %d Hz: %d\n",
+			rate, ret);
+		return ret;
+	}
+
+	return tegra_rt5671_hw_params(substream, params);
+}
+
 /*
- * The I2S side runs at the DAM output format: 48 kHz stereo, 24 bits, so
- * that neither a 24-bit stream nor the software volume applied to a 16-bit
- * one loses resolution on its way to the codec.
+ * The back end keeps the rate of the front end that opens it (48 kHz for
+ * deep and fast, the track's own rate for hifi) and runs stereo S24, which
+ * the I2S carries in 32-bit slots.
  */
 static int tegra_rt5671_be_fixup(struct snd_soc_pcm_runtime *rtd,
 				 struct snd_pcm_hw_params *params)
 {
-	struct snd_interval *rate = hw_param_interval(params,
-						SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_interval *channels = hw_param_interval(params,
 						SNDRV_PCM_HW_PARAM_CHANNELS);
 	struct snd_mask *format = hw_param_mask(params,
 						SNDRV_PCM_HW_PARAM_FORMAT);
 
-	rate->min = rate->max = DAM_OUT_RATE;
 	channels->min = channels->max = 2;
 	snd_mask_none(format);
 	snd_mask_set(format, SNDRV_PCM_FORMAT_S24_LE);
@@ -487,6 +627,13 @@ static int tegra_rt5671_be_init(struct snd_soc_pcm_runtime *rtd)
 	machine->be_i2s = i2s;
 
 	return 0;
+}
+
+static enum tegra30_ahub_rxcif tegra_rt5671_fe_rx(struct tegra_rt5671 *m,
+						  int fe)
+{
+	return tegra_rt5671_dam_rx(m->dam[tegra_rt5671_fe_input[fe].dam],
+				   tegra_rt5671_fe_input[fe].ch);
 }
 
 static int tegra_rt5671_fe_startup(struct snd_pcm_substream *substream,
@@ -512,9 +659,8 @@ static int tegra_rt5671_fe_startup(struct snd_pcm_substream *substream,
 	dma->width = 32;
 	rtd->cpu_dai->playback_dma_data = dma;
 
-	tegra30_ahub_set_rx_cif_source(TEGRA30_AHUB_RXCIF_DAM0_RX0 +
-			machine->dam_ifc * 2 + tegra_rt5671_fe_dam_ch[fe],
-			machine->fe_fifo_cif[fe]);
+	tegra30_ahub_set_rx_cif_source(tegra_rt5671_fe_rx(machine, fe),
+				       machine->fe_fifo_cif[fe]);
 
 	return 0;
 }
@@ -525,38 +671,12 @@ static void tegra_rt5671_fe_shutdown(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
 
-	tegra30_ahub_unset_rx_cif_source(TEGRA30_AHUB_RXCIF_DAM0_RX0 +
-			machine->dam_ifc * 2 + tegra_rt5671_fe_dam_ch[fe]);
+	tegra30_ahub_unset_rx_cif_source(tegra_rt5671_fe_rx(machine, fe));
 	tegra30_ahub_free_tx_fifo(machine->fe_fifo_cif[fe]);
 	machine->fe_fifo_cif[fe] = -1;
 	rtd->cpu_dai->playback_dma_data = NULL;
 
 	tegra30_ahub_disable_clocks();
-}
-
-/*
- * Run CH0 at the deep buffer's rate. Off the output rate it goes through the
- * converter, as stereo; stereo mixing needs bypass (TRM 20.10.4.1), so it is
- * on only at the output rate.
- */
-static int tegra_rt5671_dam_ch0_rate(struct tegra_rt5671 *machine, int rate)
-{
-	int ifc = machine->dam_ifc;
-	bool src = rate != DAM_OUT_RATE;
-	int ret;
-
-	mutex_lock(&machine->dam_lock);
-	if (src)
-		tegra30_dam_enable_stereo_mixing(ifc, 0);
-	ret = tegra30_dam_set_samplerate(ifc, TEGRA30_DAM_CHIN0_SRC, rate);
-	if (!ret) {
-		tegra30_dam_enable_stereo_src(ifc, src);
-		if (!src)
-			ret = tegra30_dam_enable_stereo_mixing(ifc, 1);
-	}
-	mutex_unlock(&machine->dam_lock);
-
-	return ret;
 }
 
 static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
@@ -584,39 +704,46 @@ static int tegra_rt5671_fe_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	if (fe == FE_DEEP) {
-		ret = tegra_rt5671_dam_ch0_rate(machine, params_rate(params));
-		if (ret) {
-			dev_err(rtd->card->dev, "DAM can't take %u Hz: %d\n",
-				params_rate(params), ret);
-			return ret;
-		}
+	mutex_lock(&machine->dam_lock);
+	/* hifi plays at the back-end rate, untouched; a back end another
+	 * front end opened at a different rate cannot take it */
+	if (fe == FE_HIFI && params_rate(params) != machine->be_rate) {
+		dev_dbg(rtd->card->dev, "back end busy at %d Hz\n",
+			machine->be_rate);
+		mutex_unlock(&machine->dam_lock);
+		return -EBUSY;
 	}
+
+	/* The DAM input takes the stream as it comes; inside it is 32-bit */
+	ret = tegra30_dam_set_acif(machine->dam[tegra_rt5671_fe_input[fe].dam],
+				   tegra_rt5671_fe_input[fe].ch,
+				   params_channels(params), bits, 2, 32);
+	mutex_unlock(&machine->dam_lock);
+	if (ret)
+		return ret;
 
 	tegra30_ahub_set_tx_cif_channels(cif, params_channels(params),
 					 params_channels(params));
 	tegra30_ahub_set_tx_cif_bits(cif, cif_bits, cif_bits);
 	tegra30_ahub_set_tx_fifo_pack_mode(cif, pack);
 
-	/* The DAM input takes the stream as it comes; inside it is 32-bit */
-	mutex_lock(&machine->dam_lock);
-	ret = tegra30_dam_set_acif(machine->dam_ifc, tegra_rt5671_fe_dam_ch[fe],
-				   params_channels(params), bits, 2, 32);
-	mutex_unlock(&machine->dam_lock);
-
-	return ret;
+	return 0;
 }
 
 /*
  * DATA_SYNC as TRM 20.10.4.3/5 recommend: CH0 waits for nothing, CH1 waits
  * for CH0. CH1 may wait only while CH0 runs, or it would stall on a channel
- * that sends nothing; so the wait is set once the deep buffer has started
- * and cleared before it stops. Called under dam_trigger_lock.
+ * that sends nothing; so the wait is set once CH0's stream has started and
+ * cleared before it stops. In MIX, CH0 is deep and CH1 fast; in OUT, CH0 is
+ * hifi and CH1 the chain from SRC. Called under dam_trigger_lock.
  */
 static void tegra_rt5671_dam_sync(struct tegra_rt5671 *machine)
 {
-	tegra30_dam_ch1_set_datasync(machine->dam_ifc,
+	tegra30_dam_ch1_set_datasync(machine->dam[DAM_MIX],
 			machine->fe_running[FE_DEEP] ?
+				DAM_SYNC_WAIT_CH0 : DAM_SYNC_NONE);
+	tegra30_dam_ch1_set_datasync(machine->dam[DAM_OUT],
+			machine->fe_running[FE_HIFI] ?
 				DAM_SYNC_WAIT_CH0 : DAM_SYNC_NONE);
 }
 
@@ -624,16 +751,20 @@ static void tegra_rt5671_dam_sync(struct tegra_rt5671 *machine)
  * Called by the platform before the DMA starts and after it stops.
  *
  * Making neither channel wait does not work: CH0 stalls as soon as CH1
- * starts. Having CH0 wait for CH1, as flounder does, makes the music on CH0
- * click whenever a short sound starts or stops on CH1.
+ * starts. Having CH0 wait for CH1, as flounder does, makes the steady stream
+ * on CH0 click whenever a short sound starts or stops on CH1.
+ *
+ * deep and fast reach OUT through SRC; that path is switched on with the
+ * first of them and off after the last, downstream first going up.
  */
 static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 				   int cmd, int fe)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(rtd->card);
-	int ifc = machine->dam_ifc;
-	int ch = tegra_rt5671_fe_dam_ch[fe];
+	int ifc = machine->dam[tegra_rt5671_fe_input[fe].dam];
+	int ch = tegra_rt5671_fe_input[fe].ch;
+	bool chain = fe != FE_HIFI;
 	unsigned long flags;
 
 	spin_lock_irqsave(&machine->dam_trigger_lock, flags);
@@ -642,11 +773,19 @@ static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		machine->fe_running[fe] = true;
+		if (chain && !machine->chain_users++) {
+			tegra_rt5671_dam_sync(machine);
+			tegra30_dam_enable(machine->dam[DAM_OUT],
+					   TEGRA30_DAM_ENABLE, TEGRA30_DAM_CHIN1);
+			tegra30_dam_enable(machine->dam[DAM_SRC],
+					   TEGRA30_DAM_ENABLE,
+					   TEGRA30_DAM_CHIN0_SRC);
+		}
 		if (fe == FE_FAST)
 			tegra_rt5671_dam_sync(machine);
 		tegra30_dam_enable(ifc, TEGRA30_DAM_ENABLE, ch);
 		tegra30_ahub_enable_tx_fifo(machine->fe_fifo_cif[fe]);
-		if (fe == FE_DEEP)
+		if (fe == FE_DEEP || fe == FE_HIFI)
 			tegra_rt5671_dam_sync(machine);
 		break;
 
@@ -654,10 +793,17 @@ static int tegra_rt5671_fe_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		machine->fe_running[fe] = false;
-		if (fe == FE_DEEP)
+		if (fe == FE_DEEP || fe == FE_HIFI)
 			tegra_rt5671_dam_sync(machine);
 		tegra30_ahub_disable_tx_fifo(machine->fe_fifo_cif[fe]);
 		tegra30_dam_enable(ifc, TEGRA30_DAM_DISABLE, ch);
+		if (chain && !--machine->chain_users) {
+			tegra30_dam_enable(machine->dam[DAM_SRC],
+					   TEGRA30_DAM_DISABLE,
+					   TEGRA30_DAM_CHIN0_SRC);
+			tegra30_dam_enable(machine->dam[DAM_OUT],
+					   TEGRA30_DAM_DISABLE, TEGRA30_DAM_CHIN1);
+		}
 		break;
 
 	default:
@@ -697,9 +843,10 @@ static struct snd_soc_ops tegra_rt5671_##name##_ops = {			\
 
 TEGRA_RT5671_FE_OPS(fe_deep, FE_DEEP);
 TEGRA_RT5671_FE_OPS(fe_fast, FE_FAST);
+TEGRA_RT5671_FE_OPS(fe_hifi, FE_HIFI);
 
 static struct snd_soc_ops tegra_rt5671_be_ops = {
-	.hw_params = tegra_rt5671_hw_params,
+	.hw_params = tegra_rt5671_be_hw_params,
 	.hw_free = tegra_hw_free,
 	.startup = tegra_rt5671_be_startup,
 	.shutdown = tegra_rt5671_be_shutdown,
@@ -752,6 +899,7 @@ static const struct snd_soc_dapm_route ardbeg_audio_map[] = {
 	/* Playback front ends through the DAM into AIF1 */
 	{"DAM Mixer", NULL, "FE0 Playback"},
 	{"DAM Mixer", NULL, "FE1 Playback"},
+	{"DAM Mixer", NULL, "FE2 Playback"},
 	{"AIF1 Playback", NULL, "DAM Mixer"},
 };
 
@@ -918,6 +1066,19 @@ static struct snd_soc_dai_link tegra_rt5671_dai[NUM_DAI_LINKS] = {
 		.ops = &tegra_rt5671_fe_fast_ops,
 		.dynamic = 1,
 	},
+	/* Music on its own rate: the back end follows it when it opens
+	 * first, and it reaches the codec untouched while nothing else
+	 * plays */
+	[DAI_LINK_FE_HIFI] = {
+		.name = "rt5671 HiFi",
+		.stream_name = "rt5671 HiFi",
+		.codec_name = "snd-soc-dummy",
+		.platform_name = "tegra-pcm-audio",
+		.cpu_dai_name = "tegra-pcm-fe2",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.ops = &tegra_rt5671_fe_hifi_ops,
+		.dynamic = 1,
+	},
 	/* AIF1 playback behind the DAM; cpu, codec and platform are set
 	 * like the HIFI link's in probe */
 	[DAI_LINK_HIFI_BE] = {
@@ -1063,9 +1224,42 @@ static struct snd_soc_card snd_soc_tegra_rt5671 = {
 
 static void tegra_rt5671_free_dam(struct tegra_rt5671 *machine)
 {
-	tegra30_dam_free_channel(machine->dam_ifc, TEGRA30_DAM_CHIN0_SRC);
-	tegra30_dam_free_channel(machine->dam_ifc, TEGRA30_DAM_CHIN1);
-	tegra30_dam_free_controller(machine->dam_ifc);
+	int i;
+
+	for (i = 0; i < NUM_DAM; i++) {
+		if (machine->dam[i] < 0)
+			continue;
+		tegra30_dam_free_channel(machine->dam[i],
+					 TEGRA30_DAM_CHIN0_SRC);
+		tegra30_dam_free_channel(machine->dam[i], TEGRA30_DAM_CHIN1);
+		tegra30_dam_free_controller(machine->dam[i]);
+		machine->dam[i] = -1;
+	}
+}
+
+static int tegra_rt5671_alloc_dam(struct tegra_rt5671 *machine,
+				  struct device *dev)
+{
+	int i, ret;
+
+	for (i = 0; i < NUM_DAM; i++)
+		machine->dam[i] = -1;
+
+	for (i = 0; i < NUM_DAM; i++) {
+		ret = tegra30_dam_allocate_controller();
+		if (ret < 0) {
+			if (ret != -EPROBE_DEFER)
+				dev_err(dev, "No DAM %d for the mixer: %d\n",
+					i, ret);
+			tegra_rt5671_free_dam(machine);
+			return ret;
+		}
+		machine->dam[i] = ret;
+		tegra30_dam_allocate_channel(ret, TEGRA30_DAM_CHIN0_SRC);
+		tegra30_dam_allocate_channel(ret, TEGRA30_DAM_CHIN1);
+	}
+
+	return 0;
 }
 
 static int tegra_rt5671_driver_probe(struct platform_device *pdev)
@@ -1151,16 +1345,11 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	spin_lock_init(&machine->dam_trigger_lock);
 	machine->fe_fifo_cif[FE_DEEP] = -1;
 	machine->fe_fifo_cif[FE_FAST] = -1;
+	machine->fe_fifo_cif[FE_HIFI] = -1;
 
-	machine->dam_ifc = tegra30_dam_allocate_controller();
-	if (machine->dam_ifc < 0) {
-		ret = machine->dam_ifc;
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "No DAM for the mixer: %d\n", ret);
+	ret = tegra_rt5671_alloc_dam(machine, &pdev->dev);
+	if (ret)
 		goto err_free_machine;
-	}
-	tegra30_dam_allocate_channel(machine->dam_ifc, TEGRA30_DAM_CHIN0_SRC);
-	tegra30_dam_allocate_channel(machine->dam_ifc, TEGRA30_DAM_CHIN1);
 
 	ret = tegra_asoc_utils_init(&machine->util_data, &pdev->dev, card);
 	if (ret)
