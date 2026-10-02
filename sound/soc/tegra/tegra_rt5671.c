@@ -380,14 +380,15 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine)
 	tegra30_dam_set_gain(ifc, TEGRA30_DAM_CHIN1, DAM_GAIN_UNITY);
 
 	/* Inputs start as S16; each front end's hw_params sets its own.
-	 * The output is the back end's S24. */
+	 * The output is the back end's S24, which the I2S carries in 32-bit
+	 * slots: the DAM hands it over as 32 bits, the samples at the top. */
 	ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN0_SRC, 2, 16, 2, 32);
 	if (!ret)
 		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHIN1,
 					   2, 16, 2, 32);
 	if (!ret)
 		ret = tegra30_dam_set_acif(ifc, TEGRA30_DAM_CHOUT,
-					   2, 24, 2, 32);
+					   2, 32, 2, 32);
 	if (ret)
 		goto err;
 
