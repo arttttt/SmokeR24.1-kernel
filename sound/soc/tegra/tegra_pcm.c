@@ -413,6 +413,9 @@ EXPORT_SYMBOL_GPL(tegra_pcm_platform_unregister);
  * machine driver gives each one an APBIF FIFO and routes it, e.g. into a
  * DAM input, and the DMA runs through the platform above.
  *
+ * Both take S16 and S24 (24 bits in a 32-bit word); the DAM works in 32
+ * bits inside, so each input may carry either.
+ *
  * fe0 is meant for DAM CH0, whose rate converter takes the DAM's rates
  * (24 kHz has no ALSA rate bit, and 64 kHz is not among them); fe1 for CH1,
  * which has no converter and runs at the DAM output rate.
@@ -433,7 +436,8 @@ static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 			.channels_min = 2,
 			.channels_max = 2,
 			.rates = TEGRA_PCM_FE0_RATES,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE |
+				   SNDRV_PCM_FMTBIT_S24_LE,
 		},
 	},
 	{
@@ -444,7 +448,8 @@ static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 			.channels_min = 2,
 			.channels_max = 2,
 			.rates = SNDRV_PCM_RATE_48000,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE |
+				   SNDRV_PCM_FMTBIT_S24_LE,
 		},
 	},
 };
