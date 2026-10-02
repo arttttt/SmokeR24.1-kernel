@@ -458,7 +458,7 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine,
 	ret = tegra_rt5671_dam_init_one(dam[DAM_MIX], 16, 16, true);
 	if (ret)
 		return ret;
-	ret = tegra_rt5671_dam_init_one(dam[DAM_SRC], 32, 32, false);
+	ret = tegra_rt5671_dam_init_one(dam[DAM_SRC], 32, 32, true);
 	if (ret)
 		goto err_mix;
 	ret = tegra_rt5671_dam_init_one(dam[DAM_OUT], 16, 32, true);
@@ -504,6 +504,11 @@ static void tegra_rt5671_dam_teardown(struct tegra_rt5671 *machine,
  * Put the chain's tail at the back-end rate. SRC converts 48 kHz to it, as
  * stereo with its CH1 idle, or passes 48 kHz through; OUT mixes in bypass at
  * it. Only called with no front end running (the back end's hw_params).
+ *
+ * A DAM's CH0 is stereo only with STEREO_SRC_EN (converting) or
+ * STEREO_MIXING_EN (bypass) set; with neither it takes each stereo frame as
+ * two mono samples and runs at half speed. So SRC, idle CH1 or not, keeps
+ * stereo mixing on whenever it passes 48 kHz through.
  */
 static int tegra_rt5671_dam_rate(struct tegra_rt5671 *machine, int rate)
 {
@@ -512,6 +517,7 @@ static int tegra_rt5671_dam_rate(struct tegra_rt5671 *machine, int rate)
 	int ret;
 
 	tegra30_dam_enable_stereo_mixing(out, 0);
+	tegra30_dam_enable_stereo_mixing(src, 0);
 
 	ret = tegra30_dam_set_samplerate(src, TEGRA30_DAM_CHOUT, rate);
 	if (!ret)
@@ -520,6 +526,11 @@ static int tegra_rt5671_dam_rate(struct tegra_rt5671 *machine, int rate)
 	if (ret)
 		return ret;
 	tegra30_dam_enable_stereo_src(src, convert);
+	if (!convert) {
+		ret = tegra30_dam_enable_stereo_mixing(src, 1);
+		if (ret)
+			return ret;
+	}
 
 	ret = tegra30_dam_set_samplerate(out, TEGRA30_DAM_CHOUT, rate);
 	if (!ret)
