@@ -413,19 +413,14 @@ EXPORT_SYMBOL_GPL(tegra_pcm_platform_unregister);
  * machine driver gives each one an APBIF FIFO and routes it, e.g. into a
  * DAM input, and the DMA runs through the platform above.
  *
- * Both take S16 and S24 (24 bits in a 32-bit word); the DAM works in 32
- * bits inside, so each input may carry either.
- *
- * fe0 is meant for DAM CH0, whose rate converter takes the DAM's rates
- * (24 kHz has no ALSA rate bit, and 64 kHz is not among them); fe1 for CH1,
- * which has no converter and runs at the DAM output rate.
+ * All take S16 and S24 (24 bits in a 32-bit word); the DAM works in 32 bits
+ * inside. fe0 and fe1 are mixed at 48 kHz. fe2 carries a stream at its own
+ * rate, up to what the codec's AIF1 takes, and the back end follows it.
  */
-#define TEGRA_PCM_FE0_RATES	(SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 | \
-				 SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 | \
-				 SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 | \
-				 SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_88200 | \
-				 SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_176400 | \
-				 SNDRV_PCM_RATE_192000)
+#define TEGRA_PCM_FE_FORMATS	(SNDRV_PCM_FMTBIT_S16_LE | \
+				 SNDRV_PCM_FMTBIT_S24_LE)
+#define TEGRA_PCM_FE2_RATES	(SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_48000 | \
+				 SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000)
 
 static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 	{
@@ -435,9 +430,8 @@ static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 			.stream_name = "FE0 Playback",
 			.channels_min = 2,
 			.channels_max = 2,
-			.rates = TEGRA_PCM_FE0_RATES,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE |
-				   SNDRV_PCM_FMTBIT_S24_LE,
+			.rates = SNDRV_PCM_RATE_48000,
+			.formats = TEGRA_PCM_FE_FORMATS,
 		},
 	},
 	{
@@ -448,8 +442,18 @@ static struct snd_soc_dai_driver tegra_pcm_fe_dai[] = {
 			.channels_min = 2,
 			.channels_max = 2,
 			.rates = SNDRV_PCM_RATE_48000,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE |
-				   SNDRV_PCM_FMTBIT_S24_LE,
+			.formats = TEGRA_PCM_FE_FORMATS,
+		},
+	},
+	{
+		.name = "tegra-pcm-fe2",
+		.id = 2,
+		.playback = {
+			.stream_name = "FE2 Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = TEGRA_PCM_FE2_RATES,
+			.formats = TEGRA_PCM_FE_FORMATS,
 		},
 	},
 };
