@@ -863,6 +863,64 @@ static int rt5671_da_sto_asrc_put(struct snd_kcontrol *kcontrol,
 	return snd_soc_put_enum_double(kcontrol, ucontrol);
 }
 
+/*
+ * Select the ASRC clock of a set of filters from the machine driver, as
+ * mainline rt5670_sel_asrc_clk_src() does. The filter's ASRC supply is
+ * a DAPM supply checked on the next power walk; when the filter is
+ * already powered the enable bit in ASRC_1 is set here, as the ASRC
+ * Switch controls above do.
+ */
+static const struct {
+	unsigned int filter;
+	unsigned int reg;
+	unsigned int shift;
+	unsigned int asrc_en;
+	unsigned int pwr;
+} rt5671_asrc_filters[] = {
+	{ RT5671_DA_STEREO_FILTER, RT5671_ASRC_2, 12, 0x400, RT5671_PWR_DAC_S1F },
+	{ RT5671_DA_MONO_L_FILTER, RT5671_ASRC_2, 8, 0x200, RT5671_PWR_DAC_MF_L },
+	{ RT5671_DA_MONO_R_FILTER, RT5671_ASRC_2, 4, 0x100, RT5671_PWR_DAC_MF_R },
+	{ RT5671_AD_STEREO_FILTER, RT5671_ASRC_2, 0, 0x8, RT5671_PWR_ADC_S1F },
+	{ RT5671_AD_MONO_L_FILTER, RT5671_ASRC_3, 4, 0x2, RT5671_PWR_ADC_MF_L },
+	{ RT5671_AD_MONO_R_FILTER, RT5671_ASRC_3, 0, 0x1, RT5671_PWR_ADC_MF_R },
+	{ RT5671_UP_RATE_FILTER, RT5671_ASRC_3, 12, 0, 0 },
+	{ RT5671_DOWN_RATE_FILTER, RT5671_ASRC_3, 8, 0, 0 },
+};
+
+int rt5671_sel_asrc_clk_src(struct snd_soc_codec *codec,
+		unsigned int filter_mask, unsigned int clk_src)
+{
+	bool tracking = clk_src >= RT5671_CLK_SEL_I2S1_ASRC &&
+			clk_src <= RT5671_CLK_SEL_I2S4_ASRC;
+	unsigned int pwr;
+	int i;
+
+	if (clk_src > RT5671_CLK_SEL_SYS5)
+		return -EINVAL;
+
+	pwr = snd_soc_read(codec, RT5671_PWR_DIG2);
+
+	for (i = 0; i < ARRAY_SIZE(rt5671_asrc_filters); i++) {
+		unsigned int shift = rt5671_asrc_filters[i].shift;
+		unsigned int en = rt5671_asrc_filters[i].asrc_en;
+
+		if (!(filter_mask & rt5671_asrc_filters[i].filter))
+			continue;
+
+		if (en && !tracking)
+			snd_soc_update_bits(codec, RT5671_ASRC_1, en, 0);
+
+		snd_soc_update_bits(codec, rt5671_asrc_filters[i].reg,
+				    0xf << shift, clk_src << shift);
+
+		if (en && tracking && (pwr & rt5671_asrc_filters[i].pwr))
+			snd_soc_update_bits(codec, RT5671_ASRC_1, en, en);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rt5671_sel_asrc_clk_src);
+
 static const char *rt5671_push_btn_mode[] = {
 	"Disable", "read"
 };

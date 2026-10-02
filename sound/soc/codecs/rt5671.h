@@ -2085,4 +2085,32 @@ struct rt5671_priv {
 int rt5671_conn_mux_path(struct snd_soc_codec *codec,
 		char *widget_name, char *path_name);
 
+/* ASRC clock source, the value of an ASRC_2/ASRC_3 filter field */
+enum {
+	RT5671_CLK_SEL_SYS,
+	RT5671_CLK_SEL_I2S1_ASRC,
+	RT5671_CLK_SEL_I2S2_ASRC,
+	RT5671_CLK_SEL_I2S3_ASRC,
+	RT5671_CLK_SEL_I2S4_ASRC,
+	RT5671_CLK_SEL_SYS2,
+	RT5671_CLK_SEL_SYS3,
+	RT5671_CLK_SEL_SYS4,
+	RT5671_CLK_SEL_SYS5,
+};
+
+/* Filters for rt5671_sel_asrc_clk_src() */
+enum {
+	RT5671_DA_STEREO_FILTER = 0x1,
+	RT5671_DA_MONO_L_FILTER = (0x1 << 1),
+	RT5671_DA_MONO_R_FILTER = (0x1 << 2),
+	RT5671_AD_STEREO_FILTER = (0x1 << 3),
+	RT5671_AD_MONO_L_FILTER = (0x1 << 4),
+	RT5671_AD_MONO_R_FILTER = (0x1 << 5),
+	RT5671_UP_RATE_FILTER   = (0x1 << 6),
+	RT5671_DOWN_RATE_FILTER = (0x1 << 7),
+};
+
+int rt5671_sel_asrc_clk_src(struct snd_soc_codec *codec,
+		unsigned int filter_mask, unsigned int clk_src);
+
 #endif /* __RT5671_H__ */
