@@ -551,7 +551,8 @@ static int tegra30_i2s_tdm_hw_params(struct snd_pcm_substream *substream,
 }
 
 static void tegra30_i2s_set_pb_fifo_format(struct tegra30_i2s *i2s,
-					   int channels, int sample_size)
+					   int channels, int sample_size,
+					   int mem_bits)
 {
 	tegra30_ahub_set_tx_cif_channels(i2s->playback_fifo_cif,
 					 channels,
@@ -580,7 +581,8 @@ static void tegra30_i2s_set_pb_fifo_format(struct tegra30_i2s *i2s,
 
 	case 32:
 		tegra30_ahub_set_tx_cif_bits(i2s->playback_fifo_cif,
-		  TEGRA30_AUDIOCIF_BITS_32, TEGRA30_AUDIOCIF_BITS_32);
+		  TEGRA30_AUDIOCIF_BITS_32, mem_bits == 24 ?
+		  TEGRA30_AUDIOCIF_BITS_24 : TEGRA30_AUDIOCIF_BITS_32);
 		tegra30_ahub_set_tx_fifo_pack_mode(i2s->playback_fifo_cif, 0);
 		break;
 
@@ -599,26 +601,35 @@ static int tegra30_i2s_hw_params(struct snd_pcm_substream *substream,
 	unsigned int mask, val, reg, reg_ctrl, i;
 	int ret, sample_size, srate, i2sclock, bitcnt, sym_bitclk;
 	int i2s_client_ch;
+	int mem_bits;	/* bits per sample on the memory side of the FIFO */
 
 	mask = TEGRA30_I2S_CTRL_BIT_SIZE_MASK;
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S8:
 		val = TEGRA30_I2S_CTRL_BIT_SIZE_8;
 		sample_size = 8;
+		mem_bits = 8;
 		break;
 	case SNDRV_PCM_FORMAT_S16_LE:
 		val = TEGRA30_I2S_CTRL_BIT_SIZE_16;
 		sample_size = 16;
+		mem_bits = 16;
 		break;
 	case SNDRV_PCM_FORMAT_S24_LE:
-	/* Fallthrough
-	 * for 24 bit audio we support only S24_LE (S24_3LE is not
-	 * supported) which is rendered on bus in 32 bits packet so
-	 * consider as 32 bit
-	 */
+		/*
+		 * S24_LE goes on the bus in a 32-bit slot, so the I2S and its
+		 * CIF run at 32 bits. The FIFO's memory side stays at 24: the
+		 * CIF moves the 24 bits to the top of the slot on the way out
+		 * and takes the top 24 back on the way in (TRM 20.2.2).
+		 */
+		val = TEGRA30_I2S_CTRL_BIT_SIZE_32;
+		sample_size = 32;
+		mem_bits = 24;
+		break;
 	case SNDRV_PCM_FORMAT_S32_LE:
 		val = TEGRA30_I2S_CTRL_BIT_SIZE_32;
 		sample_size = 32;
+		mem_bits = 32;
 		break;
 	default:
 		return -EINVAL;
@@ -766,7 +777,8 @@ static int tegra30_i2s_hw_params(struct snd_pcm_substream *substream,
 
 		if (tegra30_i2s_has_pb_fifo(i2s))
 			tegra30_i2s_set_pb_fifo_format(i2s,
-					params_channels(params), sample_size);
+					params_channels(params), sample_size,
+					mem_bits);
 	} else {
 		val |= TEGRA30_AUDIOCIF_CTRL_DIRECTION_TX;
 		reg = TEGRA30_I2S_CIF_TX_CTRL;
@@ -798,7 +810,8 @@ static int tegra30_i2s_hw_params(struct snd_pcm_substream *substream,
 
 		case 32:
 			tegra30_ahub_set_rx_cif_bits(i2s->capture_fifo_cif,
-			  TEGRA30_AUDIOCIF_BITS_32, TEGRA30_AUDIOCIF_BITS_32);
+			  TEGRA30_AUDIOCIF_BITS_32, mem_bits == 24 ?
+			  TEGRA30_AUDIOCIF_BITS_24 : TEGRA30_AUDIOCIF_BITS_32);
 			tegra30_ahub_set_rx_fifo_pack_mode(i2s->capture_fifo_cif, 0);
 			break;
 
