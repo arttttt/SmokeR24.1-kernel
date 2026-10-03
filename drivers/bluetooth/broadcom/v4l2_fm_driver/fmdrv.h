@@ -26,6 +26,7 @@
 #ifndef _FM_DRV_H
 #define _FM_DRV_H
 
+#include <linux/mutex.h>
 #include <linux/skbuff.h>
 #include <linux/interrupt.h>
 #include <sound/core.h>
@@ -213,6 +214,15 @@ struct fm_device_info {
 /* FM driver operation structure */
 struct fmdrv_ops {
     struct video_device *radio_dev;   /* V4L2 video device pointer */
+    /*
+     * Serialises everything that talks to the chip: every ioctl (the V4L2
+     * core takes it as the video device's lock), open, release and the
+     * sysfs stores. The command path has a single response slot and a
+     * single completion per caller kind, so two callers at once took each
+     * other's responses. read() and poll() only touch the RDS ring and
+     * stay outside it, so a blocking RDS read does not hold off ioctls.
+     */
+    struct mutex mutex;
     spinlock_t resp_skb_lock;         /* To protect access to received SKB */
     spinlock_t rds_cbuff_lock;        /* To protect access to RDS Circular buffer */
 

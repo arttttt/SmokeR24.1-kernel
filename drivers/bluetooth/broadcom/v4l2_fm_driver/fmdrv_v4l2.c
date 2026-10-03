@@ -568,7 +568,21 @@ static struct attribute_group v4l2_fm_attr_grp = {
 /* Handle open request for "/dev/radioX" device.
  * Start with FM RX mode as default.
  */
+static int fm_v4l2_fops_open_locked(struct file *file);
+
 static int fm_v4l2_fops_open(struct file *file)
+{
+    struct fmdrv_ops *fmdev = video_drvdata(file);
+    int ret;
+
+    if (mutex_lock_interruptible(&fmdev->mutex))
+        return -ERESTARTSYS;
+    ret = fm_v4l2_fops_open_locked(file);
+    mutex_unlock(&fmdev->mutex);
+    return ret;
+}
+
+static int fm_v4l2_fops_open_locked(struct file *file)
 {
     int ret = -EINVAL;
     unsigned char option;
@@ -674,7 +688,21 @@ err_inc_avail:
 
 /* Handle close request for "/dev/radioX" device.
  */
+static int fm_v4l2_fops_release_locked(struct file *file);
+
 static int fm_v4l2_fops_release(struct file *file)
+{
+    struct fmdrv_ops *fmdev = video_drvdata(file);
+    int ret;
+
+    /* release cannot be interrupted: the chip has to be turned off */
+    mutex_lock(&fmdev->mutex);
+    ret = fm_v4l2_fops_release_locked(file);
+    mutex_unlock(&fmdev->mutex);
+    return ret;
+}
+
+static int fm_v4l2_fops_release_locked(struct file *file)
 {
     int ret =  -EINVAL;
     struct fmdrv_ops *fmdev;
@@ -1135,6 +1163,8 @@ int fm_v4l2_init_video_device(struct fmdrv_ops *fmdev, int radio_nr)
     memcpy(gradio_dev, &fm_viddev_template, sizeof(fm_viddev_template));
 
     video_set_drvdata(gradio_dev, fmdev);
+    /* the V4L2 core holds it around every ioctl */
+    gradio_dev->lock = &fmdev->mutex;
 
     /* Register with V4L2 subsystem as RADIO device */
     if (video_register_device(gradio_dev, VFL_TYPE_RADIO, radio_nr)) {

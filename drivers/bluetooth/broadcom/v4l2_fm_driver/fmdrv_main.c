@@ -1652,6 +1652,8 @@ static int __init fm_drv_init(void)
         return ret;
     }
 
+    mutex_init(&fmdev->mutex);
+
     fmdev->rx.rds.buf_size = default_rds_buf * FM_RDS_TUPLE_LENGTH;
     /* Allocate memory for RDS ring buffer */
     fmdev->rx.rds.cbuffer = kzalloc(fmdev->rx.rds.buf_size, GFP_KERNEL);
