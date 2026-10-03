@@ -697,10 +697,10 @@ int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
 
     if (!skb)
     {
-        /* expired, or refused by the line discipline */
-        pr_err("(fmdrv): Timeout(%d sec),didn't get reg"
-                            "completion signal from RX tasklet",
-                                        jiffies_to_msecs(FM_DRV_TX_TIMEOUT) / 1000);
+        /* expired or refused by the line discipline -- both logged where
+         * it happened; the old "Timeout ... from RX tasklet" was misleading */
+        V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv): FM opcode 0x%02x got no response",
+                        fmreg_index);
         return -ETIMEDOUT;
     }
 
@@ -718,16 +718,31 @@ int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
         //V4L2_FM_DRV_DBG("(fmdrv): Reponse status success : %d ", cmd_complete_hdr->status);
         /* Send reponse data to caller */
         if (reponse != NULL && reponse_len != NULL && fm_evt_hdr->len) {
-            /* The data length the event header claims, bounded by what
-             * arrived: the header was copied from blindly before. The
-             * caller's buffer is sized for the read length it asked for. */
+            /*
+             * Callers hand a buffer sized for the read they asked for, and
+             * a register read asks for its length in the first payload byte.
+             * The copy is bounded by that, as well as by what the event
+             * header claims and by what arrived -- a corrupt length byte or
+             * a late answer with the same opcode used to overrun the 1- or
+             * 2-byte buffer on the caller's stack. A response shorter than
+             * the read fails the call: callers use the buffer unchecked.
+             */
             int data_len = (int)fm_evt_hdr->len - FM_CMD_COMPLETE_HDR_SIZE;
             int have = (int)skb->len - (FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE);
+            int want = (type == REG_RD && payload != NULL && payload_len > 0)
+                        ? *(unsigned char *)payload : data_len;
 
             if (data_len > have)
                 data_len = have;
-            if (data_len < 0)
-                data_len = 0;
+            if (data_len > want)
+                data_len = want;
+            if (data_len < want || data_len < 0)
+            {
+                pr_err("(fmdrv): short response to FM opcode 0x%02x: %d of %d bytes",
+                       fmreg_index, data_len < 0 ? 0 : data_len, want);
+                kfree_skb(skb);
+                return -EIO;
+            }
             /* Skip header info and copy only response data */
             skb_pull(skb, (FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE));
             memcpy(reponse, skb->data, data_len);
