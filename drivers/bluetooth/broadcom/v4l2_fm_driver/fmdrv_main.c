@@ -381,7 +381,10 @@ static void fm_receive_data_ldisc(struct work_struct *w)
              * the next command, and when it fires for this one it finds
              * the sequence moved on and does nothing */
 
-            if (fm && opcode == FM_REG_FM_RDS_MSK)
+            /* The tune/seek setup freezes interrupt handling until its own
+             * mask write is answered; the mask writes the driver issues
+             * after each RDS read must not lift that freeze early. */
+            if (fm && opcode == FM_REG_FM_RDS_MSK && waiter)
                 fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
 
             if (waiter)
