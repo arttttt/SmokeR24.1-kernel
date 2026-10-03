@@ -240,6 +240,7 @@ struct fmdrv_ops {
      */
     spinlock_t cmd_lock;
     bool cmd_busy;                     /* a command is with the chip */
+    bool cmd_stopping;                 /* release is taking the channel down */
     unsigned int cmd_seq;              /* number of the command in flight */
     unsigned int cmd_expire_seq;       /* command cmd_expire is timing */
     unsigned char cmd_opcode;          /* its FM opcode */

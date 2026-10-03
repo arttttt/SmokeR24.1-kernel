@@ -436,7 +436,7 @@ static void fm_send_data_ldisc(struct work_struct *w)
     long len;
 
     spin_lock_irqsave(&fmdev->cmd_lock, flags);
-    if (fmdev->cmd_busy)
+    if (fmdev->cmd_busy || fmdev->cmd_stopping)
     {
         spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
         return;
@@ -476,7 +476,7 @@ static void fm_send_data_ldisc(struct work_struct *w)
             fmdev->cmd_waiter = NULL;
         }
     }
-    else if (fmdev->cmd_busy && fmdev->cmd_seq == seq)
+    else if (fmdev->cmd_busy && fmdev->cmd_seq == seq && !fmdev->cmd_stopping)
     {
         /* still waiting for its answer: time it from now */
         fmdev->cmd_expire_seq = seq;
@@ -507,9 +507,10 @@ static void fm_cmd_expire(struct work_struct *w)
     bool vsc;
 
     spin_lock_irqsave(&fmdev->cmd_lock, flags);
-    if (!fmdev->cmd_busy || fmdev->cmd_seq != fmdev->cmd_expire_seq)
+    if (!fmdev->cmd_busy || fmdev->cmd_seq != fmdev->cmd_expire_seq ||
+        fmdev->cmd_stopping)
     {
-        /* answered meanwhile */
+        /* answered meanwhile, or the channel is going down */
         spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
         return;
     }
@@ -1669,6 +1670,13 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
         return ret;
     }
 
+    /* The channel is set up before the line discipline can deliver to
+     * it; its works and queues were initialised once, with the device. */
+    fmdev->cmd_stopping = false;
+    fmdev->cmd_busy = false;
+    fmdev->cmd_waiter = NULL;
+    fmdev->cmd_resp = NULL;
+
     memset(&fm_st_proto, 0, sizeof(fm_st_proto));
     fm_st_proto.type = PROTO_SH_FM;
     fm_st_proto.recv = fm_st_receive;
@@ -1700,18 +1708,6 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
         return ret;
     }
 
-    /* The command channel starts empty and free */
-    spin_lock_init(&fmdev->cmd_lock);
-    skb_queue_head_init(&fmdev->tx_q);
-    skb_queue_head_init(&fmdev->rx_q);
-    INIT_WORK(&fmdev->tx_workqueue, fm_send_data_ldisc);
-    INIT_WORK(&fmdev->rx_workqueue, fm_receive_data_ldisc);
-    INIT_DELAYED_WORK(&fmdev->cmd_expire, fm_cmd_expire);
-    fmdev->cmd_busy = false;
-    fmdev->cmd_waiter = NULL;
-    fmdev->cmd_resp = NULL;
-    init_completion(&fmdev->tune_completion);
-    init_completion(&fmdev->seektask_completion);
 
     /* Do all the broadcom FM hardware specific initialization */
     fmdev->rx.curr_mute_mode = FM_MUTE_OFF;
@@ -1748,6 +1744,7 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
  */
 int fmc_release(struct fmdrv_ops *fmdev)
 {
+    unsigned long flags;
     int ret;
     V4L2_FM_DRV_DBG(V4L2_DBG_CLOSE, "(fmdrv) %s", __func__);
 
@@ -1765,9 +1762,21 @@ int fmc_release(struct fmdrv_ops *fmdev)
     else
         V4L2_FM_DRV_DBG(V4L2_DBG_CLOSE, "(fmdrv): Successfully unregistered from  HCI LDisc");
 
+    /*
+     * Stop the channel: with cmd_stopping set the tx work sends and arms
+     * nothing and cmd_expire wakes no tx work. Cancelled rx, then tx, then
+     * the timer -- rx may kick tx and tx may arm the timer, so each goes
+     * after what could restart it. The timer used to be cancelled before
+     * tx, which could re-arm it; the next open then re-initialised a
+     * pending work, and module exit destroyed its queue under it.
+     */
+    spin_lock_irqsave(&fmdev->cmd_lock, flags);
+    fmdev->cmd_stopping = true;
+    spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+
     cancel_work_sync(&fmdev->rx_workqueue);
-    cancel_delayed_work_sync(&fmdev->cmd_expire);
     cancel_work_sync(&fmdev->tx_workqueue);
+    cancel_delayed_work_sync(&fmdev->cmd_expire);
 
     /* Sevice pending read */
     wake_up_interruptible(&fmdev->rx.rds.read_queue);
@@ -1811,6 +1820,18 @@ static int __init fm_drv_init(void)
     mutex_init(&fmdev->mutex);
     spin_lock_init(&fmdev->rds_cbuff_lock);
     init_waitqueue_head(&fmdev->rx.rds.read_queue);
+
+    /* The command channel's works and queues, once for the device's life:
+     * initialising them on every open could do so under a pending work */
+    spin_lock_init(&fmdev->cmd_lock);
+    skb_queue_head_init(&fmdev->tx_q);
+    skb_queue_head_init(&fmdev->rx_q);
+    INIT_WORK(&fmdev->tx_workqueue, fm_send_data_ldisc);
+    INIT_WORK(&fmdev->rx_workqueue, fm_receive_data_ldisc);
+    INIT_DELAYED_WORK(&fmdev->cmd_expire, fm_cmd_expire);
+    init_completion(&fmdev->tune_completion);
+    init_completion(&fmdev->seektask_completion);
+    init_completion(&fmdev->maintask_completion);
     fmdev->curr_fmmode = FM_MODE_OFF;
 
     fmdev->rx.rds.buf_size = default_rds_buf * FM_RDS_TUPLE_LENGTH;
