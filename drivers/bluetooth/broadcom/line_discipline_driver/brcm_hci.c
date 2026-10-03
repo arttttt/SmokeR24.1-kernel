@@ -442,9 +442,10 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
                     if (unlikely(brcm->rx_skb->data[0]==0x04
                         && brcm->rx_skb->data[4]==0x09
                         && brcm->rx_skb->data[5]==0x10 )) {
-                        brcm->resp_buffer[0] = brcm->rx_skb->cb[0];
+                        /* the frame, not a fixed RESP_BUFF_SIZE past it */
                         memcpy(brcm->resp_buffer, brcm->rx_skb->data,
-                                                           RESP_BUFF_SIZE);
+                               min_t(unsigned int, brcm->rx_skb->len,
+                                     RESP_BUFF_SIZE));
                     }
                     complete_all(&hu->cmd_rcvd);
 #if V4L2_SNOOP_ENABLE

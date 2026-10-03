@@ -653,8 +653,9 @@ static ssize_t store_vendor_params(struct device *dev,
 static ssize_t store_bdaddr(struct device *dev,
         struct device_attribute *attr, char *buf,size_t size)
 {
-    /* bounded: bd_addr holds 17 characters and a NUL */
+    /* bounded: bd_addr holds 17 characters and a NUL; no trailing newline */
     snprintf(bd_addr, sizeof(bd_addr), "%s", buf);
+    bd_addr[strcspn(bd_addr, "\n")] = '\0';
 
     pr_info("store_bdaddr  %s  size %d",bd_addr,size);
     return size;
@@ -873,7 +874,9 @@ void brcm_hci_uart_route_frame(enum proto_type protoid, struct hci_uart *hu,
 #if V4L2_SNOOP_ENABLE
     if(nl_sk_hcisnoop)
     {
+        /* bytes 11 and 12 exist only in frames that long */
         if (!(hu->is_registered[PROTO_SH_ANT] || hu->is_registered[PROTO_SH_FM])
+           || skb->len < 13
            || (skb->data)[11] != 0x03 || (skb->data)[12] != 0x0c)
         {
             /* forward to hcisnoop */
