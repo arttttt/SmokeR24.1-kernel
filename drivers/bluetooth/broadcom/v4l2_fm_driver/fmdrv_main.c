@@ -197,8 +197,8 @@ MODULE_PARM_DESC(radio_nr, "Radio Nr");
 
 long (*g_bcm_write) (struct sk_buff *skb);
 
-int parse_inrpt_flags(struct fmdrv_ops *fmdev);
-int parse_rds_data(struct fmdrv_ops *fmdev);
+int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb);
+int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb);
 void send_read_intrp_cmd(struct fmdrv_ops *fmdev);
 int read_rds_data(struct fmdrv_ops *);
 
@@ -272,26 +272,44 @@ void fmc_update_region_info(struct fmdrv_ops *fmdev,
 }
 
 /*
-* FM common sub-module will schedule this tasklet whenever it receives
-* FM packet from ST driver.
-*/
-#ifdef TASKLET_SUPPORT
-static void __recv_tasklet(unsigned long arg)
+ * The command channel.
+ *
+ * The chip takes one command at a time and answers it with an HCI Command
+ * Complete that carries the FM opcode -- or, for the FC61 PCM pin switch, the
+ * FC61 opcode itself. Commands wait in tx_q; the tx work sends the next one
+ * only when none is in flight. The command in flight is described by the
+ * cmd_* fields under cmd_lock: its sequence number, opcode, whether it is the
+ * FC61 VSC, and the completion of the caller waiting for it -- NULL for the
+ * flag reads, RDS reads and mask writes the driver issues by itself, whose
+ * responses are handled where they land, in the rx work.
+ *
+ * A response is matched against the command in flight. One that matches
+ * nothing -- late, unexpected -- is freed with a log line, never stored for
+ * someone else to pick up and never left blocking the channel.
+ *
+ * The channel times its commands itself: cmd_expire fires FM_DRV_TX_TIMEOUT
+ * after a command has been handed to the line discipline, takes it out of
+ * flight, wakes its caller with no response and lets the next one go. Before,
+ * a lost response left the channel closed for good, silently so for the
+ * driver's own reads. A response that comes after its command expired is a
+ * late one; if a command with the same opcode is in flight by then it is
+ * taken as that command's answer -- the chip answers in order, so only one
+ * read after a lost response can see stale data.
+ */
+static void fm_cmd_kick(struct fmdrv_ops *fmdev)
 {
-    struct fmdrv_ops *fmdev;
-    fmdev = (struct fmdrv_ops *)arg;
-#else
+    queue_work(fmdev->tx_wq, &fmdev->tx_workqueue);
+}
+
+/* rx work: route what the chip sent */
 static void fm_receive_data_ldisc(struct work_struct *w)
 {
     struct fmdrv_ops *fmdev = container_of(w, struct fmdrv_ops,rx_workqueue);
-#endif
-    //struct fmdrv_ops *fmdev;
     struct fm_event_msg_hdr *fm_evt_hdr;
     struct sk_buff *skb;
     unsigned long flags;
     unsigned char sub_event, *p;
 
-    /* Process all packets in the RX queue */
     while ((skb = skb_dequeue(&fmdev->rx_q)))
     {
         if (skb->len < sizeof(struct fm_event_msg_hdr))
@@ -309,59 +327,72 @@ static void fm_receive_data_ldisc(struct work_struct *w)
         fm_evt_hdr = (void *)skb->data;
         if (fm_evt_hdr->event_id == HCI_EV_CMD_COMPLETE)
         {
-            struct fm_cmd_complete_hdr *cmd_complete_hdr;
-            cmd_complete_hdr = (struct fm_cmd_complete_hdr *) &skb->data [FM_EVT_MSG_HDR_SIZE];
-            /*parsing the Opcode FC61 response since it is sent by */
-            /*FM driver to switch I2S path. Unlike other FM commands*/
-            /*FC61 response comes with HCI event*/
-            if (((unsigned char )skb->data[4] == 0x61) &&
-                ((unsigned char )skb->data[5] == 0xfc) &&
-                (&fmdev->maintask_completion != NULL))
+            struct completion *waiter;
+            bool vsc, fm, match;
+            unsigned char opcode = 0;
+
+            /* type, event, length, credit, 2-byte HCI opcode, status */
+            if (skb->len < FM_EVT_MSG_HDR_SIZE + 4)
             {
-                spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
-                fmdev->response_skb = skb;
-                spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
-                complete(fmdev->response_completion);
-                fmdev->response_completion = NULL;
-                atomic_set(&fmdev->tx_cnt, 1);
+                pr_err("(fmdrv): short Command Complete (%d bytes), dropped",
+                       skb->len);
+                kfree_skb(skb);
+                continue;
             }
-            /* Anyone waiting for this with completion handler? */
-            else if (cmd_complete_hdr->fm_opcode == fmdev->last_sent_pkt_opcode &&
-                                fmdev->response_completion != NULL)
+            vsc = skb->data[4] == (VSC_HCI_WRITE_PCM_PINS_OCF & 0xff) &&
+                  skb->data[5] == 0xfc;
+            fm = skb->data[4] == FM_2048_OP_CODE && skb->data[5] == 0xfc &&
+                 skb->len >= FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE;
+            if (fm)
+                opcode = ((struct fm_cmd_complete_hdr *)
+                          &skb->data[FM_EVT_MSG_HDR_SIZE])->fm_opcode;
+
+            spin_lock_irqsave(&fmdev->cmd_lock, flags);
+            match = fmdev->cmd_busy &&
+                    ((vsc && fmdev->cmd_vsc) ||
+                     (fm && !fmdev->cmd_vsc && opcode == fmdev->cmd_opcode));
+            waiter = NULL;
+            if (match)
             {
-                if (fmdev->response_skb != NULL)
-                    pr_err("(fmdrv): Response SKB ptr not NULL");
-
-                if(cmd_complete_hdr->fm_opcode == FM_REG_FM_RDS_MSK)
-                    fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
-
-                spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
-                fmdev->response_skb = skb;
-                spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
-                complete(fmdev->response_completion);
-
-                fmdev->response_completion = NULL;
-                atomic_set(&fmdev->tx_cnt, 1);
+                waiter = fmdev->cmd_waiter;
+                fmdev->cmd_busy = false;
+                fmdev->cmd_waiter = NULL;
+                if (waiter)
+                {
+                    /* the waiter takes it; one left by an expired
+                     * command's caller is no longer wanted */
+                    if (fmdev->cmd_resp)
+                        kfree_skb(fmdev->cmd_resp);
+                    fmdev->cmd_resp = skb;
+                }
             }
-            /* This is the VSE interrupt handler case */
-            else if (cmd_complete_hdr->fm_opcode == fmdev->last_sent_pkt_opcode &&
-                                    fmdev->response_completion == NULL)
+            spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+
+            if (!match)
             {
-                V4L2_FM_DRV_DBG(V4L2_DBG_RX,"(fmdrv) : VSE interrupt handler case for 0x%x", \
-                                    cmd_complete_hdr->fm_opcode);
-                if (fmdev->response_skb != NULL)
-                    pr_err("(fmdrv): Response SKB ptr not NULL");
-                spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
-                fmdev->response_skb = skb;
-                spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
-                /* Parse the interrupt flags in 0x12 */
-                if(cmd_complete_hdr->fm_opcode == FM_REG_FM_RDS_FLAG)
-                    parse_inrpt_flags(fmdev);
-                else if(cmd_complete_hdr->fm_opcode == FM_REG_RDS_DATA)
-                    parse_rds_data(fmdev);
-
-                atomic_set(&fmdev->tx_cnt, 1);
+                pr_err("(fmdrv): unexpected response to %s 0x%02x, dropped",
+                       vsc ? "VSC" : "FM opcode", vsc ? 0x61 : opcode);
+                kfree_skb(skb);
+                continue;
             }
+
+            /* cmd_expire is not cancelled here: by now it may be timing
+             * the next command, and when it fires for this one it finds
+             * the sequence moved on and does nothing */
+
+            if (fm && opcode == FM_REG_FM_RDS_MSK)
+                fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+
+            if (waiter)
+                complete(waiter);
+            else if (fm && opcode == FM_REG_FM_RDS_FLAG)
+                parse_inrpt_flags(fmdev, skb);
+            else if (fm && opcode == FM_REG_RDS_DATA)
+                parse_rds_data(fmdev, skb);
+            else
+                kfree_skb(skb);
+
+            fm_cmd_kick(fmdev);
         }
         else if(fm_evt_hdr->event_id == BRCM_FM_VS_EVENT) /* Vendor specific Event */
         {
@@ -369,78 +400,146 @@ static void fm_receive_data_ldisc(struct work_struct *w)
             p = &skb->data[FM_EVT_MSG_HDR_SIZE];
 
             /* Check if this is a FM vendor specific event */
-            STREAM_TO_UINT8(sub_event, p);
-            if(sub_event == BRCM_VSE_SUBCODE_FM_INTERRUPT)
+            if (skb->len > FM_EVT_MSG_HDR_SIZE)
             {
-                V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) VSE Interrupt event for FM received. Calling fmc_send_intrp_cmd().");
-                send_read_intrp_cmd(fmdev);
+                STREAM_TO_UINT8(sub_event, p);
+                if(sub_event == BRCM_VSE_SUBCODE_FM_INTERRUPT)
+                {
+                    V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) VSE Interrupt event for FM received. Calling fmc_send_intrp_cmd().");
+                    send_read_intrp_cmd(fmdev);
+                }
             }
+            /* the event has been read; it was never freed before */
+            kfree_skb(skb);
         }
         else
         {
             pr_err("Unhandled packet SKB(%p),purging", skb);
+            kfree_skb(skb);
         }
-        if (!skb_queue_empty(&fmdev->tx_q))
-#ifdef TASKLET_SUPPORT
-        tasklet_schedule(&fmdev->tx_task);
-#else
-        queue_work(fmdev->tx_wq,&fmdev->tx_workqueue);
-#endif
     }
 }
 
-/*
-* FM send tasklet: is scheduled when
-* FM packet has to be sent to chip */
-#ifdef TASKLET_SUPPORT
-static void __send_tasklet(unsigned long arg)
-{
-    struct fmdrv_ops *fmdev;
-    fmdev = (struct fmdrv_ops *)arg;
-#else
+/* tx work: hand the next command to the chip, if none is in flight */
 static void fm_send_data_ldisc(struct work_struct *w)
 {
     struct fmdrv_ops *fmdev =container_of(w, struct fmdrv_ops,tx_workqueue);
-#endif
-    //struct fmdrv_ops *fmdev;
+    struct completion *waiter;
     struct sk_buff *skb;
-    int len;
+    unsigned long flags;
+    unsigned int seq;
+    unsigned char opcode;
+    long len;
 
-    /* Send queued FM TX packets */
-    if (atomic_read(&fmdev->tx_cnt))
+    spin_lock_irqsave(&fmdev->cmd_lock, flags);
+    if (fmdev->cmd_busy)
     {
-        skb = skb_dequeue(&fmdev->tx_q);
-        if (skb)
+        spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+        return;
+    }
+    skb = skb_dequeue(&fmdev->tx_q);
+    if (!skb)
+    {
+        spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+        return;
+    }
+    seq = ++fmdev->cmd_seq;
+    opcode = fm_cb(skb)->fm_opcode;
+    fmdev->cmd_busy = true;
+    fmdev->cmd_opcode = opcode;
+    fmdev->cmd_vsc = fm_cb(skb)->vsc;
+    fmdev->cmd_waiter = fm_cb(skb)->completion;
+    spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+
+#ifdef FM_DUMP_TXRX_PKT
+    dump_tx_skb_data(skb);
+#endif
+    sh_ldisc_cb(skb)->pkt_type = FM_PKT_LOGICAL_CHAN_NUMBER;
+
+    /* May sleep: with BT attached the line discipline waits for the
+     * command credit. The skb is the line discipline's once accepted. */
+    len = g_bcm_write(skb);
+
+    spin_lock_irqsave(&fmdev->cmd_lock, flags);
+    waiter = NULL;
+    if (len < 0)
+    {
+        /* refused, not sent: our skb to free, and nothing in flight */
+        if (fmdev->cmd_busy && fmdev->cmd_seq == seq)
         {
-            atomic_dec(&fmdev->tx_cnt);
-            fmdev->last_sent_pkt_opcode = fm_cb(skb)->fm_opcode;
-
-            if (fmdev->response_completion != NULL)
-                    pr_err("(fmdrv): Response completion handler"
-                                "is not NULL");
-
-            fmdev->response_completion = fm_cb(skb)->completion;
-               /* SYED : Hack to set the right packet type for FM */
-            sh_ldisc_cb(skb)->pkt_type = FM_PKT_LOGICAL_CHAN_NUMBER;
-
-        }
-
-            /* Write FM packet to hci shared ldisc driver */
-            len = g_bcm_write(skb);
-            if (len < 0)
-            {
-                kfree_skb(skb);
-                fmdev->response_completion = NULL;
-                pr_err("(fmdrv): TX tasklet failed to send" \
-                                "skb(%p)", skb);
-                atomic_set(&fmdev->tx_cnt, 1);
-            }
-            else {
-                fmdev->last_tx_jiffies = jiffies;
-            }
+            waiter = fmdev->cmd_waiter;
+            fmdev->cmd_busy = false;
+            fmdev->cmd_waiter = NULL;
         }
     }
+    else if (fmdev->cmd_busy && fmdev->cmd_seq == seq)
+    {
+        /* still waiting for its answer: time it from now */
+        fmdev->cmd_expire_seq = seq;
+        mod_delayed_work(fmdev->tx_wq, &fmdev->cmd_expire, FM_DRV_TX_TIMEOUT);
+    }
+    spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
 
+    if (len < 0)
+    {
+        pr_err("(fmdrv): line discipline refused FM command 0x%02x", opcode);
+        kfree_skb(skb);
+        if (waiter)
+            complete(waiter);
+    }
+
+    /* next one, if this was refused or already answered */
+    fm_cmd_kick(fmdev);
+}
+
+/* A command got no answer in time: drop it and open the channel */
+static void fm_cmd_expire(struct work_struct *w)
+{
+    struct fmdrv_ops *fmdev = container_of(to_delayed_work(w),
+                                           struct fmdrv_ops, cmd_expire);
+    struct completion *waiter;
+    unsigned long flags;
+    unsigned char opcode;
+    bool vsc;
+
+    spin_lock_irqsave(&fmdev->cmd_lock, flags);
+    if (!fmdev->cmd_busy || fmdev->cmd_seq != fmdev->cmd_expire_seq)
+    {
+        /* answered meanwhile */
+        spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+        return;
+    }
+    waiter = fmdev->cmd_waiter;
+    opcode = fmdev->cmd_opcode;
+    vsc = fmdev->cmd_vsc;
+    fmdev->cmd_busy = false;
+    fmdev->cmd_waiter = NULL;
+    spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+
+    pr_err("(fmdrv): no response to %s 0x%02x in %d ms, dropped",
+           vsc ? "VSC" : "FM opcode", vsc ? 0x61 : opcode,
+           jiffies_to_msecs(FM_DRV_TX_TIMEOUT));
+
+    /* its caller finds no response and fails the call */
+    if (waiter)
+        complete(waiter);
+
+    fm_cmd_kick(fmdev);
+}
+
+/* Queue a command; it goes out when the channel is free */
+static int fm_queue_cmd(struct fmdrv_ops *fmdev, struct sk_buff *skb,
+                        unsigned char fmreg_index, bool vsc,
+                        struct completion *wait_completion)
+{
+    fm_cb(skb)->fm_opcode = fmreg_index;
+    fm_cb(skb)->vsc = vsc;
+    fm_cb(skb)->completion = wait_completion;
+
+    skb_queue_tail(&fmdev->tx_q, skb);
+    fm_cmd_kick(fmdev);
+    return 0;
+}
 
 /* Queues FM Channel-8 packet to FM TX queue and schedules FM TX tasklet for
  * transmission */
@@ -473,22 +572,10 @@ static int __fm_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
     /* read/write type */
     cmd_hdr->rd_wr = type;
 
-    fm_cb(skb)->fm_opcode = fmreg_index;
-
     if (payload != NULL)
             memcpy(skb_put(skb, payload_len), payload, payload_len);
 
-    fm_cb(skb)->completion = wait_completion;
-
-//    print skb->cb to check pck_type and completion.
-
-    skb_queue_tail(&fmdev->tx_q, skb);
-#ifdef TASKLET_SUPPORT
-     tasklet_schedule(&fmdev->tx_task);
-#else
-     queue_work(fmdev->tx_wq,&fmdev->tx_workqueue);
-#endif
-    return 0;
+    return fm_queue_cmd(fmdev, skb, fmreg_index, false, wait_completion);
 }
 
 /* QueuesVSC HCI packet to FM TX queue and schedules FM TX tasklet for
@@ -522,19 +609,49 @@ static int __fm_send_vsc_hci_cmd(struct fmdrv_ops *fmdev,__u16 ocf_value,
     if (payload != NULL)
         memcpy(skb_put(skb, payload_len), ch, payload_len);
 
-    fm_cb(skb)->completion = wait_completion;
-
-    skb_queue_tail(&fmdev->tx_q, skb);
-#ifdef TASKLET_SUPPORT
-    tasklet_schedule(&fmdev->tx_task);
-#else
-    queue_work(fmdev->tx_wq,&fmdev->tx_workqueue);
-#endif
-    return 0;
+    return fm_queue_cmd(fmdev, skb, 0, true, wait_completion);
 }
 
+/*
+ * A caller gives up on its command: take it out of flight, or out of the
+ * queue if it never left, and drop any response that reached it just now.
+ */
+static void fmc_abandon_cmd(struct fmdrv_ops *fmdev,
+                            struct completion *wait_completion)
+{
+    struct sk_buff *skb, *tmp;
+    unsigned long flags;
 
-/* Sends FM Channel-8 command to the chip and waits for the reponse */
+    spin_lock_irqsave(&fmdev->cmd_lock, flags);
+    if (fmdev->cmd_busy && fmdev->cmd_waiter == wait_completion)
+    {
+        fmdev->cmd_busy = false;
+        fmdev->cmd_waiter = NULL;
+    }
+    spin_lock(&fmdev->tx_q.lock);
+    skb_queue_walk_safe(&fmdev->tx_q, skb, tmp)
+    {
+        if (fm_cb(skb)->completion == wait_completion)
+        {
+            __skb_unlink(skb, &fmdev->tx_q);
+            kfree_skb(skb);
+        }
+    }
+    spin_unlock(&fmdev->tx_q.lock);
+    if (fmdev->cmd_resp)
+    {
+        kfree_skb(fmdev->cmd_resp);
+        fmdev->cmd_resp = NULL;
+    }
+    spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+
+    fm_cmd_kick(fmdev);
+}
+
+/*
+ * Sends FM Channel-8 command to the chip and waits for the reponse.
+ * Called with fmdev->mutex held, so there is one caller at a time.
+ */
 int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
             void *payload, int payload_len, unsigned char type,
             struct completion *wait_completion, void *reponse,
@@ -543,44 +660,45 @@ int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
     struct sk_buff *skb;
     struct fm_event_msg_hdr *fm_evt_hdr;
     struct fm_cmd_complete_hdr *cmd_complete_hdr;
-    unsigned long timeleft;
     unsigned long flags;
     int ret;
 
-    //V4L2_FM_DRV_DBG("In fmc_send_cmd");
-
     init_completion(wait_completion);
     if(type == VSC_HCI_CMD)
-    {
         ret = __fm_send_vsc_hci_cmd(fmdev, VSC_HCI_WRITE_PCM_PINS_OCF, payload,
                             payload_len, wait_completion);
-        if (ret < 0)
-           return ret;
-    }
     else
-    {
         ret = __fm_send_cmd(fmdev, fmreg_index, payload, payload_len, type,
                             wait_completion);
-        if (ret < 0)
-           return ret;
+    if (ret < 0)
+       return ret;
+
+    /*
+     * The channel answers or expires every command it sends, so this wait
+     * normally ends through the rx work or cmd_expire. The bound only covers
+     * a command that never left: the line discipline may hold the tx work
+     * for its own timeout before the channel's starts.
+     */
+    if (!wait_for_completion_timeout(wait_completion, 3 * FM_DRV_TX_TIMEOUT))
+    {
+        pr_err("(fmdrv): FM command 0x%02x never went out", fmreg_index);
+        fmc_abandon_cmd(fmdev, wait_completion);
+        return -ETIMEDOUT;
     }
 
-    timeleft = wait_for_completion_timeout(wait_completion, FM_DRV_TX_TIMEOUT);
-    if (!timeleft)
+    spin_lock_irqsave(&fmdev->cmd_lock, flags);
+    skb = fmdev->cmd_resp;
+    fmdev->cmd_resp = NULL;
+    spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
+
+    if (!skb)
     {
+        /* expired, or refused by the line discipline */
         pr_err("(fmdrv): Timeout(%d sec),didn't get reg"
                             "completion signal from RX tasklet",
                                         jiffies_to_msecs(FM_DRV_TX_TIMEOUT) / 1000);
         return -ETIMEDOUT;
     }
-    if (!fmdev->response_skb) {
-        pr_err("(fmdrv): Reponse SKB is missing ");
-        return -EFAULT;
-    }
-    spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
-    skb = fmdev->response_skb;
-    fmdev->response_skb = NULL;
-    spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
 
     fm_evt_hdr = (void *)skb->data;
     if (fm_evt_hdr->event_id == HCI_EV_CMD_COMPLETE) /* Vendor specific command response */
@@ -589,7 +707,7 @@ int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
         if (cmd_complete_hdr->status != 0)
         {
             pr_err("(fmdrv): Reponse status not success ");
-            kfree (skb);
+            kfree_skb(skb);
             return -EFAULT;
         }
 
@@ -633,17 +751,10 @@ void reset_rds_parser(void)
 * in FM_REG_FM_RDS_FLAG (0x12).
 * Called locally by fmdrv_main.c
 */
-int parse_inrpt_flags(struct fmdrv_ops *fmdev)
+int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
 {
-    struct sk_buff *skb;
-    unsigned long flags;
     unsigned short fm_rds_flag;
     unsigned char response[2];
-
-    spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
-    skb = fmdev->response_skb;
-    fmdev->response_skb = NULL;
-    spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
 
     memcpy(&response, &skb->data[FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE], 2);
     fm_rds_flag= (unsigned short)response[0] + ((unsigned short)response[1] << 8) ;
@@ -905,21 +1016,15 @@ void parse_rds_tupple(void)
 * in FM_REG_FM_RDS_DATA (0x80).
 * Called locally by fmdrv_main.c
 */
-int parse_rds_data(struct fmdrv_ops *fmdev)
+int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
 {
     unsigned long flags;
     unsigned char *rds_data;
     unsigned char type, block_index;
     tBRCM_RDS_QUALITY qlty_index;
     int ret, response_len, index=0;
-    struct sk_buff *skb;
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(rds)");
-
-    spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
-    skb = fmdev->response_skb;
-    fmdev->response_skb = NULL;
-    spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
     skb_pull(skb, (sizeof(struct fm_event_msg_hdr) + sizeof(struct fm_cmd_complete_hdr)));
     rds_data = skb->data;
     response_len = skb->len;
@@ -1490,12 +1595,7 @@ static long fm_st_receive(void *arg, struct sk_buff *skb)
 
     memcpy(skb_push(skb, 1), &pkt_type, 1);
     skb_queue_tail(&fmdev->rx_q, skb);
-
-#ifdef TASKLET_SUPPORT
-    tasklet_schedule(&fmdev->rx_task);
-#else
     queue_work(fmdev->rx_wq,&fmdev->rx_workqueue);
-#endif
     return 0;
 }
 
@@ -1544,21 +1644,16 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
         return ret;
     }
 
-    spin_lock_init(&fmdev->resp_skb_lock);
-
-    /* Initialize TX queue and TX tasklet */
+    /* The command channel starts empty and free */
+    spin_lock_init(&fmdev->cmd_lock);
     skb_queue_head_init(&fmdev->tx_q);
-    /* Initialize RX Queue and RX tasklet */
     skb_queue_head_init(&fmdev->rx_q);
-#ifdef TASKLET_SUPPORT
-    tasklet_init(&fmdev->tx_task, __send_tasklet, (unsigned long)fmdev);
-    tasklet_init(&fmdev->rx_task, __recv_tasklet, (unsigned long)fmdev);
-#else
-INIT_WORK(&fmdev->tx_workqueue,fm_send_data_ldisc);
-INIT_WORK(&fmdev->rx_workqueue,fm_receive_data_ldisc);
-#endif
-    atomic_set(&fmdev->tx_cnt, 1);
-    fmdev->response_completion = NULL;
+    INIT_WORK(&fmdev->tx_workqueue, fm_send_data_ldisc);
+    INIT_WORK(&fmdev->rx_workqueue, fm_receive_data_ldisc);
+    INIT_DELAYED_WORK(&fmdev->cmd_expire, fm_cmd_expire);
+    fmdev->cmd_busy = false;
+    fmdev->cmd_waiter = NULL;
+    fmdev->cmd_resp = NULL;
 
     /* Do all the broadcom FM hardware specific initialization */
     fmdev->rx.curr_mute_mode = FM_MUTE_OFF;
@@ -1603,27 +1698,30 @@ int fmc_release(struct fmdrv_ops *fmdev)
         return 0;
     }
 
-#ifndef TASKLET_SUPPORT
-    cancel_work_sync(&fmdev->tx_workqueue);
-    cancel_work_sync(&fmdev->rx_workqueue);
-#endif
+    /* Off the line discipline first, so nothing new arrives; then stop
+     * the channel's work -- the works requeue each other, so each is
+     * cancelled after the one that could requeue it -- and empty it. */
     ret = brcm_sh_ldisc_unregister(PROTO_SH_FM);
     if (ret < 0)
         V4L2_FM_DRV_ERR("(fmdrv): Failed to de-register FM from HCI LDisc - %d", ret);
     else
         V4L2_FM_DRV_DBG(V4L2_DBG_CLOSE, "(fmdrv): Successfully unregistered from  HCI LDisc");
 
+    cancel_work_sync(&fmdev->rx_workqueue);
+    cancel_delayed_work_sync(&fmdev->cmd_expire);
+    cancel_work_sync(&fmdev->tx_workqueue);
+
     /* Sevice pending read */
     wake_up_interruptible(&fmdev->rx.rds.read_queue);
-#ifdef TASKLET_SUPPORT
-    tasklet_kill(&fmdev->tx_task);
-    tasklet_kill(&fmdev->rx_task);
-#else
     skb_queue_purge(&fmdev->tx_q);
     skb_queue_purge(&fmdev->rx_q);
-#endif
 
-    fmdev->response_completion = NULL;
+    fmdev->cmd_busy = false;
+    fmdev->cmd_waiter = NULL;
+    if (fmdev->cmd_resp) {
+        kfree_skb(fmdev->cmd_resp);
+        fmdev->cmd_resp = NULL;
+    }
     fmdev->rx.curr_freq = 0;
 
     clear_bit(FM_CORE_READY, &fmdev->flag);

@@ -27,6 +27,7 @@
 #define _FM_DRV_H
 
 #include <linux/mutex.h>
+#include <linux/workqueue.h>
 #include <linux/skbuff.h>
 #include <linux/interrupt.h>
 #include <sound/core.h>
@@ -223,34 +224,34 @@ struct fmdrv_ops {
      * stay outside it, so a blocking RDS read does not hold off ioctls.
      */
     struct mutex mutex;
-    spinlock_t resp_skb_lock;         /* To protect access to received SKB */
     spinlock_t rds_cbuff_lock;        /* To protect access to RDS Circular buffer */
 
     long flag;                         /*  FM driver state machine info */
     struct sk_buff_head rx_q;          /* RX queue */
-#ifdef TASKLET_SUPPORT
-    struct tasklet_struct rx_task;  /* RX Tasklet */
-    struct tasklet_struct tx_task;  /* TX Tasklet */
-#else
     struct workqueue_struct *tx_wq;     /* Fm workqueue */
     struct work_struct tx_workqueue;    /* Tx work queue */
     struct workqueue_struct *rx_wq;     /* Fm workqueue */
     struct work_struct rx_workqueue;    /* Rx work queue */
-#endif
     struct sk_buff_head tx_q;          /* TX queue */
 
-    unsigned long last_tx_jiffies;  /* Timestamp of last pkt sent */
-    atomic_t tx_cnt;                         /* Number of packets can send at a time */
+    /*
+     * The command channel (fmdrv_main.c): one command with the chip at a
+     * time, described here under cmd_lock.
+     */
+    spinlock_t cmd_lock;
+    bool cmd_busy;                     /* a command is with the chip */
+    unsigned int cmd_seq;              /* number of the command in flight */
+    unsigned int cmd_expire_seq;       /* command cmd_expire is timing */
+    unsigned char cmd_opcode;          /* its FM opcode */
+    bool cmd_vsc;                      /* it is the FC61 PCM pin command */
+    struct completion *cmd_waiter;     /* its caller, NULL for the driver's own */
+    struct sk_buff *cmd_resp;          /* response handed to that caller */
+    struct delayed_work cmd_expire;    /* drops a command left unanswered */
 
-    struct sk_buff *response_skb;   /* Response from the chip */
     /* Main task completion handler */
     struct completion maintask_completion;
     /* Seek task completion handler */
     struct completion seektask_completion;
-    /* Opcode of last command sent to the chip */
-    unsigned char last_sent_pkt_opcode;
-    /* Handler used for wakeup when response packet is received */
-    struct completion *response_completion;
     unsigned char curr_fmmode;   /* Current FM chip mode (TX, RX, OFF) */
     unsigned char aud_ctrl;     /* Current Audio Control (STEREO/MONO/NONE) */
     struct fm_rx rx;                         /* FM receiver info */

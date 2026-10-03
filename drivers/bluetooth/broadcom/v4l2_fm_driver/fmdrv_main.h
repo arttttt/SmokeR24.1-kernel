@@ -102,7 +102,8 @@
 /* SKB helpers */
 struct fm_skb_cb {
     __u8 fm_opcode;
-    struct completion *completion;
+    bool vsc;                       /* FC61 VSC rather than an FM opcode */
+    struct completion *completion;  /* caller waiting, or NULL */
 };
 
 #define fm_cb(skb) ((struct fm_skb_cb *)(skb->cb))
