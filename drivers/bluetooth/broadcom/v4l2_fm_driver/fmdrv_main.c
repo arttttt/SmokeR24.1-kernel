@@ -39,6 +39,7 @@
 
 #include <linux/module.h>
 #include <linux/delay.h>
+#include <linux/uaccess.h>
 #include "fmdrv.h"
 #include "fmdrv_v4l2.h"
 #include "fmdrv_main.h"
@@ -907,7 +908,11 @@ void get_rds_element_value(int ioctl_num, char __user *ioctl_value)
           return;
 
       case GET_TMC_CHANNEL:
-         *(__u32 *)ioctl_value = 4;
+         /* a user pointer: it was written through directly */
+         if (put_user((__u32)4, (__u32 __user *)ioctl_value))
+         {
+            V4L2_FM_DRV_ERR("(rds) Failed to copy TMC channel");
+         }
          return;
    }
 }

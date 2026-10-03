@@ -158,7 +158,7 @@ static atomic_t v4l2_device_available = ATOMIC_INIT(1);
 ************************************************************************************/
 
 static int fm_v4l2_vidioc_s_hw_freq_seek(struct file *, void *,
-                    struct v4l2_hw_freq_seek *);
+                    const struct v4l2_hw_freq_seek *);
 
 /************************************************************************************
 **  Functions
@@ -225,12 +225,11 @@ static ssize_t show_fmrx_comp_scan(struct device *dev,
     return sprintf(buf, "%d\n", fmdev->rx.no_of_chans);
 }
 
-static ssize_t store_fmrx_comp_scan(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_comp_scan_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long comp_scan;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
     /* Chip doesn't support complete scan for weather band */
     if (fmdev->rx.region.fm_band == FM_BAND_WEATHER)
@@ -243,10 +242,9 @@ static ssize_t store_fmrx_comp_scan(struct device *dev,
     if (ret < 0)
         V4L2_FM_DRV_ERR("RX complete scan failed - %d\n", ret);
 
-    if (comp_scan == COMP_SCAN_READ)
-        return (size_t) fmdev->rx.no_of_chans;
-    else
-        return size;
+    /* the channel count is read through show; a store returns the
+     * bytes it consumed, and anything less makes the caller write again */
+    return size;
 }
 
 static ssize_t show_fmrx_deemphasis(struct device *dev,
@@ -258,12 +256,11 @@ static ssize_t show_fmrx_deemphasis(struct device *dev,
                 FM_RX_EMPHASIS_FILTER_50_USEC) ? 50 : 75);
 }
 
-static ssize_t store_fmrx_deemphasis(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_deemphasis_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long deemph_mode;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
     if (kstrtoul(buf, 0, &deemph_mode))
         return -EINVAL;
@@ -285,12 +282,11 @@ static ssize_t show_fmrx_af(struct device *dev,
     return sprintf(buf, "%d\n", fmdev->rx.af_mode);
 }
 
-static ssize_t store_fmrx_af(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_af_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long af_mode;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
     if (kstrtoul(buf, 0, &af_mode))
         return -EINVAL;
@@ -315,12 +311,11 @@ static ssize_t show_fmrx_band(struct device *dev,
     return sprintf(buf, "%d\n", fmdev->rx.region.fm_band);
 }
 
-static ssize_t store_fmrx_band(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_band_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long fm_band;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
     if (kstrtoul(buf, 0, &fm_band))
         return -EINVAL;
     pr_info("store_fmrx_band In  fm_band %ld",fm_band);
@@ -345,12 +340,12 @@ static ssize_t show_fmrx_fm_audio_pins(struct device *dev,
     return sprintf(buf, "%s\n", fmdev->rx.current_pins);
 }
 
-static ssize_t store_fmrx_fm_audio_pins(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_fm_audio_pins_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret = 0;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
-    if(strncmp(buf, fmdev->rx.current_pins, 3) == 0) /*I2S or PCM*/
+    if(strncmp(buf, fmdev->rx.current_pins, 3) == 0 &&
+       fmdev->rx.current_pins[0]) /*I2S or PCM*/
     {
         return size;
     }
@@ -377,7 +372,7 @@ static ssize_t store_fmrx_fm_audio_pins(struct device *dev,
         return ret;
     }
 #endif
-    sprintf(fmdev->rx.current_pins, "%s", buf);
+    strlcpy(fmdev->rx.current_pins, "PCM", sizeof(fmdev->rx.current_pins));
     return size;
     }
     else if(strncmp(buf, "I2S", 3) == 0) /*use I2S pins and release PCM pins for BT SCO*/
@@ -402,13 +397,13 @@ static ssize_t store_fmrx_fm_audio_pins(struct device *dev,
             return ret;
         }
 #endif
-        sprintf(fmdev->rx.current_pins, "%s", buf);
+        strlcpy(fmdev->rx.current_pins, "I2S", sizeof(fmdev->rx.current_pins));
         return size;
     }
     else
     {
         V4L2_FM_DRV_ERR("Wrong value: either PCM or I2S\n");
-        return ret;
+        return -EINVAL;
     }
     return size;
 }
@@ -422,12 +417,11 @@ static ssize_t show_fmrx_rssi_lvl(struct device *dev,
     return sprintf(buf, "%d\n", fmdev->rx.curr_rssi_threshold);
 }
 
-static ssize_t store_fmrx_rssi_lvl(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_rssi_lvl_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long rssi_lvl;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
     if (kstrtoul(buf, 0, &rssi_lvl))
         return -EINVAL;
@@ -449,12 +443,11 @@ static ssize_t show_fmrx_snr_lvl(struct device *dev,
     return sprintf(buf, "%d\n", fmdev->rx.curr_snr_threshold);
 }
 
-static ssize_t store_fmrx_snr_lvl(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_snr_lvl_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long snr_lvl;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
     if (kstrtoul(buf, 0, &snr_lvl))
         return -EINVAL;
@@ -476,12 +469,11 @@ static ssize_t show_fmrx_channel_space(struct device *dev,
     return sprintf(buf, "%d\n", fmdev->rx.sch_step);
 }
 
-static ssize_t store_fmrx_channel_space(struct device *dev,
-        struct device_attribute *attr, char *buf, size_t size)
+static ssize_t fmrx_channel_space_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
 {
     int ret;
     unsigned long chl_spacing,chl_step;
-    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
     if (kstrtoul(buf, 0, &chl_spacing))
         return -EINVAL;
@@ -498,7 +490,9 @@ static ssize_t store_fmrx_channel_space(struct device *dev,
         default:
             chl_step= FM_STEP_100KHZ;
     };
-    ret = fmc_set_scan_step(fmdev, chl_spacing);
+    /* the step index, not the spacing: fm_sch_step_size[] has three
+     * entries and the spacing was used to index it */
+    ret = fmc_set_scan_step(fmdev, chl_step);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("Failed to set channel spacing\n");
         return ret;
@@ -507,48 +501,72 @@ static ssize_t store_fmrx_channel_space(struct device *dev,
     return size;
 }
 
-/* structures specific for sysfs entries
- * FM GUI app belongs to group "fmradio", these sysfs entries belongs to "root",
- * but GUI app needs both read and write permissions to these sysfs entires for
- * below features, so these entries got permission "666"
+/*
+ * The stores drive the chip, so they take the driver mutex like the ioctls;
+ * the shows only read cached state. These used to be kobj_attributes whose
+ * functions were written for struct device and cast through void *: they
+ * were handed the kobject and dev_get_drvdata() read garbage. They were also
+ * world-writable. Nothing in userspace uses them -- the FM HAL and app go
+ * through /dev/radio0 -- so they are root-writable now.
  */
+#define FM_SYSFS_STORE(name)                                              \
+static ssize_t store_##name(struct device *dev,                           \
+        struct device_attribute *attr, const char *buf, size_t size)      \
+{                                                                         \
+    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);                       \
+    ssize_t ret;                                                          \
+                                                                          \
+    if (mutex_lock_interruptible(&fmdev->mutex))                          \
+        return -ERESTARTSYS;                                              \
+    /* the group lives as long as the device; FM may be closed */         \
+    if (!test_bit(FM_CORE_READY, &fmdev->flag))                           \
+        ret = -EPERM;                                                     \
+    else                                                                  \
+        ret = name##_locked(fmdev, buf, size);                            \
+    mutex_unlock(&fmdev->mutex);                                          \
+    return ret;                                                           \
+}
+
+FM_SYSFS_STORE(fmrx_comp_scan)
+FM_SYSFS_STORE(fmrx_deemphasis)
+FM_SYSFS_STORE(fmrx_af)
+FM_SYSFS_STORE(fmrx_band)
+FM_SYSFS_STORE(fmrx_fm_audio_pins)
+FM_SYSFS_STORE(fmrx_rssi_lvl)
+FM_SYSFS_STORE(fmrx_snr_lvl)
+FM_SYSFS_STORE(fmrx_channel_space)
 
 /* To start FM RX complete scan*/
-static struct kobj_attribute v4l2_fmrx_comp_scan =
-__ATTR(fmrx_comp_scan, 0666, (void *)show_fmrx_comp_scan,
-        (void *)store_fmrx_comp_scan);
+static struct device_attribute v4l2_fmrx_comp_scan =
+__ATTR(fmrx_comp_scan, 0644, show_fmrx_comp_scan, store_fmrx_comp_scan);
 
 /* To Set De-Emphasis filter mode */
-static struct kobj_attribute v4l2_fmrx_deemph_mode =
-__ATTR(fmrx_deemph_mode, 0666, (void *)show_fmrx_deemphasis,
-        (void *)store_fmrx_deemphasis);
+static struct device_attribute v4l2_fmrx_deemph_mode =
+__ATTR(fmrx_deemph_mode, 0644, show_fmrx_deemphasis, store_fmrx_deemphasis);
 
 /* To Enable/Disable FM RX RDS AF feature */
-static struct kobj_attribute v4l2_fmrx_rds_af =
-__ATTR(fmrx_rds_af, 0666, (void *)show_fmrx_af, (void *)store_fmrx_af);
+static struct device_attribute v4l2_fmrx_rds_af =
+__ATTR(fmrx_rds_af, 0644, show_fmrx_af, store_fmrx_af);
 
 /* To switch between Japan/US bands */
-static struct kobj_attribute v4l2_fmrx_band =
-__ATTR(fmrx_band, 0666, (void *)show_fmrx_band, (void *)store_fmrx_band);
+static struct device_attribute v4l2_fmrx_band =
+__ATTR(fmrx_band, 0644, show_fmrx_band, store_fmrx_band);
 
 /* To set the desired FM reception RSSI level */
-static struct kobj_attribute v4l2_fmrx_rssi_lvl =
-__ATTR(fmrx_rssi_lvl, 0666, (void *) show_fmrx_rssi_lvl,
-        (void *)store_fmrx_rssi_lvl);
+static struct device_attribute v4l2_fmrx_rssi_lvl =
+__ATTR(fmrx_rssi_lvl, 0644, show_fmrx_rssi_lvl, store_fmrx_rssi_lvl);
 
 /* To set the desired FM reception SNR level */
-static struct kobj_attribute v4l2_fmrx_snr_lvl =
-__ATTR(fmrx_snr_lvl, 0666, (void *) show_fmrx_snr_lvl,
-        (void *)store_fmrx_snr_lvl);
+static struct device_attribute v4l2_fmrx_snr_lvl =
+__ATTR(fmrx_snr_lvl, 0644, show_fmrx_snr_lvl, store_fmrx_snr_lvl);
 
 /* To set the desired channel spacing */
-static struct kobj_attribute v4l2_fmrx_channel_space =
-__ATTR(fmrx_chl_lvl, 0666, (void *) show_fmrx_channel_space,
-        (void *)store_fmrx_channel_space);
+static struct device_attribute v4l2_fmrx_channel_space =
+__ATTR(fmrx_chl_lvl, 0644, show_fmrx_channel_space, store_fmrx_channel_space);
 
 /* To switch between PCM / I2S pins*/
-static struct kobj_attribute v4l2_fmrx_fm_audio_pins =
-__ATTR(fmrx_fm_audio_pins, 0666, (void *)show_fmrx_fm_audio_pins, (void *)store_fmrx_fm_audio_pins);
+static struct device_attribute v4l2_fmrx_fm_audio_pins =
+__ATTR(fmrx_fm_audio_pins, 0644, show_fmrx_fm_audio_pins, store_fmrx_fm_audio_pins);
 
 static struct attribute *v4l2_fm_attrs[] = {
     &v4l2_fmrx_comp_scan.attr,
@@ -629,7 +647,7 @@ static int fm_v4l2_fops_open_locked(struct file *file)
     ret = fmc_enable(fmdev, option);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Unable to enable FM");
-        goto err_clear_disconnect;
+        goto err_release;
     }
 
     /* Set Audio mode */
@@ -637,15 +655,7 @@ static int fm_v4l2_fops_open_locked(struct file *file)
     ret = fmc_set_audio_mode(fmdev, DEF_V4L2_FM_AUDIO_MODE);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting Audio mode during FM enable operation");
-        goto err_clear_disconnect;
-    }
-
-    /* Register sysfs entries */
-    ret = sysfs_create_group(&fmdev->radio_dev->dev.kobj,
-            &v4l2_fm_attr_grp);
-    if (ret) {
-        V4L2_FM_DRV_ERR("failed to create sysfs entries");
-        goto err_clear_disconnect;
+        goto err_release;
     }
 
     /* Set Audio path */
@@ -653,7 +663,7 @@ static int fm_v4l2_fops_open_locked(struct file *file)
     ret = fm_rx_config_audio_path(fmdev, DEF_V4L2_FM_AUDIO_PATH);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting Audio path during FM enable operation");
-        goto err_remove_sysfs;
+        goto err_release;
     }
 
 #if ROUTE_FM_I2S_MASTER_TO_PCM_PINS
@@ -661,7 +671,7 @@ static int fm_v4l2_fops_open_locked(struct file *file)
     ret = fmc_send_cmd(fmdev, 0, i2s_master_on_pcm_pins, 5, VSC_HCI_CMD, &fmdev->maintask_completion, NULL, NULL);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting switch I2s path to PCM pins as a master");
-        goto err_remove_sysfs;
+        goto err_release;
     }
 #endif
 
@@ -671,15 +681,16 @@ static int fm_v4l2_fops_open_locked(struct file *file)
     if (ret < 0)
     {
         V4L2_FM_DRV_ERR("(fmdrv): Error setting switch I2s path to PCM pins as a slave");
-        goto err_remove_sysfs;
+        goto err_release;
     }
 #endif
 
     return 0;
 
-err_remove_sysfs:
-    sysfs_remove_group(&fmdev->radio_dev->dev.kobj, &v4l2_fm_attr_grp);
-err_clear_disconnect:
+err_release:
+    /* The core is prepared and registered with the line discipline; leave
+     * it up and the next open finds it "already up" on a half-set chip. */
+    fmc_release(fmdev);
     radio_disconnected = 0;
 err_inc_avail:
     atomic_inc(&v4l2_device_available);
@@ -746,18 +757,16 @@ static int fm_v4l2_fops_release_locked(struct file *file)
         V4L2_FM_DRV_ERR("(fmdrv): Error disabling FM. Continuing to release FM core..");
         ret = 0;
     }
-    sysfs_remove_group(&fmdev->radio_dev->dev.kobj, &v4l2_fm_attr_grp);
-
     ret = fmc_release(fmdev);
     if (ret < 0)
-    {
         V4L2_FM_DRV_ERR("(fmdrv): FM CORE release failed");
-        return ret;
-    }
+
+    /* Whatever failed above, the file is closed: returning early here left
+     * the device marked open for good, and every later open got -EBUSY. */
     radio_disconnected = 0;
     atomic_inc(&v4l2_device_available);
 
-    return 0;
+    return ret < 0 ? ret : 0;
 }
 
 /*****************************************************************************
@@ -900,7 +909,7 @@ static int fm_v4l2_vidioc_g_audio(struct file *file, void *priv,
 * by user-space via IOCTL call
 */
 static int fm_v4l2_vidioc_s_audio(struct file *file, void *priv,
-                    struct v4l2_audio *audio)
+                    const struct v4l2_audio *audio)
 {
     int ret = 0;
     if (audio->index != 0)
@@ -952,7 +961,7 @@ static int fm_v4l2_vidioc_g_tuner(struct file *file, void *priv,
    upper/lower frequency, audio mode.
  */
 static int fm_v4l2_vidioc_s_tuner(struct file *file, void *priv,
-                    struct v4l2_tuner *tuner)
+                    const struct v4l2_tuner *tuner)
 {
     int ret = -EINVAL;
     struct fmdrv_ops *fmdev;
@@ -1008,7 +1017,7 @@ static int fm_v4l2_vidioc_g_frequency(struct file *file, void *priv,
 
 /* Set tuner or modulator radio frequency, this is tune channel */
 static int fm_v4l2_vidioc_s_frequency(struct file *file, void *priv,
-                    struct v4l2_frequency *freq)
+                    const struct v4l2_frequency *freq)
 {
     int ret = 0;
     struct fmdrv_ops *fmdev;
@@ -1027,7 +1036,7 @@ static int fm_v4l2_vidioc_s_frequency(struct file *file, void *priv,
 
 /* Set hardware frequency seek. This is scanning radio stations. */
 static int fm_v4l2_vidioc_s_hw_freq_seek(struct file *file, void *priv,
-                    struct v4l2_hw_freq_seek *seek)
+                    const struct v4l2_hw_freq_seek *seek)
 {
     int ret = -EINVAL;
     struct fmdrv_ops *fmdev;
@@ -1174,6 +1183,15 @@ int fm_v4l2_init_video_device(struct fmdrv_ops *fmdev, int radio_nr)
     }
 
     fmdev->radio_dev = gradio_dev;
+
+    /*
+     * The sysfs entries live as long as the device, not per open: release
+     * holds the driver mutex, and removing the group there would wait for a
+     * store that is itself waiting for the mutex. A store with FM closed
+     * returns -EPERM.
+     */
+    if (sysfs_create_group(&gradio_dev->dev.kobj, &v4l2_fm_attr_grp))
+        V4L2_FM_DRV_ERR("(fmdrv): failed to create sysfs entries");
     V4L2_FM_DRV_DBG(V4L2_DBG_INIT,"(fmdrv) registered with video device");
     ret = 0;
 
@@ -1185,6 +1203,7 @@ void *fm_v4l2_deinit_video_device(void)
     struct fmdrv_ops *fmdev;
 
     fmdev = video_get_drvdata(gradio_dev);
+    sysfs_remove_group(&gradio_dev->dev.kobj, &v4l2_fm_attr_grp);
     /* Unregister RADIO device from V4L2 subsystem */
     video_unregister_device(gradio_dev);
 

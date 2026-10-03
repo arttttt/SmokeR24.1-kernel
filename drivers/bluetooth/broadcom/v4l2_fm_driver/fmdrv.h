@@ -201,7 +201,7 @@ struct fm_rx {
 
     u8 af_mode;         /* Alternate frequency on/off */
     u8 no_of_chans;     /* Number stations found */
-    char current_pins[3]; /*Current pins configuration. either I2S or PCM*/
+    char current_pins[4]; /* "I2S" or "PCM", NUL-terminated; empty until set */
 };
 
 struct fm_device_info {
