@@ -632,8 +632,13 @@ static ssize_t store_vendor_params(struct device *dev,
         struct device_attribute *attr, char *buf,size_t size)
 {
     struct hci_uart *hu;
+    size_t len;
     hu_ref(&hu, 0);
-    memcpy(hu->vendor_params, buf, VENDOR_PARAMS_LEN);
+    /* sysfs hands over size bytes, not a string: copy at most what fits
+     * and terminate it, as parse_vendor_params() walks it with strsep() */
+    len = size < VENDOR_PARAMS_LEN ? size : VENDOR_PARAMS_LEN - 1;
+    memcpy(hu->vendor_params, buf, len);
+    hu->vendor_params[len] = '\0';
     parse_vendor_params();
 
     // enable/disable snoop
@@ -648,7 +653,8 @@ static ssize_t store_vendor_params(struct device *dev,
 static ssize_t store_bdaddr(struct device *dev,
         struct device_attribute *attr, char *buf,size_t size)
 {
-    sprintf(bd_addr, "%s\n", buf);
+    /* bounded: bd_addr holds 17 characters and a NUL */
+    snprintf(bd_addr, sizeof(bd_addr), "%s", buf);
 
     pr_info("store_bdaddr  %s  size %d",bd_addr,size);
     return size;
@@ -664,7 +670,9 @@ static ssize_t store_bdaddr(struct device *dev,
 static ssize_t store_fw_patchfile(struct device *dev,
         struct device_attribute *attr, char *buf,size_t size)
 {
-    sprintf(fw_name, "%s",buf);
+    /* bounded, and without the trailing newline echo leaves */
+    snprintf(fw_name, sizeof(fw_name), "%s", buf);
+    fw_name[strcspn(fw_name, "\n")] = '\0';
     BT_LDISC_DBG(V4L2_DBG_INIT,"store_fw_patchfile  %s size %d ",fw_name,size);
     return size;
 }
@@ -715,34 +723,39 @@ static ssize_t store_snoop_enable(struct device *dev,
 }
 #endif
 
+/*
+ * Only brcm-uim-sysfs writes these, as root: they set the chip's address,
+ * the firmware it loads and the install handshake, and were writable by
+ * every app.
+ */
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_bdaddr =
-__ATTR(bdaddr, 0666, NULL,(void *)store_bdaddr);
+__ATTR(bdaddr, 0644, NULL,(void *)store_bdaddr);
 
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_install =
-__ATTR(install, 0666, (void *)show_install, (void *)store_install);
+__ATTR(install, 0644, (void *)show_install, (void *)store_install);
 
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_vendor_params =
-__ATTR(vendor_params, 0666, (void *)show_vendor_params, (void *)store_vendor_params);
+__ATTR(vendor_params, 0644, (void *)show_vendor_params, (void *)store_vendor_params);
 
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_bt_err =
-__ATTR(bt_err, 0666, (void *)show_bt_err, (void *)store_bt_err);
+__ATTR(bt_err, 0644, (void *)show_bt_err, (void *)store_bt_err);
 
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_fm_err =
-__ATTR(fm_err, 0666, (void *)show_fm_err, (void *)store_fm_err);
+__ATTR(fm_err, 0644, (void *)show_fm_err, (void *)store_fm_err);
 
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_fw_patchfile =
-__ATTR(fw_patchfile, 0666, NULL, (void *)store_fw_patchfile);
+__ATTR(fw_patchfile, 0644, NULL, (void *)store_fw_patchfile);
 
 #if V4L2_SNOOP_ENABLE
 /* structures specific for sysfs entries */
 static struct kobj_attribute ldisc_snoop_enable =
-__ATTR(snoop_enable, 0666, (void *)show_snoop_enable, (void *)store_snoop_enable);
+__ATTR(snoop_enable, 0644, (void *)show_snoop_enable, (void *)store_snoop_enable);
 #endif
 
 static struct attribute *uim_attrs[] = {
