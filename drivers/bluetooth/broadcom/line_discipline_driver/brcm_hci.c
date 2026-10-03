@@ -175,7 +175,10 @@ static inline int brcm_check_data_len(struct brcm_struct *brcm,
     if (!len) {
        brcm_hci_uart_route_frame(protoid, hu, brcm->rx_skb);
     } else if (len > room) {
-        BT_ERR("brcm_check_data_len Data length is too large kfree_skb %p",brcm->rx_skb);
+        /* the frame is lost; whoever waits for it will time out, so say
+         * which one it was */
+        BRCM_HCI_ERR("frame for proto %d too long (%d bytes, room %d), dropped",
+                     protoid, len, room);
         kfree_skb(brcm->rx_skb);
     } else {
         brcm->rx_state = HCIBRCM_W4_DATA;

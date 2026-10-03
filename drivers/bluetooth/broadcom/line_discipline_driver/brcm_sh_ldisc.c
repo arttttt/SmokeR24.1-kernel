@@ -1565,8 +1565,15 @@ static long download_patchram(struct hci_uart *hu)
         /* delay before patchram download */
         msleep(50);
 
-        /* start downloading firmware */
+        /* start downloading firmware: records of a 2-byte opcode, a
+         * length byte and that many bytes, each sent as an HCI command */
         do {
+            if (len < 3 || len < 3 + ptr[2]) {
+                BT_LDISC_ERR("patchram %s truncated: %ld bytes left", fw_name, len);
+                err = -EINVAL;
+                release_firmware(hu->fw_entry);
+                goto error_state;
+            }
             buf[0] = 0x01;
             memcpy(buf+1, ptr, 3);
             ptr += 3;
@@ -1583,7 +1590,10 @@ static long download_patchram(struct hci_uart *hu)
               (&hu->cmd_rcvd, msecs_to_jiffies(CMD_RESP_TIME))) {
                 BT_LDISC_ERR(" waiting for download patchram command response \
                     - timed out ");
-                return -ETIMEDOUT;
+                /* this returned directly, leaking the firmware and buf */
+                err = -ETIMEDOUT;
+                release_firmware(hu->fw_entry);
+                goto error_state;
             }
         } while(len>0);
 
@@ -1813,8 +1823,6 @@ long brcm_sh_ldisc_start(struct hci_uart *hu)
                 continue;
             } else {/* on success don't retry */
                 BT_LDISC_DBG(V4L2_DBG_INIT, "patchram downloaded successfully");
-                // initialize lock for err flags
-                spin_lock_init(&hu->err_lock);
                 break;
             }
         }
@@ -1948,13 +1956,13 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
             mutex_lock(&cmd_credit);
             init_completion(&hu->cmd_rcvd);
 
-            hu->proto->enqueue(hu, skb);
-
-            /* forward to snoop */
+            /* forward to snoop -- before queueing: once queued, the tx
+             * path may send and free the skb at any moment */
 #if V4L2_SNOOP_ENABLE
             if(nl_sk_hcisnoop)
                 brcm_hci_write(hu, skb->data, skb->len);
 #endif
+            hu->proto->enqueue(hu, skb);
             brcm_hci_uart_tx_wakeup(hu);
 
             /*
@@ -1973,13 +1981,12 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
         }
         else
         {
-            hu->proto->enqueue(hu, skb);
-
-            /* forward to snoop */
+            /* forward to snoop, before queueing as above */
 #if V4L2_SNOOP_ENABLE
             if(nl_sk_hcisnoop)
                 brcm_hci_write(hu, skb->data, skb->len);
 #endif
+            hu->proto->enqueue(hu, skb);
             brcm_hci_uart_tx_wakeup(hu);
         }
     }
@@ -2093,6 +2100,9 @@ static void brcm_hci_uart_tty_close(struct tty_struct *tty)
         tty->ldisc->ops->flush_buffer(tty);
 
     tty_driver_flush_buffer(tty);
+
+    if (!hu)
+        return;
 
 #if V4L2_SNOOP_ENABLE
     /* release memory allocated for snooping */
@@ -2478,6 +2488,9 @@ static int bcmbt_ldisc_probe(struct platform_device *pdev)
     init_completion(&hu->cmd_rcvd);
     init_completion(&hu->ldisc_installed);
     init_completion(&hu->tty_close_complete);
+    /* store_install takes it whenever userspace writes "install"; it was
+     * only initialised after the first successful start */
+    spin_lock_init(&hu->err_lock);
 
     rc = sysfs_create_group(&pdev->dev.kobj, &uim_attr_grp);
     if (rc) {
