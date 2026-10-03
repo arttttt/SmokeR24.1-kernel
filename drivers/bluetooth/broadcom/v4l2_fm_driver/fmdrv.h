@@ -184,6 +184,11 @@ struct fm_rds {
 /* FM RX mode info */
 struct fm_rx {
     struct region_info region;      /* Current selected band */
+    /* Limits of the next hardware seek, in the chip's units; the region's
+     * band unless a seek asked for less. Tuning is checked against the
+     * band, never against these. */
+    unsigned short seek_low;
+    unsigned short seek_high;
     unsigned char curr_region;
     unsigned int curr_freq;         /* Current RX frquency */
     unsigned char curr_mute_mode;   /* Current mute mode */
@@ -230,6 +235,7 @@ struct fmdrv_ops {
     /* Volume, mute and de-emphasis, through the V4L2 control framework.
      * Set while FM is closed they are kept and applied on the next open. */
     struct v4l2_ctrl_handler ctrl_handler;
+    struct v4l2_ctrl *deemph_ctrl;    /* kept in step with sysfs and regions */
     /*
      * Serialises everything that talks to the chip: every ioctl (the V4L2
      * core takes it as the video device's lock), open, release and the

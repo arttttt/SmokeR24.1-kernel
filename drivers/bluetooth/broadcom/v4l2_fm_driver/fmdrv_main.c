@@ -85,11 +85,11 @@ struct region_info region_configs[] = {
       .scan_step = 200,
       },
 
-     /* Russia-Ext */
+     /* Russia-Ext: 50 us, as broadcast in Russia (it said 75) */
     {
      .low_bound = FM_GET_FREQ(6580),    /* 65.8 MHz */
      .high_bound = FM_GET_FREQ(10800),    /* 108 MHz */
-     .deemphasis = FM_DEEMPHA_75U,
+     .deemphasis = FM_DEEMPHA_50U,
      .scan_step = 100,
     },
 
@@ -269,7 +269,16 @@ void fmc_update_region_info(struct fmdrv_ops *fmdev,
     memcpy(&fmdev->rx.region, &region_configs[region_to_set],
         sizeof(struct region_info));
     fmdev->rx.curr_freq = fmdev->rx.region.low_bound;
-    fm_rx_config_deemphasis( fmdev,fmdev->rx.region.deemphasis);
+    fmdev->rx.seek_low = fmdev->rx.region.low_bound;
+    fmdev->rx.seek_high = fmdev->rx.region.high_bound;
+    /* De-emphasis is userspace's choice once it has made one (the
+     * control); the region's own value only stands in before that. */
+    if (fmdev->deemph_ctrl)
+        fm_rx_config_deemphasis(fmdev,
+            v4l2_ctrl_g_ctrl(fmdev->deemph_ctrl) == V4L2_DEEMPHASIS_75_uS ?
+            FM_DEEMPHA_75U : FM_DEEMPHA_50U);
+    else
+        fm_rx_config_deemphasis( fmdev,fmdev->rx.region.deemphasis);
 }
 
 /*
@@ -1543,6 +1552,7 @@ int fmc_enable (struct fmdrv_ops *fmdev, unsigned char opt)
     unsigned char read_length;
     unsigned char resp_buf [1];
     int resp_len;
+    unsigned char step;
 
     if (!test_bit(FM_CORE_READY, &fmdev->flag))
     {
@@ -1610,14 +1620,16 @@ int fmc_enable (struct fmdrv_ops *fmdev, unsigned char opt)
     }
     fmdev->rx.curr_region = DEF_V4L2_FM_WORLD_REGION;
 
-    /* Set Scan Step */
+    /* Set Scan Step. Assigned to rx.sch_step first, it was never written:
+     * fm_rx_set_scan_step() skips a step equal to the cached one. */
 #if(defined(DEF_V4L2_FM_WORLD_REGION) && DEF_V4L2_FM_WORLD_REGION == FM_REGION_NA)
-    fmdev->rx.sch_step = FM_STEP_200KHZ;
+    step = FM_STEP_200KHZ;
 #else
-    fmdev->rx.sch_step = FM_STEP_100KHZ;
+    step = FM_STEP_100KHZ;
 #endif
-    V4L2_FM_DRV_DBG(V4L2_DBG_TX,"(fmdrv): FM Set Scan Step : 0x%x", fmdev->rx.sch_step);
-    ret = fmc_set_scan_step(fmdev, fmdev->rx.sch_step);
+    V4L2_FM_DRV_DBG(V4L2_DBG_TX,"(fmdrv): FM Set Scan Step : 0x%x", step);
+    fmdev->rx.sch_step = FM_STEP_NONE;
+    ret = fmc_set_scan_step(fmdev, step);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("(fmdrv): Unable to set scan step");
         return ret;

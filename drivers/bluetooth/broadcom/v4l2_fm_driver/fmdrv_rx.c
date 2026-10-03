@@ -325,14 +325,14 @@ int process_seek_event(struct fmdrv_ops *fmdev)
 
     tmp_freq = fmdev->rx.curr_freq;
     is_valid_freq = check_if_valid_freq(fmdev, tmp_freq);
-    if(((FM_SET_FREQ(tmp_freq) - 5) <= FM_SET_FREQ(fmdev->rx.region.low_bound)) ||
-       ((FM_SET_FREQ(tmp_freq) + 5)  >= FM_SET_FREQ(fmdev->rx.region.high_bound)))
+    if(((FM_SET_FREQ(tmp_freq) - 5) <= FM_SET_FREQ(fmdev->rx.seek_low)) ||
+       ((FM_SET_FREQ(tmp_freq) + 5)  >= FM_SET_FREQ(fmdev->rx.seek_high)))
     {
         is_valid_freq = FALSE;
     }
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) %s tmp:%d low:%d high:%d", __func__,\
-        tmp_freq, fmdev->rx.region.low_bound, fmdev->rx.region.high_bound);
+        tmp_freq, fmdev->rx.seek_low, fmdev->rx.seek_high);
 
     /* First check if Scan suceeded or not */
     if(fmdev->rx.curr_search_state == FM_STATE_SEEK_ERR)
@@ -351,7 +351,7 @@ int process_seek_event(struct fmdrv_ops *fmdev)
                 "Wrapping search again..");
 
             start_freq = (fmdev->rx.seek_direction==FM_SCAN_DOWN)?
-                (fmdev->rx.region.high_bound):(fmdev->rx.region.low_bound);
+                (fmdev->rx.seek_high):(fmdev->rx.seek_low);
             V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdev) Current scanned frequency " \
                 "is out of bounds. Resetting to freq (%d) ",
                         FM_SET_FREQ(start_freq));
@@ -546,7 +546,8 @@ int fm_rx_get_frequency(struct fmdrv_ops *fmdev, unsigned int *curr_freq)
 int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
                             unsigned char wrap_around)
 {
-    int ret = 0, freq;
+    int ret = 0;
+    unsigned int freq;
     unsigned short tmp_freq, start_freq;
     unsigned long timeleft;
 
@@ -560,13 +561,14 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
         fmdev->rx.seek_direction, fmdev->rx.curr_sch_mode, fmdev->rx.seek_wrap);
 
     ret = fm_rx_get_frequency(fmdev, &freq);
+    FM_CHECK_SEND_CMD_STATUS(ret);
     tmp_freq = FM_GET_FREQ(freq);
 
     if(!check_if_valid_freq(fmdev, tmp_freq))
     {
-        start_freq = (direction_upward)?(fmdev->rx.region.low_bound+
+        start_freq = (direction_upward)?(fmdev->rx.seek_low+
             fm_sch_step_size[fmdev->rx.sch_step])
-            :(fmdev->rx.region.high_bound - fm_sch_step_size[fmdev->rx.sch_step]);
+            :(fmdev->rx.seek_high - fm_sch_step_size[fmdev->rx.sch_step]);
         V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdev) Current frequency is out of "\
             "bounds. Resetting to freq (%d) ", FM_SET_FREQ(start_freq));
     }
@@ -574,10 +576,10 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
     {
         start_freq = (direction_upward)?(tmp_freq + fm_sch_step_size[fmdev->rx.sch_step])
             :(tmp_freq - fm_sch_step_size[fmdev->rx.sch_step]);
-        if(start_freq >= fmdev->rx.region.high_bound ||
-            start_freq <= fmdev->rx.region.low_bound)
+        if(start_freq >= fmdev->rx.seek_high ||
+            start_freq <= fmdev->rx.seek_low)
                 start_freq =  (direction_upward)?
-                (fmdev->rx.region.low_bound):(fmdev->rx.region.high_bound);
+                (fmdev->rx.seek_low):(fmdev->rx.seek_high);
     }
     V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) Starting FM seek (%s) from %d..", \
         (direction_upward?"SEEKUP":"SEEKDOWN"), FM_SET_FREQ(start_freq));
@@ -664,15 +666,16 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
 *Function to set band's high and low frequencies
 */
 /*
- * Limit tuning and seeking to [low_freq, high_freq], in 10 kHz units, within
- * the current region's band. The limits go to the chip's search boundary
- * too; they used to change only the driver's copy, so the chip's own seek
- * ran to the region's ends regardless.
+ * Limit the next hardware seek to [low_freq, high_freq], in 10 kHz units,
+ * within the region's band. The limits go to the chip's search boundary and
+ * to rx.seek_low/high, which the seek code uses; the band itself -- what
+ * tuning is checked against -- stays as it is. Narrowing the band here made
+ * every later S_FREQUENCY outside a seek's limits fail.
  */
-int fm_rx_set_band_frequencies(struct fmdrv_ops *fmdev,
+int fm_rx_set_seek_range(struct fmdrv_ops *fmdev,
                          unsigned int low_freq, unsigned int high_freq)
 {
-    const struct region_info *band = &region_configs[fmdev->rx.curr_region];
+    const struct region_info *band = &fmdev->rx.region;
     unsigned short boundary[2];
     int ret;
 
@@ -685,8 +688,8 @@ int fm_rx_set_band_frequencies(struct fmdrv_ops *fmdev,
         high_freq > FM_SET_FREQ(band->high_bound))
         return -EINVAL;
 
-    if((fmdev->rx.region.high_bound == FM_GET_FREQ(high_freq)) &&
-        (fmdev->rx.region.low_bound == FM_GET_FREQ(low_freq)))
+    if (fmdev->rx.seek_high == FM_GET_FREQ(high_freq) &&
+        fmdev->rx.seek_low == FM_GET_FREQ(low_freq))
         return 0;
 
     boundary[0] = FM_GET_FREQ(high_freq);
@@ -695,8 +698,8 @@ int fm_rx_set_band_frequencies(struct fmdrv_ops *fmdev,
                        REG_WR, &fmdev->maintask_completion, NULL, NULL);
     FM_CHECK_SEND_CMD_STATUS(ret);
 
-    fmdev->rx.region.high_bound = FM_GET_FREQ(high_freq);
-    fmdev->rx.region.low_bound = FM_GET_FREQ(low_freq);
+    fmdev->rx.seek_high = FM_GET_FREQ(high_freq);
+    fmdev->rx.seek_low = FM_GET_FREQ(low_freq);
     return 0;
 }
 
@@ -841,6 +844,19 @@ int fm_rx_set_region(struct fmdrv_ops *fmdev,
 
     fmc_update_region_info(fmdev, region_to_set);
 
+    /* FM_CTRL also holds the stereo mode, and the write above set it to
+     * auto-blend: put back the mode asked for, which rx.audio_mode still
+     * claimed was in place */
+    {
+        unsigned char mode = fmdev->rx.audio_mode;
+
+        fmdev->rx.audio_mode = FM_AUTO_MODE;
+        if (mode != FM_AUTO_MODE) {
+            ret = fm_rx_set_audio_mode(fmdev, mode);
+            FM_CHECK_SEND_CMD_STATUS(ret);
+        }
+    }
+
     return ret;
 }
 
@@ -921,8 +937,10 @@ int fm_rx_set_mute_mode(struct fmdrv_ops *fmdev,
 
     if (fmdev->curr_fmmode != FM_MODE_RX)
         return -EPERM;
-    /* First read the aud_ctrl*/
+    /* First read the aud_ctrl; on a failed read it holds nothing, and
+     * writing it back put garbage into the chip's audio control */
     ret = fm_rx_get_audio_ctrl(fmdev, &aud_ctrl);
+    FM_CHECK_SEND_CMD_STATUS(ret);
     /* turn on MUTE */
     if (mute_mode_toset)
     {

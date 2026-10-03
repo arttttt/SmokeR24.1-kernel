@@ -229,7 +229,11 @@ static ssize_t fmrx_deemphasis_locked(struct fmdrv_ops *fmdev,
     if (kstrtoul(buf, 0, &deemph_mode))
         return -EINVAL;
 
-    ret = fm_rx_config_deemphasis(fmdev,deemph_mode);
+    /* through the control, so it and the chip agree; accepts 50 or 75 */
+    if (deemph_mode != 50 && deemph_mode != 75)
+        return -EINVAL;
+    ret = v4l2_ctrl_s_ctrl(fmdev->deemph_ctrl, deemph_mode == 75 ?
+                           V4L2_DEEMPHASIS_75_uS : V4L2_DEEMPHASIS_50_uS);
     if (ret < 0) {
         V4L2_FM_DRV_ERR("Failed to set De-emphasis Mode\n");
         return ret;
@@ -1014,16 +1018,19 @@ static int fm_v4l2_vidioc_s_hw_freq_seek(struct file *file, void *priv,
     /* limits in 62.5 Hz units; both 0 means the whole band, so a seek
      * without limits undoes the previous one's */
     if (seek->rangelow || seek->rangehigh)
-        ret = fm_rx_set_band_frequencies(fmdev, seek->rangelow / 160,
-                                         seek->rangehigh / 160);
+        ret = fm_rx_set_seek_range(fmdev, seek->rangelow / 160,
+                                   seek->rangehigh / 160);
     else
-        ret = fm_rx_set_band_frequencies(fmdev,
-                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].low_bound),
-                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].high_bound));
+        ret = fm_rx_set_seek_range(fmdev,
+                FM_SET_FREQ(fmdev->rx.region.low_bound),
+                FM_SET_FREQ(fmdev->rx.region.high_bound));
     if (ret < 0)
         return ret;
 
     ret = fmc_seek_station(fmdev, seek->seek_upward, seek->wrap_around);
+    /* the V4L2 answer for "no station found" */
+    if (ret == -EAGAIN)
+        ret = -ENODATA;
 
     if (ret < 0)
         return ret;
@@ -1171,10 +1178,12 @@ int fm_v4l2_init_video_device(struct fmdrv_ops *fmdev, int radio_nr)
     v4l2_ctrl_new_std(&fmdev->ctrl_handler, &fm_ctrl_ops,
                       V4L2_CID_AUDIO_MUTE, 0, 1, 1, 0);
     /* 50 or 75 us; the chip cannot turn it off */
-    v4l2_ctrl_new_std_menu(&fmdev->ctrl_handler, &fm_ctrl_ops,
+    fmdev->deemph_ctrl = v4l2_ctrl_new_std_menu(&fmdev->ctrl_handler,
+                           &fm_ctrl_ops,
                            V4L2_CID_TUNE_DEEMPHASIS, V4L2_DEEMPHASIS_75_uS,
                            1 << V4L2_DEEMPHASIS_DISABLED,
-                           fmdev->rx.region.deemphasis == FM_DEEMPHA_75U ?
+                           region_configs[DEF_V4L2_FM_WORLD_REGION].deemphasis
+                               == FM_DEEMPHA_75U ?
                            V4L2_DEEMPHASIS_75_uS : V4L2_DEEMPHASIS_50_uS);
     ret = fmdev->ctrl_handler.error;
     if (ret) {

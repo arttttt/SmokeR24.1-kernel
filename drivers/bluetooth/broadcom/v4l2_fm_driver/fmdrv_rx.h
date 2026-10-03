@@ -31,7 +31,7 @@
 *******************************************************************************/
 
 int fm_rx_set_frequency(struct fmdrv_ops*, unsigned int);
-int fm_rx_set_band_frequencies(struct fmdrv_ops *, unsigned int, unsigned int);
+int fm_rx_set_seek_range(struct fmdrv_ops *, unsigned int, unsigned int);
 int fm_rx_set_mute_mode(struct fmdrv_ops*, unsigned char);
 int fm_rx_set_rds_system(struct fmdrv_ops *, unsigned char);
 int fm_rx_set_volume(struct fmdrv_ops*, unsigned short);
