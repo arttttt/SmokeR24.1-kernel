@@ -714,10 +714,20 @@ int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
         //V4L2_FM_DRV_DBG("(fmdrv): Reponse status success : %d ", cmd_complete_hdr->status);
         /* Send reponse data to caller */
         if (reponse != NULL && reponse_len != NULL && fm_evt_hdr->len) {
+            /* The data length the event header claims, bounded by what
+             * arrived: the header was copied from blindly before. The
+             * caller's buffer is sized for the read length it asked for. */
+            int data_len = (int)fm_evt_hdr->len - FM_CMD_COMPLETE_HDR_SIZE;
+            int have = (int)skb->len - (FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE);
+
+            if (data_len > have)
+                data_len = have;
+            if (data_len < 0)
+                data_len = 0;
             /* Skip header info and copy only response data */
             skb_pull(skb, (FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE));
-            memcpy(reponse, skb->data, (fm_evt_hdr->len - FM_CMD_COMPLETE_HDR_SIZE) );
-            *reponse_len = (fm_evt_hdr->len - FM_CMD_COMPLETE_HDR_SIZE) ;
+            memcpy(reponse, skb->data, data_len);
+            *reponse_len = data_len;
         }
         else if (reponse_len != NULL && fm_evt_hdr->len == 0) {
             *reponse_len = 0;
@@ -755,6 +765,14 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
 {
     unsigned short fm_rds_flag;
     unsigned char response[2];
+
+    /* the flag register is two bytes after the Command Complete header */
+    if (skb->len < FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE + 2)
+    {
+        pr_err("(fmdrv): short FM_RDS_FLAG response (%d bytes)", skb->len);
+        kfree_skb(skb);
+        return -EINVAL;
+    }
 
     memcpy(&response, &skb->data[FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE], 2);
     fm_rds_flag= (unsigned short)response[0] + ((unsigned short)response[1] << 8) ;
@@ -1025,15 +1043,17 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
     int ret, response_len, index=0;
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(rds)");
+    /* the rx work only hands over a full Command Complete header */
     skb_pull(skb, (sizeof(struct fm_event_msg_hdr) + sizeof(struct fm_cmd_complete_hdr)));
     rds_data = skb->data;
-    response_len = skb->len;
+    /* whole tuples only: a partial one at the end is not read */
+    response_len = skb->len - skb->len % FM_RDS_TUPLE_LENGTH;
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(rds) RDS length : %d", response_len);
 
     /* Read RDS data */
     spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
-    while (response_len > 0)
+    while (response_len >= FM_RDS_TUPLE_LENGTH)
     {
         /* Fill RDS buffer as per V4L2 specification.
      * Store control byte
@@ -1100,8 +1120,9 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
             break;
         }
 
-        /*Check for end of RDS tuple */
-        if ((rds_data + FM_RDS_TUPLE_LENGTH)[FM_RDS_TUPLE_BYTE1] == FM_RDS_END_TUPLE_1ST_BYTE &&
+        /*Check for end of RDS tuple -- the next one, if there is a next one */
+        if (response_len >= 2 * FM_RDS_TUPLE_LENGTH &&
+            (rds_data + FM_RDS_TUPLE_LENGTH)[FM_RDS_TUPLE_BYTE1] == FM_RDS_END_TUPLE_1ST_BYTE &&
             (rds_data + FM_RDS_TUPLE_LENGTH)[FM_RDS_TUPLE_BYTE2] == FM_RDS_END_TUPLE_2ND_BYTE &&
             (rds_data + FM_RDS_TUPLE_LENGTH)[FM_RDS_TUPLE_BYTE3] == FM_RDS_END_TUPLE_3RD_BYTE )
         {
@@ -1130,7 +1151,7 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) Write to FM_REG_FM_RDS_MSK done : %d", ret);
 
-    kfree(skb);
+    kfree_skb(skb);
     return 0;
 }
 
