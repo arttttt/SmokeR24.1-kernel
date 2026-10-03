@@ -663,15 +663,38 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
 /*
 *Function to set band's high and low frequencies
 */
+/*
+ * Limit tuning and seeking to [low_freq, high_freq], in 10 kHz units, within
+ * the current region's band. The limits go to the chip's search boundary
+ * too; they used to change only the driver's copy, so the chip's own seek
+ * ran to the region's ends regardless.
+ */
 int fm_rx_set_band_frequencies(struct fmdrv_ops *fmdev,
                          unsigned int low_freq, unsigned int high_freq)
 {
+    const struct region_info *band = &region_configs[fmdev->rx.curr_region];
+    unsigned short boundary[2];
+    int ret;
+
+    if (fmdev->curr_fmmode != FM_MODE_RX)
+        return -EPERM;
+
+    /* compared in 10 kHz units: FM_GET_FREQ() wraps below 64 MHz */
+    if (low_freq >= high_freq ||
+        low_freq < FM_SET_FREQ(band->low_bound) ||
+        high_freq > FM_SET_FREQ(band->high_bound))
+        return -EINVAL;
+
     if((fmdev->rx.region.high_bound == FM_GET_FREQ(high_freq)) &&
         (fmdev->rx.region.low_bound == FM_GET_FREQ(low_freq)))
-    {
-        V4L2_FM_DRV_ERR("(fmdrv) Ignoring setting the same band frequencies");
         return 0;
-    }
+
+    boundary[0] = FM_GET_FREQ(high_freq);
+    boundary[1] = FM_GET_FREQ(low_freq);
+    ret = fmc_send_cmd(fmdev, FM_SEARCH_BOUNDARY, boundary, sizeof(boundary),
+                       REG_WR, &fmdev->maintask_completion, NULL, NULL);
+    FM_CHECK_SEND_CMD_STATUS(ret);
+
     fmdev->rx.region.high_bound = FM_GET_FREQ(high_freq);
     fmdev->rx.region.low_bound = FM_GET_FREQ(low_freq);
     return 0;

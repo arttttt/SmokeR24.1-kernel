@@ -89,44 +89,8 @@ unsigned char bt_master_on_pcm_pins[5] = {0x01, 0x19, 0x18, 0x18, 0x18 };
 /* set this module parameter to enable debug info */
 extern int fm_dbg_param;
 
-/* Query control */
-struct v4l2_queryctrl fmdrv_v4l2_queryctrl[] = {
-    {
-        .id = V4L2_CID_AUDIO_VOLUME,
-        .type = V4L2_CTRL_TYPE_INTEGER,
-        .name = "Volume",
-        .minimum = FM_RX_VOLUME_MIN,
-        .maximum = FM_RX_VOLUME_MAX,
-        .step = 1,
-        .default_value = FM_DEFAULT_RX_VOLUME,
-    },
-    {
-        .id = V4L2_CID_AUDIO_BALANCE,
-        .flags = V4L2_CTRL_FLAG_DISABLED,
-    },
-    {
-        .id = V4L2_CID_AUDIO_BASS,
-        .flags = V4L2_CTRL_FLAG_DISABLED,
-    },
-    {
-        .id = V4L2_CID_AUDIO_TREBLE,
-        .flags = V4L2_CTRL_FLAG_DISABLED,
-    },
-    {
-        .id = V4L2_CID_AUDIO_MUTE,
-        .type = V4L2_CTRL_TYPE_BOOLEAN,
-        .name = "Mute",
-        .minimum = 0,
-        .maximum = 2,
-        .step = 1,
-        .default_value = FM_MUTE_OFF,
-    },
-    {
-        .id = V4L2_CID_AUDIO_LOUDNESS,
-        .flags = V4L2_CTRL_FLAG_DISABLED,
-    },
-// may need private control
-};
+extern struct region_info region_configs[];
+
 
 
 #if V4L2_FM_DEBUG
@@ -343,7 +307,8 @@ static ssize_t show_fmrx_fm_audio_pins(struct device *dev,
 static ssize_t fmrx_fm_audio_pins_locked(struct fmdrv_ops *fmdev,
         const char *buf, size_t size)
 {
-    int ret = 0;
+    /* used only by the ROUTE_* pin switches, off in this build */
+    int ret __maybe_unused = 0;
     if(strncmp(buf, fmdev->rx.current_pins, 3) == 0 &&
        fmdev->rx.current_pins[0]) /*I2S or PCM*/
     {
@@ -660,6 +625,14 @@ static int fm_v4l2_fops_open_locked(struct file *file)
         goto err_release;
     }
 
+    /* The controls -- de-emphasis, volume, mute -- as userspace last set
+     * them, over what enabling the chip and its region set up */
+    ret = v4l2_ctrl_handler_setup(&fmdev->ctrl_handler);
+    if (ret < 0) {
+        V4L2_FM_DRV_ERR("(fmdrv): Error applying controls during FM enable operation");
+        goto err_release;
+    }
+
     /* Set Audio path */
     V4L2_FM_DRV_DBG(V4L2_DBG_OPEN,"(fmdrv): FM Set Audio path option : %d", DEF_V4L2_FM_AUDIO_PATH);
     ret = fm_rx_config_audio_path(fmdev, DEF_V4L2_FM_AUDIO_PATH);
@@ -799,99 +772,68 @@ static int fm_v4l2_vidioc_querycap(struct file *file, void *priv,
 }
 
 /*
-* Function to query the driver control params
-*/
-static int fm_v4l2_vidioc_queryctrl(struct file *file, void *priv,
-                                        struct v4l2_queryctrl *qc)
+ * Controls, through the V4L2 control framework. The core calls s_ctrl with
+ * the driver mutex held: from an ioctl (the video device's lock) or from
+ * open's v4l2_ctrl_handler_setup(). With FM closed a value is only kept,
+ * and open pushes it to the chip.
+ */
+static int fm_v4l2_s_ctrl(struct v4l2_ctrl *ctrl)
 {
-    int index;
-    int ret = -EINVAL;
+    struct fmdrv_ops *fmdev = container_of(ctrl->handler, struct fmdrv_ops,
+                                           ctrl_handler);
 
-    if (qc->id < V4L2_CID_BASE)
-        return ret;
-
-    /* Search control ID and copy its properties */
-    for (index = 0; index < NO_OF_ENTRIES_IN_ARRAY(fmdrv_v4l2_queryctrl);\
-            index++) {
-        if (qc->id && qc->id == fmdrv_v4l2_queryctrl[index].id) {
-            memcpy(qc, &(fmdrv_v4l2_queryctrl[index]), sizeof(*qc));
-            ret = 0;
-            break;
-        }
-    }
-    return ret;
-}
-
-/*
-* Function to get the driver control params. Called
-* by user-space via IOCTL call
-*/
-static int fm_v4l2_vidioc_g_ctrl(struct file *file, void *priv,
-                    struct v4l2_control *ctrl)
-{
-    int ret = -EINVAL;
-    unsigned short curr_vol;
-    unsigned char curr_mute_mode;
-    struct fmdrv_ops *fmdev;
-
-    fmdev = video_drvdata(file);
+    if (!test_bit(FM_CORE_READY, &fmdev->flag) ||
+        fmdev->curr_fmmode != FM_MODE_RX)
+        return 0;
 
     switch (ctrl->id) {
-        case V4L2_CID_AUDIO_MUTE:    /* get mute mode */
-            ret = fm_rx_get_mute_mode(fmdev, &curr_mute_mode);
-            if (ret < 0)
-                return ret;
-            ctrl->value = curr_mute_mode;
-            break;
+    case V4L2_CID_AUDIO_MUTE:
+        return fm_rx_set_mute_mode(fmdev, ctrl->val ? FM_MUTE_ON : FM_MUTE_OFF);
 
-        case V4L2_CID_AUDIO_VOLUME:    /* get volume */
-            V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv): V4L2_CID_AUDIO_VOLUME get");
-            ret = fm_rx_get_volume(fmdev, &curr_vol);
-            if (ret < 0)
-                return ret;
-            ctrl->value = curr_vol;
-            break;
+    case V4L2_CID_AUDIO_VOLUME:
+        return fm_rx_set_volume(fmdev, (unsigned short)ctrl->val);
 
-       default:
-           V4L2_FM_DRV_ERR("(fmdrv): Unhandled IOCTL for get Control");
-           break;
+    case V4L2_CID_TUNE_DEEMPHASIS:
+        return fm_rx_config_deemphasis(fmdev,
+                ctrl->val == V4L2_DEEMPHASIS_75_uS ? FM_DEEMPHA_75U
+                                                   : FM_DEEMPHA_50U);
     }
-
-    return ret;
+    return -EINVAL;
 }
 
+static const struct v4l2_ctrl_ops fm_ctrl_ops = {
+    .s_ctrl = fm_v4l2_s_ctrl,
+};
+
+/* The chip's tuning range, in 62.5 Hz units (V4L2_TUNER_CAP_LOW) */
+#define FM_BAND_LOW_62_5HZ(f10khz)   ((f10khz) * 160)
+
 /*
-* Function to Set the driver control params. Called
-* by user-space via IOCTL call
-*/
-static int fm_v4l2_vidioc_s_ctrl(struct file *file, void *priv,
-                    struct v4l2_control *ctrl)
+ * One band: the receiver's current one, which tuning is limited to. Seeks
+ * may narrow it per request (VIDIOC_S_HW_FREQ_SEEK rangelow/rangehigh).
+ */
+static int fm_v4l2_vidioc_enum_freq_bands(struct file *file, void *priv,
+                    struct v4l2_frequency_band *band)
 {
-    int ret = -EINVAL;
-    struct fmdrv_ops *fmdev;
+    struct fmdrv_ops *fmdev = video_drvdata(file);
 
-    fmdev = video_drvdata(file);
+    if (band->tuner != 0 || band->index != 0)
+        return -EINVAL;
 
-    switch (ctrl->id) {
-        case V4L2_CID_AUDIO_MUTE:    /* set mute */
-            ret = fm_rx_set_mute_mode(fmdev, (unsigned char)ctrl->value);
-            if (ret < 0)
-                return ret;
-            break;
-
-        case V4L2_CID_AUDIO_VOLUME:    /* set volume */
-            V4L2_FM_DRV_DBG(V4L2_DBG_TX,"(fmdrv): V4L2_CID_AUDIO_VOLUME set : %d", ctrl->value);
-            ret = fm_rx_set_volume(fmdev, (unsigned short)ctrl->value);
-            if (ret < 0)
-                return ret;
-            break;
-
-        default:
-            V4L2_FM_DRV_ERR("(fmdrv): Unhandled IOCTL for set Control");
-            break;
-    }
-
-    return ret;
+    memset(band->reserved, 0, sizeof(band->reserved));
+    band->type = V4L2_TUNER_RADIO;
+    band->capability = V4L2_TUNER_CAP_LOW | V4L2_TUNER_CAP_STEREO |
+                       V4L2_TUNER_CAP_RDS | V4L2_TUNER_CAP_FREQ_BANDS |
+                       V4L2_TUNER_CAP_HWSEEK_BOUNDED |
+                       V4L2_TUNER_CAP_HWSEEK_WRAP |
+                       V4L2_TUNER_CAP_HWSEEK_PROG_LIM;
+    /* the region's whole band, not what the last seek narrowed it to */
+    band->rangelow = FM_BAND_LOW_62_5HZ(
+                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].low_bound));
+    band->rangehigh = FM_BAND_LOW_62_5HZ(
+                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].high_bound));
+    band->modulation = V4L2_BAND_MODULATION_FM;
+    return 0;
 }
 
 /*
@@ -940,17 +882,28 @@ static int fm_v4l2_vidioc_g_tuner(struct file *file, void *priv,
     fmdev = video_drvdata(file);
     strcpy(tuner->name, "FM");
     tuner->type = fmdev->device_info.type;
-    /* The V4L2 specification defines all frequencies in unit of 62.5 kHz */
-    ret = fm_rx_get_band_frequencies(fmdev, &low, &high);
-    tuner->rangelow = (low * 100000)/625;
-    tuner->rangehigh = (high * 100000)/625;
+    /* The tuner's whole range (62.5 Hz units), not a seek's narrowing */
+    low = FM_SET_FREQ(region_configs[fmdev->rx.curr_region].low_bound);
+    high = FM_SET_FREQ(region_configs[fmdev->rx.curr_region].high_bound);
+    tuner->rangelow = FM_BAND_LOW_62_5HZ(low);
+    tuner->rangehigh = FM_BAND_LOW_62_5HZ(high);
 
+    /*
+     * audmode is the mode asked for (stereo means "when the signal allows",
+     * i.e. auto-blend); what is being received now goes in rxsubchans. It
+     * used to be the other way round: audmode followed the SNR.
+     */
+    tuner->audmode = (fmdev->rx.audio_mode == FM_MONO_MODE) ?
+                    V4L2_TUNER_MODE_MONO : V4L2_TUNER_MODE_STEREO;
     ret = fmc_get_audio_mode(fmdev, &mode);
-    tuner->audmode =  ((mode == FM_STEREO_MODE) ?
-                    V4L2_TUNER_MODE_STEREO : V4L2_TUNER_MODE_MONO);
+    tuner->rxsubchans = (ret == 0 && mode == FM_STEREO_MODE) ?
+                    V4L2_TUNER_SUB_STEREO : V4L2_TUNER_SUB_MONO;
+    if (fmdev->device_info.rxsubchans & V4L2_TUNER_SUB_RDS)
+        tuner->rxsubchans |= V4L2_TUNER_SUB_RDS;
     V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) tuner->audmode:%d", tuner->audmode);
-    tuner->capability = fmdev->device_info.tuner_capability;
-    tuner->rxsubchans = fmdev->device_info.rxsubchans;
+    tuner->capability = fmdev->device_info.tuner_capability |
+                    V4L2_TUNER_CAP_FREQ_BANDS | V4L2_TUNER_CAP_HWSEEK_BOUNDED |
+                    V4L2_TUNER_CAP_HWSEEK_WRAP | V4L2_TUNER_CAP_HWSEEK_PROG_LIM;
 
     ret = fm_rx_read_curr_rssi_freq(fmdev, TRUE);
     curr_rssi = fmdev->rx.curr_rssi;
@@ -971,27 +924,14 @@ static int fm_v4l2_vidioc_s_tuner(struct file *file, void *priv,
 {
     int ret = -EINVAL;
     struct fmdrv_ops *fmdev;
-    unsigned short high_freq, low_freq;
     unsigned short mode;
     if (tuner->index != 0)
         return ret;
 
     fmdev = video_drvdata(file);
 
-    /* TODO : Figure out how to set the region based on lower/upper freq */
-    /* The V4L2 specification defines all frequencies in unit of 62.5 kHz.
-    Hence translate the incoming tuner band frequencies to controller
-    recognized values. Set only if rangelow/rangehigh is not 0*/
-    if(tuner->rangelow != 0 && tuner->rangehigh != 0)
-    {
-        V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) rangelow:%d rangehigh:%d", tuner->rangelow, tuner->rangehigh);
-        low_freq = ((tuner->rangelow) * 625)/100000;
-        high_freq= ((tuner->rangehigh) * 625)/100000;
-        V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) low_freq:%d high_freq:%d", low_freq, high_freq);
-        ret = fm_rx_set_band_frequencies(fmdev, low_freq, high_freq);
-        if (ret < 0)
-            return ret;
-    }
+    /* Only audmode is writable (V4L2 spec); the band is reported by
+     * VIDIOC_ENUM_FREQ_BANDS and a seek's limits come with the seek. */
 
     /* Map V4L2 stereo/mono macro to Broadcom controller equivalent audio mode */
     mode = (tuner->audmode == V4L2_TUNER_MODE_STEREO) ?
@@ -1049,8 +989,39 @@ static int fm_v4l2_vidioc_s_hw_freq_seek(struct file *file, void *priv,
 
     fmdev = video_drvdata(file);
 
-    V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) direction:%d wrap:%d", \
-        seek->seek_upward, seek->wrap_around);
+    V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) direction:%d wrap:%d spacing:%u range:%u-%u", \
+        seek->seek_upward, seek->wrap_around, seek->spacing,
+        seek->rangelow, seek->rangehigh);
+
+    if (seek->tuner != 0 || seek->type != V4L2_TUNER_RADIO)
+        return -EINVAL;
+
+    /* spacing in Hz; 0 keeps the current step */
+    if (seek->spacing) {
+        unsigned char step;
+
+        switch (seek->spacing) {
+        case 50000:  step = FM_STEP_50KHZ;  break;
+        case 100000: step = FM_STEP_100KHZ; break;
+        case 200000: step = FM_STEP_200KHZ; break;
+        default:     return -EINVAL;
+        }
+        ret = fmc_set_scan_step(fmdev, step);
+        if (ret < 0)
+            return ret;
+    }
+
+    /* limits in 62.5 Hz units; both 0 means the whole band, so a seek
+     * without limits undoes the previous one's */
+    if (seek->rangelow || seek->rangehigh)
+        ret = fm_rx_set_band_frequencies(fmdev, seek->rangelow / 160,
+                                         seek->rangehigh / 160);
+    else
+        ret = fm_rx_set_band_frequencies(fmdev,
+                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].low_bound),
+                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].high_bound));
+    if (ret < 0)
+        return ret;
 
     ret = fmc_seek_station(fmdev, seek->seek_upward, seek->wrap_around);
 
@@ -1141,9 +1112,7 @@ static const struct v4l2_file_operations fm_drv_fops = {
 
 static const struct v4l2_ioctl_ops fm_drv_ioctl_ops = {
     .vidioc_querycap = fm_v4l2_vidioc_querycap,
-    .vidioc_queryctrl = fm_v4l2_vidioc_queryctrl,
-    .vidioc_g_ctrl = fm_v4l2_vidioc_g_ctrl,
-    .vidioc_s_ctrl = fm_v4l2_vidioc_s_ctrl,
+    .vidioc_enum_freq_bands = fm_v4l2_vidioc_enum_freq_bands,
     .vidioc_g_audio = fm_v4l2_vidioc_g_audio,
     .vidioc_s_audio = fm_v4l2_vidioc_s_audio,
     .vidioc_g_tuner = fm_v4l2_vidioc_g_tuner,
@@ -1181,11 +1150,46 @@ int fm_v4l2_init_video_device(struct fmdrv_ops *fmdev, int radio_nr)
     /* the V4L2 core holds it around every ioctl */
     gradio_dev->lock = &fmdev->mutex;
 
+    strlcpy(fmdev->v4l2_dev.name, FM_DRV_NAME, sizeof(fmdev->v4l2_dev.name));
+    ret = v4l2_device_register(NULL, &fmdev->v4l2_dev);
+    if (ret < 0) {
+        video_device_release(gradio_dev);
+        V4L2_FM_DRV_ERR("(fmdrv): Could not register v4l2 device");
+        return ret;
+    }
+
+    /*
+     * Volume is the chip's digital level. FM's listening volume is set on
+     * the codec (DAC1, the HAL's fm_volume), so the chip defaults to full
+     * scale: the previous default of 150 would have made FM quieter as soon
+     * as open applied it.
+     */
+    v4l2_ctrl_handler_init(&fmdev->ctrl_handler, 3);
+    v4l2_ctrl_new_std(&fmdev->ctrl_handler, &fm_ctrl_ops,
+                      V4L2_CID_AUDIO_VOLUME, FM_RX_VOLUME_MIN,
+                      FM_RX_VOLUME_MAX, 1, FM_RX_VOLUME_MAX);
+    v4l2_ctrl_new_std(&fmdev->ctrl_handler, &fm_ctrl_ops,
+                      V4L2_CID_AUDIO_MUTE, 0, 1, 1, 0);
+    /* 50 or 75 us; the chip cannot turn it off */
+    v4l2_ctrl_new_std_menu(&fmdev->ctrl_handler, &fm_ctrl_ops,
+                           V4L2_CID_TUNE_DEEMPHASIS, V4L2_DEEMPHASIS_75_uS,
+                           1 << V4L2_DEEMPHASIS_DISABLED,
+                           fmdev->rx.region.deemphasis == FM_DEEMPHA_75U ?
+                           V4L2_DEEMPHASIS_75_uS : V4L2_DEEMPHASIS_50_uS);
+    ret = fmdev->ctrl_handler.error;
+    if (ret) {
+        V4L2_FM_DRV_ERR("(fmdrv): Could not create controls (%d)", ret);
+        goto err_ctrls;
+    }
+    fmdev->v4l2_dev.ctrl_handler = &fmdev->ctrl_handler;
+    gradio_dev->v4l2_dev = &fmdev->v4l2_dev;
+    gradio_dev->ctrl_handler = &fmdev->ctrl_handler;
+
     /* Register with V4L2 subsystem as RADIO device */
     if (video_register_device(gradio_dev, VFL_TYPE_RADIO, radio_nr)) {
-        video_device_release(gradio_dev);
         V4L2_FM_DRV_ERR("(fmdrv): Could not register video device");
-        return -EINVAL;
+        ret = -EINVAL;
+        goto err_ctrls;
     }
 
     fmdev->radio_dev = gradio_dev;
@@ -1199,8 +1203,12 @@ int fm_v4l2_init_video_device(struct fmdrv_ops *fmdev, int radio_nr)
     if (sysfs_create_group(&gradio_dev->dev.kobj, &v4l2_fm_attr_grp))
         V4L2_FM_DRV_ERR("(fmdrv): failed to create sysfs entries");
     V4L2_FM_DRV_DBG(V4L2_DBG_INIT,"(fmdrv) registered with video device");
-    ret = 0;
+    return 0;
 
+err_ctrls:
+    v4l2_ctrl_handler_free(&fmdev->ctrl_handler);
+    v4l2_device_unregister(&fmdev->v4l2_dev);
+    video_device_release(gradio_dev);
     return ret;
 }
 
@@ -1212,6 +1220,8 @@ void *fm_v4l2_deinit_video_device(void)
     sysfs_remove_group(&gradio_dev->dev.kobj, &v4l2_fm_attr_grp);
     /* Unregister RADIO device from V4L2 subsystem */
     video_unregister_device(gradio_dev);
+    v4l2_ctrl_handler_free(&fmdev->ctrl_handler);
+    v4l2_device_unregister(&fmdev->v4l2_dev);
 
     return fmdev;
 }

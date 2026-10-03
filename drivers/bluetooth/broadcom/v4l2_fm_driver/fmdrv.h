@@ -35,6 +35,8 @@
 #include <linux/timer.h>
 #include <linux/version.h>
 #include <linux/videodev2.h>
+#include <media/v4l2-device.h>
+#include <media/v4l2-ctrls.h>
 
 /*******************************************************************************
 **  Constants & Macros
@@ -224,6 +226,10 @@ struct fm_device_info {
 /* FM driver operation structure */
 struct fmdrv_ops {
     struct video_device *radio_dev;   /* V4L2 video device pointer */
+    struct v4l2_device v4l2_dev;      /* parent of radio_dev, owns the controls */
+    /* Volume, mute and de-emphasis, through the V4L2 control framework.
+     * Set while FM is closed they are kept and applied on the next open. */
+    struct v4l2_ctrl_handler ctrl_handler;
     /*
      * Serialises everything that talks to the chip: every ioctl (the V4L2
      * core takes it as the video device's lock), open, release and the
