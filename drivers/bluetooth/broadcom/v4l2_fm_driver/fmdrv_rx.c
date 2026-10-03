@@ -205,7 +205,7 @@ int fm_rx_set_mask(struct fmdrv_ops *fmdev, unsigned short mask)
     int ret;
     unsigned short flag;
 
-    fmdev->rx.fm_rds_flag|= FM_RDS_FLAG_CLEAN_BIT; /* clean FM_RDS_FLAG */
+    set_bit(FM_RDS_FLAG_CLEAN, &fmdev->rx.fm_rds_flag); /* clean FM_RDS_FLAG */
     ret = read_fm_rds_flag(fmdev, &flag);
     FM_CHECK_SEND_CMD_STATUS(ret);
 
@@ -260,9 +260,9 @@ int init_start_search(struct fmdrv_ops *fmdev, unsigned short start_freq,
     }
 
     /* freeze interrupt event before SCH_TUNE is commanded */
-    fmdev->rx.fm_rds_flag |= FM_RDS_FLAG_SCH_FRZ_BIT;
+    set_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
     /* set sch_tune pending bit */
-    fmdev->rx.fm_rds_flag |= FM_RDS_FLAG_SCH_BIT;
+    set_bit(FM_RDS_FLAG_SCH, &fmdev->rx.fm_rds_flag);
 
     /* Write Frequency */
     /* Write FM_REG_FM_FREQ (0x0a) register first */
@@ -281,7 +281,7 @@ int init_start_search(struct fmdrv_ops *fmdev, unsigned short start_freq,
 
     /* Reset the fm_rds_flag here as for the first time we dont get
     any interrupt during ENABLE to cleanup the bit */
-    fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_CLEAN_BIT;
+    clear_bit(FM_RDS_FLAG_CLEAN, &fmdev->rx.fm_rds_flag);
 
     /*
      * The tune or seek ended interrupt may come as soon as SCH_TUNE is
@@ -337,7 +337,7 @@ int process_seek_event(struct fmdrv_ops *fmdev)
     /* First check if Scan suceeded or not */
     if(fmdev->rx.curr_search_state == FM_STATE_SEEK_ERR)
     {
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+        clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
         if(!fmdev->rx.seek_wrap && !is_valid_freq)
         {
             fmdev->rx.curr_search_state = FM_STATE_SEEK_ERR;
@@ -474,7 +474,7 @@ int fm_rx_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
     {
         V4L2_FM_DRV_ERR("(fmdrv) Timeout(%d sec),didn't get tune ended interrupt",\
                jiffies_to_msecs(FM_DRV_TX_TIMEOUT) / 1000);
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+        clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
         return -ETIMEDOUT;
     }
 
@@ -483,11 +483,11 @@ int fm_rx_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
     {
         V4L2_FM_DRV_ERR("(fmdrv) Tune failed for %d MHz frequency", \
             FM_SET_FREQ(tmp_frq));
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+        clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
         return -EAGAIN;
     }
     V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) Set frequency done!");
-    fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+    clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
 
     fm_rx_read_curr_rssi_freq(fmdev, FALSE);
     /* Reset RDS Cache */
@@ -598,7 +598,7 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
     {
         V4L2_FM_DRV_ERR("(fmdrv) Timeout(%d sec),didn't get seek ended interrupt",\
                jiffies_to_msecs(FM_DRV_RX_SEEK_TIMEOUT) / 1000);
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+        clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
         return -ETIMEDOUT;
     }
 
@@ -629,7 +629,7 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
         timeleft = wait_for_completion_timeout(&fmdev->seektask_completion,
                                FM_DRV_RX_SEEK_TIMEOUT);
 
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+        clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
         if (!timeleft)
         {
             V4L2_FM_DRV_ERR("(fmdrv) Timeout(%d sec),didn't get Seek ended "\
@@ -1201,7 +1201,7 @@ void fm_rx_enable_rds(struct fmdrv_ops *fmdev)
     fm_rx_set_mask(fmdev, fmdev->rx.fm_rds_mask);
     /* Reset the fm_rds_flag here as for the first time we dont get
     any interrupt during ENABLE to cleanup the bit */
-    fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_CLEAN_BIT;
+    clear_bit(FM_RDS_FLAG_CLEAN, &fmdev->rx.fm_rds_flag);
 
 }
 

@@ -385,7 +385,7 @@ static void fm_receive_data_ldisc(struct work_struct *w)
              * mask write is answered; the mask writes the driver issues
              * after each RDS read must not lift that freeze early. */
             if (fm && opcode == FM_REG_FM_RDS_MSK && waiter)
-                fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_FRZ_BIT;
+                clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
 
             if (waiter)
                 complete(waiter);
@@ -797,9 +797,11 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
     memcpy(&response, &skb->data[FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE], 2);
     fm_rds_flag= (unsigned short)response[0] + ((unsigned short)response[1] << 8) ;
 
-    if (fmdev->rx.fm_rds_flag & (FM_RDS_FLAG_SCH_FRZ_BIT|FM_RDS_FLAG_CLEAN_BIT))
+    /* frozen by a tune setup, or one read to be cleaned away: CLEAN is
+     * consumed either way, as before */
+    if (test_and_clear_bit(FM_RDS_FLAG_CLEAN, &fmdev->rx.fm_rds_flag) |
+        test_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag))
     {
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_CLEAN_BIT;
         V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) : Clean BIT set. So no processing of the current"\
             "FM/RDS flag set");
         kfree_skb(skb);
@@ -815,7 +817,7 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
         reset_rds_parser();
 
         /* remove sch_tune pending bit */
-        fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_SCH_BIT;
+        clear_bit(FM_RDS_FLAG_SCH, &fmdev->rx.fm_rds_flag);
 
         if(fm_rds_flag & I2C_MASK_SRH_TUNE_FAIL_BIT)
         {

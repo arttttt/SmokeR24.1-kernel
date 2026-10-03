@@ -114,7 +114,12 @@
 #define FM_RDS_END_TUPLE_2ND_BYTE    0xff /* 2nd byte of a RDS ending tuple */
 #define FM_RDS_END_TUPLE_3RD_BYTE    0xff /* 3rd byte of a RDS ending tuple */
 
-/* FM/RDS flag bits used with fm_dev->rx.fm_rds_flag */
+/* Bit numbers in fm_dev->rx.fm_rds_flag, for set_bit() and friends */
+#define     FM_RDS_FLAG_CLEAN           0   /* clean FM_RDS_FLAG register */
+#define     FM_RDS_FLAG_SCH_FRZ         1   /* interrupt freeze */
+#define     FM_RDS_FLAG_SCH             2   /* pending search_tune */
+
+/* FM/RDS flag bits used with fm_dev->rx.fm_rds_flag (masks, unused now) */
 #define     FM_RDS_FLAG_CLEAN_BIT         0x01    /* clean FM_RDS_FLAG register */
 #define     FM_RDS_FLAG_SCH_FRZ_BIT     0x02    /* interrupt freeze */
 #define     FM_RDS_FLAG_SCH_BIT             0x04    /* pending search_tune */
@@ -195,7 +200,10 @@ struct fm_rx {
     unsigned char seek_wrap;
     unsigned char curr_search_state;
     unsigned short fm_rds_mask;     /* FM/RDS interrupt mask */
-    unsigned short fm_rds_flag;     /* FM/RDS interrupt flag */
+    /* FM_RDS_FLAG_* bit numbers, changed with atomic bitops: the tune
+     * setup (ioctl) and the interrupt parser (rx work) both change them,
+     * and a lost read-modify-write could leave the freeze set for good */
+    unsigned long fm_rds_flag;
     unsigned char fm_func_mask;
     struct fm_rds rds;
 
