@@ -1221,32 +1221,44 @@ int fmc_transfer_rds_from_cbuff(struct fmdrv_ops *fmdev, struct file *file,
     block_count = 0;
     ret = 0;
 
-    spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
-
-    /* Copy RDS blocks from the internal buffer and to user buffer */
+    /*
+     * Copy RDS blocks out one at a time. copy_to_user() may fault and
+     * sleep, which it did under the ring's spinlock with interrupts off; a
+     * block is now taken out under the lock and handed to the user without
+     * it. The read pointer moves only once the block is with the user, and
+     * only if the parser has not reset the ring meanwhile.
+     */
     while (block_count < count) {
-        if (fmdev->rx.rds.wr_index == fmdev->rx.rds.rd_index)
+        unsigned char block[FM_RDS_BLOCK_SIZE];
+        unsigned int rd;
+
+        spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
+        if (fmdev->rx.rds.wr_index == fmdev->rx.rds.rd_index) {
+            spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
             break;
+        }
+        rd = fmdev->rx.rds.rd_index;
+        memcpy(block, &fmdev->rx.rds.cbuffer[rd], FM_RDS_BLOCK_SIZE);
+        spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
 
         /* Always transfer complete RDS blocks */
-        if (copy_to_user
-            (buf, &fmdev->rx.rds.cbuffer[fmdev->rx.rds.rd_index],
-             FM_RDS_BLOCK_SIZE))
+        if (copy_to_user(buf, block, FM_RDS_BLOCK_SIZE))
             break;
 
-        /* Increment and wrap the read pointer */
-        fmdev->rx.rds.rd_index += FM_RDS_BLOCK_SIZE;
-
-        /* Wrap read pointer */
-        if (fmdev->rx.rds.rd_index >= fmdev->rx.rds.buf_size)
-            fmdev->rx.rds.rd_index = 0;
+        spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
+        if (fmdev->rx.rds.rd_index == rd) {
+            /* Increment and wrap the read pointer */
+            fmdev->rx.rds.rd_index += FM_RDS_BLOCK_SIZE;
+            if (fmdev->rx.rds.rd_index >= fmdev->rx.rds.buf_size)
+                fmdev->rx.rds.rd_index = 0;
+        }
+        spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
 
         /* Increment counters */
         block_count++;
         buf += FM_RDS_BLOCK_SIZE;
         ret += FM_RDS_BLOCK_SIZE;
     }
-    spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(rds) %s Done copying %d", __func__, ret);
 
@@ -1519,7 +1531,7 @@ int fmc_enable (struct fmdrv_ops *fmdev, unsigned char opt)
     }
     fmdev->rx.fm_func_mask = opt;
     /* wait for 300 ms before sending any more commands */
-    mdelay (V4L2_FM_ENABLE_DELAY);
+    msleep (V4L2_FM_ENABLE_DELAY);  /* process context: no need to spin */
 
     /* wrire rds control */
     rdbs_en_dis = (opt & FM_RBDS_BIT) ?
@@ -1705,9 +1717,9 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
     fmdev->device_info.rxsubchans = V4L2_TUNER_SUB_MONO | V4L2_TUNER_SUB_STEREO;
     fmdev->device_info.tuner_capability =V4L2_TUNER_CAP_STEREO | V4L2_TUNER_CAP_LOW | V4L2_TUNER_CAP_RDS;
 
-    /* RDS initialization */
+    /* RDS initialization; the read queue lives as long as the device,
+     * as a reader may still sleep on it when FM is reopened */
     fmc_reset_rds_cache(fmdev);
-    init_waitqueue_head(&fmdev->rx.rds.read_queue);
 
     set_bit(FM_CORE_READY, &fmdev->flag);
     return ret;
@@ -1779,37 +1791,50 @@ static int __init fm_drv_init(void)
     }
 
     mutex_init(&fmdev->mutex);
+    spin_lock_init(&fmdev->rds_cbuff_lock);
+    init_waitqueue_head(&fmdev->rx.rds.read_queue);
+    fmdev->curr_fmmode = FM_MODE_OFF;
 
     fmdev->rx.rds.buf_size = default_rds_buf * FM_RDS_TUPLE_LENGTH;
     /* Allocate memory for RDS ring buffer */
     fmdev->rx.rds.cbuffer = kzalloc(fmdev->rx.rds.buf_size, GFP_KERNEL);
     if (fmdev->rx.rds.cbuffer == NULL) {
         V4L2_FM_DRV_ERR("Can't allocate rds ring buffer");
-        kfree(fmdev);
-        return -ENOMEM;
+        ret = -ENOMEM;
+        goto err_free_dev;
     }
 
-    ret = fm_v4l2_init_video_device(fmdev, radio_nr);
-    if (ret < 0)
-    {
-        kfree(fmdev);
-        return ret;
-    }
-#ifndef TASKLET_SUPPORT
+    /* Everything the device needs exists before /dev/radio0 does: it was
+     * registered first, and an open in between queued work on NULL
+     * workqueues. */
     fmdev->tx_wq= create_workqueue("fm_drv_tx");
     if (!fmdev->tx_wq) {
         V4L2_FM_DRV_ERR("%s(): Unable to create workqueue fm_drv_tx\n", __func__);
-        return -ENOMEM;
+        ret = -ENOMEM;
+        goto err_free_buf;
     }
     fmdev->rx_wq= create_workqueue("fm_drv_rx");
     if (!fmdev->rx_wq) {
         V4L2_FM_DRV_ERR("%s(): Unable to create workqueue fm_drv_rx\n", __func__);
-        return -ENOMEM;
+        ret = -ENOMEM;
+        goto err_destroy_tx;
     }
-#endif
 
-    fmdev->curr_fmmode = FM_MODE_OFF;
+    ret = fm_v4l2_init_video_device(fmdev, radio_nr);
+    if (ret < 0)
+        goto err_destroy_rx;
+
     return 0;
+
+err_destroy_rx:
+    destroy_workqueue(fmdev->rx_wq);
+err_destroy_tx:
+    destroy_workqueue(fmdev->tx_wq);
+err_free_buf:
+    kfree(fmdev->rx.rds.cbuffer);
+err_free_dev:
+    kfree(fmdev);
+    return ret;
 }
 
 /* Module exit function. Ask FM V4L module to unregister video device */
@@ -1820,10 +1845,9 @@ static void __exit fm_drv_exit(void)
 
     fmdev = fm_v4l2_deinit_video_device();
     if (fmdev != NULL) {
-#ifndef TASKLET_SUPPORT
     destroy_workqueue(fmdev->tx_wq);
     destroy_workqueue(fmdev->rx_wq);
-#endif
+    kfree(fmdev->rx.rds.cbuffer);
     kfree(fmdev);
     }
 }
@@ -1831,7 +1855,8 @@ static void __exit fm_drv_exit(void)
 module_init(fm_drv_init);
 module_exit(fm_drv_exit);
 
-module_param(fm_dbg_param, int, S_IRUGO);
+/* writable, so debug output can be switched on without a reboot */
+module_param(fm_dbg_param, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(fm_dbg_param, \
                "Set to integer value from 1 to 31 for enabling/disabling" \
                " specific categories of logs");

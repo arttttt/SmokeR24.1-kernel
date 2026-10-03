@@ -189,6 +189,8 @@ int read_fm_rds_flag(struct fmdrv_ops *fmdev, unsigned short *value)
     ret = fmc_send_cmd(fmdev, FM_REG_FM_RDS_FLAG, &read_length,
         sizeof(read_length), REG_RD,
                     &fmdev->maintask_completion, &resp_buf, &resp_len);
+    /* the buffer holds nothing on a failed read */
+    FM_CHECK_SEND_CMD_STATUS(ret);
     *value = (unsigned short)resp_buf[0] +
                 ((unsigned short)resp_buf[1] << 8);
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) FM Mask : 0x%x ", *value);
@@ -665,7 +667,7 @@ int fm_rx_set_band_frequencies(struct fmdrv_ops *fmdev,
                          unsigned int low_freq, unsigned int high_freq)
 {
     if((fmdev->rx.region.high_bound == FM_GET_FREQ(high_freq)) &&
-        (fmdev->rx.region.low_bound = FM_GET_FREQ(low_freq)))
+        (fmdev->rx.region.low_bound == FM_GET_FREQ(low_freq)))
     {
         V4L2_FM_DRV_ERR("(fmdrv) Ignoring setting the same band frequencies");
         return 0;
@@ -994,6 +996,8 @@ int fm_rx_get_audio_mode(struct fmdrv_ops *fmdev, unsigned char *mode)
     }
     ret = fmc_send_cmd(fmdev, FM_REG_SNR, &payload, sizeof(payload),
             REG_RD, &fmdev->maintask_completion, &resp, &len);
+    /* resp holds nothing on a failed read */
+    FM_CHECK_SEND_CMD_STATUS(ret);
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv): resp(current snr) : %x", resp);
 
     if(resp<=19)
@@ -1215,6 +1219,7 @@ int fm_rx_is_rds_data_available(struct fmdrv_ops *fmdev, struct file *file,
             "available in buffer");
         return 0;
     }
-    V4L2_FM_DRV_ERR("(fmdev) RDS Buffer is empty");
+    /* the normal answer of a poll with nothing to read, not an error */
+    V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdev) RDS Buffer is empty");
     return -EAGAIN;
 }
