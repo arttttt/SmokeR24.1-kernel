@@ -38,8 +38,11 @@
 **  Constants & Macros
 *******************************************************************************/
 
-/* Set default World region */
-#define DEF_V4L2_FM_WORLD_REGION FM_REGION_NA
+/* Set default World region: Europe -- 87.5-108 MHz, 50 us de-emphasis,
+ * 100 kHz steps and RDS (not the North American RBDS), as broadcast in
+ * Europe and Russia. North America de-emphasised with 75 us, dulling the
+ * treble of every European station, and stepped by 200 kHz. */
+#define DEF_V4L2_FM_WORLD_REGION FM_REGION_EUR
 
 /* Set default Audio mode.
  *
