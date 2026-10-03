@@ -174,6 +174,7 @@ struct fm_rds {
     unsigned int buf_size; /* Size is always multiple of 3 */
     unsigned int wr_index;
     unsigned int rd_index;
+    unsigned int gen;      /* bumped whenever the ring is reset, under the lock */
     unsigned char *cbuffer;
 
 };

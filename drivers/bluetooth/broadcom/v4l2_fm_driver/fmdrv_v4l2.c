@@ -603,6 +603,7 @@ static int fm_v4l2_fops_open(struct file *file)
 static int fm_v4l2_fops_open_locked(struct file *file)
 {
     int ret = -EINVAL;
+    bool fm_on = false;
     unsigned char option;
     struct fmdrv_ops *fmdev = NULL;
     V4L2_FM_DRV_DBG(V4L2_DBG_OPEN, "(fmdrv): fm_v4l2_fops_open");
@@ -649,6 +650,7 @@ static int fm_v4l2_fops_open_locked(struct file *file)
         V4L2_FM_DRV_ERR("(fmdrv): Unable to enable FM");
         goto err_release;
     }
+    fm_on = true;
 
     /* Set Audio mode */
     V4L2_FM_DRV_DBG(V4L2_DBG_OPEN,"(fmdrv): FM Set Audio mode option : %d", DEF_V4L2_FM_AUDIO_MODE);
@@ -689,7 +691,11 @@ static int fm_v4l2_fops_open_locked(struct file *file)
 
 err_release:
     /* The core is prepared and registered with the line discipline; leave
-     * it up and the next open finds it "already up" on a half-set chip. */
+     * it up and the next open finds it "already up" on a half-set chip.
+     * FM, once turned on, is turned off first -- with BT up the chip stays
+     * powered and would keep FM running. */
+    if (fm_on)
+        fmc_turn_fm_off(fmdev);
     fmc_release(fmdev);
     radio_disconnected = 0;
 err_inc_avail:
@@ -736,8 +742,8 @@ static int fm_v4l2_fops_release_locked(struct file *file)
     ret = fmc_send_cmd(fmdev, 0, bt_master_on_pcm_pins, 5, VSC_HCI_CMD, &fmdev->maintask_completion, NULL, NULL);
     if (ret < 0)
     {
+        /* carry on: the file is being closed whatever the chip says */
         V4L2_FM_DRV_ERR("(fmdrv): Error setting switch I2s path to PCM pins as a master");
-        return ret;
     }
 #endif
 
@@ -745,8 +751,8 @@ static int fm_v4l2_fops_release_locked(struct file *file)
     V4L2_FM_DRV_DBG(V4L2_DBG_CLOSE, "Routing I2S audio over PCM pins in slave mode");
     ret = fmc_send_cmd(fmdev, 0, bt_slave_on_pcm_pins, 5, VSC_HCI_CMD, &fmdev->maintask_completion, NULL, NULL);
     if (ret < 0) {
+        /* carry on, as above */
         V4L2_FM_DRV_ERR("(fmdrv): Error setting switch I2s path to PCM pins as a slave");
-        return ret;
     }
 #endif
 

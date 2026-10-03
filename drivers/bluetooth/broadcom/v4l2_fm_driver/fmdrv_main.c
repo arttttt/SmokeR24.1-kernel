@@ -1143,6 +1143,7 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
             pr_err("RDS buffer overflow");
             fmdev->rx.rds.wr_index = 0;
             fmdev->rx.rds.rd_index = 0;
+            fmdev->rx.rds.gen++;
             break;
         }
 
@@ -1251,7 +1252,7 @@ int fmc_transfer_rds_from_cbuff(struct fmdrv_ops *fmdev, struct file *file,
      */
     while (block_count < count) {
         unsigned char block[FM_RDS_BLOCK_SIZE];
-        unsigned int rd;
+        unsigned int rd, gen;
 
         spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
         if (fmdev->rx.rds.wr_index == fmdev->rx.rds.rd_index) {
@@ -1259,15 +1260,21 @@ int fmc_transfer_rds_from_cbuff(struct fmdrv_ops *fmdev, struct file *file,
             break;
         }
         rd = fmdev->rx.rds.rd_index;
+        gen = fmdev->rx.rds.gen;
         memcpy(block, &fmdev->rx.rds.cbuffer[rd], FM_RDS_BLOCK_SIZE);
         spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
 
         /* Always transfer complete RDS blocks */
-        if (copy_to_user(buf, block, FM_RDS_BLOCK_SIZE))
+        if (copy_to_user(buf, block, FM_RDS_BLOCK_SIZE)) {
+            /* nothing copied at all is a fault, not an empty read */
+            if (ret == 0)
+                ret = -EFAULT;
             break;
+        }
 
+        /* a reset since (same index, new generation) is not ours to move */
         spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
-        if (fmdev->rx.rds.rd_index == rd) {
+        if (fmdev->rx.rds.rd_index == rd && fmdev->rx.rds.gen == gen) {
             /* Increment and wrap the read pointer */
             fmdev->rx.rds.rd_index += FM_RDS_BLOCK_SIZE;
             if (fmdev->rx.rds.rd_index >= fmdev->rx.rds.buf_size)
@@ -1434,9 +1441,15 @@ int fmc_set_scan_step(struct fmdrv_ops *fmdev, unsigned char scan_step)
 */
 void fmc_reset_rds_cache(struct fmdrv_ops *fmdev)
 {
+    unsigned long flags;
+
     fmdev->rx.rds.rds_flag = FM_RDS_DISABLE;
+    /* under the ring's lock, as the rx work and readers use it */
+    spin_lock_irqsave(&fmdev->rds_cbuff_lock, flags);
     fmdev->rx.rds.wr_index = 0;
     fmdev->rx.rds.rd_index = 0;
+    fmdev->rx.rds.gen++;
+    spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
     fmdev->device_info.rxsubchans &= ~V4L2_TUNER_SUB_RDS;
 }
 
