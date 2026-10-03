@@ -3543,33 +3543,6 @@ static int rt5671_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static void rt5671_shutdown(struct snd_pcm_substream *substream,
-	struct snd_soc_dai *dai)
-{
-	struct snd_soc_codec *codec = dai->codec;
-
-	if (!dai->active) {
-		switch (dai->id) {
-		case RT5671_AIF1:
-			snd_soc_update_bits(codec, RT5671_I2S1_SDP,
-					RT5671_I2S_MS_MASK, RT5671_I2S_MS_S);
-			break;
-		case RT5671_AIF2:
-			snd_soc_update_bits(codec, RT5671_I2S2_SDP,
-					RT5671_I2S_MS_MASK, RT5671_I2S_MS_S);
-			break;
-		case RT5671_AIF3:
-			snd_soc_update_bits(codec, RT5671_I2S3_SDP,
-					RT5671_I2S_MS_MASK, RT5671_I2S_MS_S);
-			break;
-		case RT5671_AIF4:
-			snd_soc_update_bits(codec, RT5671_I2S4_SDP,
-					RT5671_I2S_MS_MASK, RT5671_I2S_MS_S);
-			break;
-		}
-	}
-}
-
 static int rt5671_prepare(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
@@ -4191,7 +4164,6 @@ static const struct snd_soc_dai_ops rt5671_aif_dai_ops = {
 	.set_fmt = rt5671_set_dai_fmt,
 	.set_sysclk = rt5671_set_dai_sysclk,
 	.set_pll = rt5671_set_dai_pll,
-	.shutdown = rt5671_shutdown,
 };
 
 struct snd_soc_dai_driver rt5671_dai[] = {
