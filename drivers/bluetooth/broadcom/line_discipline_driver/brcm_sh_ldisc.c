@@ -882,23 +882,32 @@ void brcm_hci_uart_route_frame(enum proto_type protoid, struct hci_uart *hu,
         memcpy(skb_push(skb, sizeof(char)),&type, sizeof(char));
     }
 
-    if(mutex_is_locked(&cmd_credit))
+    /*
+     * A command writer waits under cmd_credit for the controller to hand the
+     * command credit back. Command Complete carries Num_HCI_Command_Packets
+     * right after the length byte, Command Status one byte later. Any
+     * non-zero count returns the credit; the old test for exactly 1 left a
+     * writer waiting out its timeout whenever the controller reported more.
+     * BT frames still carry the packet type byte in front of the event code.
+     */
+    if (mutex_is_locked(&cmd_credit) && skb != NULL)
     {
-        if(protoid == PROTO_SH_BT)
-        {
-            if((skb->data[1]==0x0e && skb->data[3]==0x01) ||  // command_complete evt with hci_credit=1
-               (skb->data[1]==0x0f && skb->data[4]==0x01))    // command_status evt with hci_credit=1
-            {
-                complete_all(&hu->cmd_rcvd);
-            }
+        const unsigned char *evt = NULL;
+        unsigned int evt_len = 0;
+
+        if (protoid == PROTO_SH_BT && skb->len > 1) {
+            evt = skb->data + 1;
+            evt_len = skb->len - 1;
+        } else if (protoid == PROTO_SH_FM || protoid == PROTO_SH_ANT) {
+            evt = skb->data;
+            evt_len = skb->len;
         }
-        else if(protoid == PROTO_SH_FM || protoid == PROTO_SH_ANT)
+
+        if (evt != NULL &&
+            ((evt[0] == HCI_EV_CMD_COMPLETE && evt_len > 2 && evt[2] != 0) ||
+             (evt[0] == HCI_EV_CMD_STATUS && evt_len > 3 && evt[3] != 0)))
         {
-            if((skb->data[0]==0x0e && skb->data[2]==0x01) ||  // command_complete evt with hci_credit=1
-               (skb->data[0]==0x0f && skb->data[3]==0x01))    // command_status evt with hci_credit=1
-            {
-                complete_all(&hu->cmd_rcvd);
-            }
+            complete_all(&hu->cmd_rcvd);
         }
     }
 
@@ -1916,6 +1925,10 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
             sh_ldisc_cb(skb)->pkt_type == FM_CH8_PKT ||
             sh_ldisc_cb(skb)->pkt_type == ANT_PKT))
         {
+            /* kept for the timeout message: once queued, the tx path may
+             * free the skb at any moment */
+            unsigned char pkt_type = sh_ldisc_cb(skb)->pkt_type;
+
             mutex_lock(&cmd_credit);
             init_completion(&hu->cmd_rcvd);
 
@@ -1927,10 +1940,19 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
                 brcm_hci_write(hu, skb->data, skb->len);
 #endif
             brcm_hci_uart_tx_wakeup(hu);
-            if (!wait_for_completion_timeout(&hu->cmd_rcvd, msecs_to_jiffies(5000))) {
-                pr_err(" waiting for command response - timed out");
-                return 0;
-            }
+
+            /*
+             * The credit is released whether the controller answered or not.
+             * Returning with it held -- as a timeout did -- left every later
+             * command of BT and FM asleep in mutex_lock above, and the
+             * transport dead until reboot. The skb now belongs to the tx
+             * queue, so the write still reports its length: a negative
+             * value would have the caller free it a second time. A missing
+             * response is for the protocol driver to time out on.
+             */
+            if (!wait_for_completion_timeout(&hu->cmd_rcvd, msecs_to_jiffies(5000)))
+                pr_err(" waiting for command response - timed out (type 0x%02x)",
+                       pkt_type);
             mutex_unlock(&cmd_credit);
         }
         else
