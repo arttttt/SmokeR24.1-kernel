@@ -790,7 +790,7 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
             else if(fmdev->rx.curr_search_state == FM_STATE_TUNING)
             {
                 fmdev->rx.curr_search_state = FM_STATE_TUNE_ERR;
-                complete(&fmdev->maintask_completion);
+                complete(&fmdev->tune_completion);
             }
         }
         else
@@ -804,7 +804,7 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
             else if(fmdev->rx.curr_search_state == FM_STATE_TUNING)
             {
                 fmdev->rx.curr_search_state = FM_STATE_TUNE_CMPL;
-                complete(&fmdev->maintask_completion);
+                complete(&fmdev->tune_completion);
             }
         }
     }
@@ -1654,6 +1654,8 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
     fmdev->cmd_busy = false;
     fmdev->cmd_waiter = NULL;
     fmdev->cmd_resp = NULL;
+    init_completion(&fmdev->tune_completion);
+    init_completion(&fmdev->seektask_completion);
 
     /* Do all the broadcom FM hardware specific initialization */
     fmdev->rx.curr_mute_mode = FM_MUTE_OFF;

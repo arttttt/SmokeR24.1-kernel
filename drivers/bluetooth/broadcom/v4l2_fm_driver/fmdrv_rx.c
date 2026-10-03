@@ -281,14 +281,29 @@ int init_start_search(struct fmdrv_ops *fmdev, unsigned short start_freq,
     any interrupt during ENABLE to cleanup the bit */
     fmdev->rx.fm_rds_flag &= ~FM_RDS_FLAG_CLEAN_BIT;
 
+    /*
+     * The tune or seek ended interrupt may come as soon as SCH_TUNE is
+     * written -- before the write's own answer is back. Its handler looks at
+     * curr_search_state and completes the matching completion, so both are
+     * set up first: done after the write, an early interrupt found neither
+     * and the caller waited out its timeout.
+     */
+    fmdev->rx.curr_search_state = (mode == FM_TUNER_SEEK_MODE)?
+        FM_STATE_SEEKING:FM_STATE_TUNING;
+    if (mode == FM_TUNER_SEEK_MODE)
+        init_completion(&fmdev->seektask_completion);
+    else
+        init_completion(&fmdev->tune_completion);
+
     /* Write FM_REG_SCH_TUNE (0x09) register */
     /*payload = FM_TUNER_SEEK_MODE;*/ /* Scan parameter (0x02) */
     payload = mode;
     ret = fmc_send_cmd(fmdev, FM_REG_SCH_TUNE, &payload, sizeof(payload),
             REG_WR, &fmdev->maintask_completion, NULL, NULL);
-    FM_CHECK_SEND_CMD_STATUS(ret);
-    fmdev->rx.curr_search_state = (mode == FM_TUNER_SEEK_MODE)?
-        FM_STATE_SEEKING:FM_STATE_TUNING;
+    if (ret < 0) {
+        fmdev->rx.curr_search_state = FM_STATE_NONE;
+        return ret;
+    }
 
     fmc_reset_rds_cache(fmdev);
 
@@ -450,9 +465,8 @@ int fm_rx_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
         return ret;
     }
 
-    /* Wait for tune ended interrupt */
-    init_completion(&fmdev->maintask_completion);
-    timeleft = wait_for_completion_timeout(&fmdev->maintask_completion,
+    /* Wait for tune ended interrupt (completion armed by init_start_search) */
+    timeleft = wait_for_completion_timeout(&fmdev->tune_completion,
                            FM_DRV_TX_TIMEOUT);
     if (!timeleft)
     {
@@ -575,8 +589,7 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
         return -EINVAL;
     }
 
-    /* Wait for tune ended interrupt */
-    init_completion(&fmdev->seektask_completion);
+    /* Wait for seek ended interrupt (completion armed by init_start_search) */
     timeleft = wait_for_completion_timeout(&fmdev->seektask_completion,
                            FM_DRV_RX_SEEK_TIMEOUT);
     if (!timeleft)
@@ -609,8 +622,8 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
     else if(ret && fmdev->rx.curr_search_state == FM_STATE_SEEKING)
     {
 
-        /* Wait for tune ended interrupt */
-        init_completion(&fmdev->seektask_completion);
+        /* Wait for the wrapped seek (completion re-armed by the
+         * init_start_search() in process_seek_event()) */
         timeleft = wait_for_completion_timeout(&fmdev->seektask_completion,
                                FM_DRV_RX_SEEK_TIMEOUT);
 

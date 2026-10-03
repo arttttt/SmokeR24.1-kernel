@@ -252,6 +252,9 @@ struct fmdrv_ops {
     struct completion maintask_completion;
     /* Seek task completion handler */
     struct completion seektask_completion;
+    /* Tune ended interrupt (preset tune); maintask_completion is the
+     * command path's and an interrupt must not end a command's wait */
+    struct completion tune_completion;
     unsigned char curr_fmmode;   /* Current FM chip mode (TX, RX, OFF) */
     unsigned char aud_ctrl;     /* Current Audio Control (STEREO/MONO/NONE) */
     struct fm_rx rx;                         /* FM receiver info */
