@@ -1839,13 +1839,10 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
 {
     enum proto_type protoid = PROTO_SH_MAX;
     long len;
-    struct brcm_struct *brcm;
     char ptr[6];
 
     struct hci_uart *hu;
     hu_ref(&hu,0);
-
-    brcm = hu->priv;
 
 
     BT_LDISC_DBG(V4L2_DBG_TX, "%p",hu);
@@ -1893,17 +1890,31 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
 
     len = skb->len;
 
-    if ((hu->is_registered[PROTO_SH_ANT] || hu->is_registered[PROTO_SH_FM])
+    /*
+     * An HCI Reset from the BT stack while FM or ANT is attached would reset
+     * the chip under them, so it is not sent: the stack gets a Command
+     * Complete for it straight back.
+     *
+     * The answer is built in an skb of its own. It used to go into
+     * brcm->rx_skb, the frame brcm_recv() assembles from the UART, written
+     * here from the tx side without rx_lock: a frame arriving at that moment
+     * was clobbered and lost. The reset command itself is consumed here.
+     */
+    if (sh_ldisc_cb(skb)->pkt_type == HCI_COMMAND_PKT && skb->len > 2
+            && (hu->is_registered[PROTO_SH_ANT] || hu->is_registered[PROTO_SH_FM])
             && (skb->data)[1] == 0x03 && (skb->data)[2] == 0x0c)
     {
-        if (likely(hu->list[PROTO_SH_BT]->recv != NULL))
-        {
-            brcm->rx_skb = alloc_skb(HCI_MAX_FRAME_SIZE, GFP_ATOMIC);
-            if(brcm->rx_skb)
-                skb_reserve(brcm->rx_skb,8);
+        struct sk_buff *resp = NULL;
 
-            brcm->rx_skb->dev = (void *) hu->hdev;
-            sh_ldisc_cb(brcm->rx_skb)->pkt_type = HCI_EVENT_PKT;
+        if (likely(hu->list[PROTO_SH_BT] != NULL &&
+                   hu->list[PROTO_SH_BT]->recv != NULL))
+            resp = alloc_skb(HCI_MAX_FRAME_SIZE, GFP_ATOMIC);
+
+        if (resp != NULL)
+        {
+            skb_reserve(resp, 8);
+            resp->dev = (void *) hu->hdev;
+            sh_ldisc_cb(resp)->pkt_type = HCI_EVENT_PKT;
 
             ptr[0] = 0x0e;
             ptr[1] = 0x04;
@@ -1912,11 +1923,16 @@ long brcm_sh_ldisc_write(struct sk_buff *skb)
             ptr[4] = 0x0c;
             ptr[5] = 0x00;
 
-            memcpy(skb_put(brcm->rx_skb, 6), ptr, 6);
+            memcpy(skb_put(resp, 6), ptr, 6);
 
-            brcm_hci_process_frametype(HCI_EVENT_PKT,hu,brcm->rx_skb, 6);
-            brcm_hci_uart_route_frame(PROTO_SH_BT, hu, brcm->rx_skb);
+            brcm_hci_process_frametype(HCI_EVENT_PKT, hu, resp, 6);
+            brcm_hci_uart_route_frame(PROTO_SH_BT, hu, resp);
         }
+        else
+        {
+            pr_err("no Command Complete for the withheld HCI Reset");
+        }
+        kfree_skb(skb);
     }
     else
     {
