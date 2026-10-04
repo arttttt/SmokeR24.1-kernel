@@ -127,21 +127,15 @@ static int brcm_bt_drv_open(struct inode *inode, struct file *filp)
     */
     brcm_bt_st_proto.priv_data = bt_dev;
 
+    /* The line discipline may complete a pending registration as soon
+     * as it is made, before register returns: arm the wait first */
+    init_completion(&bt_dev->wait_for_btdrv_reg_completion);
+    bt_dev->streg_cbdata = -EINPROGRESS;
+
     /* Register with ST layer */
     BT_DRV_DBG(V4L2_DBG_OPEN, "calling ldisc register");
     err = brcm_sh_ldisc_register(&brcm_bt_st_proto);
     if (err == -EINPROGRESS) {
-       /* Prepare wait-for-completion handler data structures.
-            * Needed to syncronize this and st_registration_completion_cb()
-            * functions.
-            */
-        init_completion(&bt_dev->wait_for_btdrv_reg_completion);
-
-       /* Reset ST registration callback status flag , this value
-            * will be updated in hci_st_registration_completion_cb()
-            * function whenever it called from ST driver.
-            */
-       bt_dev->streg_cbdata = -EINPROGRESS;
 
        /* ST is busy with other protocol registration(may be busy with
             * firmware download).So,Wait till the registration callback
@@ -153,10 +147,13 @@ static int brcm_bt_drv_open(struct inode *inode, struct file *filp)
 
        timeleft = wait_for_completion_timeout
                         (&bt_dev->wait_for_btdrv_reg_completion,
-                                msecs_to_jiffies(BT_REGISTER_TIMEOUT));
+                                BT_REGISTER_TIMEOUT);
        if (!timeleft) {
             BT_DRV_ERR("Timeout(%ld sec),didn't get reg"
-                     "completion signal from ST", BT_REGISTER_TIMEOUT / 1000);
+                     "completion signal from ST", BT_REGISTER_TIMEOUT / HZ);
+            /* still pending in the line discipline's table: leave it, or
+             * the next open finds BT registered and gets -EALREADY */
+            brcm_sh_ldisc_unregister(PROTO_SH_BT);
             err = -ETIMEDOUT;
             BT_DRV_DBG(V4L2_DBG_OPEN, "End ret=%d", err);
             return err;
@@ -611,8 +608,10 @@ static void brcm_bt_st_registration_completion_cb(void *priv_data,
     */
     bt_dev_p->streg_cbdata = data;
 
-    set_bit(BT_ST_REGISTERED, &bt_dev_p->flags);
-    BT_DRV_DBG(V4L2_DBG_OPEN, "registration to ldisc cb received");
+    if (data == 0)
+        set_bit(BT_ST_REGISTERED, &bt_dev_p->flags);
+    BT_DRV_DBG(V4L2_DBG_OPEN, "registration to ldisc cb received (%d)", data);
+    complete(&bt_dev_p->wait_for_btdrv_reg_completion);
 }
 
 
