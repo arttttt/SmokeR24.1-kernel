@@ -1006,8 +1006,16 @@ static unsigned short rt5671_dsp_ezaec[][2] = {
 #define RT5671_DSP_EZAEC_NUM \
 	(sizeof(rt5671_dsp_ezaec) / sizeof(rt5671_dsp_ezaec[0]))
 
+/*
+ * (48Khz-stereo-recording) [with FFP and NS]. Xiaomi's table left FFP
+ * off (0x2304 0) and had no FFP words; 0x2304, 0x2388 and 0x23a9-0x23ab
+ * are ASUS's (Zenfone 2, rt5671_dsp_48k_sto_ffp). 0x238b/0x238c set how
+ * deep NS cuts, the lower the deeper: 0x2000 took a room's air
+ * conditioning down by some 9 dB more than ASUS's 0x4000 and Xiaomi's
+ * 0x3000, with no artefacts heard; 0x1000 did no better. No Realtek
+ * map of these words is public: the rest is as Xiaomi had it.
+ */
 static unsigned short  rt5671_dsp_48k_sto[][2] = {
-	/* (48Khz-stereo-recording) [with NS] */
 	{0x22c1, 0x1025},
 	{0x22c2, 0x1026},
 	{0x2278, 0xe4e4},
@@ -1017,11 +1025,14 @@ static unsigned short  rt5671_dsp_48k_sto[][2] = {
 	{0x230d, 0x0100},
 	{0x2301, 0x0010},
 	{0x2303, 0x0200},
-	{0x2304, 0x0000},
+	{0x2304, 0x8000},
 	{0x2305, 0x0000},
-	{0x2388, 0x6800},
-	{0x238b, 0x3000},
-	{0x238c, 0x3000},
+	{0x2388, 0x6500},
+	{0x238b, 0x2000},
+	{0x238c, 0x2000},
+	{0x23a9, 0x2000},
+	{0x23aa, 0x0200},
+	{0x23ab, 0x7c00},
 	{0x23c4, 0x3000},
 
 	{0x22fb, 0x0000},
