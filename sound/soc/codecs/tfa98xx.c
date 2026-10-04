@@ -881,10 +881,16 @@ unlock:
 			dev_err(codec->dev,
 				"Download failed (%d), giving up; amplifier off\n",
 				ret);
-			/* left enabled for the calibration: off until the
-			 * next stream start tries again */
+			/*
+			 * If it got as far as reconfiguring the DSP, the
+			 * amplifier was left enabled for the calibration: off
+			 * until the next stream start tries again. A download
+			 * that failed before that left the DSP as it was, and
+			 * it plays on.
+			 */
 			mutex_lock(&tfa98xx->amp_lock);
-			tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
+			if (!tfa98xx->dsp_ready)
+				tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
 			mutex_unlock(&tfa98xx->amp_lock);
 		}
 	}
