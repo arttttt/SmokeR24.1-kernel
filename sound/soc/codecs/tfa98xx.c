@@ -430,20 +430,29 @@ static int tfa98xx_mute(struct snd_soc_codec *codec, int mute)
 	return ret;
 }
 
-/* Puts the amplifier where amp_wanted and dsp_ready say; amp_lock held */
+/*
+ * Puts the amplifier where amp_wanted says, once the DSP is ready; amp_lock
+ * held. While it is not, the amplifier is whoever took the readiness away's:
+ * a download keeps it enabled under the DSP's mute for the calibration, and
+ * everything else switches it off as it does so.
+ */
 static void tfa98xx_amp_update_l(struct tfa98xx_priv *tfa98xx)
 {
-	const bool on = tfa98xx->amp_wanted && tfa98xx->dsp_ready;
+	if (!tfa98xx->dsp_ready)
+		return;
 
-	tfa98xx_mute(tfa98xx->codec,
-		     on ? TFA98XX_MUTE_OFF : TFA98XX_MUTE_AMPLIFIER);
+	tfa98xx_mute(tfa98xx->codec, tfa98xx->amp_wanted ?
+		     TFA98XX_MUTE_OFF : TFA98XX_MUTE_AMPLIFIER);
 }
 
 static void tfa98xx_set_dsp_ready(struct tfa98xx_priv *tfa98xx, bool ready)
 {
 	mutex_lock(&tfa98xx->amp_lock);
 	tfa98xx->dsp_ready = ready;
-	tfa98xx_amp_update_l(tfa98xx);
+	if (ready)
+		tfa98xx_amp_update_l(tfa98xx);
+	else
+		tfa98xx_mute(tfa98xx->codec, TFA98XX_MUTE_AMPLIFIER);
 	mutex_unlock(&tfa98xx->amp_lock);
 }
 
@@ -870,8 +879,13 @@ unlock:
 				 ret, delay);
 		} else {
 			dev_err(codec->dev,
-				"Download failed (%d), giving up; amplifier muted\n",
+				"Download failed (%d), giving up; amplifier off\n",
 				ret);
+			/* left enabled for the calibration: off until the
+			 * next stream start tries again */
+			mutex_lock(&tfa98xx->amp_lock);
+			tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
+			mutex_unlock(&tfa98xx->amp_lock);
 		}
 	}
 	mutex_unlock(&tfa98xx->fw_lock);
