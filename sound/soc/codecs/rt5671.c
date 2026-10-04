@@ -1803,13 +1803,19 @@ static const SOC_ENUM_SINGLE_DECL(
 static const struct snd_kcontrol_new rt5671_if1_adc2_in_mux =
 	SOC_DAPM_ENUM("IF1 ADC2 IN source", rt5671_if1_adc2_in_enum);
 
-/* MX-77 [9:8] */
+/*
+ * MX-77 [9]: which pair of IF1 ADC slots goes first on ADCDAT1, the one
+ * IF1_ADC1 fills or the one IF1_ADC2 does; a two-channel stream carries
+ * only the first. Bit 8 is reserved: setting it changes nothing on the
+ * pins, measured. IF_ADC3 reaches IF1 through IF1 ADC1 IN1 Mux (MX-FA
+ * [12]), TxDC_DAC only IF2 and IF3 and DAC L2/R2.
+ */
 static const char * const rt5671_if1_adc_in_src[] = {
-	"IF1_ADC1", "IF_ADC3", "IF1_ADC2", "TxDC_DAC"
+	"IF1_ADC1", "IF1_ADC2"
 };
 
 static const SOC_ENUM_SINGLE_DECL(
-	rt5671_if1_adc_in_enum, RT5671_TDM_CTRL_1, 8, rt5671_if1_adc_in_src);
+	rt5671_if1_adc_in_enum, RT5671_TDM_CTRL_1, 9, rt5671_if1_adc_in_src);
 
 static const struct snd_kcontrol_new rt5671_if1_adc_in_mux =
 	SOC_DAPM_ENUM("IF1 ADC IN source", rt5671_if1_adc_in_enum);
@@ -3235,8 +3241,6 @@ static const struct snd_soc_dapm_route rt5671_dapm_routes[] = {
 #else
 	{ "IF1 ADC Mux", "IF1_ADC1", "IF1_ADC1" },
 	{ "IF1 ADC Mux", "IF1_ADC2", "IF1_ADC2" },
-	{ "IF1 ADC Mux", "IF_ADC3", "IF_ADC3" },
-	{ "IF1 ADC Mux", "TxDC_DAC", "TxDC_DAC" },
 	{ "IF1 ADC", NULL, "IF1 ADC Mux" },
 #endif
 	{ "IF2 ADC Mux", "IF_ADC1", "IF_ADC1" },
