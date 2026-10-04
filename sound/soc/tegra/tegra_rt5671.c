@@ -93,26 +93,27 @@
 /*
  * The hifi stream's volume, the gain of OUT's CH0, which carries that
  * stream alone. CONV is linear, 0x1000 unity (measured: 0x0800 -6.02 dB,
- * 0x2000 +6.02 dB), and one gain for both channels. 0.5 dB steps from
- * -60 dB, the lowest muting; 0 dB leaves the samples untouched. The DAM
- * runs only while the back end does, so the gain goes on at its setup
- * and, while it runs, as the control moves.
+ * 0x2000 +6.02 dB), and one gain for both channels. 0..127 in 0.5 dB
+ * steps: 127 is 0 dB and leaves the samples untouched, 1 is -63 dB, 0
+ * mutes; the gains are 0x1000 * 10^(dB/20), rounded. The DAM runs only
+ * while the back end does, so the gain goes on at its setup and, while
+ * it runs, as the control moves.
  */
-#define HIFI_VOL_MAX		121
+#define HIFI_VOL_MAX		127
 static const u16 hifi_vol_gain[HIFI_VOL_MAX + 1] = {
-	0, 4, 4, 5, 5, 5, 5, 6, 6, 6,
-	7, 7, 8, 8, 9, 9, 10, 10, 11, 12,
-	12, 13, 14, 15, 15, 16, 17, 18, 19, 21,
-	22, 23, 24, 26, 27, 29, 31, 33, 34, 37,
-	39, 41, 43, 46, 49, 52, 55, 58, 61, 65,
-	69, 73, 77, 82, 87, 92, 97, 103, 109, 115,
-	122, 130, 137, 145, 154, 163, 173, 183, 194, 205,
-	217, 230, 244, 258, 274, 290, 307, 325, 345, 365,
-	387, 410, 434, 460, 487, 516, 546, 579, 613, 649,
-	688, 728, 772, 817, 866, 917, 971, 1029, 1090, 1154,
-	1223, 1295, 1372, 1453, 1539, 1631, 1727, 1830, 1938, 2053,
-	2175, 2303, 2440, 2584, 2738, 2900, 3072, 3254, 3446, 3651,
-	3867, DAM_GAIN_UNITY,
+	0, 3, 3, 3, 3, 4, 4, 4, 4, 5,
+	5, 5, 5, 6, 6, 6, 7, 7, 8, 8,
+	9, 9, 10, 10, 11, 12, 12, 13, 14, 15,
+	15, 16, 17, 18, 19, 21, 22, 23, 24, 26,
+	27, 29, 31, 33, 34, 37, 39, 41, 43, 46,
+	49, 52, 55, 58, 61, 65, 69, 73, 77, 82,
+	87, 92, 97, 103, 109, 115, 122, 130, 137, 145,
+	154, 163, 173, 183, 194, 205, 217, 230, 244, 258,
+	274, 290, 307, 325, 345, 365, 387, 410, 434, 460,
+	487, 516, 546, 579, 613, 649, 688, 728, 772, 817,
+	866, 917, 971, 1029, 1090, 1154, 1223, 1295, 1372, 1453,
+	1539, 1631, 1727, 1830, 1938, 2053, 2175, 2303, 2440, 2584,
+	2738, 2900, 3072, 3254, 3446, 3651, 3867, DAM_GAIN_UNITY,
 };
 
 /* DAM_CHx_CTRL DATA_SYNC: one bit per channel to wait for */
@@ -1080,7 +1081,7 @@ static int tegra_rt5671_fm_vol_put(struct snd_kcontrol *kcontrol,
 	return changed;
 }
 
-static const DECLARE_TLV_DB_SCALE(hifi_vol_tlv, -6050, 50, 1);
+static const DECLARE_TLV_DB_SCALE(hifi_vol_tlv, -6350, 50, 1);
 
 static int tegra_rt5671_hifi_vol_info(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_info *uinfo)
