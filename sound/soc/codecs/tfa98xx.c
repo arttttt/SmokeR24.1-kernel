@@ -361,13 +361,29 @@ static int tfa98xx_mute(struct snd_soc_codec *codec, int mute)
 
 	switch (mute) {
 	case TFA98XX_MUTE_OFF:
-		ret = snd_soc_update_bits_locked(codec,
-				TFA98XX_AUDIO_CTR, TFA98XX_AUDIO_CTR_CFSM_MSK, 0);
+		/*
+		 * The amplifier first, its DC-DC converter still in follower
+		 * mode, then the boost, as NXP's tfa98xx does it "to reduce
+		 * PLOP at power on"; the DSP's soft mute (CFSM, a 1 ms ramp
+		 * per the data sheet) is lifted last, once both are up.
+		 */
+		ret = snd_soc_update_bits_locked(codec, TFA98XX_AUDIO_CTR,
+				TFA98XX_AUDIO_CTR_CFSM_MSK, TFA98XX_AUDIO_CTR_CFSM);
 		if (ret < 0)
 			return ret;
 		ret = snd_soc_update_bits_locked(codec, TFA98XX_SYS_CTRL,
 				TFA98XX_SYS_CTRL_DCA_MSK | TFA98XX_SYS_CTRL_AMPE_MSK,
-				TFA98XX_SYS_CTRL_DCA | TFA98XX_SYS_CTRL_AMPE);
+				TFA98XX_SYS_CTRL_AMPE);
+		if (ret < 0)
+			return ret;
+		usleep_range(2000, 3000);	/* td(on) <= 2 ms */
+		ret = snd_soc_update_bits_locked(codec, TFA98XX_SYS_CTRL,
+				TFA98XX_SYS_CTRL_DCA_MSK, TFA98XX_SYS_CTRL_DCA);
+		if (ret < 0)
+			return ret;
+		usleep_range(1000, 2000);
+		ret = snd_soc_update_bits_locked(codec,
+				TFA98XX_AUDIO_CTR, TFA98XX_AUDIO_CTR_CFSM_MSK, 0);
 		if (ret < 0)
 			return ret;
 		break;
@@ -383,13 +399,19 @@ static int tfa98xx_mute(struct snd_soc_codec *codec, int mute)
 			return ret;
 		break;
 	case TFA98XX_MUTE_AMPLIFIER:
-		ret = snd_soc_update_bits_locked(codec,
-				TFA98XX_AUDIO_CTR, TFA98XX_AUDIO_CTR_CFSM_MSK, 0);
+		/* The other way round: soft mute, its ramp out, then off */
+		ret = snd_soc_update_bits_locked(codec, TFA98XX_AUDIO_CTR,
+				TFA98XX_AUDIO_CTR_CFSM_MSK, TFA98XX_AUDIO_CTR_CFSM);
 		if (ret < 0)
 			return ret;
+		usleep_range(1000, 2000);	/* td(soft_mute) = 1 ms */
 		ret = snd_soc_update_bits_locked(codec, TFA98XX_SYS_CTRL,
 				TFA98XX_SYS_CTRL_DCA_MSK | TFA98XX_SYS_CTRL_AMPE_MSK,
 				0);
+		if (ret < 0)
+			return ret;
+		ret = snd_soc_update_bits_locked(codec,
+				TFA98XX_AUDIO_CTR, TFA98XX_AUDIO_CTR_CFSM_MSK, 0);
 		if (ret < 0)
 			return ret;
 
