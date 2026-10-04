@@ -249,6 +249,50 @@ static void tegra_rt5671_shutdown(struct snd_pcm_substream *substream)
 	tegra_asoc_utils_tristate_dap(i2s->id, true);
 }
 
+/*
+ * AIF1's format, the I2S role included, as the board describes it
+ * (nvidia,i2s-param-hifi). The role is the wiring's -- who drives BCLK and
+ * LRCK on the bus -- not a stream's, so it goes into the AIF1 links'
+ * dai_fmt, which ASoC sets on the codec and the I2S controller once, when
+ * the card comes up. Paths inside the codec need it with no stream at all:
+ * FM on the speakers plays only while the codec's I2S1 is master.
+ *
+ * The codec's BCLK used to be inverted in DSP A mode with the codec master,
+ * to meet the Tegra I2S on the other edge; one dai_fmt for both ends can't
+ * say that, and no board this driver runs on uses DSP A.
+ */
+static int tegra_rt5671_aif1_fmt(struct tegra_asoc_platform_data *pdata,
+				 unsigned int *fmt)
+{
+	const bool codec_master = !pdata->i2s_param[HIFI_CODEC].is_i2s_master;
+
+	*fmt = SND_SOC_DAIFMT_NB_NF;
+	*fmt |= codec_master ? SND_SOC_DAIFMT_CBM_CFM : SND_SOC_DAIFMT_CBS_CFS;
+
+	switch (pdata->i2s_param[HIFI_CODEC].i2s_mode) {
+	case TEGRA_DAIFMT_I2S:
+		*fmt |= SND_SOC_DAIFMT_I2S;
+		break;
+	case TEGRA_DAIFMT_DSP_A:
+		if (codec_master)
+			return -EINVAL;
+		*fmt |= SND_SOC_DAIFMT_DSP_A;
+		break;
+	case TEGRA_DAIFMT_DSP_B:
+		*fmt |= SND_SOC_DAIFMT_DSP_B;
+		break;
+	case TEGRA_DAIFMT_LEFT_J:
+		*fmt |= SND_SOC_DAIFMT_LEFT_J;
+		break;
+	case TEGRA_DAIFMT_RIGHT_J:
+		*fmt |= SND_SOC_DAIFMT_RIGHT_J;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
 /* Defined with the other link params below. The speaker link is codec to
  * codec, so it carries its rate in .params instead of taking it from a
  * stream; probe seeds it from platform data and hw_params() below sets it
@@ -259,13 +303,10 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_soc_codec *codec = rtd->codec;
 	struct snd_soc_card *card = codec->card;
 	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
-	struct tegra_asoc_platform_data *pdata = machine->pdata;
-	int srate, i2s_daifmt, codec_daifmt;
+	int srate;
 	int err, sample_size;
 	unsigned int spk_rate, da_clk, ad_clk;
 
@@ -321,10 +362,6 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 			RT5671_AD_MONO_L_FILTER | RT5671_AD_MONO_R_FILTER,
 			ad_clk);
 
-	i2s_daifmt = SND_SOC_DAIFMT_NB_NF;
-	i2s_daifmt |= pdata->i2s_param[HIFI_CODEC].is_i2s_master ?
-			SND_SOC_DAIFMT_CBS_CFS : SND_SOC_DAIFMT_CBM_CFM;
-
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S8:
 		sample_size = 8;
@@ -342,55 +379,9 @@ static int tegra_rt5671_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	switch (pdata->i2s_param[HIFI_CODEC].i2s_mode) {
-	case TEGRA_DAIFMT_I2S:
-		i2s_daifmt |= SND_SOC_DAIFMT_I2S;
-		break;
-	case TEGRA_DAIFMT_DSP_A:
-		i2s_daifmt |= SND_SOC_DAIFMT_DSP_A;
-		break;
-	case TEGRA_DAIFMT_DSP_B:
-		i2s_daifmt |= SND_SOC_DAIFMT_DSP_B;
-		break;
-	case TEGRA_DAIFMT_LEFT_J:
-		i2s_daifmt |= SND_SOC_DAIFMT_LEFT_J;
-		break;
-	case TEGRA_DAIFMT_RIGHT_J:
-		i2s_daifmt |= SND_SOC_DAIFMT_RIGHT_J;
-		break;
-	default:
-		dev_err(card->dev, "Can't configure i2s format\n");
-		return -EINVAL;
-	}
-
 	err = tegra_rt5671_set_clock(rtd, sample_size, params_channels(params), srate);
 	if (err < 0) {
 		dev_err(card->dev, "Can't configure clocks\n");
-		return err;
-	}
-
-	codec_daifmt = i2s_daifmt;
-
-	/*invert the codec bclk polarity when codec is master
-	in DSP mode this is done to match with the negative
-	edge settings of tegra i2s*/
-	if (((i2s_daifmt & SND_SOC_DAIFMT_FORMAT_MASK)
-		== SND_SOC_DAIFMT_DSP_A) &&
-		((i2s_daifmt & SND_SOC_DAIFMT_MASTER_MASK)
-		== SND_SOC_DAIFMT_CBM_CFM)) {
-		codec_daifmt &= ~(SND_SOC_DAIFMT_INV_MASK);
-		codec_daifmt |= SND_SOC_DAIFMT_IB_NF;
-	}
-
-	err = snd_soc_dai_set_fmt(codec_dai, codec_daifmt);
-	if (err < 0) {
-		dev_err(card->dev, "codec_dai fmt not set\n");
-		return err;
-	}
-
-	err = snd_soc_dai_set_fmt(cpu_dai, i2s_daifmt);
-	if (err < 0) {
-		dev_err(card->dev, "cpu_dai fmt not set\n");
 		return err;
 	}
 
@@ -1315,6 +1306,7 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	struct tegra_rt5671 *machine;
 	struct tegra_asoc_platform_data *pdata = NULL;
+	unsigned int aif1_fmt;
 	int ret;
 	int codec_id;
 	u32 val32[6];
@@ -1377,6 +1369,19 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 		tegra_rt5671_dai[DAI_LINK_HIFI_BE].codec_dai_name =
 			pdata->codec_dai_name;
 	}
+
+	ret = tegra_rt5671_aif1_fmt(pdata, &aif1_fmt);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "AIF1: unsupported i2s mode %d, %s master\n",
+			pdata->i2s_param[HIFI_CODEC].i2s_mode,
+			pdata->i2s_param[HIFI_CODEC].is_i2s_master ?
+				"tegra" : "codec");
+		if (np)
+			kfree(pdata);
+		return ret;
+	}
+	tegra_rt5671_dai[DAI_LINK_HIFI].dai_fmt = aif1_fmt;
+	tegra_rt5671_dai[DAI_LINK_HIFI_BE].dai_fmt = aif1_fmt;
 
 	machine = kzalloc(sizeof(struct tegra_rt5671), GFP_KERNEL);
 	if (!machine) {
