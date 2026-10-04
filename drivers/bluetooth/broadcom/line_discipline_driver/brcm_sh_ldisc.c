@@ -796,6 +796,34 @@ static void remove_channel_from_table(struct hci_uart*hu,
     hu->is_registered[proto] = false;
 }
 
+/*
+ * A protocol that registered while the first one was starting the line
+ * discipline was put in the table and told -EINPROGRESS: tell it now how
+ * the start went. One that failed with it leaves the table, so it can
+ * register again and a later first registration starts the discipline
+ * afresh. Caller holds reg_lock; the callbacks only record the result
+ * and wake their waiter.
+ */
+static void brcm_sh_ldisc_reg_complete(struct hci_uart *hu, long err)
+{
+    int type;
+
+    for (type = PROTO_SH_BT; type < PROTO_SH_MAX; type++) {
+        struct sh_proto_s *proto = hu->list[type];
+
+        if (proto == NULL || !hu->is_registered[type])
+            continue;
+        if (proto->reg_complete_cb != NULL)
+            proto->reg_complete_cb(proto->priv_data, (char)err);
+        if (err != 0) {
+            remove_channel_from_table(hu, type);
+            if (hu->protos_registered > 0)
+                hu->protos_registered--;
+        }
+    }
+    clear_bit(LDISC_REG_PENDING, &hu->sh_ldisc_state);
+}
+
 /* to signal completion of line discipline installation
  */
 void sh_ldisc_complete(void *sh_data)
@@ -1241,19 +1269,23 @@ long brcm_sh_ldisc_register(struct sh_proto_s *new_proto)
         err = brcm_sh_ldisc_start(hu);
         BT_LDISC_DBG(V4L2_DBG_OPEN, "brcm_sh_ldisc_start response = %ld", err);
         if (err != 0) {
+            spin_lock_irqsave(&reg_lock, flags);
             clear_bit(LDISC_REG_IN_PROGRESS, &hu->sh_ldisc_state);
-            if ((hu->protos_registered != LDISC_EMPTY) &&
-                (test_bit(LDISC_REG_PENDING, &hu->sh_ldisc_state))) {
-                pr_err(" ldisc registration failed ");
+            if (test_bit(LDISC_REG_PENDING, &hu->sh_ldisc_state)) {
+                pr_err("ldisc start failed (%ld): pending registrations dropped",
+                       err);
+                brcm_sh_ldisc_reg_complete(hu, -EINVAL);
             }
+            spin_unlock_irqrestore(&reg_lock, flags);
             return -EINVAL;
         }
 
+        spin_lock_irqsave(&reg_lock, flags);
         BT_LDISC_DBG(V4L2_DBG_OPEN, "clearing flag LDISC_REG_IN_PROGRESS");
         clear_bit(LDISC_REG_IN_PROGRESS, &hu->sh_ldisc_state);
-
-        BT_LDISC_DBG(V4L2_DBG_OPEN,"clearing flag LDISC_REG_PENDING");
-        clear_bit(LDISC_REG_PENDING, &hu->sh_ldisc_state);
+        if (test_bit(LDISC_REG_PENDING, &hu->sh_ldisc_state))
+            brcm_sh_ldisc_reg_complete(hu, 0);
+        spin_unlock_irqrestore(&reg_lock, flags);
 
         /* check for already registered once more, since the above check is old */
         BT_LDISC_DBG(V4L2_DBG_OPEN, "checking already registerd proto");
@@ -1329,10 +1361,14 @@ long brcm_sh_ldisc_unregister(enum proto_type type)
         return -EPROTONOSUPPORT;
     }
 
-    if(hu->protos_registered > 0)
-        hu->protos_registered--;
+    /* Only a protocol in the table counts: a second unregister, or one
+     * after a failed start dropped it, must not take another's place */
+    if (hu->is_registered[type]) {
+        if (hu->protos_registered > 0)
+            hu->protos_registered--;
+        remove_channel_from_table(hu, type);
+    }
     BT_LDISC_DBG(V4L2_DBG_CLOSE, "Changed hu->protos_registered = %d",hu->protos_registered);
-    remove_channel_from_table(hu,type);
     spin_unlock_irqrestore(&reg_lock, flags);
 
     /* Power OFF chip only if no protos are registered.
