@@ -1210,6 +1210,27 @@ static int check_dac_monor_asrc_source(struct snd_soc_dapm_widget *source,
 	return is_using_asrc(codec, RT5671_ASRC_2, 4);
 }
 
+/*
+ * While I2S1 is master, the DAC and ADC filters need the I2S1 block
+ * powered, whatever their clock -- the system clock or an I2S tracked
+ * through the ASRC. Measured on mocha with FM, which plays inside the
+ * codec with no stream on AIF1, setting PWR_DIG1's I2S1 bit alone:
+ *
+ *   I2S1     I2S1 power   mono filters, sysclk   stereo filter, I2S4 ASRC
+ *   slave    off          silent                 plays
+ *   master   off          silent                 silent
+ *   master   on           plays                  plays
+ *
+ * The datasheet does not say why; its clock tree has the filters on the
+ * system clock through DIV_F1/F2. With I2S1 slave they are left alone.
+ */
+static int is_i2s1_master(struct snd_soc_dapm_widget *source,
+			  struct snd_soc_dapm_widget *sink)
+{
+	return (snd_soc_read(source->codec, RT5671_I2S1_SDP) &
+		RT5671_I2S_MS_MASK) == RT5671_I2S_MS_M;
+}
+
 /* Digital Mixer */
 static const struct snd_kcontrol_new rt5671_sto1_adc_l_mix[] = {
 	SOC_DAPM_SINGLE("ADC1 Switch", RT5671_STO1_ADC_MIXER,
@@ -2968,6 +2989,13 @@ static const struct snd_soc_dapm_route rt5671_dapm_routes[] = {
 	{ "dac mono left filter", NULL, "DAC MONO L ASRC", check_dac_monol_asrc_source },
 	{ "dac mono right filter", NULL, "DAC MONO R ASRC", check_dac_monor_asrc_source },
 	{ "dac stereo1 filter", NULL, "DAC STO ASRC", check_dac_sto_asrc_source },
+	{ "dac stereo1 filter", NULL, "I2S1", is_i2s1_master },
+	{ "dac mono left filter", NULL, "I2S1", is_i2s1_master },
+	{ "dac mono right filter", NULL, "I2S1", is_i2s1_master },
+	{ "adc stereo1 filter", NULL, "I2S1", is_i2s1_master },
+	{ "adc stereo2 filter", NULL, "I2S1", is_i2s1_master },
+	{ "adc mono left filter", NULL, "I2S1", is_i2s1_master },
+	{ "adc mono right filter", NULL, "I2S1", is_i2s1_master },
 
 	{"I2S1", NULL, "I2S1 ASRC"},
 	{"I2S2", NULL, "I2S2 ASRC"},
