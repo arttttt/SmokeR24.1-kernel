@@ -38,7 +38,9 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/tlv.h>
 #include "../codecs/rt5671.h"
+#include "../codecs/tfa98xx.h"
 
 #include "tegra_pcm.h"
 #include "tegra_asoc_utils.h"
@@ -124,6 +126,9 @@ struct tegra_rt5671 {
 	struct tegra30_i2s *be_i2s;
 	enum tegra30_ahub_txcif fe_fifo_cif[NUM_FE];
 	struct tegra_pcm_dma_params fe_dma_data[NUM_FE];
+
+	struct mutex fm_vol_lock;
+	unsigned int fm_vol;		/* FM Playback Volume; fm_vol_lock */
 };
 
 /* Which DAM input each front end feeds */
@@ -941,7 +946,124 @@ static const struct snd_soc_dapm_route ardbeg_audio_map[] = {
 	{"AIF1 Playback", NULL, "DAM Mixer"},
 };
 
+/*
+ * FM's volume. FM reaches the outputs through DAC1, and the codec takes
+ * it for a recording after DAC1, so the volume is set past that point
+ * and DAC1 stays at 0 dB: on the headphone amplifier (HPOVOL, 1.5 dB
+ * steps down to -46.5 dB) and on both TFA9890s (0.5 dB steps). Both
+ * outputs take the same level, whichever one FM plays on. Below the
+ * headphone amplifier's range DAC1 takes the rest, and the speakers'
+ * share drops by as much, since DAC1 feeds them too.
+ *
+ * Both amplifiers carry everything else on their output as well: the
+ * volume is FM's while FM plays, and the audio config's FM "off" path
+ * sets it back to 0 dB.
+ *
+ * 0 dB is each output's own level: the headphone amplifier at 0 dB, the
+ * speakers' digital volume at 0 dB. The headphones go no lower than the
+ * amplifier and DAC1 together, -112 dB. Muting is the audio config's,
+ * on DAC1's mixer.
+ */
+#define FM_VOL_MAX		255	/* 0.5 dB steps from -127.5 dB */
+#define FM_VOL_STEP_MDB		500	/* step, 1/1000 dB */
+
+#define FM_HP_VOL_0DB		8	/* HPOVOL register at 0 dB */
+#define FM_HP_VOL_MIN		0x27	/* -46.5 dB, the amplifier's lowest */
+#define FM_HP_STEP_MDB		1500
+
+#define FM_DAC1_VOL_0DB		0xaf
+#define FM_DAC1_STEP_MDB	375
+
+static const DECLARE_TLV_DB_SCALE(fm_vol_tlv, -12750, 50, 0);
+
+static void tegra_rt5671_fm_vol_apply(struct snd_soc_card *card,
+				      unsigned int vol)
+{
+	struct snd_soc_codec *codec = card->rtd[DAI_LINK_HIFI].codec;
+	int att = (FM_VOL_MAX - vol) * FM_VOL_STEP_MDB;
+	int hp, dac1 = 0, spk;	/* attenuations, in each one's steps */
+	int i;
+
+	/* The headphone amplifier to the nearest step it has, DAC1 the rest */
+	hp = (att + FM_HP_STEP_MDB / 2) / FM_HP_STEP_MDB;
+	if (hp >= FM_HP_VOL_MIN - FM_HP_VOL_0DB) {
+		hp = FM_HP_VOL_MIN - FM_HP_VOL_0DB;
+		dac1 = (att - hp * FM_HP_STEP_MDB + FM_DAC1_STEP_MDB / 2) /
+			FM_DAC1_STEP_MDB;
+		dac1 = clamp(dac1, 0, FM_DAC1_VOL_0DB);
+	}
+	/* The speakers' share less what DAC1 already takes */
+	spk = (max(0, att - dac1 * FM_DAC1_STEP_MDB) + FM_VOL_STEP_MDB / 2) /
+		FM_VOL_STEP_MDB;
+
+	/* The headphone mute bits are the codec's depop sequence's */
+	hp += FM_HP_VOL_0DB;
+	snd_soc_update_bits(codec, RT5671_HP_VOL,
+			    RT5671_L_VOL_MASK | RT5671_R_VOL_MASK,
+			    hp << RT5671_L_VOL_SFT | hp << RT5671_R_VOL_SFT);
+	dac1 = FM_DAC1_VOL_0DB - dac1;
+	snd_soc_write(codec, RT5671_DAC1_DIG_VOL,
+		      dac1 << RT5671_L_VOL_SFT | dac1);
+	for (i = DAI_LINK_LEFT_SPK; i <= DAI_LINK_RIGHT_SPK; i++)
+		snd_soc_update_bits(card->rtd[i].codec, TFA98XX_AUDIO_CTR,
+				    TFA98XX_AUDIO_CTR_VOL_MSK,
+				    spk << TFA98XX_AUDIO_CTR_VOL_POS);
+}
+
+static int tegra_rt5671_fm_vol_info(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = FM_VOL_MAX;
+	return 0;
+}
+
+static int tegra_rt5671_fm_vol_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
+
+	mutex_lock(&machine->fm_vol_lock);
+	ucontrol->value.integer.value[0] = machine->fm_vol;
+	mutex_unlock(&machine->fm_vol_lock);
+	return 0;
+}
+
+static int tegra_rt5671_fm_vol_put(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
+	long vol = ucontrol->value.integer.value[0];
+	int changed;
+
+	if (vol < 0 || vol > FM_VOL_MAX)
+		return -EINVAL;
+
+	mutex_lock(&machine->fm_vol_lock);
+	changed = machine->fm_vol != vol;
+	if (changed) {
+		machine->fm_vol = vol;
+		tegra_rt5671_fm_vol_apply(card, vol);
+	}
+	mutex_unlock(&machine->fm_vol_lock);
+	return changed;
+}
+
 static const struct snd_kcontrol_new ardbeg_controls[] = {
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "FM Playback Volume",
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
+			  SNDRV_CTL_ELEM_ACCESS_TLV_READ,
+		.info = tegra_rt5671_fm_vol_info,
+		.get = tegra_rt5671_fm_vol_get,
+		.put = tegra_rt5671_fm_vol_put,
+		.tlv.p = fm_vol_tlv,
+	},
 	SOC_DAPM_PIN_SWITCH("Int Left Spk"),
 	SOC_DAPM_PIN_SWITCH("Int Right Spk"),
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
@@ -1240,6 +1362,25 @@ static struct snd_soc_codec_conf tegra_rt5671_conf[] = {
 	},
 };
 
+/*
+ * FM's volume starts at 0 dB. The headphone amplifier ramps through its
+ * steps, as FM's volume moves it while something plays.
+ */
+static int tegra_rt5671_late_probe(struct snd_soc_card *card)
+{
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
+	struct snd_soc_codec *codec = card->rtd[DAI_LINK_HIFI].codec;
+
+	snd_soc_update_bits(codec, RT5671_SV_ZCD1,
+			    RT5671_HP_SV_MASK, RT5671_HP_SV_EN);
+
+	mutex_lock(&machine->fm_vol_lock);
+	machine->fm_vol = FM_VOL_MAX;
+	tegra_rt5671_fm_vol_apply(card, machine->fm_vol);
+	mutex_unlock(&machine->fm_vol_lock);
+	return 0;
+}
+
 static struct snd_soc_card snd_soc_tegra_rt5671 = {
 	.name = "tegra-rt5671",
 	.owner = THIS_MODULE,
@@ -1251,6 +1392,7 @@ static struct snd_soc_card snd_soc_tegra_rt5671 = {
 	.resume_pre = tegra_rt5671_resume_pre,
 	.set_bias_level = tegra_rt5671_set_bias_level,
 	.set_bias_level_post = tegra_rt5671_set_bias_level_post,
+	.late_probe = tegra_rt5671_late_probe,
 	.controls = ardbeg_controls,
 	.num_controls = ARRAY_SIZE(ardbeg_controls),
 	.dapm_widgets = ardbeg_dapm_widgets,
@@ -1394,6 +1536,7 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	machine->pdata = pdata;
 	machine->pcard = card;
 	mutex_init(&machine->dam_lock);
+	mutex_init(&machine->fm_vol_lock);
 	spin_lock_init(&machine->dam_trigger_lock);
 	machine->fe_fifo_cif[FE_DEEP] = -1;
 	machine->fe_fifo_cif[FE_FAST] = -1;
