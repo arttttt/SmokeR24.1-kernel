@@ -44,7 +44,6 @@
 
 #include "tegra_pcm.h"
 #include "tegra_asoc_utils.h"
-#include <linux/tfa9887.h>
 #include "tegra30_ahub.h"
 #include "tegra30_i2s.h"
 #include "tegra30_dam.h"
