@@ -1588,9 +1588,14 @@ static int rt5671_dsp_snd_effect(struct snd_soc_codec *codec)
 		break;
 	}
 
-	ret = rt5671_dsp_rate(codec, 12288000, rate);
-	if (ret < 0)
+	/* The DSP runs on the codec's clock after AIF1's pre-divider,
+	 * 256 fs: 12.288 MHz at 48 kHz whatever the system clock */
+	ret = rt5671_dsp_rate(codec, rt5671->lrck[RT5671_AIF1] << 8, rate);
+	if (ret < 0) {
+		dev_warn(codec->dev, "DSP: no clock table for %d Hz\n",
+			 rt5671->lrck[RT5671_AIF1] << 8);
 		goto effect_err;
+	}
 
 	/*read MX-2d [3:2] to decide TDM source*/
 	/*currently, support slot 0/1 and 2/3 only*/
