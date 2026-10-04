@@ -98,6 +98,15 @@ struct tfa98xx_priv {
 	bool dsp_crash;
 	bool recalib;
 	unsigned int download_retries;
+
+	/*
+	 * The amplifier plays only while DAPM wants it -- every widget of the
+	 * path before it is up -- and the DSP is ready: powered, clocked and
+	 * configured. Both, and the amplifier's state, are under amp_lock.
+	 */
+	struct mutex amp_lock;
+	bool amp_wanted;
+	bool dsp_ready;
 };
 
 /*
@@ -399,6 +408,23 @@ static int tfa98xx_mute(struct snd_soc_codec *codec, int mute)
 	return ret;
 }
 
+/* Puts the amplifier where amp_wanted and dsp_ready say; amp_lock held */
+static void tfa98xx_amp_update_l(struct tfa98xx_priv *tfa98xx)
+{
+	const bool on = tfa98xx->amp_wanted && tfa98xx->dsp_ready;
+
+	tfa98xx_mute(tfa98xx->codec,
+		     on ? TFA98XX_MUTE_OFF : TFA98XX_MUTE_AMPLIFIER);
+}
+
+static void tfa98xx_set_dsp_ready(struct tfa98xx_priv *tfa98xx, bool ready)
+{
+	mutex_lock(&tfa98xx->amp_lock);
+	tfa98xx->dsp_ready = ready;
+	tfa98xx_amp_update_l(tfa98xx);
+	mutex_unlock(&tfa98xx->amp_lock);
+}
+
 static int tfa98xx_enable_otc(struct snd_soc_codec *codec, bool recalib)
 {
 	unsigned int mtp, status;
@@ -688,7 +714,11 @@ static void tfa98xx_download(struct work_struct *work)
 		goto unlock;
 	tfa98xx->recalib = false;
 
+	/* Not ready while the DSP is reconfigured; it says so at the end */
+	mutex_lock(&tfa98xx->amp_lock);
+	tfa98xx->dsp_ready = false;
 	ret = tfa98xx_mute(codec, TFA98XX_MUTE_DIGITAL);
+	mutex_unlock(&tfa98xx->amp_lock);
 	if (ret < 0)
 		goto unlock;
 
@@ -805,10 +835,9 @@ static void tfa98xx_download(struct work_struct *work)
 	else
 		dev_info(codec->dev, "Finish one time calibration\n");
 
-	/* update_bits answers 1 when a bit changed: only < 0 is a failure */
-	ret = tfa98xx_mute(codec, TFA98XX_MUTE_OFF);
-	if (ret >= 0)
-		tfa98xx->download_retries = 0;
+	/* The amplifier plays now if the path wants it, else stops */
+	tfa98xx_set_dsp_ready(tfa98xx, true);
+	tfa98xx->download_retries = 0;
 
 unlock:
 	/* retry later, backing off, while the amplifier stays muted */
@@ -915,19 +944,19 @@ static void tfa98xx_monitor(struct work_struct *work)
 		 * through a DSP that is not configured yet. The download
 		 * unmutes once the DSP has its settings.
 		 */
-		tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
+		tfa98xx_set_dsp_ready(tfa98xx, false);
 		tfa98xx_reset(codec);
 		tfa98xx_start_download(tfa98xx, true);
 		break;
 	case 1:
 		dev_err(codec->dev, "Repower due to over condition\n");
 		/* the same order as a stream stop and start: silent edges */
-		tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
+		tfa98xx_set_dsp_ready(tfa98xx, false);
 		tfa98xx_power(codec, false);
 		usleep_range(5000, 6000);
 		if (tfa98xx_power(codec, true) == 0 &&
 		    !tfa98xx_start_download(tfa98xx, false))
-			tfa98xx_mute(codec, TFA98XX_MUTE_OFF);
+			tfa98xx_set_dsp_ready(tfa98xx, true);
 		break;
 	case 0:
 		break;
@@ -987,6 +1016,7 @@ static int tfa98xx_probe(struct snd_soc_codec *codec)
 
 	tfa98xx->codec = codec;
 	mutex_init(&tfa98xx->fw_lock);
+	mutex_init(&tfa98xx->amp_lock);
 
 	INIT_DELAYED_WORK(&tfa98xx->monitor_work, tfa98xx_monitor);
 	INIT_DELAYED_WORK(&tfa98xx->download_work, tfa98xx_download);
@@ -1295,8 +1325,36 @@ static const struct snd_kcontrol_new tfa98xx_controls[] = {
 		tfa98xx_recalib_get, tfa98xx_recalib_put),
 };
 
+/*
+ * The amplifier, as an output driver: DAPM powers it after every widget
+ * before it -- the stream and the codec's path into it, unmuted -- and
+ * down before them, as mainline tfa989x does. Switched on into a path
+ * that comes up after it, the speaker took the step with a click.
+ */
+static int tfa98xx_amp_event(struct snd_soc_dapm_widget *w,
+			     struct snd_kcontrol *kcontrol, int event)
+{
+	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(w->codec);
+
+	mutex_lock(&tfa98xx->amp_lock);
+	tfa98xx->amp_wanted = SND_SOC_DAPM_EVENT_ON(event);
+	tfa98xx_amp_update_l(tfa98xx);
+	mutex_unlock(&tfa98xx->amp_lock);
+
+	return 0;
+}
+
+static const struct snd_soc_dapm_widget tfa98xx_widgets[] = {
+	SND_SOC_DAPM_OUT_DRV_E("Amp", SND_SOC_NOPM, 0, 0, NULL, 0,
+			       tfa98xx_amp_event,
+			       SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+	SND_SOC_DAPM_OUTPUT("OUT"),
+};
+
 static const struct snd_soc_dapm_route tfa98xx_routes[] = {
 	{ "Capture", NULL, "Playback" },
+	{ "Amp", NULL, "Playback" },
+	{ "OUT", NULL, "Amp" },
 };
 
 static const u16 tfa98xx_reg[0x90] = {
@@ -1352,6 +1410,8 @@ static const struct snd_soc_codec_driver tfa98xx_drv = {
 	.remove = tfa98xx_remove,
 	.controls = tfa98xx_controls,
 	.num_controls = ARRAY_SIZE(tfa98xx_controls),
+	.dapm_widgets = tfa98xx_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(tfa98xx_widgets),
 	.dapm_routes = tfa98xx_routes,
 	.num_dapm_routes = ARRAY_SIZE(tfa98xx_routes),
 	.read = tfa98xx_read,
@@ -1415,21 +1475,24 @@ static int tfa98xx_digital_mute(struct snd_soc_dai *codec_dai, int mute)
 	struct snd_soc_codec *codec = codec_dai->codec;
 	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
 
+	/*
+	 * The link's stream: power and the DSP. The amplifier itself is the
+	 * Amp widget's, which DAPM brings up after the codec's path into it
+	 * and takes down before.
+	 */
 	if (mute) {
 		tfa98xx_stop_monitor(tfa98xx);
 		tfa98xx_stop_download(tfa98xx);
-		tfa98xx_mute(codec, TFA98XX_MUTE_AMPLIFIER);
+		tfa98xx_set_dsp_ready(tfa98xx, false);
 		tfa98xx_power(codec, false);
 		usleep_range(5000, 6000);
 	} else {
 		usleep_range(5000, 6000);
-		/* without the I2S clocks the amplifier stays muted */
+		/* without the I2S clocks the DSP is not ready */
 		if (tfa98xx_power(codec, true) < 0)
 			return 0;
-		if (tfa98xx_start_download(tfa98xx, false))
-			; /* will turn off the mute after download */
-		else
-			tfa98xx_mute(codec, TFA98XX_MUTE_OFF);
+		if (!tfa98xx_start_download(tfa98xx, false))
+			tfa98xx_set_dsp_ready(tfa98xx, true);
 		tfa98xx_start_monitor(tfa98xx);
 	}
 
