@@ -54,6 +54,8 @@
 #define FM_CORE_READY                 3
 
 #define FM_DRV_TX_TIMEOUT       (5*HZ)  /* 5 sec */
+/* A start by another protocol includes the patchram download */
+#define FM_DRV_REG_TIMEOUT      (10*HZ)
 #define FM_DRV_RX_SEEK_TIMEOUT       (20*HZ)  /* 20 sec */
 
 #define NO_OF_ENTRIES_IN_ARRAY(array) (sizeof(array) / sizeof(array[0]))
@@ -277,6 +279,10 @@ struct fmdrv_ops {
     /* Tune ended interrupt (preset tune); maintask_completion is the
      * command path's and an interrupt must not end a command's wait */
     struct completion tune_completion;
+    /* Registration left pending by the line discipline while another
+     * protocol starts it: its outcome, and the wait for it */
+    struct completion reg_completion;
+    char reg_status;
     unsigned char curr_fmmode;   /* Current FM chip mode (TX, RX, OFF) */
     unsigned char aud_ctrl;     /* Current Audio Control (STEREO/MONO/NONE) */
     struct fm_rx rx;                         /* FM receiver info */

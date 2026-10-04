@@ -1683,6 +1683,15 @@ static long fm_st_receive(void *arg, struct sk_buff *skb)
     return 0;
 }
 
+/* Called by the line discipline when a pending registration completes */
+static void fm_st_reg_complete(void *arg, char status)
+{
+    struct fmdrv_ops *fmdev = (struct fmdrv_ops *)arg;
+
+    fmdev->reg_status = status;
+    complete(&fmdev->reg_completion);
+}
+
 /*
  * This function will be called from FM V4L2 open function.
  * Register with shared ldisc driver and initialize driver data.
@@ -1708,12 +1717,34 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
     fm_st_proto.type = PROTO_SH_FM;
     fm_st_proto.recv = fm_st_receive;
     fm_st_proto.match_packet = NULL;
+    fm_st_proto.reg_complete_cb = fm_st_reg_complete;
     fm_st_proto.write = NULL; /* shared ldisc driver will fill write pointer */
     fm_st_proto.priv_data = fmdev;
 
+    /* The line discipline may complete a pending registration before
+     * register returns: arm the wait first */
+    init_completion(&fmdev->reg_completion);
+    fmdev->reg_status = -EINPROGRESS;
+
     /* Register with the shared line discipline */
     ret = brcm_sh_ldisc_register(&fm_st_proto);
-    if (ret == -1) {
+    if (ret == -EINPROGRESS) {
+        /* Another protocol is starting the line discipline (patchram
+         * download): no command may go to the chip before it is done */
+        if (!wait_for_completion_timeout(&fmdev->reg_completion,
+                                         FM_DRV_REG_TIMEOUT)) {
+            pr_err("(fmdrv): line discipline start did not complete");
+            brcm_sh_ldisc_unregister(PROTO_SH_FM);
+            return -ETIMEDOUT;
+        }
+        if (fmdev->reg_status != 0) {
+            pr_err("(fmdrv): line discipline start failed (%d)",
+                   fmdev->reg_status);
+            return -EAGAIN;
+        }
+        ret = 0;
+    }
+    if (ret < 0) {
         pr_err("(fmdrv): brcm_sh_ldisc_register failed %d", ret);
         ret = -EAGAIN;
         return ret;
