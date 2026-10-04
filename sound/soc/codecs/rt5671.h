@@ -2067,7 +2067,6 @@ struct rt5671_priv {
 	int sysclk_src;
 	int lrck[RT5671_AIFS];
 	int bclk[RT5671_AIFS];
-	int master[RT5671_AIFS];
 
 	int pll_src;
 	int pll_in;

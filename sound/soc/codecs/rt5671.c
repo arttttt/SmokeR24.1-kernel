@@ -3503,16 +3503,13 @@ static int rt5671_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	if (rt5671->master[dai->id] == 0)
-		val |= RT5671_I2S_MS_S;
-
 	switch (dai->id) {
 	case RT5671_AIF1:
 		mask_clk = RT5671_I2S_PD1_MASK;
 		val_clk = pre_div << RT5671_I2S_PD1_SFT;
 		snd_soc_update_bits(codec, RT5671_ADDA_CLK1, mask_clk, val_clk);
 		snd_soc_update_bits(codec, RT5671_I2S1_SDP,
-			RT5671_I2S_DL_MASK | RT5671_I2S_MS_MASK, val);
+			RT5671_I2S_DL_MASK, val);
 		break;
 	case RT5671_AIF2:
 		mask_clk = RT5671_I2S_BCLK_MS2_MASK | RT5671_I2S_PD2_MASK;
@@ -3520,7 +3517,7 @@ static int rt5671_hw_params(struct snd_pcm_substream *substream,
 			pre_div << RT5671_I2S_PD2_SFT;
 		snd_soc_update_bits(codec, RT5671_ADDA_CLK1, mask_clk, val_clk);
 		snd_soc_update_bits(codec, RT5671_I2S2_SDP,
-			RT5671_I2S_DL_MASK | RT5671_I2S_MS_MASK, val);
+			RT5671_I2S_DL_MASK, val);
 		break;
 	case RT5671_AIF3:
 		mask_clk = RT5671_I2S_BCLK_MS3_MASK | RT5671_I2S_PD3_MASK;
@@ -3528,7 +3525,7 @@ static int rt5671_hw_params(struct snd_pcm_substream *substream,
 			pre_div << RT5671_I2S_PD3_SFT;
 		snd_soc_update_bits(codec, RT5671_ADDA_CLK1, mask_clk, val_clk);
 		snd_soc_update_bits(codec, RT5671_I2S3_SDP,
-			RT5671_I2S_DL_MASK | RT5671_I2S_MS_MASK, val);
+			RT5671_I2S_DL_MASK, val);
 		break;
 	case RT5671_AIF4:
 		mask_clk = RT5671_I2S_BCLK_MS4_MASK | RT5671_I2S_PD4_MASK;
@@ -3536,7 +3533,7 @@ static int rt5671_hw_params(struct snd_pcm_substream *substream,
 			pre_div << RT5671_I2S_PD4_SFT;
 		snd_soc_update_bits(codec, RT5671_DSP_CLK, mask_clk, val_clk);
 		snd_soc_update_bits(codec, RT5671_I2S4_SDP,
-			RT5671_I2S_DL_MASK | RT5671_I2S_MS_MASK, val);
+			RT5671_I2S_DL_MASK, val);
 		break;
 	}
 
@@ -3556,15 +3553,13 @@ static int rt5671_prepare(struct snd_pcm_substream *substream,
 static int rt5671_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	struct snd_soc_codec *codec = dai->codec;
-	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
 	unsigned int reg_val = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBM_CFM:
-		rt5671->master[dai->id] = 1;
 		break;
 	case SND_SOC_DAIFMT_CBS_CFS:
-		rt5671->master[dai->id] = 0;
+		reg_val |= RT5671_I2S_MS_S;
 		break;
 	default:
 		return -EINVAL;
@@ -3599,22 +3594,22 @@ static int rt5671_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	switch (dai->id) {
 	case RT5671_AIF1:
 		snd_soc_update_bits(codec, RT5671_I2S1_SDP,
-			RT5671_I2S_BP_MASK |
+			RT5671_I2S_MS_MASK | RT5671_I2S_BP_MASK |
 			RT5671_I2S_DF_MASK, reg_val);
 		break;
 	case RT5671_AIF2:
 		snd_soc_update_bits(codec, RT5671_I2S2_SDP,
-			RT5671_I2S_BP_MASK |
+			RT5671_I2S_MS_MASK | RT5671_I2S_BP_MASK |
 			RT5671_I2S_DF_MASK, reg_val);
 		break;
 	case RT5671_AIF3:
 		snd_soc_update_bits(codec, RT5671_I2S3_SDP,
-			RT5671_I2S_BP_MASK |
+			RT5671_I2S_MS_MASK | RT5671_I2S_BP_MASK |
 			RT5671_I2S_DF_MASK, reg_val);
 		break;
 	case RT5671_AIF4:
 		snd_soc_update_bits(codec, RT5671_I2S4_SDP,
-			RT5671_I2S_BP_MASK |
+			RT5671_I2S_MS_MASK | RT5671_I2S_BP_MASK |
 			RT5671_I2S_DF_MASK, reg_val);
 		break;
 	}
