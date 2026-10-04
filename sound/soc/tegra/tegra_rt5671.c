@@ -90,6 +90,31 @@
 /* NVIDIA's machine drivers all program 0x1000 as unity; TRM omits CONV */
 #define DAM_GAIN_UNITY		0x1000
 
+/*
+ * The hifi stream's volume, the gain of OUT's CH0, which carries that
+ * stream alone. CONV is linear, 0x1000 unity (measured: 0x0800 -6.02 dB,
+ * 0x2000 +6.02 dB), and one gain for both channels. 0.5 dB steps from
+ * -60 dB, the lowest muting; 0 dB leaves the samples untouched. The DAM
+ * runs only while the back end does, so the gain goes on at its setup
+ * and, while it runs, as the control moves.
+ */
+#define HIFI_VOL_MAX		121
+static const u16 hifi_vol_gain[HIFI_VOL_MAX + 1] = {
+	0, 4, 4, 5, 5, 5, 5, 6, 6, 6,
+	7, 7, 8, 8, 9, 9, 10, 10, 11, 12,
+	12, 13, 14, 15, 15, 16, 17, 18, 19, 21,
+	22, 23, 24, 26, 27, 29, 31, 33, 34, 37,
+	39, 41, 43, 46, 49, 52, 55, 58, 61, 65,
+	69, 73, 77, 82, 87, 92, 97, 103, 109, 115,
+	122, 130, 137, 145, 154, 163, 173, 183, 194, 205,
+	217, 230, 244, 258, 274, 290, 307, 325, 345, 365,
+	387, 410, 434, 460, 487, 516, 546, 579, 613, 649,
+	688, 728, 772, 817, 866, 917, 971, 1029, 1090, 1154,
+	1223, 1295, 1372, 1453, 1539, 1631, 1727, 1830, 1938, 2053,
+	2175, 2303, 2440, 2584, 2738, 2900, 3072, 3254, 3446, 3651,
+	3867, DAM_GAIN_UNITY,
+};
+
 /* DAM_CHx_CTRL DATA_SYNC: one bit per channel to wait for */
 #define DAM_SYNC_NONE		0
 #define DAM_SYNC_WAIT_CH0	BIT(0)
@@ -119,6 +144,7 @@ struct tegra_rt5671 {
 	struct mutex dam_lock;		/* DAM setup against BE users */
 	int dam_users;
 	int be_rate;			/* under dam_lock */
+	unsigned int hifi_vol;		/* HiFi Playback Volume; dam_lock */
 	spinlock_t dam_trigger_lock;	/* DAM enables, from three streams */
 	bool fe_running[NUM_FE];	/* under dam_trigger_lock */
 	int chain_users;		/* deep/fast running; dam_trigger_lock */
@@ -495,6 +521,8 @@ static int tegra_rt5671_dam_setup(struct tegra_rt5671 *machine,
 	ret = tegra_rt5671_dam_init_one(dam[DAM_OUT], 16, 32, true);
 	if (ret)
 		goto err_src;
+	tegra30_dam_set_gain(dam[DAM_OUT], TEGRA30_DAM_CHIN0_SRC,
+			     hifi_vol_gain[machine->hifi_vol]);
 
 	tegra30_ahub_set_rx_cif_source(
 			tegra_rt5671_dam_rx(dam[DAM_SRC], TEGRA30_DAM_CHIN0_SRC),
@@ -1052,7 +1080,63 @@ static int tegra_rt5671_fm_vol_put(struct snd_kcontrol *kcontrol,
 	return changed;
 }
 
+static const DECLARE_TLV_DB_SCALE(hifi_vol_tlv, -6050, 50, 1);
+
+static int tegra_rt5671_hifi_vol_info(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = HIFI_VOL_MAX;
+	return 0;
+}
+
+static int tegra_rt5671_hifi_vol_get(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
+
+	mutex_lock(&machine->dam_lock);
+	ucontrol->value.integer.value[0] = machine->hifi_vol;
+	mutex_unlock(&machine->dam_lock);
+	return 0;
+}
+
+static int tegra_rt5671_hifi_vol_put(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+	struct tegra_rt5671 *machine = snd_soc_card_get_drvdata(card);
+	long vol = ucontrol->value.integer.value[0];
+	int changed;
+
+	if (vol < 0 || vol > HIFI_VOL_MAX)
+		return -EINVAL;
+
+	mutex_lock(&machine->dam_lock);
+	changed = machine->hifi_vol != vol;
+	machine->hifi_vol = vol;
+	/* Only a DAM with its clock on may be written */
+	if (changed && machine->dam_users)
+		tegra30_dam_set_gain(machine->dam[DAM_OUT],
+				     TEGRA30_DAM_CHIN0_SRC, hifi_vol_gain[vol]);
+	mutex_unlock(&machine->dam_lock);
+	return changed;
+}
+
 static const struct snd_kcontrol_new ardbeg_controls[] = {
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "HiFi Playback Volume",
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
+			  SNDRV_CTL_ELEM_ACCESS_TLV_READ,
+		.info = tegra_rt5671_hifi_vol_info,
+		.get = tegra_rt5671_hifi_vol_get,
+		.put = tegra_rt5671_hifi_vol_put,
+		.tlv.p = hifi_vol_tlv,
+	},
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "FM Playback Volume",
@@ -1536,6 +1620,7 @@ static int tegra_rt5671_driver_probe(struct platform_device *pdev)
 	machine->pcard = card;
 	mutex_init(&machine->dam_lock);
 	mutex_init(&machine->fm_vol_lock);
+	machine->hifi_vol = HIFI_VOL_MAX;
 	spin_lock_init(&machine->dam_trigger_lock);
 	machine->fe_fifo_cif[FE_DEEP] = -1;
 	machine->fe_fifo_cif[FE_FAST] = -1;
