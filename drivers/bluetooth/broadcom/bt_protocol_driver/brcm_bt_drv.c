@@ -35,10 +35,13 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/poll.h>
+#include <linux/mutex.h>
 #include "../include/v4l2_target.h"
 #include "../include/brcm_ldisc_sh.h"
 #include "../include/v4l2_logs.h"
 #include "brcm_bt_drv.h"
+
+static void bt_tx_asm_reset(struct brcm_bt_dev *bt_dev);
 
 #ifndef BTDRV_DEBUG
 #define BTDRV_DEBUG TRUE
@@ -243,10 +246,10 @@ static void brcm_bt_drv_prepare(struct brcm_bt_dev* bt_dev)
 
     atomic_set(&bt_dev->tx_cnt, 0);
 
-    /* The device is kmalloc'd, not zeroed, and a fresh open starts a fresh
-     * packet stream. The first fragment written always carries a type byte, so
-     * this is only a safe default, never the value actually used. */
-    bt_dev->last_pkt_type = HCI_COMMAND_PKT;
+    /* A fresh open starts a fresh packet stream */
+    mutex_lock(&bt_dev->tx_asm_lock);
+    bt_tx_asm_reset(bt_dev);
+    mutex_unlock(&bt_dev->tx_asm_lock);
 
     init_waitqueue_head(&bt_dev->inq);
 
@@ -289,6 +292,10 @@ static int brcm_bt_drv_close(struct inode *i, struct file *f)
     skb_queue_purge(&bt_dev_p->rx_q);
     atomic_set(&bt_dev_p->tx_cnt, 0);
     bt_dev_p->st_write = NULL;
+
+    mutex_lock(&bt_dev_p->tx_asm_lock);
+    bt_tx_asm_reset(bt_dev_p);
+    mutex_unlock(&bt_dev_p->tx_asm_lock);
 
     BT_DRV_DBG(V4L2_DBG_CLOSE, "End ret=%d", err);
     return err;
@@ -371,67 +378,175 @@ exit:
 **
 ** Returns - Number of bytes written.
 *****************************************************************************/
+/*
+ * H4 packets the stack writes, by their type byte: the HCI header that
+ * follows it, and where in that header the parameter or data length is,
+ * one byte or two (little-endian) -- as mainline's h4_recv_buf() reads
+ * them coming the other way.
+ */
+struct bt_h4_type {
+    unsigned char type;
+    unsigned char hdr;      /* bytes after the type byte */
+    unsigned char len_off;  /* of the length field, after the type byte */
+    unsigned char len_size;
+};
+
+static const struct bt_h4_type bt_h4_types[] = {
+    { HCI_COMMAND_PKT, 3, 2, 1 },   /* opcode(2) plen(1) */
+    { HCI_ACLDATA_PKT, 4, 2, 2 },   /* handle(2) dlen(2) */
+    { HCI_SCODATA_PKT, 3, 2, 1 },   /* handle(2) dlen(1) */
+};
+
+static const struct bt_h4_type *bt_h4_type_of(unsigned char type)
+{
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(bt_h4_types); i++)
+        if (bt_h4_types[i].type == type)
+            return &bt_h4_types[i];
+    return NULL;
+}
+
+/* Drop a packet half put together. Caller holds tx_asm_lock. */
+static void bt_tx_asm_reset(struct brcm_bt_dev *bt_dev)
+{
+    if (bt_dev->tx_pkt != NULL)
+        kfree_skb(bt_dev->tx_pkt);
+    bt_dev->tx_pkt = NULL;
+    bt_dev->tx_pkt_owed = 0;
+    bt_dev->tx_hdr_have = 0;
+}
+
+/* Queue a whole packet for the line discipline */
+static void bt_tx_queue(struct brcm_bt_dev *bt_dev, struct sk_buff *skb)
+{
+    unsigned long flags;
+
+    BT_DRV_DBG(V4L2_DBG_TX, "from stack: type=0x%02x opcode=0x%04x len=%u",
+        skb->data[0],
+        (skb->data[0] == HCI_COMMAND_PKT) ? (skb->data[1] | (skb->data[2] << 8)) : 0,
+        skb->len);
+
+    spin_lock_irqsave(&bt_dev->tx_q_lock, flags);
+    skb_queue_tail(&bt_dev->tx_q, skb);
+    spin_unlock_irqrestore(&bt_dev->tx_q_lock, flags);
+    atomic_inc(&bt_dev->tx_cnt);
+}
+
+/*
+ * Take bytes the stack wrote into the packet being put together, queueing
+ * each packet as it completes. Caller holds tx_asm_lock. Returns the number
+ * of packets queued, or a negative error, the partial packet dropped.
+ */
+static int bt_tx_assemble(struct brcm_bt_dev *bt_dev,
+                          const unsigned char *data, size_t len)
+{
+    int queued = 0;
+
+    while (len > 0) {
+        const struct bt_h4_type *t;
+        unsigned int n, plen, i;
+
+        if (bt_dev->tx_pkt != NULL) {
+            /* The body: as much of what is owed as this write has */
+            n = min_t(size_t, len, bt_dev->tx_pkt_owed);
+            memcpy(skb_put(bt_dev->tx_pkt, n), data, n);
+            data += n;
+            len -= n;
+            bt_dev->tx_pkt_owed -= n;
+            if (bt_dev->tx_pkt_owed == 0) {
+                bt_tx_queue(bt_dev, bt_dev->tx_pkt);
+                bt_dev->tx_pkt = NULL;
+                queued++;
+            }
+            continue;
+        }
+
+        /* The type byte and the header, possibly across writes */
+        t = bt_h4_type_of(bt_dev->tx_hdr_have ? bt_dev->tx_hdr[0] : data[0]);
+        if (t == NULL) {
+            BT_DRV_ERR("not an H4 packet start: 0x%02x, write dropped",
+                data[0]);
+            bt_tx_asm_reset(bt_dev);
+            return -EILSEQ;
+        }
+        n = min_t(size_t, len, 1 + t->hdr - bt_dev->tx_hdr_have);
+        memcpy(&bt_dev->tx_hdr[bt_dev->tx_hdr_have], data, n);
+        data += n;
+        len -= n;
+        bt_dev->tx_hdr_have += n;
+        if (bt_dev->tx_hdr_have < 1 + t->hdr)
+            continue;
+
+        plen = 0;
+        for (i = 0; i < t->len_size; i++)
+            plen |= bt_dev->tx_hdr[1 + t->len_off + i] << (8 * i);
+
+        bt_dev->tx_pkt = alloc_skb(1 + t->hdr + plen, GFP_KERNEL);
+        if (bt_dev->tx_pkt == NULL) {
+            BT_DRV_ERR("no memory for a %u-byte packet", 1 + t->hdr + plen);
+            bt_tx_asm_reset(bt_dev);
+            return -ENOMEM;
+        }
+        memcpy(skb_put(bt_dev->tx_pkt, 1 + t->hdr), bt_dev->tx_hdr, 1 + t->hdr);
+        bt_dev->tx_hdr_have = 0;
+        bt_dev->tx_pkt_owed = plen;
+        if (plen == 0) {
+            bt_tx_queue(bt_dev, bt_dev->tx_pkt);
+            bt_dev->tx_pkt = NULL;
+            queued++;
+        }
+    }
+    return queued;
+}
+
+/*
+ * The stack writes H4 packets, but not necessarily one per write(): the
+ * HIDL HAL writes the type byte and the body apart (one writev() of two
+ * iovecs, which reaches this legacy ->write twice). Each piece used to go
+ * to the line discipline as an skb of its own, and with FM attached the
+ * line discipline waits for a command's response before the next one --
+ * after the lone type byte, for up to 5 s, and the body, tagged by its
+ * first byte (0x03 for HCI Reset's), went on as SCO, past the check that
+ * keeps a Reset from the chip while FM is up. Packets are put together
+ * here and only whole ones queued.
+ */
 static ssize_t brcm_bt_write(struct file *f, const char __user *buf,
   size_t len, loff_t *off)
 {
-    int ret=0;
-    struct sk_buff *skb;
-    struct brcm_bt_dev *bt_dev;
-    unsigned long flags;
+    struct brcm_bt_dev *bt_dev = f->private_data;
+    unsigned char *data;
+    int queued;
 
-    bt_dev = f->private_data;
-    spin_lock_irqsave(&bt_dev->tx_q_lock, flags);
+    if (buf == NULL || len == 0)
+        return buf == NULL ? -EFAULT : 0;
 
-    if (buf != NULL)
-    {
-        if(!(skb = alloc_skb(len, GFP_ATOMIC)))
-        {
-            BT_DRV_ERR("Error in allocating memory for skb\n");
-            ret=-EFAULT;
-            goto nomem;
-        }
-
-        if(copy_from_user(skb_put(skb, len), buf, len))
-        {
-            BT_DRV_ERR("Error:Could not copy all data bytes from user space\n");
-            ret=-EFAULT;
-            goto nomem;
-        }
-
-    }
-    else {
-        BT_DRV_ERR("Error: Buffer from user space is NULL\n");
-        ret=-EFAULT;
-        goto nomem;
+    /* Copied before any lock: copy_from_user may sleep */
+    data = kmalloc(len, GFP_KERNEL);
+    if (data == NULL)
+        return -ENOMEM;
+    if (copy_from_user(data, buf, len)) {
+        kfree(data);
+        return -EFAULT;
     }
 
-    /* Name the frame the stack is sending: H4 type byte, then the HCI opcode
-     * for commands (little-endian, right after the type). Without this, a
-     * timeout reported by bluedroid cannot be tied to a command that actually
-     * reached the driver. */
-    BT_DRV_DBG(V4L2_DBG_TX, "from stack: type=0x%02x opcode=0x%04x len=%zu",
-        skb->data[0], (len >= 3) ? (skb->data[1] | (skb->data[2] << 8)) : 0,
-        len);
+    mutex_lock(&bt_dev->tx_asm_lock);
+    queued = bt_tx_assemble(bt_dev, data, len);
+    mutex_unlock(&bt_dev->tx_asm_lock);
+    kfree(data);
 
-    /* writing to tx queue should be atomic */
-    skb_queue_tail(&bt_dev->tx_q, skb);
-    spin_unlock_irqrestore(&bt_dev->tx_q_lock, flags);
-
-    atomic_inc(&bt_dev->tx_cnt);
-
+    if (queued < 0)
+        return queued;
+    if (queued > 0) {
 #ifdef TASKLET_SUPPORT
-    tasklet_schedule(&bt_dev->tx_task);
+        tasklet_schedule(&bt_dev->tx_task);
 #else
-    queue_work(bt_dev->tx_wq,&bt_dev->tx_workqueue);
+        queue_work(bt_dev->tx_wq, &bt_dev->tx_workqueue);
 #endif
+    }
 
-    BT_DRV_DBG(V4L2_DBG_TX, "End len=%d", len);
+    BT_DRV_DBG(V4L2_DBG_TX, "End len=%zu packets=%d", len, queued);
     return len;
-
-nomem:
-     spin_unlock_irqrestore(&bt_dev->tx_q_lock, flags);
-     BT_DRV_DBG(V4L2_DBG_TX, "End ret=%d", ret);
-     return ret;
 }
 
 
@@ -501,17 +616,9 @@ static void bt_send_data_ldisc(struct work_struct *w)
     BT_DRV_DBG(V4L2_DBG_TX, "sending data to ldisc");
 
     /* Drain the queue, do not send a single packet per run. queue_work() on an
-     * already-pending work item is a no-op, so two writes arriving back to back
-     * schedule this handler once -- and one skb was left behind until the next
-     * write happened to schedule it again.
-     *
-     * That is exactly what Android 8's HIDL HAL does: it writes the H4 type
-     * byte and the packet body as two separate write() calls. Every command
-     * body therefore sat in the queue until the stack sent the next command,
-     * so each command reached the chip roughly two seconds late and bluedroid
-     * gave up on it first ("Waited 2006 ms for a response to opcode 0xc03").
-     * Bluedroid on Android 7 wrote whole packets in one call, one skb per
-     * schedule, which is why this never showed before. */
+     * already-pending work item is a no-op, so two packets queued back to back
+     * schedule this handler once, and one would be left behind until the next
+     * write happened to schedule it again. */
     while (atomic_read(&bt_dev_p->tx_cnt))
     {
         spin_lock_irqsave(&bt_dev_p->tx_q_lock, flags);
@@ -525,22 +632,8 @@ static void bt_send_data_ldisc(struct work_struct *w)
             break;
         }
 
-        /* Only a fragment that starts a packet carries the H4 type byte. The
-         * HIDL HAL writes that byte on its own, so tagging every skb with its
-         * first byte labelled each command body with whatever its first byte
-         * happened to be -- 0x05 for "05 10 00" -- which matches no protocol
-         * in the line discipline and made it index its proto list one past the
-         * end. Remember the type across fragments instead.
-         *
-         * A body whose first byte is itself 0x01/0x02/0x03 is misread as a
-         * packet start, but all three map to the same protocol, so the
-         * routing this tag drives is unaffected. */
+        /* A whole packet: its first byte is its H4 type */
         pkt_type = skb->data[0];
-        if (pkt_type == HCI_COMMAND_PKT || pkt_type == HCI_ACLDATA_PKT ||
-            pkt_type == HCI_SCODATA_PKT)
-            bt_dev_p->last_pkt_type = pkt_type;
-        else
-            pkt_type = bt_dev_p->last_pkt_type;
 
         /* st_write takes ownership of the skb, so this must be set, and
          * anything needed for logging read, before handing it over. */
@@ -699,6 +792,7 @@ static int __init brcm_bt_drv_init(void) /* Constructor */
     }
 
     memset(bt_dev_p, 0, sizeof(struct brcm_bt_dev));
+    mutex_init(&bt_dev_p->tx_asm_lock);
 
     if ((bt_dev_p->cl \
            = (struct class *)class_create(THIS_MODULE, "brcm_bt_drv")) == NULL)

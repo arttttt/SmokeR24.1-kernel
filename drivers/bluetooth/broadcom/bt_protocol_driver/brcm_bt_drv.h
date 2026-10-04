@@ -90,10 +90,16 @@ struct brcm_bt_dev {
     unsigned long last_tx_jiffies;       /* Timestamp of last pkt sent */
     atomic_t tx_cnt;                     /* Number of packets in tx queue */
 
-    /* H4 type of the packet currently being written. Userspace may split one
-     * packet across several write() calls, and only the first fragment carries
-     * the type byte; the rest are tagged with this. */
-    unsigned char last_pkt_type;
+    /* The H4 packet being put together from write() calls: userspace may
+     * split one packet across several (the HIDL HAL writes the type byte
+     * and the body apart), and only whole packets go to the line
+     * discipline. Its header until complete, then the packet, with what is
+     * still owed. Under tx_asm_lock. */
+    struct mutex tx_asm_lock;
+    unsigned char tx_hdr[5];
+    unsigned int tx_hdr_have;
+    struct sk_buff *tx_pkt;
+    unsigned int tx_pkt_owed;
 
     /* queue for polling table */
     wait_queue_head_t inq;
