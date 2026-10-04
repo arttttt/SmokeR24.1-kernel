@@ -1098,7 +1098,8 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
         block_index = (type >> 4);
         if (block_index < V4L2_RDS_BLOCK_A|| block_index >= V4L2_RDS_BLOCK_C_ALT)
         {
-            V4L2_FM_DRV_ERR("(rds) Block sequence mismatch\n");
+            /* a block type outside A..C', as noise gives: not an error */
+            V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(rds) Block sequence mismatch");
             block_index = V4L2_RDS_BLOCK_INVALID;
         }
 
@@ -1162,7 +1163,8 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
             (rds_data + FM_RDS_TUPLE_LENGTH)[FM_RDS_TUPLE_BYTE2] == FM_RDS_END_TUPLE_2ND_BYTE &&
             (rds_data + FM_RDS_TUPLE_LENGTH)[FM_RDS_TUPLE_BYTE3] == FM_RDS_END_TUPLE_3RD_BYTE )
         {
-            pr_err("(fmdrv) End of RDS tuple reached @ %d index", index);
+            /* the normal end of what the chip had, on every read */
+            V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) End of RDS tuple reached @ %d index", index);
             break;
         }
         response_len -= FM_RDS_TUPLE_LENGTH;
