@@ -1205,10 +1205,14 @@ static struct snd_soc_pcm_stream tegra_rt5671_spk_params = {
 
 };
 
+/* BCM4354 drives the SCO clocks, at 16 kHz for an mSBC link and 8 kHz for
+ * CVSD, and AIF3 as their slave follows either through its ASRC: the rate
+ * here sets only dividers a slave does not use. It states the wideband
+ * case, the one aimed for. */
 static const struct snd_soc_pcm_stream tegra_rt5671_bt_params = {
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rate_min = 8000,
-	.rate_max = 8000,
+	.rate_min = 16000,
+	.rate_max = 16000,
 	.channels_min = 1,
 	.channels_max = 1,
 
@@ -1267,7 +1271,7 @@ static struct snd_soc_dai_link tegra_rt5671_dai[NUM_DAI_LINKS] = {
 		.cpu_name = "spdif-dit.1",
 		.codec_dai_name = "rt5671-aif3",
 		.dai_fmt = SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_IB_NF |
-				SND_SOC_DAIFMT_CBM_CFM,
+				SND_SOC_DAIFMT_CBS_CFS,
 		.params = &tegra_rt5671_bt_params,
 		.ignore_pmdown_time = 1,
 	},
