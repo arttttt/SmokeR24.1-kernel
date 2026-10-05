@@ -246,6 +246,9 @@ static void brcm_bt_drv_prepare(struct brcm_bt_dev* bt_dev)
 
     atomic_set(&bt_dev->tx_cnt, 0);
 
+    /* The chip may have been reset since: set the PCM port up anew */
+    bt_dev->sco_coding = BT_SCO_UNSET;
+
     /* A fresh open starts a fresh packet stream */
     mutex_lock(&bt_dev->tx_asm_lock);
     bt_tx_asm_reset(bt_dev);
@@ -589,6 +592,181 @@ static unsigned int brcm_bt_drv_poll(struct file *filp,
 
 
 
+/*
+ * SCO audio leaves the chip over its PCM port to the codec, and whether the
+ * chip itself runs the mSBC codec has to match each link. libbt sets that
+ * before a link comes up (hw_set_audio_state), but the HIDL HAL never asks
+ * it to, with the firmware loaded by the line discipline. So it is set
+ * here, from the link setup the stack sends, just before it goes out,
+ * along with the PCM port's format.
+ *
+ * Not 0xFC6D, which libbt sends as well: its first field switches the I2S
+ * interface, and the I2S pins are FM's. On, SCO goes out there instead of
+ * the PCM port; off, FM's audio stops. The PCM port follows the link's
+ * rate without it, 16 kHz for mSBC.
+ *
+ * mSBC run by the chip takes the legacy setup with a transparent air
+ * coding, as libbt's Broadcom WBS always had it: given mSBC as the coding
+ * of an Enhanced Setup, the firmware turns the link down (Invalid HCI
+ * Command Parameters). The stack falls back to the legacy commands when the
+ * controller does not list the enhanced ones, so they are struck from the
+ * list it reads.
+ */
+#define BT_VSC_SCO_PCM_PARAM     0xFC1C  /* routing, clock, frame, sync, clock master */
+#define BT_VSC_ENABLE_WBS        0xFC7E  /* enable, codec (LE16) */
+#define BT_VSC_TIMEOUT           msecs_to_jiffies(2000)
+
+/* Send a vendor command and wait for its Command Complete, which
+ * brcm_bt_st_receive() keeps from the stack. Returns its status, or a
+ * negative error. */
+static int bt_vsc_send(struct brcm_bt_dev *bt_dev, u16 opcode,
+                       const u8 *param, u8 plen)
+{
+    struct sk_buff *skb;
+    unsigned long flags;
+    int status;
+
+    skb = alloc_skb(4 + plen, GFP_KERNEL);
+    if (skb == NULL)
+        return -ENOMEM;
+    *(u8 *)skb_put(skb, 1) = HCI_COMMAND_PKT;
+    *(u8 *)skb_put(skb, 1) = opcode & 0xff;
+    *(u8 *)skb_put(skb, 1) = opcode >> 8;
+    *(u8 *)skb_put(skb, 1) = plen;
+    memcpy(skb_put(skb, plen), param, plen);
+    sh_ldisc_cb(skb)->pkt_type = HCI_COMMAND_PKT;
+
+    spin_lock_irqsave(&bt_dev->vsc_lock, flags);
+    init_completion(&bt_dev->vsc_done);
+    bt_dev->vsc_status = -ETIMEDOUT;
+    bt_dev->vsc_opcode = opcode;
+    spin_unlock_irqrestore(&bt_dev->vsc_lock, flags);
+
+    if (bt_dev->st_write == NULL || bt_dev->st_write(skb) < 0) {
+        kfree_skb(skb);
+        status = -EIO;
+    } else {
+        wait_for_completion_timeout(&bt_dev->vsc_done, BT_VSC_TIMEOUT);
+        status = 0;
+    }
+
+    spin_lock_irqsave(&bt_dev->vsc_lock, flags);
+    if (status == 0)
+        status = bt_dev->vsc_status;
+    bt_dev->vsc_opcode = 0;
+    spin_unlock_irqrestore(&bt_dev->vsc_lock, flags);
+    return status;
+}
+
+/*
+ * A Command Complete on its way to the stack: true when it answers
+ * bt_vsc_send()'s command, and is taken. Read Local Supported Commands'
+ * goes on without the enhanced synchronous connection commands.
+ */
+static bool bt_cmd_complete_filter(struct brcm_bt_dev *bt_dev,
+                                   struct sk_buff *skb)
+{
+    unsigned long flags;
+    bool taken = false;
+    u16 opcode;
+
+    /* type, event, plen, credits, opcode (LE16), status */
+    if (skb->len < 7 || skb->data[0] != HCI_EVENT_PKT ||
+        skb->data[1] != HCI_EV_CMD_COMPLETE)
+        return false;
+    opcode = skb->data[4] | skb->data[5] << 8;
+
+    /* the 64-byte command mask after the status; octet 29 holds Enhanced
+     * Setup (bit 3) and Enhanced Accept (bit 4) Synchronous Connection */
+    if (opcode == 0x1002 && skb->data[6] == 0 && skb->len >= 7 + 64) {
+        skb->data[7 + 29] &= ~(0x08 | 0x10);
+        return false;
+    }
+
+    spin_lock_irqsave(&bt_dev->vsc_lock, flags);
+    if (bt_dev->vsc_opcode != 0 && opcode == bt_dev->vsc_opcode) {
+        bt_dev->vsc_status = skb->data[6];
+        complete(&bt_dev->vsc_done);
+        taken = true;
+    }
+    spin_unlock_irqrestore(&bt_dev->vsc_lock, flags);
+    return taken;
+}
+
+/*
+ * Ahead of the stack's command in skb: if it sets up a SCO/eSCO link, the
+ * PCM port set up for the link's air coding -- transparent for mSBC, run by
+ * the chip with 16 kHz on the port, or CVSD with 8 kHz.
+ */
+static void bt_sco_prepare(struct brcm_bt_dev *bt_dev, const struct sk_buff *skb)
+{
+    unsigned int off;
+    u16 opcode, voice;
+    u8 coding, wbs[3], pcm[5];
+    int err;
+
+    if (skb->len < 4)
+        return;
+    opcode = skb->data[1] | skb->data[2] << 8;
+
+    /* the voice setting, after the type byte and command header */
+    switch (opcode) {
+    case 0x0c03:            /* HCI Reset: the port back to its default */
+        bt_dev->sco_coding = BT_SCO_UNSET;
+        return;
+    case 0x0428:            /* Setup: handle, tx and rx bandwidth, latency */
+        off = 4 + 2 + 4 + 4 + 2;
+        break;
+    case 0x0429:            /* Accept: bdaddr, tx and rx bandwidth, latency */
+        off = 4 + 6 + 4 + 4 + 2;
+        break;
+    default:
+        return;
+    }
+    if (skb->len < off + 2)
+        return;
+    voice = skb->data[off] | skb->data[off + 1] << 8;
+
+    switch (voice & 0x3) {  /* the air coding format */
+    case 0x0:
+        coding = BT_SCO_CVSD;
+        break;
+    case 0x3:
+        coding = BT_SCO_MSBC;
+        break;
+    default:                /* u-law, A-law: the port left as it is */
+        return;
+    }
+    if (coding == bt_dev->sco_coding)
+        return;
+
+    /* as libbt's hw_set_SCO_codec(), and its PCM port parameters with
+     * the chip driving the clocks */
+    wbs[0] = coding == BT_SCO_MSBC;
+    wbs[1] = coding == BT_SCO_MSBC ? 0x02 : 0;      /* mSBC, LE16 */
+    wbs[2] = 0;
+    pcm[0] = 0;                                     /* routed to PCM */
+    pcm[1] = 4;                                     /* 2048 kHz */
+    pcm[2] = 0;                                     /* short frame sync */
+    pcm[3] = 1;                                     /* sync master */
+    pcm[4] = 1;                                     /* clock master */
+
+    err = bt_vsc_send(bt_dev, BT_VSC_ENABLE_WBS, wbs, sizeof(wbs));
+    if (err == 0)
+        err = bt_vsc_send(bt_dev, BT_VSC_SCO_PCM_PARAM, pcm, sizeof(pcm));
+    if (err != 0) {
+        BT_DRV_ERR("PCM port not set up for %s: %d",
+            coding == BT_SCO_MSBC ? "mSBC" : "CVSD", err);
+        bt_dev->sco_coding = BT_SCO_UNSET;
+        return;
+    }
+    bt_dev->sco_coding = coding;
+    pr_info("(btdrv): PCM port set up for %s\n",
+        coding == BT_SCO_MSBC ? "mSBC" : "CVSD");
+}
+
+
+
 /*****************************************************************************
 **
 ** Function - __send_tasklet
@@ -634,6 +812,9 @@ static void bt_send_data_ldisc(struct work_struct *w)
 
         /* A whole packet: its first byte is its H4 type */
         pkt_type = skb->data[0];
+
+        if (pkt_type == HCI_COMMAND_PKT)
+            bt_sco_prepare(bt_dev_p, skb);
 
         /* st_write takes ownership of the skb, so this must be set, and
          * anything needed for logging read, before handing it over. */
@@ -741,6 +922,12 @@ static long brcm_bt_st_receive(void *priv_data, struct sk_buff *skb)
         return err;
     }
 
+    /* The answer to this driver's own command is not the stack's */
+    if (bt_cmd_complete_filter(brcm_bt_dev_p, skb)) {
+        kfree_skb(skb);
+        return 0;
+    }
+
     /* Dump the frame before queueing it: the wake-up below lets a reader
      * consume and free this skb, so it must not be dereferenced afterwards. */
     BT_DRV_DBG(V4L2_DBG_RX, "from ldisc: len=%d head=%*ph", skb->len,
@@ -793,6 +980,8 @@ static int __init brcm_bt_drv_init(void) /* Constructor */
 
     memset(bt_dev_p, 0, sizeof(struct brcm_bt_dev));
     mutex_init(&bt_dev_p->tx_asm_lock);
+    spin_lock_init(&bt_dev_p->vsc_lock);
+    init_completion(&bt_dev_p->vsc_done);
 
     if ((bt_dev_p->cl \
            = (struct class *)class_create(THIS_MODULE, "brcm_bt_drv")) == NULL)

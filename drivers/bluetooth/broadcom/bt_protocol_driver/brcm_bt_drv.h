@@ -54,6 +54,11 @@
 
 #define BRCM_BT_DEV_MAJOR 0
 
+/* brcm_bt_dev.sco_coding */
+#define BT_SCO_UNSET       0
+#define BT_SCO_CVSD        1
+#define BT_SCO_MSBC        2
+
 struct brcm_bt_dev {
     /*register device to linux system*/
     struct cdev c_dev;
@@ -100,6 +105,17 @@ struct brcm_bt_dev {
     unsigned int tx_hdr_have;
     struct sk_buff *tx_pkt;
     unsigned int tx_pkt_owed;
+
+    /* A vendor command of this driver's own awaiting its Command Complete,
+     * which is not passed on to the stack: the opcode, 0 when none, and
+     * the status it came back with. Under vsc_lock. */
+    spinlock_t vsc_lock;
+    u16 vsc_opcode;
+    int vsc_status;
+    struct completion vsc_done;
+    /* What the chip's PCM port is set up for, BT_SCO_*: unset since open
+     * or HCI Reset, or a link's CVSD or mSBC. */
+    unsigned char sco_coding;
 
     /* queue for polling table */
     wait_queue_head_t inq;
