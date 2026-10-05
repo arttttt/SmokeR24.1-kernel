@@ -397,6 +397,8 @@
 			nxt,fw-config = "tfa9890.config";
 			nxt,fw-preset = "tfa9890_left_music.preset";
 			nxt,fw-eq = "tfa9890_left_music.eq";
+			nxt,fw-voice-preset = "tfa9890_left_voice.preset";
+			nxt,fw-voice-eq = "tfa9890_left_voice.eq";
 		};
 
 		tfa9890@37 {
@@ -409,6 +411,8 @@
 			nxt,fw-config = "tfa9890.config";
 			nxt,fw-preset = "tfa9890_right_music.preset";
 			nxt,fw-eq = "tfa9890_right_music.eq";
+			nxt,fw-voice-preset = "tfa9890_right_voice.preset";
+			nxt,fw-voice-eq = "tfa9890_right_voice.eq";
 		};
 
 	};

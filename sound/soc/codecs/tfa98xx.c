@@ -80,6 +80,12 @@
 #define TFA98XX_FW_EQUALIZER	5
 #define TFA98XX_FW_NUMBER		6
 
+/* Profiles: the preset and equalizer files the DSP plays with */
+#define TFA98XX_PROFILE_MUSIC		0
+#define TFA98XX_PROFILE_VOICE		1
+#define TFA98XX_PROFILE_NUMBER		2
+#define TFA98XX_PROFILE_NAME_LEN	64
+
 /* A failed download is retried after 10 ms, doubling up to 1.28 s, and
  * given up after this many attempts until the next stream start. */
 #define TFA98XX_DOWNLOAD_RETRIES	8
@@ -107,6 +113,12 @@ struct tfa98xx_priv {
 	struct mutex amp_lock;
 	bool amp_wanted;
 	bool dsp_ready;
+
+	/* The profile in use, and each profile's preset and equalizer
+	 * files, from the device tree; a profile without them is empty */
+	unsigned int profile;
+	char profile_preset[TFA98XX_PROFILE_NUMBER][TFA98XX_PROFILE_NAME_LEN];
+	char profile_eq[TFA98XX_PROFILE_NUMBER][TFA98XX_PROFILE_NAME_LEN];
 };
 
 /*
@@ -1209,6 +1221,53 @@ static int tfa98xx_recalib_put(struct snd_kcontrol *kcontrol,
 	return changed;
 }
 
+static int tfa98xx_profile_get(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
+
+	ucontrol->value.enumerated.item[0] = tfa98xx->profile;
+	return 0;
+}
+
+/*
+ * A profile is its preset and equalizer files, swapped into the DSP by
+ * the download, which mutes the amplifier while the DSP takes them and
+ * unmutes it once it has: at once while the amplifier is clocked, at its
+ * next power up otherwise.
+ */
+static int tfa98xx_profile_put(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct tfa98xx_priv *tfa98xx = snd_soc_codec_get_drvdata(codec);
+	unsigned int profile = ucontrol->value.enumerated.item[0];
+	int ret;
+
+	if (profile >= TFA98XX_PROFILE_NUMBER)
+		return -EINVAL;
+	if (profile == tfa98xx->profile)
+		return 0;
+	if (!tfa98xx->profile_preset[profile][0] ||
+	    !tfa98xx->profile_eq[profile][0]) {
+		dev_err(codec->dev, "Profile %u has no files\n", profile);
+		return -EINVAL;
+	}
+
+	ret = tfa98xx_firmware_put(tfa98xx, TFA98XX_FW_PRESET,
+				   tfa98xx->profile_preset[profile]);
+	if (ret < 0)
+		return ret;
+	ret = tfa98xx_firmware_put(tfa98xx, TFA98XX_FW_EQUALIZER,
+				   tfa98xx->profile_eq[profile]);
+	if (ret < 0)
+		return ret;
+
+	tfa98xx->profile = profile;
+	return 1;
+}
+
 static int tfa98xx_firmware_put(struct tfa98xx_priv *tfa98xx, unsigned long id, const char *name)
 {
 	struct snd_soc_codec *codec;
@@ -1225,6 +1284,8 @@ static int tfa98xx_firmware_put(struct tfa98xx_priv *tfa98xx, unsigned long id, 
 	}
 
 	mutex_lock(&tfa98xx->fw_lock);
+	if (name != tfa98xx->fw_name[id])
+		strlcpy(tfa98xx->fw_name[id], name, sizeof(tfa98xx->fw_name[id]));
 	if (tfa98xx->fw[id] == NULL || /* no firmware yet */
 	    tfa98xx->fw[id]->size != fw->size || /* or change */
 	    memcmp(tfa98xx->fw[id]->data, fw->data, fw->size)) {
@@ -1281,6 +1342,12 @@ static const char * const tfa98xx_bsst_text[] = {
 };
 static const SOC_ENUM_SINGLE_EXT_DECL(
 	tfa98xx_bsst_enum, tfa98xx_bsst_text);
+
+static const char * const tfa98xx_profile_text[] = {
+	"Music", "Voice",
+};
+static const SOC_ENUM_SINGLE_EXT_DECL(
+	tfa98xx_profile_enum, tfa98xx_profile_text);
 
 static const DECLARE_TLV_DB_SCALE(
 	tfa98xx_vol_tlv, -12750, 50, 0);
@@ -1365,6 +1432,8 @@ static const struct snd_kcontrol_new tfa98xx_controls[] = {
 	SOC_ENUM("Output Channel Mux", tfa98xx_dos_enum),
 	SOC_SINGLE_BOOL_EXT("Recalibrate", 0,
 		tfa98xx_recalib_get, tfa98xx_recalib_put),
+	SOC_ENUM_EXT("Profile", tfa98xx_profile_enum,
+		tfa98xx_profile_get, tfa98xx_profile_put),
 };
 
 /*
@@ -1681,6 +1750,18 @@ static int tfa98xx_parse_dt(struct device *dev, struct tfa98xx_priv *tfa98xx,
 			sizeof(tfa98xx->fw_name[TFA98XX_FW_EQUALIZER]));
 	else
 		dev_warn(dev, "Failed to read fw-eq\n");
+
+	/* The default profile, music, is the preset and equalizer above */
+	strlcpy(tfa98xx->profile_preset[TFA98XX_PROFILE_MUSIC],
+		tfa98xx->fw_name[TFA98XX_FW_PRESET], TFA98XX_PROFILE_NAME_LEN);
+	strlcpy(tfa98xx->profile_eq[TFA98XX_PROFILE_MUSIC],
+		tfa98xx->fw_name[TFA98XX_FW_EQUALIZER], TFA98XX_PROFILE_NAME_LEN);
+	if (!of_property_read_string(np, "nxt,fw-voice-preset", &pstr))
+		strlcpy(tfa98xx->profile_preset[TFA98XX_PROFILE_VOICE], pstr,
+			TFA98XX_PROFILE_NAME_LEN);
+	if (!of_property_read_string(np, "nxt,fw-voice-eq", &pstr))
+		strlcpy(tfa98xx->profile_eq[TFA98XX_PROFILE_VOICE], pstr,
+			TFA98XX_PROFILE_NAME_LEN);
 
 	return 0;
 }
