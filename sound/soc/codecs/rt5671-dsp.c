@@ -1064,7 +1064,7 @@ static int rt5671_dsp_done(struct snd_soc_codec *codec)
 }
 
 /**
- * rt5671_dsp_write - Write DSP register.
+ * __rt5671_dsp_write - Write DSP register, unlocked.
  * @codec: SoC audio codec device.
  * @param: DSP parameters.
   *
@@ -1074,7 +1074,7 @@ static int rt5671_dsp_done(struct snd_soc_codec *codec)
  *
  * Returns 0 for success or negative error code.
  */
-int rt5671_dsp_write(struct snd_soc_codec *codec,
+static int __rt5671_dsp_write(struct snd_soc_codec *codec,
 		unsigned int addr, unsigned int data)
 {
 	unsigned int dsp_val;
@@ -1111,7 +1111,7 @@ err:
 }
 
 /**
- * rt5671_dsp_read - Read DSP register.
+ * __rt5671_dsp_read - Read DSP register, unlocked.
  * @codec: SoC audio codec device.
  * @reg: DSP register index.
  *
@@ -1121,7 +1121,7 @@ err:
  *
  * Returns DSP register value or negative error code.
  */
-unsigned int rt5671_dsp_read(
+static unsigned int __rt5671_dsp_read(
 	struct snd_soc_codec *codec, unsigned int reg)
 {
 	unsigned int value;
@@ -1205,6 +1205,34 @@ unsigned int rt5671_dsp_read(
 	return value;
 
 err:
+	return ret;
+}
+
+/*
+ * A DSP access is an address, data and command written in turn to
+ * DSP_CTRL2, DSP_CTRL3 and DSP_CTRL1: one at a time, or a register dump
+ * read through sysfs could slip between the writes of a mode loading.
+ */
+int rt5671_dsp_write(struct snd_soc_codec *codec,
+		unsigned int addr, unsigned int data)
+{
+	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
+	int ret;
+
+	mutex_lock(&rt5671->dsp_lock);
+	ret = __rt5671_dsp_write(codec, addr, data);
+	mutex_unlock(&rt5671->dsp_lock);
+	return ret;
+}
+
+unsigned int rt5671_dsp_read(struct snd_soc_codec *codec, unsigned int reg)
+{
+	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
+	unsigned int ret;
+
+	mutex_lock(&rt5671->dsp_lock);
+	ret = __rt5671_dsp_read(codec, reg);
+	mutex_unlock(&rt5671->dsp_lock);
 	return ret;
 }
 

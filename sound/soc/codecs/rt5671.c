@@ -47,7 +47,7 @@ module_param(hp_amp_time, int, 0644);
 #define VERSION "0.0.5 alsa 1.0.25"
 
 struct rt5671_init_reg {
-	u8 reg;
+	unsigned int reg;
 	u16 val;
 };
 
@@ -56,12 +56,9 @@ static struct rt5671_init_reg init_list[] = {
 	{ RT5671_IL_CMD1	, 0x0000 },
 	{ RT5671_IL_CMD2	, 0x0010 }, /* set Inline Command Window */
 	{ RT5671_IL_CMD3	, 0x0014 },
-	{ RT5671_PRIV_INDEX	, 0x0014 },
-	{ RT5671_PRIV_DATA	, 0x9a8a },
-	{ RT5671_PRIV_INDEX	, 0x003d },
-	{ RT5671_PRIV_DATA	, 0x3e40 },
-	{ RT5671_PRIV_INDEX	, 0x0038 },
-	{ RT5671_PRIV_DATA	, 0x1fe1 },
+	{ RT5671_PR_BASE + 0x14	, 0x9a8a },
+	{ RT5671_PR_BASE + 0x3d	, 0x3e40 },
+	{ RT5671_PR_BASE + 0x38	, 0x1fe1 },
 	{ RT5671_TDM_CTRL_3	, 0x0101 }, /* enable IF1_DAC2 */
 	{ RT5671_CHARGE_PUMP	, 0x0c00 },
 	/* for stereo SPK */
@@ -99,16 +96,14 @@ static int rt5671_reg_init(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int rt5671_index_sync(struct snd_soc_codec *codec)
+/* The private registers set at init, again: the cache does not hold them */
+static void rt5671_index_sync(struct snd_soc_codec *codec)
 {
 	int i;
 
 	for (i = 0; i < RT5671_INIT_REG_LEN; i++)
-		if (RT5671_PRIV_INDEX == init_list[i].reg ||
-			RT5671_PRIV_DATA == init_list[i].reg)
-			snd_soc_write(codec, init_list[i].reg,
-					init_list[i].val);
-	return 0;
+		if (init_list[i].reg >= RT5671_PR_BASE)
+			snd_soc_write(codec, init_list[i].reg, init_list[i].val);
 }
 
 static const u16 rt5671_reg[RT5671_VENDOR_ID2 + 1] = {
@@ -195,109 +190,47 @@ static int rt5671_reset(struct snd_soc_codec *codec)
 	return snd_soc_write(codec, RT5671_RESET, 0);
 }
 
-/**
- * rt5671_index_write - Write private register.
- * @codec: SoC audio codec device.
- * @reg: Private register index.
- * @value: Private register Data.
- *
- * Modify private register for advanced setting. It can be written through
- * private index (0x6a) and data (0x6c) register.
- *
- * Returns 0 for success or negative error code.
+/*
+ * The private registers, behind the index (0x6a) and data (0x6c)
+ * registers: regmap selects the index and moves the data as one access.
+ * They are volatile, as in mainline's rt5640/rt5670: some hold bits the
+ * codec clears itself (HP_DCC_INT1's calibration trigger), which a cache
+ * would keep and a sync write back.
  */
 static int rt5671_index_write(struct snd_soc_codec *codec,
 		unsigned int reg, unsigned int value)
 {
-	int ret;
-
-	ret = snd_soc_write(codec, RT5671_PRIV_INDEX, reg);
-	if (ret < 0) {
-		dev_err(codec->dev, "Failed to set private addr: %d\n", ret);
-		goto err;
-	}
-	ret = snd_soc_write(codec, RT5671_PRIV_DATA, value);
-	if (ret < 0) {
-		dev_err(codec->dev, "Failed to set private value: %d\n", ret);
-		goto err;
-	}
-	return 0;
-
-err:
-	return ret;
+	return snd_soc_write(codec, RT5671_PR_BASE + reg, value);
 }
 
-/**
- * rt5671_index_read - Read private register.
- * @codec: SoC audio codec device.
- * @reg: Private register index.
- *
- * Read advanced setting from private register. It can be read through
- * private index (0x6a) and data (0x6c) register.
- *
- * Returns private register value or negative error code.
- */
 static unsigned int rt5671_index_read(
 	struct snd_soc_codec *codec, unsigned int reg)
 {
-	int ret;
-
-	ret = snd_soc_write(codec, RT5671_PRIV_INDEX, reg);
-	if (ret < 0) {
-		dev_err(codec->dev, "Failed to set private addr: %d\n", ret);
-		return ret;
-	}
-	return snd_soc_read(codec, RT5671_PRIV_DATA);
+	return snd_soc_read(codec, RT5671_PR_BASE + reg);
 }
 
-/**
- * rt5671_index_update_bits - update private register bits
- * @codec: audio codec
- * @reg: Private register index.
- * @mask: register mask
- * @value: new value
- *
- * Writes new register value.
- *
- * Returns 1 for change, 0 for no change, or negative error code.
- */
 static int rt5671_index_update_bits(struct snd_soc_codec *codec,
 	unsigned int reg, unsigned int mask, unsigned int value)
 {
-	unsigned int old, new;
-	int change, ret;
-
-	ret = rt5671_index_read(codec, reg);
-	if (ret < 0) {
-		dev_err(codec->dev, "Failed to read private reg: %d\n", ret);
-		goto err;
-	}
-
-	old = ret;
-	new = (old & ~mask) | (value & mask);
-	change = old != new;
-	if (change) {
-		ret = rt5671_index_write(codec, reg, new);
-		if (ret < 0) {
-			dev_err(codec->dev,
-				"Failed to write private reg: %d\n", ret);
-			goto err;
-		}
-	}
-	return change;
-
-err:
-	return ret;
+	return snd_soc_update_bits(codec, RT5671_PR_BASE + reg, mask, value);
 }
 
-static int rt5671_volatile_register(
-	struct snd_soc_codec *codec, unsigned int reg)
+static bool rt5671_is_private(unsigned int reg)
 {
+	return reg >= RT5671_PR_BASE && reg <= RT5671_PR_BASE + RT5671_PR_MAX;
+}
+
+static bool rt5671_volatile_register(struct device *dev, unsigned int reg)
+{
+	if (rt5671_is_private(reg))
+		return true;
+
 	switch (reg) {
 	case RT5671_RESET:
 	case RT5671_PDM_DATA_CTRL1:
 	case RT5671_PDM1_DATA_CTRL4:
 	case RT5671_PDM2_DATA_CTRL4:
+	case RT5671_PRIV_INDEX:
 	case RT5671_PRIV_DATA:
 	case RT5671_CJ_CTRL1:
 	case RT5671_CJ_CTRL2:
@@ -327,9 +260,11 @@ static int rt5671_volatile_register(
 	}
 }
 
-static int rt5671_readable_register(
-	struct snd_soc_codec *codec, unsigned int reg)
+static bool rt5671_readable_register(struct device *dev, unsigned int reg)
 {
+	if (rt5671_is_private(reg))
+		return true;
+
 	switch (reg) {
 	case RT5671_RESET:
 	case RT5671_HP_VOL:
@@ -3880,7 +3815,7 @@ static ssize_t rt5671_codec_show(struct device *dev,
 		if (cnt + RT5671_REG_DISP_LEN >= PAGE_SIZE)
 			break;
 
-		if (rt5671_readable_register(codec, i)) {
+		if (rt5671_readable_register(codec->dev, i)) {
 			val = snd_soc_read(codec, i);
 
 			cnt += snprintf(buf + cnt, RT5671_REG_DISP_LEN,
@@ -3986,7 +3921,8 @@ static int rt5671_probe(struct snd_soc_codec *codec)
 
 	pr_info("Codec driver version %s\n", VERSION);
 
-	ret = snd_soc_codec_set_cache_io(codec, 8, 16, SND_SOC_I2C);
+	codec->control_data = rt5671->regmap;
+	ret = snd_soc_codec_set_cache_io(codec, 8, 16, SND_SOC_REGMAP);
 	if (ret != 0) {
 		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
 		return ret;
@@ -4168,9 +4104,11 @@ static int rt5671_suspend(struct snd_soc_codec *codec)
 
 static int rt5671_resume(struct snd_soc_codec *codec)
 {
-	codec->cache_only = false;
-	codec->cache_sync = 1;
-	snd_soc_cache_sync(codec);
+	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
+
+	/* every register back as the driver last set it */
+	regcache_mark_dirty(rt5671->regmap);
+	regcache_sync(rt5671->regmap);
 	rt5671_index_sync(codec);
 	rt5671_dsp_resume(codec);
 	rt5671_set_bias_level(codec, SND_SOC_BIAS_OFF);
@@ -4284,13 +4222,63 @@ static struct snd_soc_codec_driver soc_codec_dev_rt5671 = {
 	.resume = rt5671_resume,
 	.set_bias_level = rt5671_set_bias_level,
 	.idle_bias_off = true,
-	.reg_cache_size = RT5671_VENDOR_ID2 + 1,
-	.reg_word_size = sizeof(u16),
-	.reg_cache_default = rt5671_reg,
-	.volatile_register = rt5671_volatile_register,
-	.readable_register = rt5671_readable_register,
-	.reg_cache_step = 1,
 };
+
+static const struct regmap_range_cfg rt5671_ranges[] = {
+	{ .name = "private",
+	  .range_min = RT5671_PR_BASE,
+	  .range_max = RT5671_PR_BASE + RT5671_PR_MAX,
+	  .selector_reg = RT5671_PRIV_INDEX,
+	  .selector_mask = 0xff,
+	  .selector_shift = 0,
+	  .window_start = RT5671_PRIV_DATA,
+	  .window_len = 1, },
+};
+
+/*
+ * The defaults regmap starts its cache from and syncs against: every
+ * readable, non-volatile register of the codec's own with its value in
+ * rt5671_reg, zero where the table leaves it out, as the ASoC cache this
+ * replaced took them.
+ */
+static struct regmap_config rt5671_regmap = {
+	.reg_bits = 8,
+	.val_bits = 16,
+	.max_register = RT5671_PR_BASE + RT5671_PR_MAX,
+	.volatile_reg = rt5671_volatile_register,
+	.readable_reg = rt5671_readable_register,
+	.cache_type = REGCACHE_RBTREE,
+	.ranges = rt5671_ranges,
+	.num_ranges = ARRAY_SIZE(rt5671_ranges),
+};
+
+static int rt5671_regmap_init(struct i2c_client *i2c,
+			      struct rt5671_priv *rt5671)
+{
+	struct reg_default *defaults;
+	unsigned int reg, n = 0;
+
+	/* regcache keeps a copy of its own */
+	defaults = kzalloc((RT5671_VENDOR_ID2 + 1) * sizeof(*defaults),
+			   GFP_KERNEL);
+	if (!defaults)
+		return -ENOMEM;
+	for (reg = 0; reg <= RT5671_VENDOR_ID2; reg++) {
+		if (!rt5671_readable_register(&i2c->dev, reg) ||
+		    rt5671_volatile_register(&i2c->dev, reg))
+			continue;
+		defaults[n].reg = reg;
+		defaults[n].def = rt5671_reg[reg];
+		n++;
+	}
+	rt5671_regmap.reg_defaults = defaults;
+	rt5671_regmap.num_reg_defaults = n;
+
+	rt5671->regmap = devm_regmap_init_i2c(i2c, &rt5671_regmap);
+	kfree(defaults);
+	rt5671_regmap.reg_defaults = NULL;
+	return PTR_RET(rt5671->regmap);
+}
 
 static const struct i2c_device_id rt5671_i2c_id[] = {
 	{ "rt5671", 0 },
@@ -4334,6 +4322,14 @@ static int rt5671_i2c_probe(struct i2c_client *i2c,
 		return -ENOMEM;
 
 	i2c_set_clientdata(i2c, rt5671);
+	mutex_init(&rt5671->dsp_lock);
+
+	ret = rt5671_regmap_init(i2c, rt5671);
+	if (ret) {
+		dev_err(&i2c->dev, "Failed to init regmap: %d\n", ret);
+		kfree(rt5671);
+		return ret;
+	}
 
 	if (pdata)
 		rt5671->pdata = *pdata;

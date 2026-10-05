@@ -13,6 +13,8 @@
 #ifndef __RT5671_H__
 #define __RT5671_H__
 
+#include <linux/mutex.h>
+#include <linux/regmap.h>
 #include <sound/rt5670.h>
 
 /* Info */
@@ -87,6 +89,12 @@
 /* Private Register Control */
 #define RT5671_PRIV_INDEX			0x6a
 #define RT5671_PRIV_DATA			0x6c
+/*
+ * The private registers, behind PRIV_INDEX and PRIV_DATA, as regmap sees
+ * them: private register n at RT5671_PR_BASE + n, past the codec's own
+ */
+#define RT5671_PR_BASE				0x100
+#define RT5671_PR_MAX				0xff
 /* Format - ADC/DAC */
 #define RT5671_I2S4_SDP				0x6f
 #define RT5671_I2S1_SDP				0x70
@@ -2058,6 +2066,10 @@ struct rt5671_pll_code {
 
 struct rt5671_priv {
 	struct snd_soc_codec *codec;
+	struct regmap *regmap;
+	/* one DSP access at a time: each is an address, data and command
+	 * written in turn to DSP_CTRL2, DSP_CTRL3 and DSP_CTRL1 */
+	struct mutex dsp_lock;
 	struct rt5670_platform_data pdata;
 	struct snd_soc_jack hp_jack;
 	struct snd_soc_jack_gpio hp_gpio;
