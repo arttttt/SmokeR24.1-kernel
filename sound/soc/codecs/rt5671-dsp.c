@@ -1219,19 +1219,21 @@ static int rt5671_dsp_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int rt5671_dsp_snd_effect(struct snd_soc_codec *codec);
-
+/*
+ * The mode to load: the Voice DSP supply loads it as it comes up
+ * (rt5671_dsp_event), and a change takes effect from the next time.
+ * Loading it here too, whenever I2S DSP was powered, loaded every mode
+ * twice -- a path sets it before routing through the DSP, with I2S DSP
+ * already up for the route -- and a "Disable" set after the DSP went
+ * down loaded it all once more.
+ */
 static int rt5671_dsp_put(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct rt5671_priv *rt5671 = snd_soc_codec_get_drvdata(codec);
 
-	if (rt5671->dsp_sw != ucontrol->value.integer.value[0]) {
-		rt5671->dsp_sw = ucontrol->value.integer.value[0];
-		if (snd_soc_read(codec, RT5671_PWR_DIG2) & RT5671_PWR_I2S_DSP)
-			rt5671_dsp_snd_effect(codec);
-	}
+	rt5671->dsp_sw = ucontrol->value.integer.value[0];
 
 	return 0;
 }
