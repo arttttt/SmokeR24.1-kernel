@@ -31,6 +31,16 @@
 *******************************************************************************/
 
 int fm_rx_set_frequency(struct fmdrv_ops*, unsigned int);
+
+/* The bands the chip tunes: VIDIOC_ENUM_FREQ_BANDS lists them, and a tune
+ * or seek takes the one its frequencies are in */
+struct fm_rx_band {
+    unsigned int low;           /* 10 kHz */
+    unsigned int high;
+    bool east;
+};
+extern const struct fm_rx_band fm_rx_bands[];
+extern const int fm_rx_band_count;
 int fm_rx_set_seek_range(struct fmdrv_ops *, unsigned int, unsigned int);
 int fm_rx_set_mute_mode(struct fmdrv_ops*, unsigned char);
 int fm_rx_set_rds_system(struct fmdrv_ops *, unsigned char);

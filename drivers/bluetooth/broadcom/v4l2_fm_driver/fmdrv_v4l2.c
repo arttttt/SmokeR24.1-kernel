@@ -216,8 +216,8 @@ static ssize_t show_fmrx_deemphasis(struct device *dev,
 {
     struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
 
-    return sprintf(buf, "%d\n", (fmdev->rx.region.deemphasis==
-                FM_RX_EMPHASIS_FILTER_50_USEC) ? 50 : 75);
+    /* as set in the chip, by the region or the V4L2 control */
+    return sprintf(buf, "%d\n", (fmdev->rx.aud_ctrl & FM_DEEMPHA_75_ON) ? 75 : 50);
 }
 
 static ssize_t fmrx_deemphasis_locked(struct fmdrv_ops *fmdev,
@@ -900,15 +900,14 @@ static const struct v4l2_ctrl_ops fm_ctrl_ops = {
 #define FM_BAND_LOW_62_5HZ(f10khz)   ((f10khz) * 160)
 
 /*
- * One band: the receiver's current one, which tuning is limited to. Seeks
- * may narrow it per request (VIDIOC_S_HW_FREQ_SEEK rangelow/rangehigh).
+ * The chip's bands (fm_rx_bands): a tune or seek takes the one it needs.
+ * Seeks keep to the range they ask for (VIDIOC_S_HW_FREQ_SEEK rangelow/
+ * rangehigh): the region's band is userspace's.
  */
 static int fm_v4l2_vidioc_enum_freq_bands(struct file *file, void *priv,
                     struct v4l2_frequency_band *band)
 {
-    struct fmdrv_ops *fmdev = video_drvdata(file);
-
-    if (band->tuner != 0 || band->index != 0)
+    if (band->tuner != 0 || band->index >= fm_rx_band_count)
         return -EINVAL;
 
     memset(band->reserved, 0, sizeof(band->reserved));
@@ -918,11 +917,9 @@ static int fm_v4l2_vidioc_enum_freq_bands(struct file *file, void *priv,
                        V4L2_TUNER_CAP_HWSEEK_BOUNDED |
                        V4L2_TUNER_CAP_HWSEEK_WRAP |
                        V4L2_TUNER_CAP_HWSEEK_PROG_LIM;
-    /* the region's whole band, not what the last seek narrowed it to */
-    band->rangelow = FM_BAND_LOW_62_5HZ(
-                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].low_bound));
-    band->rangehigh = FM_BAND_LOW_62_5HZ(
-                FM_SET_FREQ(region_configs[fmdev->rx.curr_region].high_bound));
+    /* the chip's bands: the region is userspace's to choose */
+    band->rangelow = FM_BAND_LOW_62_5HZ(fm_rx_bands[band->index].low);
+    band->rangehigh = FM_BAND_LOW_62_5HZ(fm_rx_bands[band->index].high);
     band->modulation = V4L2_BAND_MODULATION_FM;
     return 0;
 }
@@ -973,9 +970,9 @@ static int fm_v4l2_vidioc_g_tuner(struct file *file, void *priv,
     fmdev = video_drvdata(file);
     strcpy(tuner->name, "FM");
     tuner->type = fmdev->device_info.type;
-    /* The tuner's whole range (62.5 Hz units), not a seek's narrowing */
-    low = FM_SET_FREQ(region_configs[fmdev->rx.curr_region].low_bound);
-    high = FM_SET_FREQ(region_configs[fmdev->rx.curr_region].high_bound);
+    /* The tuner's whole range (62.5 Hz units), all its bands */
+    low = fm_rx_bands[1].low;
+    high = fm_rx_bands[1].high;
     tuner->rangelow = FM_BAND_LOW_62_5HZ(low);
     tuner->rangehigh = FM_BAND_LOW_62_5HZ(high);
 

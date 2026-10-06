@@ -207,6 +207,8 @@ struct fm_rx {
     unsigned char rds_mode;         /* RDS operation mode (RDS/RDBS) */
     unsigned char curr_rssi;        /* Cached value of RSSI for the current frequency */
     unsigned char audio_mode;
+    /* the chip's band: east (from 76 MHz) or west (from 87.5) */
+    bool band_east;
     unsigned char audio_path;
     unsigned short aud_ctrl;
     unsigned char pcm_reg;

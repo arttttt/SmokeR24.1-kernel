@@ -438,10 +438,39 @@ const struct fm_af_ops fm_rx_af_ops = {
 * Function to validate if the tuned/scanned frequency is valid
 * or not
 */
+/*
+ * The chip tunes 87.5-108 MHz in its west band and from 76 MHz in its east
+ * one (FM_CTRL bit 0): stock bta_fm sets east for Japan's 76-90 and
+ * 90-108 alike. 65-76 (OIRT) the datasheet leaves to Broadcom: not offered.
+ * As radio-si470x does it, the bands are listed to userspace, and a tune or
+ * seek takes the band its frequencies need -- the region is the app's.
+ */
+const struct fm_rx_band fm_rx_bands[] = {
+    { 8750, 10800, false },
+    { 7600, 10800, true },
+};
+const int fm_rx_band_count = ARRAY_SIZE(fm_rx_bands);
+
+/* The band a frequency (10 kHz) needs: east below 87.5 MHz */
+static int fm_rx_select_band(struct fmdrv_ops *fmdev, unsigned int low)
+{
+    bool east = low < fm_rx_bands[0].low;
+    unsigned char mode = fmdev->rx.audio_mode;
+
+    if (east == fmdev->rx.band_east)
+        return 0;
+    fmdev->rx.band_east = east;
+    /* FM_CTRL holds the band with the stereo mode: written again, the
+     * mode as it is (set_audio_mode skips a mode already in place) */
+    fmdev->rx.audio_mode = 0xff;
+    return fm_rx_set_audio_mode(fmdev, mode);
+}
+
 int check_if_valid_freq(struct fmdrv_ops *fmdev, unsigned short frequency)
 {
-    if(frequency < fmdev->rx.region.low_bound ||
-            frequency > fmdev->rx.region.high_bound)
+    /* anywhere the chip tunes: the region's band is userspace's */
+    if (FM_SET_FREQ(frequency) < fm_rx_bands[1].low ||
+            FM_SET_FREQ(frequency) > fm_rx_bands[1].high)
     {
         V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv)%s %d - Literally out of range", \
             __func__, FM_SET_FREQ(frequency));
@@ -744,6 +773,10 @@ int fm_rx_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
         return -EINVAL;
     }
 
+    ret = fm_rx_select_band(fmdev, FM_SET_FREQ(tmp_frq));
+    if (ret < 0)
+        return ret;
+
     ret = init_start_search(fmdev, tmp_frq, FM_TUNER_PRESET_MODE);
     if(ret < 0)
     {
@@ -963,7 +996,6 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
 int fm_rx_set_seek_range(struct fmdrv_ops *fmdev,
                          unsigned int low_freq, unsigned int high_freq)
 {
-    const struct region_info *band = &fmdev->rx.region;
     unsigned short boundary[2];
     int ret;
 
@@ -972,9 +1004,13 @@ int fm_rx_set_seek_range(struct fmdrv_ops *fmdev,
 
     /* compared in 10 kHz units: FM_GET_FREQ() wraps below 64 MHz */
     if (low_freq >= high_freq ||
-        low_freq < FM_SET_FREQ(band->low_bound) ||
-        high_freq > FM_SET_FREQ(band->high_bound))
+        low_freq < fm_rx_bands[1].low || high_freq > fm_rx_bands[1].high)
         return -EINVAL;
+
+    /* the band the range starts in */
+    ret = fm_rx_select_band(fmdev, low_freq);
+    if (ret < 0)
+        return ret;
 
     if (fmdev->rx.seek_high == FM_GET_FREQ(high_freq) &&
         fmdev->rx.seek_low == FM_GET_FREQ(low_freq))
@@ -1120,7 +1156,8 @@ int fm_rx_set_region(struct fmdrv_ops *fmdev,
                     &fmdev->maintask_completion, NULL, NULL);
     }
 
-    if (region_to_set == FM_REGION_JP)/* set japan region */
+    fmdev->rx.band_east = region_to_set == FM_REGION_JP;
+    if (fmdev->rx.band_east)/* set japan region */
     {
         payload |= FM_BAND_REG_EAST;
     }
@@ -1288,9 +1325,8 @@ int fm_rx_set_audio_mode(struct fmdrv_ops *fmdev, unsigned char mode)
         default:
             break;
     }
-    /* set the region bit */
-    audio_ctrl |= (fmdev->rx.curr_region == FM_REGION_JP) ? \
-                                FM_BAND_REG_EAST : FM_BAND_REG_WEST;
+    /* the band bit */
+    audio_ctrl |= fmdev->rx.band_east ? FM_BAND_REG_EAST : FM_BAND_REG_WEST;
 
     /* Set stereo/mono mode */
     ret = fmc_send_cmd(fmdev, FM_REG_FM_CTRL, &audio_ctrl, sizeof(audio_ctrl),
