@@ -232,6 +232,13 @@ struct tegra_dc {
 	 * stored as the mode's own porch, never as zero. */
 	u32				act_vfp_shadow;
 	bool				act_vfp_shadow_dirty;
+	/* The porch last written to the active register: nought for the
+	 * mode's own, the line count otherwise. Written under dc->lock,
+	 * read without it from the vblank interrupt -- a single aligned
+	 * word, and the interrupt runs before the frame-end work that
+	 * writes, so each vblank reads the porch of the frame that ended
+	 * on it. */
+	u32				act_vfp_applied;
 	wait_queue_head_t		wq;
 	wait_queue_head_t		timestamp_wq;
 

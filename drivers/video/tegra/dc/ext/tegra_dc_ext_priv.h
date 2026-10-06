@@ -156,7 +156,7 @@ extern int tegra_dc_ext_control_init(void);
 extern int tegra_dc_ext_queue_hotplug(struct tegra_dc_ext_control *,
 				      int output, bool connected);
 extern int tegra_dc_ext_queue_vblank(struct tegra_dc_ext_control *,
-				      int output, ktime_t timestamp);
+				      int output, ktime_t timestamp, u32 porch);
 extern int tegra_dc_ext_queue_bandwidth_renegotiate(
 			struct tegra_dc_ext_control *, int output,
 			struct tegra_dc_bw_data *data);

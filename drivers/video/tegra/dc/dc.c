@@ -3746,6 +3746,11 @@ void tegra_dc_set_act_vfp(struct tegra_dc *dc, int vfp)
 			(vfp << 16), DC_DISP_FRONT_PORCH);
 	tegra_dc_writel(dc, WRITE_MUX_ASSEMBLY | READ_MUX_ASSEMBLY,
 			DC_CMD_STATE_ACCESS);
+
+	/* Every writer of the active porch comes through here, so this is
+	 * the one place the head learns what it now runs at. */
+	ACCESS_ONCE(dc->act_vfp_applied) =
+		(vfp == dc->mode.v_front_porch) ? 0 : vfp;
 }
 
 static void tegra_dc_vrr_extend_vfp(struct tegra_dc *dc)
@@ -4179,7 +4184,8 @@ static void tegra_dc_process_vblank(struct tegra_dc *dc, ktime_t timestamp)
 		tegra_adf_process_vblank(dc->adf, timestamp);
 #endif
 #ifdef CONFIG_TEGRA_DC_EXTENSIONS
-		tegra_dc_ext_process_vblank(dc->ndev->id, timestamp);
+		tegra_dc_ext_process_vblank(dc->ndev->id, timestamp,
+					    ACCESS_ONCE(dc->act_vfp_applied));
 #endif
 	}
 }

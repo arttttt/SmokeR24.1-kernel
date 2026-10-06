@@ -47,9 +47,9 @@ int tegra_dc_ext_process_hotplug(int output, bool connected)
 	return tegra_dc_ext_queue_hotplug(&g_control, output, connected);
 }
 
-int tegra_dc_ext_process_vblank(int output, ktime_t timestamp)
+int tegra_dc_ext_process_vblank(int output, ktime_t timestamp, u32 porch)
 {
-	return tegra_dc_ext_queue_vblank(&g_control, output, timestamp);
+	return tegra_dc_ext_queue_vblank(&g_control, output, timestamp, porch);
 }
 
 static int
