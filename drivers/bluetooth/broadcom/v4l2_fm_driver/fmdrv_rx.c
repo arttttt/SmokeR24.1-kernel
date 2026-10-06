@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <linux/delay.h>
 #include "fmdrv.h"
 #include "fmdrv_main.h"
 #include "fmdrv_rx.h"
@@ -73,12 +74,9 @@ const unsigned short fm_sch_step_size[] =
 **  Helper functions
 *******************************************************************************/
 
-/* Configures Alternate Frequency switch mode */
+/* Alternate Frequency switching on or off (fmdrv_af.c) */
 int fm_rx_set_af_switch(struct fmdrv_ops *fmdev, u8 af_mode)
 {
-    u16 payload;
-    int ret;
-
     if (fmdev->curr_fmmode != FM_MODE_RX)
         return -EPERM;
 
@@ -87,25 +85,11 @@ int fm_rx_set_af_switch(struct fmdrv_ops *fmdev, u8 af_mode)
         V4L2_FM_DRV_ERR("Invalid af mode\n");
         return -EINVAL;
     }
-    /* Enable/disable low RSSI interrupt based on af_mode */
-    if (af_mode == FM_RX_RDS_AF_SWITCH_MODE_ON)
-        fmdev->rx.fm_rds_mask |= I2C_MASK_RSSI_LOW_BIT;
-    else
-        fmdev->rx.fm_rds_mask &= ~I2C_MASK_RSSI_LOW_BIT;
-
-    payload = fmdev->rx.fm_rds_mask;
-
-    ret = fmc_send_cmd(fmdev, FM_REG_FM_RDS_MSK, &fmdev->rx.fm_rds_mask,
-                            2, REG_WR,&fmdev->maintask_completion, NULL, NULL);
-
-    if (ret < 0)
-        return ret;
 
     fmdev->rx.af_mode = af_mode;
-
+    fm_af_set_enabled(&fmdev->af, af_mode == FM_RX_RDS_AF_SWITCH_MODE_ON);
     return 0;
 }
-
 
 /*
  * Sets the signal strength level that once reached
@@ -153,6 +137,302 @@ int fm_rx_set_snr_threshold(struct fmdrv_ops *fmdev, short snr_lvl_toset)
 }
 
 
+
+int fm_rx_set_mask(struct fmdrv_ops *fmdev, unsigned short mask);
+int fm_rx_get_audio_ctrl(struct fmdrv_ops *fmdev, uint16_t *audio_ctrl);
+
+/*
+ * The frequency the chip is on, read again: VIDIOC_G_FREQUENCY answers
+ * from rx.curr_freq (the chip is not asked each time: reading 0x0a over
+ * and over starves RDS, task-313), so wherever a tune, seek or AF jump
+ * ends -- failed or timed out too -- it is read back, not left or zeroed.
+ * Tried twice; a failure leaves the last known value.
+ */
+static void fm_rx_resync_freq(struct fmdrv_ops *fmdev)
+{
+    if (fm_rx_read_curr_rssi_freq(fmdev, FALSE) < 0)
+        fm_rx_read_curr_rssi_freq(fmdev, FALSE);
+}
+
+/*
+ * The chip's side of RDS alternative frequency switching (fmdrv_af.c has
+ * the policy). The jump is Broadcom's own, as its stack does it (bta_fm in
+ * the stock bluetooth.default.so, task-307/309); the look at an AF's level
+ * before it is a plain tune there and back, as receivers with one tuner do
+ * it (Silicon Labs AN243).
+ *
+ *  jump_prepare  the station's PI to PI_MAC, matched in full (PI_MSK
+ *                0xffff); the RSSI the AF must reach to SCH_CTL0 (the
+ *                search threshold); the AF to AF_FREQ
+ *  pause_arm     the chip's audio pause detector (AUD_PAUS 3, as stock:
+ *                level code 3, the shortest pause, 20 ms), its interrupt
+ *                alone in the mask
+ *  jump_go       SCH_TUNE 3: the chip tunes, checks the PI and the signal,
+ *                and stays or goes back. A fail says why in AF_FAILURE
+ *                (0x10 RSSI low, 0x20 frequency offset, 0x30 PI mismatch)
+ *  probe         a tune to the AF (SCH_TUNE 1), the RSSI, a tune back
+ *  restore       PI_MSK 0 and the usual mask back
+ *
+ * The audio is muted while the tuner is away: unmuted, the chip fades it
+ * out and back in, half a second each way. Measured on mocha: a tune there
+ * and back 1.14 s unmuted, 0.11 s muted; a jump 0.64 s unmuted, 0.15 s
+ * muted. HCI commands answer in 1-2 ms. Called with fmdev->mutex held.
+ */
+#define FM_AF_JUMP_TIMEOUT_MS   2000    /* longest a jump may take */
+
+static bool fm_rx_af_trylock(void *ctx)
+{
+    return mutex_trylock(&((struct fmdrv_ops *)ctx)->mutex);
+}
+
+static void fm_rx_af_unlock(void *ctx)
+{
+    mutex_unlock(&((struct fmdrv_ops *)ctx)->mutex);
+}
+
+static bool fm_rx_af_receiving(void *ctx)
+{
+    struct fmdrv_ops *fmdev = ctx;
+
+    return test_bit(FM_CORE_READY, &fmdev->flag) &&
+           fmdev->curr_fmmode == FM_MODE_RX;
+}
+
+static int fm_rx_af_read_signal(void *ctx, u8 *rssi, u16 *freq)
+{
+    struct fmdrv_ops *fmdev = ctx;
+    int ret;
+
+    /* the frequency as last tuned or jumped to; only the RSSI is asked */
+    ret = fm_rx_read_curr_rssi_freq(fmdev, TRUE);
+    *rssi = fmdev->rx.curr_rssi;
+    *freq = fmdev->rx.curr_freq;
+    return ret;
+}
+
+/* The audio off, *aud keeping it as it was (a mute of the user's too) */
+static int fm_rx_af_mute(struct fmdrv_ops *fmdev, u16 *aud)
+{
+    u16 muted;
+    int ret;
+
+    ret = fm_rx_get_audio_ctrl(fmdev, aud);
+    if (ret < 0)
+        return ret;
+    muted = *aud | FM_MANUAL_MUTE;
+    return fmc_send_cmd(fmdev, FM_REG_AUD_CTL0, &muted, sizeof(muted),
+                        REG_WR, &fmdev->maintask_completion, NULL, NULL);
+}
+
+static void fm_rx_af_unmute(struct fmdrv_ops *fmdev, u16 aud)
+{
+    /* once more if it fails: a mute left on would be read back as the
+     * user's by the next look, and stay */
+    if (fmc_send_cmd(fmdev, FM_REG_AUD_CTL0, &aud, sizeof(aud), REG_WR,
+                     &fmdev->maintask_completion, NULL, NULL) < 0 &&
+        fmc_send_cmd(fmdev, FM_REG_AUD_CTL0, &aud, sizeof(aud), REG_WR,
+                     &fmdev->maintask_completion, NULL, NULL) < 0)
+        pr_err("fm_af: the audio could not be unmuted\n");
+}
+
+/*
+ * SCH_TUNE in mode, and its end waited for: 0, -EAGAIN as the chip failed
+ * it, or another error. Set up as a tune is (init_start_search): the flags
+ * read clean and the tune interrupts alone in the mask, interrupt handling
+ * frozen until the mask is written -- without, the tune's own interrupt
+ * never comes.
+ */
+static int fm_rx_af_sch_tune(struct fmdrv_ops *fmdev, unsigned char mode,
+                             unsigned char state)
+{
+    unsigned char byte = mode;
+    int ret;
+
+    set_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
+    set_bit(FM_RDS_FLAG_SCH, &fmdev->rx.fm_rds_flag);
+    ret = fm_rx_set_mask(fmdev, I2C_MASK_SRH_TUNE_CMPL_BIT |
+                                I2C_MASK_SRH_TUNE_FAIL_BIT);
+    clear_bit(FM_RDS_FLAG_CLEAN, &fmdev->rx.fm_rds_flag);
+    if (ret < 0)
+        goto out;
+
+    fmdev->rx.curr_search_state = state;
+    reinit_completion(&fmdev->tune_completion);
+    ret = fmc_send_cmd(fmdev, FM_REG_SCH_TUNE, &byte, 1, REG_WR,
+                       &fmdev->maintask_completion, NULL, NULL);
+    if (ret == 0 && !wait_for_completion_timeout(&fmdev->tune_completion,
+                            msecs_to_jiffies(FM_AF_JUMP_TIMEOUT_MS))) {
+        /* no answer: stop it (stock bta_fm_af_abort) */
+        byte = 0;   /* idle */
+        fmc_send_cmd(fmdev, FM_REG_SCH_TUNE, &byte, 1, REG_WR,
+                     &fmdev->maintask_completion, NULL, NULL);
+        ret = -ETIMEDOUT;
+    } else if (ret == 0 &&
+               (fmdev->rx.curr_search_state == FM_STATE_AF_ERR ||
+                fmdev->rx.curr_search_state == FM_STATE_TUNE_ERR)) {
+        ret = -EAGAIN;
+    }
+    fmdev->rx.curr_search_state = FM_STATE_NONE;
+out:
+    clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
+    clear_bit(FM_RDS_FLAG_SCH, &fmdev->rx.fm_rds_flag);
+    return ret;
+}
+
+static int fm_rx_af_prepare(void *ctx, u16 pi, u8 min_dbm, u16 af_freq)
+{
+    struct fmdrv_ops *fmdev = ctx;
+    unsigned short word;
+    unsigned char byte;
+    int ret;
+
+    set_bit(FM_RDS_FLAG_MASK_HELD, &fmdev->rx.fm_rds_flag);
+    ret = fmc_send_cmd(fmdev, FM_REG_PI_MAC0, &pi, 2, REG_WR,
+                       &fmdev->maintask_completion, NULL, NULL);
+    FM_CHECK_SEND_CMD_STATUS(ret);
+    word = 0xffff;
+    ret = fmc_send_cmd(fmdev, FM_REG_PI_MSK0, &word, 2, REG_WR,
+                       &fmdev->maintask_completion, NULL, NULL);
+    FM_CHECK_SEND_CMD_STATUS(ret);
+
+    /* the weakest signal the AF may have, in -dBm as the search's */
+    byte = min_dbm ? min_dbm : fmdev->rx.curr_rssi_threshold;
+    ret = fmc_send_cmd(fmdev, FM_REG_SCH_CTL0, &byte, 1, REG_WR,
+                       &fmdev->maintask_completion, NULL, NULL);
+    FM_CHECK_SEND_CMD_STATUS(ret);
+
+    return fmc_send_cmd(fmdev, FM_REG_AF_FREQ0, &af_freq, 2, REG_WR,
+                        &fmdev->maintask_completion, NULL, NULL);
+}
+
+static int fm_rx_af_pause_arm(void *ctx)
+{
+    struct fmdrv_ops *fmdev = ctx;
+    unsigned char byte = 0x03;  /* the stock setting */
+    int ret;
+
+    set_bit(FM_RDS_FLAG_MASK_HELD, &fmdev->rx.fm_rds_flag);
+    ret = fmc_send_cmd(fmdev, FM_REG_AUD_PAUS, &byte, 1, REG_WR,
+                       &fmdev->maintask_completion, NULL, NULL);
+    FM_CHECK_SEND_CMD_STATUS(ret);
+
+    fm_af_arm_pause(&fmdev->af);
+    ret = fm_rx_set_mask(fmdev, I2C_MASK_AUDIO_PAUSE_BIT);
+    clear_bit(FM_RDS_FLAG_CLEAN, &fmdev->rx.fm_rds_flag);
+    return ret;
+}
+
+static int fm_rx_af_go(void *ctx, u8 *reason)
+{
+    struct fmdrv_ops *fmdev = ctx;
+    unsigned char byte, resp[2];
+    int ret, resp_len;
+    u16 aud;
+
+    *reason = 0;
+    ret = fm_rx_af_mute(fmdev, &aud);
+    if (ret < 0)
+        return ret;
+    ret = fm_rx_af_sch_tune(fmdev, FM_TUNER_AF_JUMP_MODE,
+                            FM_STATE_AF_JUMPING);
+    fm_rx_af_unmute(fmdev, aud);
+
+    if (ret == -EAGAIN) {
+        byte = FM_READ_1_BYTE_DATA;
+        if (fmc_send_cmd(fmdev, FM_REG_AF_FAILURE, &byte, 1, REG_RD,
+                         &fmdev->maintask_completion, resp, &resp_len) == 0)
+            *reason = resp[0];
+    }
+    return ret;
+}
+
+static int fm_rx_af_hop(struct fmdrv_ops *fmdev, u16 freq)
+{
+    int ret;
+
+    ret = fmc_send_cmd(fmdev, FM_REG_FM_FREQ, &freq, 2, REG_WR,
+                       &fmdev->maintask_completion, NULL, NULL);
+    if (ret < 0)
+        return ret;
+    return fm_rx_af_sch_tune(fmdev, FM_TUNER_PRESET_MODE, FM_STATE_TUNING);
+}
+
+static int fm_rx_af_probe(void *ctx, u16 af_freq, u8 *rssi)
+{
+    struct fmdrv_ops *fmdev = ctx;
+    u16 orig = fmdev->rx.curr_freq, aud;
+    unsigned char byte;
+    int ret, back, i;
+
+    ret = fm_rx_af_mute(fmdev, &aud);
+    if (ret < 0)
+        return ret;
+    ret = fm_rx_af_hop(fmdev, af_freq);
+    if (ret == 0)
+        ret = fm_rx_read_curr_rssi_freq(fmdev, TRUE);
+    *rssi = fmdev->rx.curr_rssi;
+
+    /* back to the user's station, as hard as it takes */
+    for (i = 0; i < 3; i++) {
+        back = fm_rx_af_hop(fmdev, orig);
+        if (back == 0)
+            break;
+        msleep(20);
+    }
+    if (back < 0) {
+        /* left where it is: the frequency cache says so, and the
+         * switching ends its round (-ENOLINK) */
+        pr_err("fm_af: not back on %u from %u: %d\n", FM_SET_FREQ(orig),
+               FM_SET_FREQ(af_freq), back);
+        fm_rx_af_unmute(fmdev, aud);
+        fm_rx_resync_freq(fmdev);
+        return -ENOLINK;
+    }
+
+    /* what RDS the chip took in there is the other frequency's: away */
+    byte = FM_RDS_CTRL_FIFO_FLUSH;
+    if (fmdev->rx.rds_mode == FM_RDS_SYSTEM_RBDS)
+        byte |= FM_RDS_CTRL_RBDS;
+    fmc_send_cmd(fmdev, FM_REG_RDS_CTL0, &byte, 1, REG_WR,
+                 &fmdev->maintask_completion, NULL, NULL);
+
+    fm_rx_af_unmute(fmdev, aud);
+    return ret;
+}
+
+static void fm_rx_af_restore(void *ctx)
+{
+    struct fmdrv_ops *fmdev = ctx;
+    unsigned short word = 0;
+
+    fmc_send_cmd(fmdev, FM_REG_PI_MSK0, &word, 2, REG_WR,
+                 &fmdev->maintask_completion, NULL, NULL);
+    /* the frequency the chip is on now */
+    fm_rx_resync_freq(fmdev);
+    /* the usual mask, even none: the AF switching's is not left on */
+    fmc_send_cmd(fmdev, FM_REG_FM_RDS_MSK, &fmdev->rx.fm_rds_mask,
+                 sizeof(fmdev->rx.fm_rds_mask), REG_WR,
+                 &fmdev->maintask_completion, NULL, NULL);
+    clear_bit(FM_RDS_FLAG_MASK_HELD, &fmdev->rx.fm_rds_flag);
+}
+
+static unsigned int fm_rx_af_freq_10khz(u16 freq)
+{
+    return FM_SET_FREQ(freq);
+}
+
+const struct fm_af_ops fm_rx_af_ops = {
+    .trylock      = fm_rx_af_trylock,
+    .unlock       = fm_rx_af_unlock,
+    .receiving    = fm_rx_af_receiving,
+    .read_signal  = fm_rx_af_read_signal,
+    .pause_arm    = fm_rx_af_pause_arm,
+    .probe        = fm_rx_af_probe,
+    .jump_prepare = fm_rx_af_prepare,
+    .jump_go      = fm_rx_af_go,
+    .jump_restore = fm_rx_af_restore,
+    .freq_10khz   = fm_rx_af_freq_10khz,
+};
 
 /*
 * Function to validate if the tuned/scanned frequency is valid
@@ -259,6 +539,10 @@ int init_start_search(struct fmdrv_ops *fmdev, unsigned short start_freq,
 
     }
 
+    /* Another frequency asked for: the station's AF list and PI were the
+     * old station's, and an AF jump waiting for a pause is off */
+    fm_af_tuned(&fmdev->af);
+
     /* freeze interrupt event before SCH_TUNE is commanded */
     set_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
     /* set sch_tune pending bit */
@@ -360,7 +644,7 @@ int process_seek_event(struct fmdrv_ops *fmdev)
             if(ret < 0)
             {
                 fmdev->rx.curr_search_state = FM_STATE_SEEK_ERR;
-                fmdev->rx.curr_freq = 0;
+                fm_rx_resync_freq(fmdev);
                 V4L2_FM_DRV_ERR ("(fmdrv): Error starting search for Seek " \
                     "operation");
                 return FALSE;
@@ -475,6 +759,7 @@ int fm_rx_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
         V4L2_FM_DRV_ERR("(fmdrv) Timeout(%d sec),didn't get tune ended interrupt",\
                jiffies_to_msecs(FM_DRV_TX_TIMEOUT) / 1000);
         clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
+        fm_rx_resync_freq(fmdev);
         return -ETIMEDOUT;
     }
 
@@ -484,6 +769,7 @@ int fm_rx_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
         V4L2_FM_DRV_ERR("(fmdrv) Tune failed for %d MHz frequency", \
             FM_SET_FREQ(tmp_frq));
         clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
+        fm_rx_resync_freq(fmdev);
         return -EAGAIN;
     }
     V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) Set frequency done!");
@@ -601,6 +887,7 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
         V4L2_FM_DRV_ERR("(fmdrv) Timeout(%d sec),didn't get seek ended interrupt",\
                jiffies_to_msecs(FM_DRV_RX_SEEK_TIMEOUT) / 1000);
         clear_bit(FM_RDS_FLAG_SCH_FRZ, &fmdev->rx.fm_rds_flag);
+        fm_rx_resync_freq(fmdev);
         return -ETIMEDOUT;
     }
 
@@ -636,6 +923,7 @@ int fm_rx_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
         {
             V4L2_FM_DRV_ERR("(fmdrv) Timeout(%d sec),didn't get Seek ended "\
                 "interrupt", jiffies_to_msecs(FM_DRV_RX_SEEK_TIMEOUT) / 1000);
+            fm_rx_resync_freq(fmdev);
             return -ETIMEDOUT;
         }
 

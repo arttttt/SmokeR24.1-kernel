@@ -199,6 +199,7 @@ MODULE_PARM_DESC(radio_nr, "Radio Nr");
 long (*g_bcm_write) (struct sk_buff *skb);
 
 int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb);
+static void parse_rds_tupple(struct fmdrv_ops *fmdev);
 int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb);
 void send_read_intrp_cmd(struct fmdrv_ops *fmdev);
 int read_rds_data(struct fmdrv_ops *);
@@ -841,6 +842,11 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
                 fmdev->rx.curr_search_state = FM_STATE_TUNE_ERR;
                 complete(&fmdev->tune_completion);
             }
+            else if(fmdev->rx.curr_search_state == FM_STATE_AF_JUMPING)
+            {
+                fmdev->rx.curr_search_state = FM_STATE_AF_ERR;
+                complete(&fmdev->tune_completion);
+            }
         }
         else
         {
@@ -855,7 +861,17 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev, struct sk_buff *skb)
                 fmdev->rx.curr_search_state = FM_STATE_TUNE_CMPL;
                 complete(&fmdev->tune_completion);
             }
+            else if(fmdev->rx.curr_search_state == FM_STATE_AF_JUMPING)
+            {
+                fmdev->rx.curr_search_state = FM_STATE_AF_CMPL;
+                complete(&fmdev->tune_completion);
+            }
         }
+    }
+    else if ((fm_rds_flag & I2C_MASK_AUDIO_PAUSE_BIT) &&
+             fm_af_audio_paused(&fmdev->af))
+    {
+        /* the pause an AF jump waits for, so as not to be heard */
     }
     else if((fm_rds_flag & (I2C_MASK_RDS_FIFO_WLINE_BIT|I2C_MASK_SYNC_LOST_BIT))
             == I2C_MASK_RDS_FIFO_WLINE_BIT)
@@ -951,11 +967,25 @@ void get_rds_element_value(int ioctl_num, char __user *ioctl_value)
 /* Each RDS packet is devided into 4 blocks of 16bits*/
 /* when we receive RDS packet it is devided into 4 * 3Byts tuples, */
 /*2 bytes of information and 1byte of meta data */
-void parse_rds_tupple(void)
+/* One AF code from group 0A block C: 1..204 is 87.6..107.9 MHz; fillers,
+ * counts and LF/MF codes are not frequencies */
+static void fm_rds_add_af(struct fmdrv_ops *fmdev, __u8 code)
 {
-   int version =0;
+   unsigned int khz10;
+
+   if (code < 1 || code > 204)
+      return;
+   /* 87.5 MHz + code * 100 kHz, in 10 kHz, then the chip's units:
+    * FM_GET_FREQ does not bracket its argument */
+   khz10 = 8750 + code * 10;
+   fm_af_rds_add(&fmdev->af, FM_GET_FREQ(khz10));
+}
+
+static void parse_rds_tupple(struct fmdrv_ops *fmdev)
+{
    __u8 byte1, byte2;
    static __u8 group, spare, blkc_byte1, blkc_byte2, blkb_byte1, blkb_byte2;
+   static bool blkc_valid;
    static __u8 rds_pty;
    __u32 tmp1;
    __u32 tmp2;
@@ -965,7 +995,12 @@ void parse_rds_tupple(void)
    byte2 = rds_tupple[0];
 /*tempbuf[2] has meta data */
    switch ((rds_tupple[2]& 0x07)) {
-      case 0: /* Block A */
+      case 0: /* Block A: the PI, in every group */
+         blkc_valid = false;
+         if (rds_tupple[2] & (BRCM_RDS_BIT_6 | BRCM_RDS_BIT_7))
+            break;
+         pi_code_b = (byte1 << 8) | byte2;
+         fm_af_rds_pi(&fmdev->af, pi_code_b);
          break;
 
       case 1: /* Block B */
@@ -997,18 +1032,13 @@ void parse_rds_tupple(void)
          }
          blkc_byte1 = byte1;
          blkc_byte2 = byte2;
+         blkc_valid = true;
          break;
 
       case 3 : /* Block D */
          if (rds_tupple[2] & (BRCM_RDS_BIT_6 | BRCM_RDS_BIT_7)) {
             /* invalid tupple */
             break;
-         }
-         /* Parsing the PI code, PI code will be present in all the Groups in Block-c*/
-         version = (group & 0x01);
-         if(version) {
-            pi_code_b |= (blkc_byte1 << 8) & 0xFF;
-            pi_code_b |= (blkc_byte2 << 16) & 0xFFFF;
          }
          if (skip_flag) {
             /* group and spare was */
@@ -1017,6 +1047,12 @@ void parse_rds_tupple(void)
          switch (group) {
              /*There are 32 Groups in total but we are only interested in the following Groups*/
             case 0: /* Group 0A */
+               /* block C: two AF codes */
+               if (blkc_valid) {
+                  fm_rds_add_af(fmdev, blkc_byte1);
+                  fm_rds_add_af(fmdev, blkc_byte2);
+               }
+               /* fall through: the name as 0B */
             case 1: /* Group 0B */
                rds_psn[2*(spare & 0x03)+0] = byte1;
                rds_psn[2*(spare & 0x03)+1] = byte2;
@@ -1141,7 +1177,7 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
         /* Store data byte. Swap bytes*/
         rds_tupple[0] = rds_data[2]; /* LSB of V4L2 spec block */
         rds_tupple[1] = rds_data[1]; /* MSB of V4L2 spec block */
-        parse_rds_tupple();
+        parse_rds_tupple(fmdev);
         memcpy(&fmdev->rx.rds.cbuffer[fmdev->rx.rds.wr_index], &rds_tupple,
                FM_RDS_TUPLE_LENGTH);
         fmdev->rx.rds.wr_index =
@@ -1184,8 +1220,14 @@ int parse_rds_data(struct fmdrv_ops *fmdev, struct sk_buff *skb)
 
     fmdev->rx.fm_rds_mask |= I2C_MASK_RDS_FIFO_WLINE_BIT;
 
-    ret = __fm_send_cmd(fmdev, FM_REG_FM_RDS_MSK, &fmdev->rx.fm_rds_mask,
-                            2, REG_WR, NULL);
+    /* A tune, or the AF switching, has the mask set its own way -- the
+     * tune's interrupts, the audio pause's -- and puts this one back as
+     * it ends: written now, it would take theirs away. */
+    ret = 0;
+    if (!test_bit(FM_RDS_FLAG_SCH, &fmdev->rx.fm_rds_flag) &&
+        !test_bit(FM_RDS_FLAG_MASK_HELD, &fmdev->rx.fm_rds_flag))
+        ret = __fm_send_cmd(fmdev, FM_REG_FM_RDS_MSK, &fmdev->rx.fm_rds_mask,
+                                2, REG_WR, NULL);
 
     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "(fmdrv) Write to FM_REG_FM_RDS_MSK done : %d", ret);
 
@@ -1640,6 +1682,13 @@ int fmc_enable (struct fmdrv_ops *fmdev, unsigned char opt)
     /* Enable RDS */
     fm_rx_enable_rds(fmdev);
 
+    /* and RDS alternative frequency switching on it; a round FM going
+     * off cut short left no mask of its own */
+    clear_bit(FM_RDS_FLAG_MASK_HELD, &fmdev->rx.fm_rds_flag);
+    fmdev->rx.af_mode = FM_RX_RDS_AF_SWITCH_MODE_ON;
+    fm_af_set_enabled(&fmdev->af, true);
+    fm_af_start(&fmdev->af);
+
     return ret;
 }
 
@@ -1830,6 +1879,9 @@ int fmc_release(struct fmdrv_ops *fmdev)
      * tx, which could re-arm it; the next open then re-initialised a
      * pending work, and module exit destroyed its queue under it.
      */
+    /* AF switching first: it talks to the chip through the channel */
+    fm_af_stop(&fmdev->af);
+
     spin_lock_irqsave(&fmdev->cmd_lock, flags);
     fmdev->cmd_stopping = true;
     spin_unlock_irqrestore(&fmdev->cmd_lock, flags);
@@ -1906,25 +1958,35 @@ static int __init fm_drv_init(void)
     /* Everything the device needs exists before /dev/radio0 does: it was
      * registered first, and an open in between queued work on NULL
      * workqueues. */
-    fmdev->tx_wq= create_workqueue("fm_drv_tx");
+    /* unbound unless asked otherwise (CONFIG_WQ_POWER_EFFICIENT_DEFAULT):
+     * an idle CPU is not woken for them */
+    fmdev->tx_wq = alloc_workqueue("fm_drv_tx",
+                                   WQ_MEM_RECLAIM | WQ_POWER_EFFICIENT, 1);
     if (!fmdev->tx_wq) {
         V4L2_FM_DRV_ERR("%s(): Unable to create workqueue fm_drv_tx\n", __func__);
         ret = -ENOMEM;
         goto err_free_buf;
     }
-    fmdev->rx_wq= create_workqueue("fm_drv_rx");
+    fmdev->rx_wq = alloc_workqueue("fm_drv_rx",
+                                   WQ_MEM_RECLAIM | WQ_POWER_EFFICIENT, 1);
     if (!fmdev->rx_wq) {
         V4L2_FM_DRV_ERR("%s(): Unable to create workqueue fm_drv_rx\n", __func__);
         ret = -ENOMEM;
         goto err_destroy_tx;
     }
 
-    ret = fm_v4l2_init_video_device(fmdev, radio_nr);
+    ret = fm_af_init(&fmdev->af, &fm_rx_af_ops, fmdev, "fm_drv_af");
     if (ret < 0)
         goto err_destroy_rx;
 
+    ret = fm_v4l2_init_video_device(fmdev, radio_nr);
+    if (ret < 0)
+        goto err_destroy_af;
+
     return 0;
 
+err_destroy_af:
+    fm_af_destroy(&fmdev->af);
 err_destroy_rx:
     destroy_workqueue(fmdev->rx_wq);
 err_destroy_tx:
@@ -1944,6 +2006,7 @@ static void __exit fm_drv_exit(void)
 
     fmdev = fm_v4l2_deinit_video_device();
     if (fmdev != NULL) {
+    fm_af_destroy(&fmdev->af);
     destroy_workqueue(fmdev->tx_wq);
     destroy_workqueue(fmdev->rx_wq);
     kfree(fmdev->rx.rds.cbuffer);

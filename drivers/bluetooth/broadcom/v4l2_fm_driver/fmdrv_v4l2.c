@@ -271,6 +271,80 @@ static ssize_t fmrx_af_locked(struct fmdrv_ops *fmdev,
     return size;
 }
 
+/*
+ * The station's RDS as the AF jump uses it: frequency, PI, RSSI and the
+ * alternative frequencies, in 10 kHz units
+ */
+static ssize_t show_fmrx_af_info(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
+    u16 af[FM_AF_LIST_MAX], pi;
+    u8 n;
+    int i, len;
+
+    if (mutex_lock_interruptible(&fmdev->mutex))
+        return -ERESTARTSYS;
+    if (!test_bit(FM_CORE_READY, &fmdev->flag) ||
+        fmdev->curr_fmmode != FM_MODE_RX) {
+        mutex_unlock(&fmdev->mutex);
+        return -EPERM;
+    }
+    fm_rx_read_curr_rssi_freq(fmdev, FALSE);
+    pi = fm_af_snapshot(&fmdev->af, af, &n);
+
+    len = sprintf(buf, "freq %u pi %04x rssi -%u af %d:",
+                  FM_SET_FREQ(fmdev->rx.curr_freq), pi, fmdev->rx.curr_rssi, n);
+    for (i = 0; i < n; i++)
+        len += sprintf(buf + len, " %u", FM_SET_FREQ(af[i]));
+    len += sprintf(buf + len, "\n");
+    mutex_unlock(&fmdev->mutex);
+    return len;
+}
+
+/* The RSSI, in -dBm, from which a reading counts as weak for AF switching */
+static ssize_t show_fmrx_af_weak(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+    struct fmdrv_ops *fmdev = dev_get_drvdata(dev);
+
+    return sprintf(buf, "%u\n", fmdev->af.weak_dbm);
+}
+
+static ssize_t fmrx_af_weak_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
+{
+    unsigned int dbm;
+
+    if (kstrtouint(buf, 0, &dbm) || dbm < 20 || dbm > 127)
+        return -EINVAL;
+    fm_af_set_weak(&fmdev->af, dbm);
+    return size;
+}
+
+/* "freq [pause_ms]": one AF jump by hand, freq in 10 kHz units */
+static ssize_t fmrx_af_jump_locked(struct fmdrv_ops *fmdev,
+        const char *buf, size_t size)
+{
+    unsigned int freq, pause_ms = 3000;
+    unsigned short af_freq;
+    u8 reason;
+    int ret;
+
+    if (sscanf(buf, "%u %u", &freq, &pause_ms) < 1)
+        return -EINVAL;
+    if (fmdev->curr_fmmode != FM_MODE_RX)
+        return -EPERM;
+    af_freq = FM_GET_FREQ(freq);
+    if (!check_if_valid_freq(fmdev, af_freq))
+        return -EINVAL;
+
+    /* the switching's own attempt, if waiting for a pause, is off */
+    fm_af_preempt(&fmdev->af);
+    ret = fm_af_jump(&fmdev->af, af_freq, pause_ms, &reason);
+    return (ret < 0 && ret != -EAGAIN) ? ret : size;
+}
+
 static ssize_t show_fmrx_band(struct device *dev,
         struct device_attribute *attr, char *buf)
 {
@@ -504,6 +578,8 @@ FM_SYSFS_STORE(fmrx_fm_audio_pins)
 FM_SYSFS_STORE(fmrx_rssi_lvl)
 FM_SYSFS_STORE(fmrx_snr_lvl)
 FM_SYSFS_STORE(fmrx_channel_space)
+FM_SYSFS_STORE(fmrx_af_jump)
+FM_SYSFS_STORE(fmrx_af_weak)
 
 /* To start FM RX complete scan*/
 static struct device_attribute v4l2_fmrx_comp_scan =
@@ -537,7 +613,18 @@ __ATTR(fmrx_chl_lvl, 0644, show_fmrx_channel_space, store_fmrx_channel_space);
 static struct device_attribute v4l2_fmrx_fm_audio_pins =
 __ATTR(fmrx_fm_audio_pins, 0644, show_fmrx_fm_audio_pins, store_fmrx_fm_audio_pins);
 
+/* AF jump, by hand: RDS state, and one jump */
+static struct device_attribute v4l2_fmrx_af_info =
+__ATTR(fmrx_af_info, 0444, show_fmrx_af_info, NULL);
+static struct device_attribute v4l2_fmrx_af_jump =
+__ATTR(fmrx_af_jump, 0200, NULL, store_fmrx_af_jump);
+static struct device_attribute v4l2_fmrx_af_weak =
+__ATTR(fmrx_af_weak, 0644, show_fmrx_af_weak, store_fmrx_af_weak);
+
 static struct attribute *v4l2_fm_attrs[] = {
+    &v4l2_fmrx_af_info.attr,
+    &v4l2_fmrx_af_jump.attr,
+    &v4l2_fmrx_af_weak.attr,
     &v4l2_fmrx_comp_scan.attr,
     &v4l2_fmrx_deemph_mode.attr,
     &v4l2_fmrx_rds_af.attr,
@@ -955,14 +1042,21 @@ static int fm_v4l2_vidioc_g_frequency(struct file *file, void *priv,
     struct fmdrv_ops *fmdev;
 
     fmdev = video_drvdata(file);
-    ret = fmc_get_frequency(fmdev, &freq->frequency);
+    if (fmdev->curr_fmmode != FM_MODE_RX)
+        return -EINVAL;
+    /*
+     * The frequency as the driver last read it from the chip: after every
+     * tune, seek and AF jump. Asking the chip each time, as this did, is a
+     * register read per call; the FM library calls it twice a second to
+     * notice an AF jump, and RDS stopped coming while it did.
+     */
+    ret = 0;
+    freq->frequency = FM_SET_FREQ(fmdev->rx.curr_freq);
     /* Translate the controller frequency to V4L2 specific frequency
         (frequencies in unit of 62.5 Hz):
         x = (y * 100) * 1000/62.5  = y * 160 */
     freq->frequency = (freq->frequency * 160);
-    if (ret < 0)
-        return ret;
-    return 0;
+    return ret;
 }
 
 /* Set tuner or modulator radio frequency, this is tune channel */

@@ -37,6 +37,7 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
+#include "fmdrv_af.h"
 
 /*******************************************************************************
 **  Constants & Macros
@@ -122,6 +123,7 @@
 #define     FM_RDS_FLAG_CLEAN           0   /* clean FM_RDS_FLAG register */
 #define     FM_RDS_FLAG_SCH_FRZ         1   /* interrupt freeze */
 #define     FM_RDS_FLAG_SCH             2   /* pending search_tune */
+#define     FM_RDS_FLAG_MASK_HELD       3   /* the AF switching set FM_RDS_MSK */
 
 /* FM/RDS flag bits used with fm_dev->rx.fm_rds_flag (masks, unused now) */
 #define     FM_RDS_FLAG_CLEAN_BIT         0x01    /* clean FM_RDS_FLAG register */
@@ -154,7 +156,10 @@ enum fm_seek_tune_state
     FM_STATE_TUNE_ERR,
     FM_STATE_SEEKING,
     FM_STATE_SEEK_CMPL,
-    FM_STATE_SEEK_ERR
+    FM_STATE_SEEK_ERR,
+    FM_STATE_AF_JUMPING,
+    FM_STATE_AF_CMPL,
+    FM_STATE_AF_ERR
 };
 
 /*******************************************************************************
@@ -286,6 +291,7 @@ struct fmdrv_ops {
     unsigned char curr_fmmode;   /* Current FM chip mode (TX, RX, OFF) */
     unsigned char aud_ctrl;     /* Current Audio Control (STEREO/MONO/NONE) */
     struct fm_rx rx;                         /* FM receiver info */
+    struct fm_af af;                         /* RDS AF switching */
     struct fm_device_info device_info; /* FM Device info */
 };
 

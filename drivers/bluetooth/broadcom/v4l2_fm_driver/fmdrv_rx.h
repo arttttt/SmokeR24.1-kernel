@@ -45,6 +45,8 @@ int fm_rx_config_deemphasis(struct fmdrv_ops *, unsigned long);
 int fm_rx_set_rssi_threshold(struct fmdrv_ops*, short);
 int fm_rx_set_snr_threshold(struct fmdrv_ops*,  short);
 int fm_rx_set_af_switch(struct fmdrv_ops *, u8);
+extern const struct fm_af_ops fm_rx_af_ops;
+int check_if_valid_freq(struct fmdrv_ops *, unsigned short);
 
 int fm_rx_get_frequency(struct fmdrv_ops*, unsigned int*);
 int fm_rx_get_mute_mode(struct fmdrv_ops*, unsigned char*);
