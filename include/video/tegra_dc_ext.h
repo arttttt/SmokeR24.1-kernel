@@ -880,15 +880,16 @@ struct tegra_dc_ext_control_event_hotplug {
 
 #define TEGRA_DC_EXT_EVENT_VBLANK			(1 << 1)
 /*
- * reserved: the vertical front porch the frame that ended on this vblank
- * ran with, in lines, and nought for the mode's own -- the answer to
+ * act_vfp: the vertical front porch the frame that ended on this vblank ran
+ * with, in lines, and nought for the mode's own -- the answer to
  * TEGRA_DC_EXT_SET_ACT_VFP, which takes effect at a frame's end without a
- * reply. Kept under its old name so a reader built against a header that
- * still calls it unused goes on reading the same layout.
+ * reply. Every vblank carries it, so a reader that missed one learns the
+ * state from the next. The word was reserved and always zero before, so the
+ * layout is the one older readers expect.
  */
 struct tegra_dc_ext_control_event_vblank {
 	__u32 handle;
-	__u32 reserved;
+	__u32 act_vfp;
 	__u64 timestamp_ns;
 };
 

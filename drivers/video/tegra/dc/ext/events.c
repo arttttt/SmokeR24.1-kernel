@@ -212,7 +212,7 @@ int tegra_dc_ext_queue_vblank(struct tegra_dc_ext_control *control, int output,
 	pack.event.data_size = sizeof(pack.vblank);
 
 	pack.vblank.handle = output;
-	pack.vblank.reserved = porch;
+	pack.vblank.act_vfp = porch;
 	pack.vblank.timestamp_ns = ktime_to_ns(timestamp);
 
 	tegra_dc_ext_queue_event(control, &pack.event);
