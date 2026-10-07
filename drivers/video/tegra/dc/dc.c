@@ -2879,6 +2879,27 @@ EXPORT_SYMBOL(tegra_dc_update_cmu_aligned);
 #define tegra_dc_update_cmu_aligned(dc, cmu)
 #endif
 
+/* The porch the head runs at now: the mode's own unless stretched. */
+static u32 tegra_dc_act_vfp_running(struct tegra_dc *dc)
+{
+	return dc->act_vfp_applied ? dc->act_vfp_applied
+				   : dc->mode.v_front_porch;
+}
+
+/* Writes the composer's porch, under the head's lock and with the head
+ * enabled. */
+static void tegra_dc_apply_act_vfp(struct tegra_dc *dc, u32 vfp)
+{
+	tegra_dc_get(dc);
+	tegra_dc_set_act_vfp(dc, vfp);
+#ifdef CONFIG_DEBUG_FS
+	/* The calibration knob's file stays the one honest reader of what
+	 * was last applied. */
+	dc->dbg_act_vfp = (vfp == dc->mode.v_front_porch) ? 0 : vfp;
+#endif
+	tegra_dc_put(dc);
+}
+
 /* The composer's road to the refresh stretch: remember the porch and let
  * the frame's end write it. The caller never waits and never hears back
  * -- the discipline the colour unit's aligned path lives by -- and a
@@ -2914,6 +2935,28 @@ int tegra_dc_set_act_vfp_aligned(struct tegra_dc *dc, u32 vfp)
 	if (vfp < dc->mode.v_ref_to_sync + 1 || vfp > 0x1fff) {
 		pr_debug_ratelimited("tegradc: act_vfp %u out of range\n",
 				     vfp);
+		mutex_unlock(&dc->lock);
+		return 0;
+	}
+
+	/* A shorter porch is written at once. The timing generator reads
+	 * the active porch line by line: written while the line counter is
+	 * still short of the new porch's end, the frame ends where a frame
+	 * at that porch would; written past it, the frame ends on the spot.
+	 * Measured on the panel, a stretched frame cut this way ran 16.7 ms
+	 * or ended 0.1 ms after the write, and never shorter than the
+	 * native frame -- the stretch only ever adds lines past it. Waiting
+	 * for the frame's end instead held the return to the full rate for
+	 * up to a whole stretched frame, 33 ms, at the start of every
+	 * gesture. A longer porch still waits for the frame's end: there is
+	 * nothing to hurry, and a frame stretched halfway would be neither
+	 * rate. A shorter request supersedes a longer one still waiting. */
+	if (vfp < tegra_dc_act_vfp_running(dc)) {
+		if (dc->act_vfp_shadow_dirty) {
+			dc->act_vfp_shadow_dirty = false;
+			_tegra_dc_config_frame_end_intr(dc, false);
+		}
+		tegra_dc_apply_act_vfp(dc, vfp);
 		mutex_unlock(&dc->lock);
 		return 0;
 	}
@@ -3973,19 +4016,8 @@ static void tegra_dc_frame_end(struct work_struct *work)
 	if (dc->act_vfp_shadow_dirty) {
 		mutex_lock(&dc->lock);
 		if (dc->act_vfp_shadow_dirty) {
-			if (dc->enabled) {
-				tegra_dc_get(dc);
-				tegra_dc_set_act_vfp(dc, dc->act_vfp_shadow);
-#ifdef CONFIG_DEBUG_FS
-				/* The calibration knob's file stays the one
-				 * honest reader of what was last applied. */
-				dc->dbg_act_vfp =
-					(dc->act_vfp_shadow ==
-					 dc->mode.v_front_porch)
-						? 0 : dc->act_vfp_shadow;
-#endif
-				tegra_dc_put(dc);
-			}
+			if (dc->enabled)
+				tegra_dc_apply_act_vfp(dc, dc->act_vfp_shadow);
 			dc->act_vfp_shadow_dirty = false;
 			_tegra_dc_config_frame_end_intr(dc, false);
 		}
