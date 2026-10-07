@@ -229,12 +229,20 @@ static struct tegra_dc_feature t114_feature_table_b = {
 
 #elif defined(CONFIG_ARCH_TEGRA_12x_SOC)
 
+/* The windows downscale up to four times either way, not two. The
+ * hardware's own limits are wider still -- the horizontal step stops at
+ * 4.0 for 32-bit formats, the vertical at 15.0 (TRM 21.9.67), and
+ * compute_dda_inc clamps to exactly those -- and four in both axes stays
+ * inside them while keeping the lines read per output line, and with them
+ * the fetch burst, within bounds. Two sent every window that opens from an
+ * icon to the composer's engine for its first frames, while it is still
+ * three to five times smaller than its buffer. */
 static struct tegra_dc_feature_entry t124_feature_entries_a[] = {
 	{ 0, TEGRA_DC_FEATURE_FORMATS,
 			{ TEGRA_WIN_FMT_BASE, TEGRA_WIN_FMT_T124_HIGH } },
 	{ 0, TEGRA_DC_FEATURE_BLEND_TYPE, {2,} },
 	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4096, 1, 4096, 1,} },
-	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
+	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 4, 4,} },
 	{ 0, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
 	{ 0, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 0, 1,} },
 	{ 0, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
@@ -244,7 +252,7 @@ static struct tegra_dc_feature_entry t124_feature_entries_a[] = {
 			{ TEGRA_WIN_FMT_BASE, TEGRA_WIN_FMT_T124_HIGH } },
 	{ 1, TEGRA_DC_FEATURE_BLEND_TYPE, {2,} },
 	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4096, 1, 4096, 1,} },
-	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
+	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 4, 4,} },
 	{ 1, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
 	{ 1, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 0, 1,} },
 	{ 1, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
@@ -254,7 +262,7 @@ static struct tegra_dc_feature_entry t124_feature_entries_a[] = {
 			{ TEGRA_WIN_FMT_BASE, TEGRA_WIN_FMT_T124_HIGH } },
 	{ 2, TEGRA_DC_FEATURE_BLEND_TYPE, {2,} },
 	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4096, 1, 4096, 1,} },
-	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
+	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 4, 4,} },
 	{ 2, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
 	{ 2, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 0, 1,} },
 	{ 2, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
@@ -275,7 +283,7 @@ static struct tegra_dc_feature_entry t124_feature_entries_b[] = {
 			{ TEGRA_WIN_FMT_BASE, TEGRA_WIN_FMT_T124_HIGH } },
 	{ 0, TEGRA_DC_FEATURE_BLEND_TYPE, {2,} },
 	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4096, 1, 4096, 1,} },
-	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
+	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 4, 4,} },
 	{ 0, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
 	{ 0, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 0, 1,} },
 	{ 0, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 0,} },
@@ -285,7 +293,7 @@ static struct tegra_dc_feature_entry t124_feature_entries_b[] = {
 			{ TEGRA_WIN_FMT_BASE, TEGRA_WIN_FMT_T124_HIGH } },
 	{ 1, TEGRA_DC_FEATURE_BLEND_TYPE, {2,} },
 	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4096, 1, 4096, 1,} },
-	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
+	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 4, 4,} },
 	{ 1, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
 	{ 1, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 0, 1,} },
 	{ 1, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 0,} },
@@ -295,7 +303,7 @@ static struct tegra_dc_feature_entry t124_feature_entries_b[] = {
 			{ TEGRA_WIN_FMT_BASE, TEGRA_WIN_FMT_T124_HIGH } },
 	{ 2, TEGRA_DC_FEATURE_BLEND_TYPE, {2,} },
 	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4096, 1, 4096, 1,} },
-	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
+	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 4, 4,} },
 	{ 2, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
 	{ 2, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 0, 1,} },
 	{ 2, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 0,} },
