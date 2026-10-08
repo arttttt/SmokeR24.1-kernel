@@ -20,13 +20,23 @@
  * 02111-1307, USA
  */
 
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/pm.h>
+#include <linux/reboot.h>
 #include <linux/power/reset/system-pmic.h>
+
+/*
+ * A PMIC that took the power off request drops the rails within a few
+ * milliseconds; still running long after it means the request did not
+ * reach it, and it is asked again
+ */
+#define SYSTEM_PMIC_POWER_OFF_TRIES	3
+#define SYSTEM_PMIC_POWER_OFF_WAIT_MS	500
 
 struct system_pmic_dev {
 	struct device *pmic_dev;
@@ -64,16 +74,29 @@ static void system_pmic_power_off(void)
 			system_pmic_dev->pmic_drv_data, i,
 			system_pmic_dev->power_on_data[i]);
 	}
-	system_pmic_dev->ops->power_off(system_pmic_dev->pmic_drv_data);
+
+	for (i = 1; i <= SYSTEM_PMIC_POWER_OFF_TRIES; i++) {
+		system_pmic_dev->ops->power_off(system_pmic_dev->pmic_drv_data);
+		mdelay(SYSTEM_PMIC_POWER_OFF_WAIT_MS);
+		dev_err(system_pmic_dev->pmic_dev,
+			"System PMIC did not power off, attempt %d of %d\n",
+			i, SYSTEM_PMIC_POWER_OFF_TRIES);
+	}
+
 	if (soc_specific_power_off) {
 		dev_err(system_pmic_dev->pmic_dev,
 			"SoC specific power off sequence\n");
 		soc_specific_power_off();
 	}
 
+	/*
+	 * Spinning here keeps the board on until the battery is flat, the
+	 * screen dark and nothing answering. A restart at least ends in a
+	 * system the user can turn off again.
+	 */
 	dev_err(system_pmic_dev->pmic_dev,
-		"System PMIC is not able to power off system\n");
-	while (1);
+		"System PMIC is not able to power off system, restarting\n");
+	machine_restart(NULL);
 }
 
 int system_pmic_set_power_on_event(enum system_pmic_power_on_event event,
