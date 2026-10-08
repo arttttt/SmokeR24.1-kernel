@@ -26,6 +26,7 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
+#include <linux/workqueue.h>
 #include <asm/smp_plat.h>
 
 #include "ote_protocol.h"
@@ -208,6 +209,41 @@ void te_restore_keyslots(void)
 EXPORT_SYMBOL(te_restore_keyslots);
 
 /*
+ * A monitor fastcall skips the smc_lock, not the rule send_smc() keeps:
+ * the SMC is made on CPU0. A secure monitor may set itself up on CPU0
+ * alone -- the TLK the Shield Tablet shipped in 2015 does, and enters the
+ * non-secure world on the other CPUs with no monitor vector -- and there
+ * an SMC from another CPU jumps to 0x8 and halts the secure world for
+ * good, the boot with it.
+ */
+static long tlk_fastcall_on_cpu0(void *args)
+{
+	struct tlk_smc_work_args *work = args;
+
+	return _tlk_generic_smc(work->arg0, work->arg1, work->arg2);
+}
+
+static uint32_t tlk_fastcall(uint32_t arg0, uintptr_t arg1, uintptr_t arg2)
+{
+	struct tlk_smc_work_args work_args;
+	uint32_t retval;
+
+	work_args.arg0 = arg0;
+	work_args.arg1 = arg1;
+	work_args.arg2 = arg2;
+
+	/* on CPU0, stay there for the call */
+	if (cpu_logical_map(get_cpu()) == 0) {
+		retval = tlk_fastcall_on_cpu0(&work_args);
+		put_cpu();
+		return retval;
+	}
+	put_cpu();
+
+	return work_on_cpu(0, tlk_fastcall_on_cpu0, &work_args);
+}
+
+/*
  * VRR Set Buffer
  *
  * Called from the DC driver and implemented as a monitor fastcall
@@ -216,7 +252,7 @@ EXPORT_SYMBOL(te_restore_keyslots);
  */
 int te_vrr_set_buf(phys_addr_t addr)
 {
-	return _tlk_generic_smc(TE_SMC_VRR_SET_BUF, addr, 0);
+	return tlk_fastcall(TE_SMC_VRR_SET_BUF, addr, 0);
 }
 EXPORT_SYMBOL(te_vrr_set_buf);
 
@@ -234,15 +270,29 @@ void te_invalidate_btb(void)
 }
 EXPORT_SYMBOL(te_invalidate_btb);
 
+static void te_vrr_sec_work_fn(struct work_struct *work)
+{
+	_tlk_generic_smc(TE_SMC_VRR_SEC, 0, 0);
+}
+
+static DECLARE_WORK(te_vrr_sec_work, te_vrr_sec_work_fn);
+
 /*
  * VRR Sec
  *
  * Called from the DC driver and implemented as a monitor fastcall
  * to avoid taking the smc_lock.
+ *
+ * The DC calls it from its frame end interrupt, which cannot wait for
+ * CPU0 to make the call; off CPU0 the call goes to CPU0's workqueue,
+ * the result is never read.
  */
 void te_vrr_sec(void)
 {
-	_tlk_generic_smc(TE_SMC_VRR_SEC, 0, 0);
+	if (cpu_logical_map(smp_processor_id()) == 0)
+		_tlk_generic_smc(TE_SMC_VRR_SEC, 0, 0);
+	else
+		schedule_work_on(0, &te_vrr_sec_work);
 }
 EXPORT_SYMBOL(te_vrr_sec);
 
