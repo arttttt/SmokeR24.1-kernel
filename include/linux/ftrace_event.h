@@ -369,7 +369,7 @@ extern int filter_current_check_discard(struct ring_buffer *buffer,
 					void *rec,
 					struct ring_buffer_event *event);
 
-#if 1
+#ifdef CONFIG_BPF_EVENTS
 unsigned int trace_call_bpf(struct ftrace_event_call *call, void *ctx);
 int perf_event_attach_bpf_prog(struct perf_event *event, struct bpf_prog *prog);
 void perf_event_detach_bpf_prog(struct perf_event *event);
