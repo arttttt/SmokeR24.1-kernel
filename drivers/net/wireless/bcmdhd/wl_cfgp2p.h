@@ -323,6 +323,8 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, struct net_device *dev,
 extern void
 wl_cfgp2p_generate_bss_mac(struct ether_addr *primary_addr, struct ether_addr *out_dev_addr,
             struct ether_addr *out_int_addr);
+extern void
+wl_cfgp2p_update_bss_mac(struct bcm_cfg80211 *cfg);
 
 extern void
 wl_cfg80211_change_ifaddr(u8* buf, struct ether_addr *p2p_int_addr, u8 element_id);
