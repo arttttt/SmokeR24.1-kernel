@@ -106,8 +106,8 @@ static struct bcm_cfg80211 *g_bcm_cfg = NULL;
 u32 wl_dbg_level = WL_DBG_ERR;
 /* The cfg80211 and P2P logging, WL_DBG_* bits, beside dhd_msg_level: in
  * /sys/module/bcmdhd/parameters, so that P2P and scan problems can be
- * looked at on a running device. The debugfs file meant for it only comes
- * with DEBUGFS_CFG80211, which this build does not define.
+ * looked at on a running device -- also where debugfs is not mounted,
+ * unlike the debug_level file DEBUGFS_CFG80211 brings.
  */
 module_param(wl_dbg_level, uint, 0644);
 
