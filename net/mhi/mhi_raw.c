@@ -155,7 +155,6 @@ static int mhi_raw_ioctl(struct sock *sk, int cmd, unsigned long arg)
 }
 
 static int mhi_raw_sendmsg(
-	struct kiocb		*iocb,
 	struct sock			*sk,
 	struct msghdr		*msg,
 	size_t				len)
@@ -234,7 +233,6 @@ out:
 }
 
 static int mhi_raw_recvmsg(
-	struct kiocb *iocb,
 	struct sock *sk,
 	struct msghdr *msg,
 	size_t len,

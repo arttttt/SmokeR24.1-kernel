@@ -209,17 +209,15 @@ int mhi_sock_rcv_multicast(
 }
 
 int mhi_sock_sendmsg(
-	struct kiocb	*iocb,
 	struct socket	*sock,
 	struct msghdr	*msg,
 	size_t		 len)
 {
 	DPRINTK("mhi_sock_sendmsg: len:%lu\n", len);
-	return sock->sk->sk_prot->sendmsg(iocb, sock->sk, msg, len);
+	return sock->sk->sk_prot->sendmsg(sock->sk, msg, len);
 }
 
 int mhi_sock_recvmsg(
-	struct kiocb    *iocb,
 	struct socket   *sock,
 	struct msghdr   *msg,
 	size_t           len,
@@ -228,7 +226,7 @@ int mhi_sock_recvmsg(
 	int addrlen = 0;
 	int err;
 
-	err = sock->sk->sk_prot->recvmsg(iocb, sock->sk, msg, len,
+	err = sock->sk->sk_prot->recvmsg(sock->sk, msg, len,
 					 flags & MSG_DONTWAIT,
 					 flags & ~MSG_DONTWAIT,
 					 &addrlen);

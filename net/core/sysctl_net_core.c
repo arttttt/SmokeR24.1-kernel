@@ -24,7 +24,6 @@
 static int zero = 0;
 static int one = 1;
 static int ushort_max = USHRT_MAX;
-static int one = 1;
 static int two __maybe_unused = 2;
 static int min_sndbuf = SOCK_MIN_SNDBUF;
 static int min_rcvbuf = SOCK_MIN_RCVBUF;

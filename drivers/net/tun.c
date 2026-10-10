@@ -1512,7 +1512,7 @@ static int tun_recvmsg(struct socket *sock, struct msghdr *m, size_t total_len,
 		ret = -EINVAL;
 		goto out;
 	}
-	ret = tun_do_read(tun, tfile, iocb, m->msg_iov, total_len,
+	ret = tun_do_read(tun, tfile, NULL, m->msg_iov, total_len,
 			  flags & MSG_DONTWAIT);
 	if (ret > total_len) {
 		m->msg_flags |= MSG_TRUNC;

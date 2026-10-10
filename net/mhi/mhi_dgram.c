@@ -154,7 +154,6 @@ static int mhi_dgram_ioctl(struct sock *sk, int cmd, unsigned long arg)
 }
 
 static int mhi_dgram_sendmsg(
-	struct kiocb	*iocb,
 	struct sock	*sk,
 	struct msghdr	*msg,
 	size_t		len)
@@ -237,7 +236,6 @@ out:
 }
 
 static int mhi_dgram_recvmsg(
-	struct kiocb *iocb,
 	struct sock *sk,
 	struct msghdr *msg,
 	size_t len,
