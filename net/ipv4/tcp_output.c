@@ -2670,8 +2670,8 @@ void tcp_send_active_reset(struct sock *sk, gfp_t priority)
 			     TCPHDR_ACK | TCPHDR_RST);
 	/* Send it off. */
 	TCP_SKB_CB(skb)->when = tcp_time_stamp;
-//	if (tcp_transmit_skb(sk, skb, 0, priority))
-//		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPABORTFAILED);
+	if (tcp_transmit_skb(sk, skb, 0, priority))
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPABORTFAILED);
 
 	TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTRSTS);
 }
