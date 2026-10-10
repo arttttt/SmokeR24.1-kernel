@@ -79,6 +79,10 @@ do {									\
 
 #define set_mb(var, value)	do { var = value; smp_mb(); } while (0)
 
+#define speculation_barrier()                                           \
+	asm volatile(   "dsb sy\n"                                      \
+		"isb\n" : : : "memory")
+
 #define smp_mb__before_atomic()	smp_mb()
 #define smp_mb__after_atomic()	smp_mb()
 

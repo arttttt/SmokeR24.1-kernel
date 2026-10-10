@@ -4,6 +4,21 @@
 #include <asm/atomic.h>
 
 /*
+ * The relaxed variants arrived with the memory-model rework after this
+ * kernel. Nothing here orders less than the full-barrier form, so mapping
+ * them onto it is always correct -- only possibly stronger than asked for.
+ */
+#ifndef cmpxchg_relaxed
+#define cmpxchg_relaxed		cmpxchg
+#endif
+#ifndef cmpxchg_acquire
+#define cmpxchg_acquire		cmpxchg
+#endif
+#ifndef cmpxchg_release
+#define cmpxchg_release		cmpxchg
+#endif
+
+/*
  * Provide __deprecated wrappers for the new interface, avoid flag day changes.
  * We need the ugly external functions to break header recursion hell.
  */
