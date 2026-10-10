@@ -735,7 +735,26 @@ wl_cfgp2p_deinit_discovery(struct bcm_cfg80211 *cfg)
 	/* Clear our saved WPS and P2P IEs for the discovery BSS.  The driver
 	 * deleted these IEs when wl_cfgp2p_set_discovery() deleted the discovery
 	 * BSS.
+	 *
+	 * The clearing itself was missing: the copies outlived the BSS, and the
+	 * next discovery BSS -- after the P2P device was stopped and started
+	 * again, as Android does to an idle one -- was never given its IEs,
+	 * wl_cfgp2p_set_management_ie finding them "equal to the previous" ones.
+	 * Its probe requests then went without the P2P IE, no P2P device
+	 * answered them, and Wi-Fi Direct found nothing.
 	 */
+#define CLEAR_SAVED_IE(IE_TYPE)		\
+	do {							\
+		memset(wl_to_p2p_bss_saved_ie(cfg, P2PAPI_BSSCFG_DEVICE).p2p_ ## IE_TYPE ## _ie, \
+		   0, sizeof(wl_to_p2p_bss_saved_ie(cfg, P2PAPI_BSSCFG_DEVICE).p2p_ ## IE_TYPE ## _ie)); \
+		wl_to_p2p_bss_saved_ie(cfg, P2PAPI_BSSCFG_DEVICE).p2p_ ## IE_TYPE ## _ie_len = 0; \
+	} while (0)
+	CLEAR_SAVED_IE(probe_req);
+	CLEAR_SAVED_IE(probe_res);
+	CLEAR_SAVED_IE(assoc_req);
+	CLEAR_SAVED_IE(assoc_res);
+	CLEAR_SAVED_IE(beacon);
+#undef CLEAR_SAVED_IE
 
 	/* Clear the saved bsscfg index of the discovery BSSCFG to indicate we
 	 * have no discovery BSS.
