@@ -437,7 +437,7 @@ static void bictcp_acked(struct sock *sk, const struct ack_sample *sample)
 		u32 ratio = ca->delayed_ack;
 
 		ratio -= ca->delayed_ack >> ACK_RATIO_SHIFT;
-		ratio += cnt;
+		ratio += sample->pkts_acked;
 
 		ca->delayed_ack = clamp(ratio, 1U, ACK_RATIO_LIMIT);
 	}

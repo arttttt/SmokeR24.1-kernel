@@ -17,6 +17,15 @@
 #ifndef cmpxchg_release
 #define cmpxchg_release		cmpxchg
 #endif
+#ifndef atomic_cmpxchg_relaxed
+#define atomic_cmpxchg_relaxed	atomic_cmpxchg
+#endif
+#ifndef atomic_cmpxchg_acquire
+#define atomic_cmpxchg_acquire	atomic_cmpxchg
+#endif
+#ifndef atomic_cmpxchg_release
+#define atomic_cmpxchg_release	atomic_cmpxchg
+#endif
 
 /*
  * Provide __deprecated wrappers for the new interface, avoid flag day changes.

@@ -24,6 +24,7 @@
 #include <linux/suspend.h>
 #include <linux/debugfs.h>
 #include <linux/of.h>
+#include <linux/slab.h>
 #include "sysedp_internal.h"
 
 #define UPDATE_INTERVAL	60000

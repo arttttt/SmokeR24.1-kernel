@@ -24,16 +24,6 @@
 
 #define on_build_free_nids(nmi) mutex_is_locked(&(nm_i)->build_lock)
 
-#ifndef PTR_ERR_OR_ZERO
-static inline int __must_check PTR_ERR_OR_ZERO(__force const void *ptr)
-{
-	if (IS_ERR(ptr))
-		return PTR_ERR(ptr);
-	else
-		return 0;
-}
-#endif
-
 static struct kmem_cache *nat_entry_slab;
 static struct kmem_cache *free_nid_slab;
 static struct kmem_cache *nat_entry_set_slab;
