@@ -841,7 +841,7 @@ perf_check_frame_address(unsigned long addr, struct vm_area_struct *vma)
 }
 
 void
-perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
+perf_callchain_user(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs)
 {
 	struct frame_tail __user *tail;
 	unsigned long *fp, reg;
@@ -900,7 +900,8 @@ perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 		return;
 	}
 
-	while (tail && !((unsigned long)tail & 0x3)) {
+	while ((entry->entry->nr < entry->max_stack) &&
+	       tail && !((unsigned long)tail & 0x3)) {
 		if (perf_check_frame_address((unsigned long)tail, vma) ||
 			tail->lr < AB_USER_SPACE_MIN_ADDR) {
 			return;
