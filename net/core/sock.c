@@ -136,6 +136,7 @@
 #include <linux/sock_diag.h>
 
 #include <linux/filter.h>
+#include <net/bpf_sk_storage.h>
 #include <net/sock_reuseport.h>
 
 #include <trace/events/sock.h>
@@ -1436,6 +1437,9 @@ static void __sk_free(struct sock *sk)
 		sk_filter_uncharge(sk, filter);
 		RCU_INIT_POINTER(sk->sk_filter, NULL);
 	}
+#ifdef CONFIG_BPF_SYSCALL
+	bpf_sk_storage_free(sk);
+#endif
 	if (rcu_access_pointer(sk->sk_reuseport_cb))
 		reuseport_detach_sock(sk);
 
@@ -1514,6 +1518,12 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 		sock_copy(newsk, sk);
 
 		newsk->sk_prot_creator = sk->sk_prot;
+#ifdef CONFIG_BPF_SYSCALL
+		/* The storage belongs to the listener; the clone starts empty,
+		 * and must, before any failure path below frees it.
+		 */
+		RCU_INIT_POINTER(newsk->sk_bpf_storage, NULL);
+#endif
 
 		/* SANITY */
 		get_net(sock_net(newsk));
