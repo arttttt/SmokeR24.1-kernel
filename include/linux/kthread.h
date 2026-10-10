@@ -131,7 +131,7 @@ struct kthread_delayed_work {
 # define DEFINE_KTHREAD_WORKER_ONSTACK(worker)				\
 	struct kthread_worker worker = KTHREAD_WORKER_INIT_ONSTACK(worker)
 # define KTHREAD_WORK_INIT_ONSTACK(work, fn)				\
-	({ init_kthread_work((&work), fn); work; })
+	({ kthread_init_work((&work), fn); work; })
 # define DEFINE_KTHREAD_WORK_ONSTACK(work, fn)				\
 	struct kthread_work work = KTHREAD_WORK_INIT_ONSTACK(work, fn)
 #else

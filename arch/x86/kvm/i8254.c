@@ -248,7 +248,7 @@ static void kvm_pit_ack_irq(struct kvm_irq_ack_notifier *kian)
 		/* in this case, we had multiple outstanding pit interrupts
 		 * that we needed to inject.  Reinject
 		 */
-		queue_kthread_work(&ps->pit->worker, &ps->pit->expired);
+		kthread_queue_work(&ps->pit->worker, &ps->pit->expired);
 	ps->irq_ack = 1;
 	spin_unlock(&ps->inject_lock);
 }
@@ -344,7 +344,7 @@ static void create_pit_timer(struct kvm *kvm, u32 val, int is_period)
 
 	/* TODO The new value only affected after the retriggered */
 	hrtimer_cancel(&ps->timer);
-	flush_kthread_work(&ps->pit->expired);
+	kthread_flush_work(&ps->pit->expired);
 	ps->period = interval;
 	ps->is_periodic = is_period;
 
@@ -698,7 +698,7 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 	pid_nr = pid_vnr(pid);
 	put_pid(pid);
 
-	init_kthread_worker(&pit->worker);
+	kthread_init_worker(&pit->worker);
 	pit->worker_task = kthread_run(kthread_worker_fn, &pit->worker,
 				       "kvm-pit/%d", pid_nr);
 	if (IS_ERR(pit->worker_task)) {
@@ -707,7 +707,7 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 		kfree(pit);
 		return NULL;
 	}
-	init_kthread_work(&pit->expired, pit_do_work);
+	kthread_init_work(&pit->expired, pit_do_work);
 
 	kvm->arch.vpit = pit;
 	pit->kvm = kvm;
@@ -770,7 +770,7 @@ void kvm_free_pit(struct kvm *kvm)
 		mutex_lock(&kvm->arch.vpit->pit_state.lock);
 		timer = &kvm->arch.vpit->pit_state.timer;
 		hrtimer_cancel(timer);
-		flush_kthread_work(&kvm->arch.vpit->expired);
+		kthread_flush_work(&kvm->arch.vpit->expired);
 		kthread_stop(kvm->arch.vpit->worker_task);
 		kvm_free_irq_source_id(kvm, kvm->arch.vpit->irq_source_id);
 		mutex_unlock(&kvm->arch.vpit->pit_state.lock);

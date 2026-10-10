@@ -392,7 +392,7 @@ static int bq2471x_probe(struct i2c_client *client,
 		goto psy_err;
 	}
 
-	init_kthread_worker(&bq2471x->bq_kworker);
+	kthread_init_worker(&bq2471x->bq_kworker);
 	bq2471x->bq_kworker_task = kthread_run(kthread_worker_fn,
 				&bq2471x->bq_kworker,
 				dev_name(bq2471x->dev));
@@ -402,10 +402,10 @@ static int bq2471x_probe(struct i2c_client *client,
 		goto psy_err;
 	}
 
-	init_kthread_work(&bq2471x->bq_wdt_work, bq2471x_work_thread);
+	kthread_init_work(&bq2471x->bq_wdt_work, bq2471x_work_thread);
 	sched_setscheduler(bq2471x->bq_kworker_task,
 		SCHED_FIFO, &bq2471x_param);
-	queue_kthread_work(&bq2471x->bq_kworker, &bq2471x->bq_wdt_work);
+	kthread_queue_work(&bq2471x->bq_kworker, &bq2471x->bq_wdt_work);
 
 
 	dev_info(bq2471x->dev, "bq2471x charger registerd\n");
@@ -422,7 +422,7 @@ gpio_err:
 static int bq2471x_remove(struct i2c_client *client)
 {
 	struct bq2471x_chip *bq2471x = i2c_get_clientdata(client);
-	flush_kthread_worker(&bq2471x->bq_kworker);
+	kthread_flush_worker(&bq2471x->bq_kworker);
 	kthread_stop(bq2471x->bq_kworker_task);
 	power_supply_unregister(&bq2471x->ac);
 	gpio_free(bq2471x->gpio);

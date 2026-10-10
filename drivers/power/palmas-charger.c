@@ -839,7 +839,7 @@ static int palmas_bcharger_init(struct palmas_charger_chip *palmas_chip,
 		return ret;
 	}
 
-	init_kthread_worker(&palmas_chip->bq_kworker);
+	kthread_init_worker(&palmas_chip->bq_kworker);
 	palmas_chip->bq_kworker_task = kthread_run(kthread_worker_fn,
 			&palmas_chip->bq_kworker,
 			dev_name(palmas_chip->dev));
@@ -850,10 +850,10 @@ static int palmas_bcharger_init(struct palmas_charger_chip *palmas_chip,
 		goto scrub_chg_reg;
 	}
 
-	init_kthread_work(&palmas_chip->bq_wdt_work, palmas_work_thread);
+	kthread_init_work(&palmas_chip->bq_wdt_work, palmas_work_thread);
 	sched_setscheduler(palmas_chip->bq_kworker_task,
 			SCHED_FIFO, &palmas_param);
-	queue_kthread_work(&palmas_chip->bq_kworker, &palmas_chip->bq_wdt_work);
+	kthread_queue_work(&palmas_chip->bq_kworker, &palmas_chip->bq_wdt_work);
 
 	ret = palmas_watchdog_init(palmas_chip,
 			palmas_chip->wdt_time_sec, "PROBE");
@@ -870,7 +870,7 @@ static int palmas_bcharger_init(struct palmas_charger_chip *palmas_chip,
 	return 0;
 scrub_kthread:
 	palmas_chip->stop_thread = true;
-	flush_kthread_worker(&palmas_chip->bq_kworker);
+	kthread_flush_worker(&palmas_chip->bq_kworker);
 	kthread_stop(palmas_chip->bq_kworker_task);
 scrub_chg_reg:
 	regulator_unregister(palmas_chip->chg_rdev);
@@ -880,7 +880,7 @@ scrub_chg_reg:
 static int palmas_bcharger_deinit(struct palmas_charger_chip *palmas_chip)
 {
 	palmas_chip->stop_thread = true;
-	flush_kthread_worker(&palmas_chip->bq_kworker);
+	kthread_flush_worker(&palmas_chip->bq_kworker);
 	kthread_stop(palmas_chip->bq_kworker_task);
 	regulator_unregister(palmas_chip->chg_rdev);
 	return 0;

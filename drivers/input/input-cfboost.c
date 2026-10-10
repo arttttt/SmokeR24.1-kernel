@@ -176,12 +176,12 @@ static void cfb_input_event(struct input_handle *handle, unsigned int type,
 	trace_input_cfboost_event("event", type, code, value);
 	if ((code == BTN_TRIGGER_HAPPY14 || code == KEY_SEARCH) &&
 			time_after(jiffies, last_boost_jiffies)) {
-		queue_kthread_work(&boost_worker, &boost_hotword_work);
+		kthread_queue_work(&boost_worker, &boost_hotword_work);
 		last_boost_jiffies = jiffies;
 	} else if (jiffies < last_boost_jiffies ||
 		jiffies > last_boost_jiffies + msecs_to_jiffies(boost_time/2)) {
 
-		queue_kthread_work(&boost_worker, &boost_work);
+		kthread_queue_work(&boost_worker, &boost_work);
 		last_boost_jiffies = jiffies;
 	}
 }
