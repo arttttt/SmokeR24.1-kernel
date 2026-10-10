@@ -104,6 +104,12 @@ static struct device *cfg80211_parent_dev = NULL;
 /* g_bcm_cfg should be static. Do not change */
 static struct bcm_cfg80211 *g_bcm_cfg = NULL;
 u32 wl_dbg_level = WL_DBG_ERR;
+/* The cfg80211 and P2P logging, WL_DBG_* bits, beside dhd_msg_level: in
+ * /sys/module/bcmdhd/parameters, so that P2P and scan problems can be
+ * looked at on a running device. The debugfs file meant for it only comes
+ * with DEBUGFS_CFG80211, which this build does not define.
+ */
+module_param(wl_dbg_level, uint, 0644);
 
 extern int op_mode;
 
