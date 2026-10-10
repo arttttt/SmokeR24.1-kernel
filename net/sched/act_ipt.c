@@ -273,7 +273,7 @@ static struct tc_action_ops act_ipt_ops = {
 
 static struct tc_action_ops act_xt_ops = {
 	.kind		=	"xt",
-	.type		=	10,
+	.type		=	TCA_ACT_XT,
 	.owner		=	THIS_MODULE,
 	.act		=	tcf_ipt,
 	.dump		=	tcf_ipt_dump,
