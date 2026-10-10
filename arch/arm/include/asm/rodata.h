@@ -16,8 +16,12 @@
 
 #ifdef CONFIG_DEBUG_RODATA
 
-int set_memory_rw(unsigned long virt, int numpages);
-int set_memory_ro(unsigned long virt, int numpages);
+/*
+ * Write-protecting the kernel's own text: unlike set_memory_*(), which
+ * only touch the module and vmalloc areas, these walk any kernel page.
+ */
+int rodata_set_memory_rw(unsigned long virt, int numpages);
+int rodata_set_memory_ro(unsigned long virt, int numpages);
 
 void mark_rodata_ro(void);
 void set_kernel_text_rw(void);
