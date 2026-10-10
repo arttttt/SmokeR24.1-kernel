@@ -14815,6 +14815,15 @@ s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len,
 	} else if (wl_get_drv_status(cfg, AP_CREATED, net)) {
 		ndev = net;
 		bssidx = 0;
+	} else if (net->ieee80211_ptr &&
+		net->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
+		/* hostapd sends its WPS/P2P IEs for an AP interface it has not
+		 * started yet. Not a P2P matter: taken for one, it started P2P
+		 * discovery, which the firmware refuses while the AP holds the
+		 * one further BSS (p2p_disc answers BCME_BUSY). The IEs reach the
+		 * firmware with the AP, as they do for AP_CREATING above.
+		 */
+		goto exit;
 	} else if (cfg->p2p) {
 		net = ndev_to_wlc_ndev(net, cfg);
 		if (!cfg->p2p->on) {
@@ -14827,6 +14836,10 @@ s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len,
 			ret = wl_cfgp2p_enable_discovery(cfg, net, NULL, 0);
 
 			if (unlikely(ret)) {
+				/* P2P is not on: left set, the paths that turn it on
+				 * when it is off would not.
+				 */
+				p2p_on(cfg) = false;
 				goto exit;
 			}
 		}
