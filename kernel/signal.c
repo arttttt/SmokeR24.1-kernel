@@ -2979,7 +2979,9 @@ static int copy_siginfo_from_user_any(siginfo_t *kinfo, siginfo_t __user *info)
 		return copy_siginfo_from_user32(
 			kinfo, (struct compat_siginfo __user *)info);
 #endif
-	return copy_from_user(kinfo, info, sizeof(siginfo_t));
+	if (copy_from_user(kinfo, info, sizeof(siginfo_t)))
+		return -EFAULT;
+	return 0;
 }
 
 /**
