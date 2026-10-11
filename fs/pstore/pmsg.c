@@ -15,7 +15,7 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
-#include <linux/vmalloc.h>
+#include <linux/slab.h>
 #include "internal.h"
 
 static DEFINE_MUTEX(pmsg_lock);
@@ -36,7 +36,14 @@ static ssize_t write_pmsg(struct file *file, const char __user *buf,
 	buffer_size = count;
 	if (buffer_size > PMSG_MAX_BOUNCE_BUFFER_SIZE)
 		buffer_size = PMSG_MAX_BOUNCE_BUFFER_SIZE;
-	buffer = vmalloc(buffer_size);
+	/*
+	 * At most two pages, so kmalloc: every log line of every process comes
+	 * through here, and a vmalloc each time was a trip through the global
+	 * vmap tree for each of them.
+	 */
+	buffer = kmalloc(buffer_size, GFP_KERNEL);
+	if (!buffer)
+		return -ENOMEM;
 
 	mutex_lock(&pmsg_lock);
 	for (i = 0; i < count; ) {
@@ -47,7 +54,7 @@ static ssize_t write_pmsg(struct file *file, const char __user *buf,
 		ret = __copy_from_user(buffer, buf + i, c);
 		if (unlikely(ret != 0)) {
 			mutex_unlock(&pmsg_lock);
-			vfree(buffer);
+			kfree(buffer);
 			return -EFAULT;
 		}
 		psinfo->write_buf(PSTORE_TYPE_PMSG, 0, &id, 0, buffer, c,
@@ -57,7 +64,7 @@ static ssize_t write_pmsg(struct file *file, const char __user *buf,
 	}
 
 	mutex_unlock(&pmsg_lock);
-	vfree(buffer);
+	kfree(buffer);
 	return count;
 }
 
