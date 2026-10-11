@@ -372,12 +372,54 @@ void nvmap_handle_put(struct nvmap_handle *h)
 		_nvmap_handle_free(h);
 }
 
+/*
+ * sg_alloc_table_from_pages(), read straight from the handle's own page
+ * array: the low bits of its entries carry nvmap's flags, and copying the
+ * array to strip them meant a vmalloc for every buffer above a few MB --
+ * paid in the display's flip each time a buffer is first shown.
+ */
+static int nvmap_sg_alloc_table_from_handle_pages(struct sg_table *sgt,
+		struct page **pg_pages, unsigned int n_pages,
+		unsigned long size)
+{
+	unsigned int chunks = 1;
+	unsigned int i, cur_page = 0;
+	struct scatterlist *s;
+	int ret;
+
+	for (i = 1; i < n_pages; ++i)
+		if (page_to_pfn(nvmap_to_page(pg_pages[i])) !=
+		    page_to_pfn(nvmap_to_page(pg_pages[i - 1])) + 1)
+			++chunks;
+
+	ret = sg_alloc_table(sgt, chunks, GFP_KERNEL);
+	if (unlikely(ret))
+		return ret;
+
+	for_each_sg(sgt->sgl, s, sgt->orig_nents, i) {
+		unsigned long chunk_size;
+		unsigned int j;
+
+		for (j = cur_page + 1; j < n_pages; ++j)
+			if (page_to_pfn(nvmap_to_page(pg_pages[j])) !=
+			    page_to_pfn(nvmap_to_page(pg_pages[j - 1])) + 1)
+				break;
+
+		chunk_size = (j - cur_page) << PAGE_SHIFT;
+		sg_set_page(s, nvmap_to_page(pg_pages[cur_page]),
+			    min(size, chunk_size), 0);
+		size -= chunk_size;
+		cur_page = j;
+	}
+
+	return 0;
+}
+
 struct sg_table *__nvmap_sg_table(struct nvmap_client *client,
 		struct nvmap_handle *h)
 {
 	struct sg_table *sgt = NULL;
 	int err, npages;
-	struct page **pages;
 
 	if (!virt_addr_valid(h))
 		return ERR_PTR(-EINVAL);
@@ -404,14 +446,8 @@ struct sg_table *__nvmap_sg_table(struct nvmap_client *client,
 			goto err;
 		sg_set_buf(sgt->sgl, phys_to_virt(handle_phys(h)), h->size);
 	} else {
-		pages = nvmap_pages(h->pgalloc.pages, npages);
-		if (!pages) {
-			err = -ENOMEM;
-			goto err;
-		}
-		err = sg_alloc_table_from_pages(sgt, pages,
-				npages, 0, h->size, GFP_KERNEL);
-		nvmap_altfree(pages, npages * sizeof(*pages));
+		err = nvmap_sg_alloc_table_from_handle_pages(sgt,
+				h->pgalloc.pages, npages, h->size);
 		if (err)
 			goto err;
 	}
