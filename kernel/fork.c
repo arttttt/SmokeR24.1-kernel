@@ -1200,13 +1200,12 @@ static int pidfd_release(struct inode *inode, struct file *file)
 }
 
 #ifdef CONFIG_PROC_FS
-static void pidfd_show_fdinfo(struct seq_file *m, struct file *f)
+static int pidfd_show_fdinfo(struct seq_file *m, struct file *f)
 {
 	struct pid_namespace *ns = file_inode(m->file)->i_sb->s_fs_info;
 	struct pid *pid = f->private_data;
 
-	seq_put_decimal_ull(m, "Pid:\t", pid_nr_ns(pid, ns));
-	seq_putc(m, '\n');
+	return seq_printf(m, "Pid:\t%d\n", pid_nr_ns(pid, ns));
 }
 #endif
 
