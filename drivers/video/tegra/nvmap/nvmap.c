@@ -205,6 +205,22 @@ void *__nvmap_kmap(struct nvmap_handle *h, unsigned int pagenum)
 	if (pagenum >= h->size >> PAGE_SHIFT)
 		goto out;
 	prot = nvmap_pgprot(h, PG_PROT_KERNEL);
+
+	/*
+	 * A page that has a struct page goes through vm_map_ram(): its
+	 * per-cpu blocks hand out one-page mappings without a trip through
+	 * the global vmap tree, which host1x's relocation patching otherwise
+	 * takes once per page of every submit.
+	 */
+	if (h->heap_pgalloc) {
+		struct page *page = nvmap_to_page(h->pgalloc.pages[pagenum]);
+		void *mem = vm_map_ram(&page, 1, -1, prot);
+
+		if (!mem)
+			goto out;
+		return mem;
+	}
+
 	area = alloc_vm_area(PAGE_SIZE, NULL);
 	if (!area)
 		goto out;
@@ -249,11 +265,15 @@ void __nvmap_kunmap(struct nvmap_handle *h, unsigned int pagenum,
 		outer_flush_range(paddr, paddr + PAGE_SIZE); /* FIXME */
 	}
 
-	area = find_vm_area(addr);
-	if (area)
-		free_vm_area(area);
-	else
-		WARN(1, "Invalid address passed");
+	if (h->heap_pgalloc) {
+		vm_unmap_ram(addr, 1);
+	} else {
+		area = find_vm_area(addr);
+		if (area)
+			free_vm_area(area);
+		else
+			WARN(1, "Invalid address passed");
+	}
 	nvmap_kmaps_dec(h);
 	nvmap_handle_put(h);
 }
