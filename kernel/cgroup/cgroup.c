@@ -5539,8 +5539,6 @@ static struct cgroup *cgroup_create(struct cgroup *parent)
 	 */
 	cgroup_idr_replace(&root->cgroup_idr, cgrp, cgrp->id);
 
-	trace_cgroup_mkdir(cgrp);
-
 	/*
 	 * On the default hierarchy, a child doesn't automatically inherit
 	 * subtree_control from the parent.  Each is configured manually.
