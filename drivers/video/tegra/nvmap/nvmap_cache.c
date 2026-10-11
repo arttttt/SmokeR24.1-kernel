@@ -115,11 +115,19 @@ per_page_cache_maint:
 		paddr = page_to_phys(page) + off;
 
 		if (inner) {
-			kaddr = kmap(page);
+			/*
+			 * The maintenance does not sleep, so the page goes
+			 * through this cpu's own atomic slot: kmap() of a
+			 * highmem page took the global kmap lock for every
+			 * page, and flushed the TLB whenever the pkmap slots
+			 * wrapped, for every page of a buffer an app hands
+			 * over each frame.
+			 */
+			kaddr = kmap_atomic(page);
 			vaddr = (void *)kaddr + off;
 			BUG_ON(!kaddr);
 			inner_cache_maint(op, vaddr, size);
-			kunmap(page);
+			kunmap_atomic(kaddr);
 		}
 
 		if (outer)
