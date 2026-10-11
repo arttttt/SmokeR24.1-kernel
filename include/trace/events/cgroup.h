@@ -59,15 +59,25 @@ DECLARE_EVENT_CLASS(cgroup,
 	TP_STRUCT__entry(
 		__field(	int,		root			)
 		__field(	int,		id			)
+		__field(	int,		level			)
+		__dynamic_array(char,		path,
+				cgrp->kn ? cgroup_path(cgrp, NULL, 0) + 1
+					 : strlen("(null)"))
 	),
 
 	TP_fast_assign(
 		__entry->root = cgrp->root->hierarchy_id;
 		__entry->id = cgrp->id;
+		__entry->level = cgrp->level;
+		if (cgrp->kn)
+			cgroup_path(cgrp, __get_dynamic_array(path),
+				    __get_dynamic_array_len(path));
+		else
+			__assign_str(path, "(null)");
 	),
 
-	TP_printk("root=%d id=%d",
-		  __entry->root, __entry->id)
+	TP_printk("root=%d id=%d level=%d path=%s",
+		  __entry->root, __entry->id, __entry->level, __get_str(path))
 );
 
 DEFINE_EVENT(cgroup, cgroup_mkdir,
@@ -107,6 +117,10 @@ DECLARE_EVENT_CLASS(cgroup_migrate,
 	TP_STRUCT__entry(
 		__field(	int,		dst_root		)
 		__field(	int,		dst_id			)
+		__field(	int,		dst_level		)
+		__dynamic_array(char,		dst_path,
+				dst_cgrp->kn ? cgroup_path(dst_cgrp, NULL, 0) + 1
+					     : strlen("(null)"))
 		__field(	int,		pid			)
 		__string(	comm,		task->comm		)
 	),
@@ -114,13 +128,19 @@ DECLARE_EVENT_CLASS(cgroup_migrate,
 	TP_fast_assign(
 		__entry->dst_root = dst_cgrp->root->hierarchy_id;
 		__entry->dst_id = dst_cgrp->id;
+		__entry->dst_level = dst_cgrp->level;
+		if (dst_cgrp->kn)
+			cgroup_path(dst_cgrp, __get_dynamic_array(dst_path),
+				    __get_dynamic_array_len(dst_path));
+		else
+			__assign_str(dst_path, "(null)");
 		__entry->pid = task->pid;
 		__assign_str(comm, task->comm);
 	),
 
-	TP_printk("dst_root=%d dst_id=%d  pid=%d comm=%s",
-		  __entry->dst_root, __entry->dst_id,
-		  __entry->pid, __get_str(comm))
+	TP_printk("dst_root=%d dst_id=%d dst_level=%d dst_path=%s pid=%d comm=%s",
+		  __entry->dst_root, __entry->dst_id, __entry->dst_level,
+		  __get_str(dst_path), __entry->pid, __get_str(comm))
 );
 
 DEFINE_EVENT(cgroup_migrate, cgroup_attach_task,
