@@ -80,6 +80,14 @@ static bool cpufreq_all_freq_init;
 static DEFINE_PER_CPU(struct all_cpufreq_stats *, all_cpufreq_stats);
 static DEFINE_PER_CPU(struct cpufreq_stats *, cpufreq_stats_table);
 static DEFINE_PER_CPU(struct cpufreq_power_stats *, cpufreq_power_stats);
+/*
+ * Whether the device tree has been asked for a cpu's power table. A cpu
+ * node without a "current" property leaves the stats NULL, and without
+ * this they were built and thrown away again on every policy notification
+ * -- two allocations and a walk of the whole tree under devtree_lock each
+ * time a minimum frequency was asked for.
+ */
+static DEFINE_PER_CPU(bool, cpufreq_power_stats_tried);
 
 struct cpufreq_stats_attribute {
 	struct attribute attr;
@@ -601,6 +609,7 @@ static void cpufreq_powerstats_free(void)
 	sysfs_remove_file(cpufreq_global_kobject, &_attr_current_in_state.attr);
 
 	for_each_possible_cpu(cpu) {
+		per_cpu(cpufreq_power_stats_tried, cpu) = false;
 		powerstats = per_cpu(cpufreq_power_stats, cpu);
 		if (!powerstats)
 			continue;
@@ -740,6 +749,7 @@ static void cpufreq_powerstats_create(unsigned int cpu,
 		}
 	}
 	per_cpu(cpufreq_power_stats, cpu) = powerstats;
+	per_cpu(cpufreq_power_stats_tried, cpu) = true;
 	spin_unlock(&cpufreq_stats_lock);
 }
 
@@ -886,7 +896,8 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 		cpufreq_allstats_create(cpu, table, count);
 
 	for_each_possible_cpu(cpu_num) {
-		if (!per_cpu(cpufreq_power_stats, cpu_num))
+		if (!per_cpu(cpufreq_power_stats, cpu_num) &&
+		    !per_cpu(cpufreq_power_stats_tried, cpu_num))
 			cpufreq_powerstats_create(cpu_num, table, count);
 	}
 
@@ -979,7 +990,8 @@ static int cpufreq_stats_create_table_cpu(unsigned int cpu)
 		cpufreq_allstats_create(cpu, table, count);
 
 	for_each_possible_cpu(cpu_num) {
-		if (!per_cpu(cpufreq_power_stats, cpu_num))
+		if (!per_cpu(cpufreq_power_stats, cpu_num) &&
+		    !per_cpu(cpufreq_power_stats_tried, cpu_num))
 			cpufreq_powerstats_create(cpu_num, table, count);
 	}
 
