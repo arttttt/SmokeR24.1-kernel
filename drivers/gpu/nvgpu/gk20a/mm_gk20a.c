@@ -708,8 +708,15 @@ int map_gmmu_pages(struct gk20a_mm_entry *entry)
 				 sg_phys(entry->sgt->sgl),
 				 entry->size);
 	} else {
+		/*
+		 * The tables are mapped only around each update, so the
+		 * mapping is short-lived: vm_map_ram() gives the small ones
+		 * (the directory, big-page tables) a per-cpu block instead of
+		 * a trip through the global vmap tree on every GPU map and
+		 * unmap.
+		 */
 		pages = entry->pages;
-		entry->cpu_va = vmap(pages, count, 0,
+		entry->cpu_va = vm_map_ram(pages, count, -1,
 				     pgprot_dmacoherent(PAGE_KERNEL));
 		if (!entry->cpu_va)
 			return -ENOMEM;
@@ -732,7 +739,8 @@ void unmap_gmmu_pages(struct gk20a_mm_entry *entry)
 				 sg_phys(entry->sgt->sgl),
 				 entry->size);
 	} else {
-		vunmap(entry->cpu_va);
+		vm_unmap_ram(entry->cpu_va,
+			     PAGE_ALIGN(entry->size) >> PAGE_SHIFT);
 		entry->cpu_va = NULL;
 	}
 }
