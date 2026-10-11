@@ -47,15 +47,17 @@ void *kmap_atomic(struct page *page)
 	if (!PageHighMem(page))
 		return page_address(page);
 
-#ifdef CONFIG_DEBUG_HIGHMEM
 	/*
-	 * There is no cache coherency issue when non VIVT, so force the
-	 * dedicated kmap usage for better debugging purposes in that case.
+	 * There is no cache coherency issue when non VIVT, so the dedicated
+	 * per-cpu slot is used and kmap_high_get() is not asked. It takes the
+	 * global kmap_lock with interrupts off, and every atomic mapping of a
+	 * highmem page went through it: nvmap's page zeroing thread, file
+	 * reads and page faults all contended there with the graphics
+	 * drivers' cache maintenance.
 	 */
 	if (!cache_is_vivt())
 		kmap = NULL;
 	else
-#endif
 		kmap = kmap_high_get(page);
 	if (kmap)
 		return kmap;
