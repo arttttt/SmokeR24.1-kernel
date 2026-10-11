@@ -2044,9 +2044,6 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (!(ts_status = tpacket_get_timestamp(skb, &ts, po->tp_tstamp)))
 		getnstimeofday(&ts);
 
-	if (!(ts_status = tpacket_get_timestamp(skb, &ts, po->tp_tstamp)))
-		getnstimeofday(&ts);
-
 	status |= ts_status;
 
 	switch (po->tp_version) {
