@@ -44,6 +44,8 @@
 #include "kind_gk20a.h"
 #include "semaphore_gk20a.h"
 
+#include "../../../../arch/arm/mach-tegra/board.h"
+
 /*
  * GPU mapping life cycle
  * ======================
@@ -1140,6 +1142,22 @@ struct buffer_attrs {
 	bool ctag_user_mappable;
 };
 
+/* Whether a buffer lies in the composer's carveout zone. The display and
+ * the merge engine read the zone, and neither reads compressed memory, so
+ * a GPU drawing there is mapped in its kind's uncompressed twin: the
+ * layout they scan, without the compression laid over it. Nothing outside
+ * the zone is touched. */
+static bool gk20a_in_composer_zone(struct sg_table *sgt)
+{
+	phys_addr_t p;
+
+	if (!tegra_composer_carveout_size || !sgt || !sgt->sgl)
+		return false;
+	p = sg_phys(sgt->sgl);
+	return p >= tegra_composer_carveout_start &&
+	       p < tegra_composer_carveout_start + tegra_composer_carveout_size;
+}
+
 static void gmmu_select_page_size(struct vm_gk20a *vm,
 				  struct buffer_attrs *bfr)
 {
@@ -1191,6 +1209,12 @@ static int setup_buffer_kind_and_compression(struct vm_gk20a *vm,
 		" but pagesize being used doesn't support it");*/
 		/* it is safe to fall back to uncompressed as
 		   functionality is not harmed */
+		bfr->kind_v = bfr->uc_kind_v;
+		kind_compressible = false;
+	}
+	/* The same fallback for the composer's zone, whatever the page size:
+	 * see gk20a_in_composer_zone. */
+	if (kind_compressible && gk20a_in_composer_zone(bfr->sgt)) {
 		bfr->kind_v = bfr->uc_kind_v;
 		kind_compressible = false;
 	}
