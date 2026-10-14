@@ -240,12 +240,20 @@
 		 * table back instead of building another. The composer zone
 		 * the merge writes into is reached through the display's
 		 * linear map, which covers it. Everything else VIC ever touched
-		 * in the common space it maps for itself, as before. */
+		 * in the common space it maps for itself, as before.
+		 *
+		 * The GPU joins them, for the same reason: the composer zone is
+		 * handed out at its own address, which only this space maps, so
+		 * in the GPU's own space its writes there faulted ("csw_gpuswr:
+		 * EMEM decode error", the memory controller dropping them) and
+		 * its drawing never reached the zone. Here it reaches the zone,
+		 * and a buffer the GPU drew is already mapped when the display
+		 * scans it or the merge reads it. The space takes the GPU's
+		 * alignment, which its large pages are chosen by. */
 		domains = <
 			&ppcs_as TEGRA_SWGROUP_CELLS(PPCS)
 			&ppcs_as TEGRA_SWGROUP_CELLS(PPCS1)
-			&gpu_as TEGRA_SWGROUP_CELLS(GPUB)
-			&dc_as TEGRA_SWGROUP_CELLS3(DC, DC12, VIC)
+			&dc_as TEGRA_SWGROUP_CELLS4(DC, DC12, VIC, GPUB)
 			&dc_as TEGRA_SWGROUP_CELLS(DCB)
 			&common_as TEGRA_SWGROUP_CELLS(AFI)
 			&common_as TEGRA_SWGROUP_CELLS(SDMMC1A)
@@ -270,6 +278,7 @@
 			dc_as: dc {
 				iova-start = <0x0 0x00010000>;
 				iova-size = <0x0 0xFFFEFFFF>;
+				alignment = <0x20000>;
 				num-pf-page = <0>;
 				gap-page = <0>;
 			};
