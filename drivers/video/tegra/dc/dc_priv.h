@@ -108,6 +108,14 @@ static inline void tegra_dc_writel(struct tegra_dc *dc, unsigned long val,
 	writel(val, dc->base + reg * 4);
 }
 
+/* The hardware may have lost the window registers (power down, reset) or
+ * be about to be reprogrammed from scratch: the next run of window writes
+ * writes them all. Under dc->lock. */
+static inline void tegra_dc_forget_win_regs(struct tegra_dc *dc)
+{
+	memset(dc->win_regs, 0, sizeof(dc->win_regs));
+}
+
 static inline void tegra_dc_power_on(struct tegra_dc *dc)
 {
 	tegra_dc_writel(dc, PW0_ENABLE | PW1_ENABLE | PW2_ENABLE | PW3_ENABLE |
@@ -397,12 +405,14 @@ static inline void tegra_disp_clk_disable_unprepare(struct clk *clk)
 #if !defined(CONFIG_ARCH_TEGRA_2x_SOC) && !defined(CONFIG_ARCH_TEGRA_3x_SOC)
 static inline void tegra_dc_powergate_locked(struct tegra_dc *dc)
 {
+	tegra_dc_forget_win_regs(dc);
 	tegra_powergate_partition(dc->powergate_id);
 }
 
 static inline void tegra_dc_unpowergate_locked(struct tegra_dc *dc)
 {
 	int ret;
+	tegra_dc_forget_win_regs(dc);
 	ret = tegra_unpowergate_partition(dc->powergate_id);
 	if (ret < 0)
 		dev_err(&dc->ndev->dev, "%s: could not unpowergate %d\n",
