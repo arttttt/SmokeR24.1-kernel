@@ -49,28 +49,15 @@ module_param_named(use_dynamic_emc, use_dynamic_emc, int, S_IRUGO | S_IWUSR);
 static unsigned int tegra_dcs_total_bw[TEGRA_MAX_DC] = {0};
 DEFINE_MUTEX(tegra_dcs_total_bw_lock);
 
-/* What each window's latency allowance was last set to, and with what.
- * Setting it again to the same numbers rewrites the same memory controller
- * registers, nine of the PTSA ones among them, after two mutexes: the flip
- * thread did that for every window twice a flip, and the numbers seldom
- * differ. The key is everything the result depends on; the PTSA totals of
- * both heads are part of the params. Forgotten with the display's
- * bandwidth, so the first setting after it is always written. */
-struct tegra_dc_la_memo {
-	bool valid;
-	unsigned long emc_freq_hz;
-	unsigned long bw_mbps;
-	struct dc_to_la_params params;
-};
-static struct tegra_dc_la_memo la_memo[TEGRA_MAX_DC][DC_N_WINDOWS];
-static DEFINE_MUTEX(la_memo_lock);
+/* The floor handed to emc_la_clk is remembered in dc->la_floor_hz; the lock
+ * keeps its forgetting (clear_bandwidth) apart from its setting. */
+static DEFINE_MUTEX(la_floor_lock);
 
 static void tegra_dc_forget_la(struct tegra_dc *dc)
 {
-	mutex_lock(&la_memo_lock);
-	memset(la_memo[dc->ctrl_num], 0, sizeof(la_memo[0]));
+	mutex_lock(&la_floor_lock);
 	dc->la_floor_hz = ~0UL;
-	mutex_unlock(&la_memo_lock);
+	mutex_unlock(&la_floor_lock);
 }
 #else
 static inline void tegra_dc_forget_la(struct tegra_dc *dc)
@@ -603,7 +590,6 @@ static int tegra_dc_handle_latency_allowance(struct tegra_dc *dc,
 	!defined(CONFIG_ARCH_TEGRA_14x_SOC)
 	struct clk *emc_clk = NULL;
 	unsigned long emc_freq_hz = 0;
-	struct tegra_dc_la_memo *memo;
 #endif
 
 
@@ -652,24 +638,11 @@ static int tegra_dc_handle_latency_allowance(struct tegra_dc *dc,
 			return err;
 		}
 
-		mutex_lock(&la_memo_lock);
-		memo = &la_memo[dc->ctrl_num][w->idx];
-		if (memo->valid && memo->emc_freq_hz == emc_freq_hz &&
-		    memo->bw_mbps == bw &&
-		    !memcmp(&memo->params, &disp_params, sizeof(disp_params))) {
-			err = 0;
-		} else {
-			err = tegra_set_disp_latency_allowance(
-				la_id_tab[dc->ndev->id][w->idx],
-				emc_freq_hz, bw, disp_params);
-			memo->valid = !err;
-			if (!err) {
-				memo->emc_freq_hz = emc_freq_hz;
-				memo->bw_mbps = bw;
-				memo->params = disp_params;
-			}
-		}
-		mutex_unlock(&la_memo_lock);
+		/* Written again only if the window's own register differs:
+		 * see t12x_handle_disp_la(). */
+		err = tegra_set_disp_latency_allowance(
+			la_id_tab[dc->ndev->id][w->idx],
+			emc_freq_hz, bw, disp_params);
 
 		if (!err) {
 			/* Remembered, not applied: the floor under the memory
@@ -949,10 +922,10 @@ static void tegra_dc_set_la_floor(struct tegra_dc *dc, bool use_new)
 
 	/* clk_set_rate has no shortcut for the rate it already has: it takes
 	 * the clock lock and recomputes the shared bus every time. */
-	mutex_lock(&la_memo_lock);
+	mutex_lock(&la_floor_lock);
 	if (floor != dc->la_floor_hz && !clk_set_rate(dc->emc_la_clk, floor))
 		dc->la_floor_hz = floor;
-	mutex_unlock(&la_memo_lock);
+	mutex_unlock(&la_floor_lock);
 }
 #else
 static inline void tegra_dc_set_la_floor(struct tegra_dc *dc, bool use_new)
