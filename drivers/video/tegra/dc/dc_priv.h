@@ -82,8 +82,8 @@ static inline unsigned long tegra_dc_readl(struct tegra_dc *dc,
 		BUG_ON(!nvhost_module_powered_ext(dc->ndev));
 		if (WARN(!tegra_is_clk_enabled(dc->clk),
 			"DC is clock-gated.\n") ||
-			WARN(!tegra_powergate_is_powered(
-			dc->powergate_id), "DC is power-gated.\n"))
+			(!dc->power_checked && WARN(!tegra_powergate_is_powered(
+			dc->powergate_id), "DC is power-gated.\n")))
 			return 0;
 	}
 
@@ -99,8 +99,8 @@ static inline void tegra_dc_writel(struct tegra_dc *dc, unsigned long val,
 		BUG_ON(!nvhost_module_powered_ext(dc->ndev));
 		if (WARN(!tegra_is_clk_enabled(dc->clk),
 			"DC is clock-gated.\n") ||
-			WARN(!tegra_powergate_is_powered(
-			dc->powergate_id), "DC is power-gated.\n"))
+			(!dc->power_checked && WARN(!tegra_powergate_is_powered(
+			dc->powergate_id), "DC is power-gated.\n")))
 			return;
 	}
 

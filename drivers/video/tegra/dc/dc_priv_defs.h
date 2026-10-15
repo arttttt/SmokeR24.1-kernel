@@ -178,6 +178,9 @@ struct tegra_dc {
 	/* The floor last handed to emc_la_clk: set again only when it
 	 * changes. 0 is what probe sets; ~0 makes the next set go through. */
 	unsigned long			la_floor_hz;
+	/* Set under dc->lock around a run of register writes whose power
+	 * state was checked once at its head; see tegra_dc_update_windows. */
+	bool				power_checked;
 	long				bw_kbps; /* bandwidth in KBps */
 	long				new_bw_kbps;
 	struct tegra_dc_shift_clk_div	shift_clk_div;
