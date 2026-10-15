@@ -175,6 +175,9 @@ struct tegra_dc {
 	struct clk			*emc_clk;
 #endif
 	struct clk			*emc_la_clk;
+	/* The floor last handed to emc_la_clk: set again only when it
+	 * changes. 0 is what probe sets; ~0 makes the next set go through. */
+	unsigned long			la_floor_hz;
 	long				bw_kbps; /* bandwidth in KBps */
 	long				new_bw_kbps;
 	struct tegra_dc_shift_clk_div	shift_clk_div;
