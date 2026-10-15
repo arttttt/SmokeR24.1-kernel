@@ -3056,6 +3056,22 @@ void tegra_dc_incr_syncpt_min(struct tegra_dc *dc, int i, u32 val)
 	unsigned long flags;
 
 	BUG_ON(!win);
+
+	/* Most often already true. The end-of-frame interrupt raises the
+	 * counter of a window it has just seen latch
+	 * (tegra_dc_incr_syncpt_min_irq), and the flip worker gets here after
+	 * that. With nothing left to raise, there is no register to write, and
+	 * no reason to take the controller's lock or to hold its clock and
+	 * power for the space of a comparison. Taking them for every window
+	 * of every flip cost the flip thread more than anything it does after
+	 * the latch. */
+	spin_lock_irqsave(&dc->syncpt_lock, flags);
+	if (win->syncpt.min >= val) {
+		spin_unlock_irqrestore(&dc->syncpt_lock, flags);
+		return;
+	}
+	spin_unlock_irqrestore(&dc->syncpt_lock, flags);
+
 	mutex_lock(&dc->lock);
 
 	tegra_dc_get(dc);
