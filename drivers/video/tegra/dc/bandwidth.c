@@ -534,6 +534,28 @@ static void tegra_dc_process_bandwidth_renegotiate(struct tegra_dc *dc,
 }
 #endif
 
+#if !defined(CONFIG_ARCH_TEGRA_2x_SOC) && \
+	!defined(CONFIG_ARCH_TEGRA_3x_SOC) && \
+	!defined(CONFIG_ARCH_TEGRA_11x_SOC) && \
+	!defined(CONFIG_ARCH_TEGRA_14x_SOC)
+/* The root memory clock, looked up once. clk_get_sys walks the whole clock
+ * list comparing names, and the latency allowance asked it twice a window
+ * on every flip for the same clock: the largest single cost of the flip
+ * thread. Kept only once found, so a failed lookup is tried again. */
+static struct clk *tegra_dc_root_emc_clk(void)
+{
+	static struct clk *root_emc;
+	struct clk *c = ACCESS_ONCE(root_emc);
+
+	if (likely(c))
+		return c;
+	c = clk_get_sys("tegra_emc", "emc");
+	if (!IS_ERR_OR_NULL(c))
+		ACCESS_ONCE(root_emc) = c;
+	return c;
+}
+#endif
+
 /* uses the larger of w->bandwidth or w->new_bandwidth */
 static int tegra_dc_handle_latency_allowance(struct tegra_dc *dc,
 	struct tegra_dc_win *w, int set_la)
@@ -582,7 +604,7 @@ static int tegra_dc_handle_latency_allowance(struct tegra_dc *dc,
 	!defined(CONFIG_ARCH_TEGRA_11x_SOC) && \
 	!defined(CONFIG_ARCH_TEGRA_14x_SOC)
 	/* use clk_round_rate on root emc clock instead to get correct rate */
-	emc_clk = clk_get_sys("tegra_emc", "emc");
+	emc_clk = tegra_dc_root_emc_clk();
 	emc_freq_hz = set_la ?
 		tegra_emc_bw_to_freq_req(bw * 1000000) : UINT_MAX;
 	emc_freq_hz = clk_round_rate(emc_clk, emc_freq_hz);
