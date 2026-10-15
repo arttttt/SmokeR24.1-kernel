@@ -1191,6 +1191,15 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n,
 	}
 
 	tegra_dc_io_start(dc);
+	/* The partition's power is read from the PMC once for the whole run
+	 * of window writes rather than at each of the hundreds of them: it
+	 * cannot change under dc->lock, which powergating takes too. Found
+	 * off, nothing is marked, and every write checks and refuses as
+	 * before. */
+	if (!tegra_platform_is_silicon() ||
+	    !WARN(!tegra_powergate_is_powered(dc->powergate_id),
+		  "DC is power-gated.\n"))
+		dc->power_checked = true;
 	if (dc->out_ops && dc->out_ops->hold)
 		dc->out_ops->hold(dc);
 
@@ -1210,6 +1219,7 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n,
 	 * tegra_dc_put() called at frame end, for one shot.
 	 * out_ops->release called in tegra_dc_sync_windows.
 	 */
+	dc->power_checked = false;
 	tegra_dc_io_end(dc);
 
 	BUG_ON(e);
