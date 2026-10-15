@@ -294,6 +294,38 @@ static unsigned int total_dc0_bw;
 static unsigned int total_dc1_bw;
 DEFINE_MUTEX(disp_and_camera_ptsa_lock);
 
+/* What the display and camera paths last wrote to the PTSA registers they
+ * share (RING1 with both, DIS/DISB the display's, VE/VE2/ISP the camera's),
+ * and written again only when the value differs. Most of them are constants
+ * of the calculation and the three display rates move one step per ~30-60
+ * MB/s of display bandwidth, yet nine of them were written on every call,
+ * eight or ten calls a flip. Nobody else writes these registers (the memory
+ * clock tables carry GRANT_DECREMENT and MPCORER only). Under
+ * disp_and_camera_ptsa_lock; forgotten wherever program_ptsa() writes
+ * everything afresh. */
+enum t12x_ptsa_slot {
+	PSL_RING1_MIN, PSL_RING1_MAX, PSL_RING1_RATE,
+	PSL_DIS_MIN, PSL_DIS_MAX, PSL_DIS_RATE,
+	PSL_DISB_MIN, PSL_DISB_MAX, PSL_DISB_RATE,
+	PSL_VE_MIN, PSL_VE_MAX, PSL_VE_RATE,
+	PSL_VE2_MIN, PSL_VE2_MAX, PSL_VE2_RATE,
+	PSL_ISP_MIN, PSL_ISP_MAX, PSL_ISP_RATE,
+	PSL_N
+};
+static u32 ptsa_written[PSL_N];
+static u32 ptsa_known;
+
+#define T12X_PTSA_WRITE(slot, val, reg)					\
+	do {								\
+		u32 __v = (val);					\
+		if (!(ptsa_known & BIT(PSL_##slot)) ||			\
+		    ptsa_written[PSL_##slot] != __v) {			\
+			writel(__v, T12X_MC_RA(reg));			\
+			ptsa_written[PSL_##slot] = __v;			\
+			ptsa_known |= BIT(PSL_##slot);			\
+		}							\
+	} while (0)
+
 
 unsigned int tegra12x_la_real_to_fp(unsigned int val)
 {
@@ -308,6 +340,9 @@ unsigned int tegra12x_la_fp_to_real(unsigned int val)
 static void program_ptsa(void)
 {
 	struct ptsa_info *p = &cs->ptsa_info;
+
+	/* Everything is written afresh below (boot, resume from LP0). */
+	ptsa_known = 0;
 
 	writel(p->ptsa_grant_dec, T12X_MC_RA(PTSA_GRANT_DECREMENT_0));
 	writel(1, T12X_MC_RA(TIMING_CONTROL_0));
@@ -867,17 +902,17 @@ static void t12x_update_display_ptsa_rate(unsigned int *disp_bw_array)
 
 	t12x_calc_disp_and_camera_ptsa();
 
-	writel(p->ring1_ptsa_min, T12X_MC_RA(RING1_PTSA_MIN_0));
-	writel(p->ring1_ptsa_max, T12X_MC_RA(RING1_PTSA_MAX_0));
-	writel(p->ring1_ptsa_rate, T12X_MC_RA(RING1_PTSA_RATE_0));
+	T12X_PTSA_WRITE(RING1_MIN, p->ring1_ptsa_min, RING1_PTSA_MIN_0);
+	T12X_PTSA_WRITE(RING1_MAX, p->ring1_ptsa_max, RING1_PTSA_MAX_0);
+	T12X_PTSA_WRITE(RING1_RATE, p->ring1_ptsa_rate, RING1_PTSA_RATE_0);
 
-	writel(p->dis_ptsa_min, T12X_MC_RA(DIS_PTSA_MIN_0));
-	writel(p->dis_ptsa_max, T12X_MC_RA(DIS_PTSA_MAX_0));
-	writel(p->dis_ptsa_rate, T12X_MC_RA(DIS_PTSA_RATE_0));
+	T12X_PTSA_WRITE(DIS_MIN, p->dis_ptsa_min, DIS_PTSA_MIN_0);
+	T12X_PTSA_WRITE(DIS_MAX, p->dis_ptsa_max, DIS_PTSA_MAX_0);
+	T12X_PTSA_WRITE(DIS_RATE, p->dis_ptsa_rate, DIS_PTSA_RATE_0);
 
-	writel(p->disb_ptsa_min, T12X_MC_RA(DISB_PTSA_MIN_0));
-	writel(p->disb_ptsa_max, T12X_MC_RA(DISB_PTSA_MAX_0));
-	writel(p->disb_ptsa_rate, T12X_MC_RA(DISB_PTSA_RATE_0));
+	T12X_PTSA_WRITE(DISB_MIN, p->disb_ptsa_min, DISB_PTSA_MIN_0);
+	T12X_PTSA_WRITE(DISB_MAX, p->disb_ptsa_max, DISB_PTSA_MAX_0);
+	T12X_PTSA_WRITE(DISB_RATE, p->disb_ptsa_rate, DISB_PTSA_RATE_0);
 }
 
 static int t12x_update_camera_ptsa_rate(enum tegra_la_id id,
@@ -931,21 +966,21 @@ static int t12x_update_camera_ptsa_rate(enum tegra_la_id id,
 	t12x_calc_disp_and_camera_ptsa();
 
 
-	writel(p->ring1_ptsa_min, T12X_MC_RA(RING1_PTSA_MIN_0));
-	writel(p->ring1_ptsa_max, T12X_MC_RA(RING1_PTSA_MAX_0));
-	writel(p->ring1_ptsa_rate, T12X_MC_RA(RING1_PTSA_RATE_0));
+	T12X_PTSA_WRITE(RING1_MIN, p->ring1_ptsa_min, RING1_PTSA_MIN_0);
+	T12X_PTSA_WRITE(RING1_MAX, p->ring1_ptsa_max, RING1_PTSA_MAX_0);
+	T12X_PTSA_WRITE(RING1_RATE, p->ring1_ptsa_rate, RING1_PTSA_RATE_0);
 
-	writel(p->ve_ptsa_min, T12X_MC_RA(VE_PTSA_MIN_0));
-	writel(p->ve_ptsa_max, T12X_MC_RA(VE_PTSA_MAX_0));
-	writel(p->ve_ptsa_rate, T12X_MC_RA(VE_PTSA_RATE_0));
+	T12X_PTSA_WRITE(VE_MIN, p->ve_ptsa_min, VE_PTSA_MIN_0);
+	T12X_PTSA_WRITE(VE_MAX, p->ve_ptsa_max, VE_PTSA_MAX_0);
+	T12X_PTSA_WRITE(VE_RATE, p->ve_ptsa_rate, VE_PTSA_RATE_0);
 
-	writel(p->ve2_ptsa_min, T12X_MC_RA(VE2_PTSA_MIN_0));
-	writel(p->ve2_ptsa_max, T12X_MC_RA(VE2_PTSA_MAX_0));
-	writel(p->ve2_ptsa_rate, T12X_MC_RA(VE2_PTSA_RATE_0));
+	T12X_PTSA_WRITE(VE2_MIN, p->ve2_ptsa_min, VE2_PTSA_MIN_0);
+	T12X_PTSA_WRITE(VE2_MAX, p->ve2_ptsa_max, VE2_PTSA_MAX_0);
+	T12X_PTSA_WRITE(VE2_RATE, p->ve2_ptsa_rate, VE2_PTSA_RATE_0);
 
-	writel(p->isp_ptsa_min, T12X_MC_RA(ISP_PTSA_MIN_0));
-	writel(p->isp_ptsa_max, T12X_MC_RA(ISP_PTSA_MAX_0));
-	writel(p->isp_ptsa_rate, T12X_MC_RA(ISP_PTSA_RATE_0));
+	T12X_PTSA_WRITE(ISP_MIN, p->isp_ptsa_min, ISP_PTSA_MIN_0);
+	T12X_PTSA_WRITE(ISP_MAX, p->isp_ptsa_max, ISP_PTSA_MAX_0);
+	T12X_PTSA_WRITE(ISP_RATE, p->isp_ptsa_rate, ISP_PTSA_RATE_0);
 
 
 exit:
@@ -1096,7 +1131,11 @@ static int t12x_handle_disp_la(enum tegra_la_id id,
 	if (la_to_set < t12x_min_la(&disp_params))
 		return -1;
 
-	if (write_la)
+	/* ci->la_set is what program_la() last put in the register (la_suspend
+	 * reads it back, la_resume writes it again); nothing else writes a
+	 * display client's. Same value, no read-modify-write, no second write
+	 * of the scaled copy. */
+	if (write_la && ci->la_set != la_to_set)
 		program_la(ci, la_to_set);
 	return 0;
 }
