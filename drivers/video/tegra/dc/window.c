@@ -379,6 +379,38 @@ static inline u32 compute_initial_dda(fixed20_12 in)
 	return dfixed_frac(in);
 }
 
+/* A window's registers are assembly copies: the CPU writes them, an
+ * UPDATE/ACT_REQ latches them onward, and they stay as written (TRM, Display
+ * Controller: double/triple buffered registers). Of the ~14 a flip writes per
+ * window, ~94% repeat what the last flip wrote. Remembered here, per window
+ * and per register, and written again only when the value differs. The
+ * remembering is skipped (and forgotten) unless the run's power and clock
+ * were checked, because tegra_dc_writel() silently refuses a write otherwise.
+ * Not behind it, on purpose: the window selector (other code changes it),
+ * WIN_OPTIONS (enable bit; lut.c and sor.c rewrite it), MEMFETCH_CONTROL (a
+ * pulse), STATE_CONTROL (the latch), blend, CSC, CDE, DV and the interlace
+ * second field. */
+static inline void __tegra_dc_win_writel(struct tegra_dc *dc,
+					 struct tegra_dc_win *win,
+					 unsigned long val, unsigned long reg,
+					 enum tegra_dc_wreg slot)
+{
+	struct tegra_dc_win_regs *r = &dc->win_regs[win->idx];
+
+	if (dc->win_regs_ok && (r->valid & BIT(slot)) &&
+	    r->val[slot] == (u32)val)
+		return;
+
+	tegra_dc_writel(dc, val, reg);
+
+	if (dc->win_regs_ok) {
+		r->val[slot] = val;
+		r->valid |= BIT(slot);
+	}
+}
+#define tegra_dc_win_writel(dc, win, val, reg) \
+	__tegra_dc_win_writel(dc, win, val, reg, WSH_##reg)
+
 static inline void tegra_dc_update_scaling(struct tegra_dc *dc,
 				struct tegra_dc_win *win, unsigned Bpp,
 				unsigned Bpp_bw, bool scan_column)
@@ -392,24 +424,24 @@ static inline void tegra_dc_update_scaling(struct tegra_dc *dc,
 		if (tegra_dc_feature_has_interlace(dc, win->idx)
 			&& (dc->mode.vmode == FB_VMODE_INTERLACED)) {
 			if (WIN_IS_INTERLACE(win))
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					V_PRESCALED_SIZE(dfixed_trunc(win->w)) |
 					H_PRESCALED_SIZE(dfixed_trunc(win->h)
 					* Bpp),
 					DC_WIN_PRESCALED_SIZE);
 			else
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					V_PRESCALED_SIZE(dfixed_trunc(win->w))
 					| H_PRESCALED_SIZE(dfixed_trunc(win->h)
 					* Bpp), DC_WIN_PRESCALED_SIZE);
 		} else {
-			tegra_dc_writel(dc,
+			tegra_dc_win_writel(dc, win,
 				V_PRESCALED_SIZE(dfixed_trunc(win->w)) |
 				H_PRESCALED_SIZE(dfixed_trunc(win->h) * Bpp),
 				DC_WIN_PRESCALED_SIZE);
 		}
-		tegra_dc_writel(dc, v_dda_init, DC_WIN_H_INITIAL_DDA);
-		tegra_dc_writel(dc, h_dda_init, DC_WIN_V_INITIAL_DDA);
+		tegra_dc_win_writel(dc, win, v_dda_init, DC_WIN_H_INITIAL_DDA);
+		tegra_dc_win_writel(dc, win, h_dda_init, DC_WIN_V_INITIAL_DDA);
 		h_dda = compute_dda_inc(win->h, win->out_w,
 				false, Bpp_bw);
 		v_dda = compute_dda_inc(win->w, win->out_h,
@@ -418,25 +450,25 @@ static inline void tegra_dc_update_scaling(struct tegra_dc *dc,
 		if (tegra_dc_feature_has_interlace(dc, win->idx)
 			&& (dc->mode.vmode == FB_VMODE_INTERLACED)) {
 			if (WIN_IS_INTERLACE(win))
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					V_PRESCALED_SIZE(dfixed_trunc(win->h)
 					>> 1) |
 					H_PRESCALED_SIZE(dfixed_trunc(win->w)
 					* Bpp), DC_WIN_PRESCALED_SIZE);
 			else
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					V_PRESCALED_SIZE(dfixed_trunc(win->h)) |
 					H_PRESCALED_SIZE(dfixed_trunc(win->w)
 					* Bpp),
 					DC_WIN_PRESCALED_SIZE);
 		} else {
-			tegra_dc_writel(dc,
+			tegra_dc_win_writel(dc, win,
 				V_PRESCALED_SIZE(dfixed_trunc(win->h)) |
 				H_PRESCALED_SIZE(dfixed_trunc(win->w) * Bpp),
 				DC_WIN_PRESCALED_SIZE);
 		}
-		tegra_dc_writel(dc, h_dda_init, DC_WIN_H_INITIAL_DDA);
-		tegra_dc_writel(dc, v_dda_init, DC_WIN_V_INITIAL_DDA);
+		tegra_dc_win_writel(dc, win, h_dda_init, DC_WIN_H_INITIAL_DDA);
+		tegra_dc_win_writel(dc, win, v_dda_init, DC_WIN_V_INITIAL_DDA);
 		h_dda = compute_dda_inc(win->w, win->out_w,
 				false, Bpp_bw);
 		v_dda = compute_dda_inc(win->h, win->out_h,
@@ -446,14 +478,14 @@ static inline void tegra_dc_update_scaling(struct tegra_dc *dc,
 	if (tegra_dc_feature_has_interlace(dc, win->idx) &&
 		(dc->mode.vmode == FB_VMODE_INTERLACED)) {
 		if (WIN_IS_INTERLACE(win))
-			tegra_dc_writel(dc, V_DDA_INC(v_dda) |
+			tegra_dc_win_writel(dc, win, V_DDA_INC(v_dda) |
 				H_DDA_INC(h_dda), DC_WIN_DDA_INCREMENT);
 		else
-			tegra_dc_writel(dc, V_DDA_INC(v_dda << 1) |
+			tegra_dc_win_writel(dc, win, V_DDA_INC(v_dda << 1) |
 				H_DDA_INC(h_dda), DC_WIN_DDA_INCREMENT);
 
 	} else {
-		tegra_dc_writel(dc, V_DDA_INC(v_dda) |
+		tegra_dc_win_writel(dc, win, V_DDA_INC(v_dda) |
 			H_DDA_INC(h_dda), DC_WIN_DDA_INCREMENT);
 	}
 }
@@ -613,6 +645,12 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 	unsigned int height;
 	u32 val;
 
+	/* The shadow of the window registers is trusted only while every
+	 * write of this run is going to reach the hardware. */
+	dc->win_regs_ok = dc->power_checked && tegra_is_clk_enabled(dc->clk);
+	if (!dc->win_regs_ok)
+		tegra_dc_forget_win_regs(dc);
+
 	if (dirty_rect) {
 		xoff = dirty_rect[0];
 		yoff = dirty_rect[1];
@@ -725,9 +763,6 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 				update_blend_par = true;
 		}
 
-		tegra_dc_writel(dc, WINDOW_A_SELECT << win->idx,
-				DC_CMD_DISPLAY_WINDOW_HEADER);
-
 		update_mask |= WIN_A_ACT_REQ << win->idx;
 
 		if (wait_for_vblank)
@@ -762,9 +797,9 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 				DC_WINBUF_CDE_CG_SW_OVR);
 		}
 #endif
-		tegra_dc_writel(dc, tegra_dc_fmt(win->fmt),
+		tegra_dc_win_writel(dc, win, tegra_dc_fmt(win->fmt),
 			DC_WIN_COLOR_DEPTH);
-		tegra_dc_writel(dc, tegra_dc_fmt_byteorder(win->fmt),
+		tegra_dc_win_writel(dc, win, tegra_dc_fmt_byteorder(win->fmt),
 			DC_WIN_BYTE_SWAP);
 
 
@@ -772,18 +807,18 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 			tegra_dc_win_partial_update(dc, win, xoff, yoff,
 				width, height);
 
-		tegra_dc_writel(dc,
+		tegra_dc_win_writel(dc, win,
 			V_POSITION(win->out_y) | H_POSITION(win->out_x),
 			DC_WIN_POSITION);
 
 		if (tegra_dc_feature_has_interlace(dc, win->idx) &&
 			(dc->mode.vmode == FB_VMODE_INTERLACED)) {
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					V_SIZE((win->out_h) >> 1) |
 					H_SIZE(win->out_w),
 					DC_WIN_SIZE);
 		} else {
-			tegra_dc_writel(dc,
+			tegra_dc_win_writel(dc, win,
 				V_SIZE(win->out_h) | H_SIZE(win->out_w),
 				DC_WIN_SIZE);
 		}
@@ -807,49 +842,49 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 
 #if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC) || \
 	defined(CONFIG_ARCH_TEGRA_11x_SOC) || defined(CONFIG_ARCH_TEGRA_14x_SOC)
-		tegra_dc_writel(dc, win->phys_addr, DC_WINBUF_START_ADDR);
+		tegra_dc_win_writel(dc, win, win->phys_addr, DC_WINBUF_START_ADDR);
 #else
-		tegra_dc_writel(dc, tegra_dc_reg_l32(win->phys_addr),
+		tegra_dc_win_writel(dc, win, tegra_dc_reg_l32(win->phys_addr),
 			DC_WINBUF_START_ADDR);
-		tegra_dc_writel(dc, tegra_dc_reg_h32(win->phys_addr),
+		tegra_dc_win_writel(dc, win, tegra_dc_reg_h32(win->phys_addr),
 			DC_WINBUF_START_ADDR_HI);
 #endif
 		if (!yuvp && !yuvsp) {
-			tegra_dc_writel(dc, win->stride, DC_WIN_LINE_STRIDE);
+			tegra_dc_win_writel(dc, win, win->stride, DC_WIN_LINE_STRIDE);
 		} else if (yuvp) {
 #if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC) || \
 	defined(CONFIG_ARCH_TEGRA_11x_SOC) || defined(CONFIG_ARCH_TEGRA_14x_SOC)
-			tegra_dc_writel(dc, win->phys_addr_u,
+			tegra_dc_win_writel(dc, win, win->phys_addr_u,
 				DC_WINBUF_START_ADDR_U);
-			tegra_dc_writel(dc, win->phys_addr_v,
+			tegra_dc_win_writel(dc, win, win->phys_addr_v,
 				DC_WINBUF_START_ADDR_V);
 #else
-			tegra_dc_writel(dc, tegra_dc_reg_l32(win->phys_addr_u),
+			tegra_dc_win_writel(dc, win, tegra_dc_reg_l32(win->phys_addr_u),
 				DC_WINBUF_START_ADDR_U);
-			tegra_dc_writel(dc, tegra_dc_reg_h32(win->phys_addr_u),
+			tegra_dc_win_writel(dc, win, tegra_dc_reg_h32(win->phys_addr_u),
 				DC_WINBUF_START_ADDR_HI_U);
-			tegra_dc_writel(dc, tegra_dc_reg_l32(win->phys_addr_v),
+			tegra_dc_win_writel(dc, win, tegra_dc_reg_l32(win->phys_addr_v),
 				DC_WINBUF_START_ADDR_V);
-			tegra_dc_writel(dc, tegra_dc_reg_h32(win->phys_addr_v),
+			tegra_dc_win_writel(dc, win, tegra_dc_reg_h32(win->phys_addr_v),
 				DC_WINBUF_START_ADDR_HI_V);
 #endif
-			tegra_dc_writel(dc,
+			tegra_dc_win_writel(dc, win,
 				LINE_STRIDE(win->stride) |
 				UV_LINE_STRIDE(win->stride_uv),
 				DC_WIN_LINE_STRIDE);
 		} else {
 #if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC) || \
 	defined(CONFIG_ARCH_TEGRA_11x_SOC) || defined(CONFIG_ARCH_TEGRA_14x_SOC)
-			tegra_dc_writel(dc, win->phys_addr_u,
+			tegra_dc_win_writel(dc, win, win->phys_addr_u,
 					DC_WINBUF_START_ADDR_U);
 #else
-			tegra_dc_writel(dc, tegra_dc_reg_l32(win->phys_addr_u),
+			tegra_dc_win_writel(dc, win, tegra_dc_reg_l32(win->phys_addr_u),
 				DC_WINBUF_START_ADDR_U);
-			tegra_dc_writel(dc, tegra_dc_reg_h32(win->phys_addr_u),
+			tegra_dc_win_writel(dc, win, tegra_dc_reg_h32(win->phys_addr_u),
 				DC_WINBUF_START_ADDR_HI_U);
 #endif
 
-			tegra_dc_writel(dc,
+			tegra_dc_win_writel(dc, win,
 					LINE_STRIDE(win->stride) |
 					UV_LINE_STRIDE(win->stride_uv),
 					DC_WIN_LINE_STRIDE);
@@ -867,9 +902,9 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 		if (invert_v)
 			v_offset.full += win->h.full - dfixed_const(1);
 
-		tegra_dc_writel(dc, dfixed_trunc(h_offset),
+		tegra_dc_win_writel(dc, win, dfixed_trunc(h_offset),
 				DC_WINBUF_ADDR_H_OFFSET);
-		tegra_dc_writel(dc, dfixed_trunc(v_offset),
+		tegra_dc_win_writel(dc, win, dfixed_trunc(v_offset),
 				DC_WINBUF_ADDR_V_OFFSET);
 
 #if defined(CONFIG_TEGRA_DC_INTERLACE)
@@ -940,12 +975,12 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 
 		if (tegra_dc_feature_has_tiling(dc, win->idx)) {
 			if (WIN_IS_TILED(win))
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					DC_WIN_BUFFER_ADDR_MODE_TILE |
 					DC_WIN_BUFFER_ADDR_MODE_TILE_UV,
 					DC_WIN_BUFFER_ADDR_MODE);
 			else
-				tegra_dc_writel(dc,
+				tegra_dc_win_writel(dc, win,
 					DC_WIN_BUFFER_ADDR_MODE_LINEAR |
 					DC_WIN_BUFFER_ADDR_MODE_LINEAR_UV,
 					DC_WIN_BUFFER_ADDR_MODE);
@@ -955,17 +990,17 @@ static int _tegra_dc_program_windows(struct tegra_dc *dc,
 		if (tegra_dc_feature_has_blocklinear(dc, win->idx) ||
 			tegra_dc_feature_has_tiling(dc, win->idx)) {
 				if (WIN_IS_BLOCKLINEAR(win)) {
-					tegra_dc_writel(dc,
+					tegra_dc_win_writel(dc, win,
 						DC_WIN_BUFFER_SURFACE_BL_16B2 |
 						(win->block_height_log2
 							<< BLOCK_HEIGHT_SHIFT),
 						DC_WIN_BUFFER_SURFACE_KIND);
 				} else if (WIN_IS_TILED(win)) {
-					tegra_dc_writel(dc,
+					tegra_dc_win_writel(dc, win,
 						DC_WIN_BUFFER_SURFACE_TILED,
 						DC_WIN_BUFFER_SURFACE_KIND);
 				} else {
-					tegra_dc_writel(dc,
+					tegra_dc_win_writel(dc, win,
 						DC_WIN_BUFFER_SURFACE_PITCH,
 						DC_WIN_BUFFER_SURFACE_KIND);
 				}
