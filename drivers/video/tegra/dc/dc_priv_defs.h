@@ -70,6 +70,35 @@ static inline u32 ALL_UF_INT(void)
 
 struct tegra_dc;
 
+/* The window registers behind the shadow, one slot each. */
+enum tegra_dc_wreg {
+	WSH_DC_WIN_COLOR_DEPTH,
+	WSH_DC_WIN_BYTE_SWAP,
+	WSH_DC_WIN_POSITION,
+	WSH_DC_WIN_SIZE,
+	WSH_DC_WIN_PRESCALED_SIZE,
+	WSH_DC_WIN_H_INITIAL_DDA,
+	WSH_DC_WIN_V_INITIAL_DDA,
+	WSH_DC_WIN_DDA_INCREMENT,
+	WSH_DC_WINBUF_START_ADDR,
+	WSH_DC_WINBUF_START_ADDR_HI,
+	WSH_DC_WINBUF_START_ADDR_U,
+	WSH_DC_WINBUF_START_ADDR_HI_U,
+	WSH_DC_WINBUF_START_ADDR_V,
+	WSH_DC_WINBUF_START_ADDR_HI_V,
+	WSH_DC_WIN_LINE_STRIDE,
+	WSH_DC_WINBUF_ADDR_H_OFFSET,
+	WSH_DC_WINBUF_ADDR_V_OFFSET,
+	WSH_DC_WIN_BUFFER_ADDR_MODE,
+	WSH_DC_WIN_BUFFER_SURFACE_KIND,
+	WSH_N
+};
+
+struct tegra_dc_win_regs {
+	u32 valid;		/* bit per enum tegra_dc_wreg */
+	u32 val[WSH_N];
+};
+
 struct tegra_dc_blend {
 	unsigned z[DC_N_WINDOWS];
 	unsigned flags[DC_N_WINDOWS];
@@ -181,6 +210,11 @@ struct tegra_dc {
 	/* Set under dc->lock around a run of register writes whose power
 	 * state was checked once at its head; see tegra_dc_update_windows. */
 	bool				power_checked;
+	/* What each window's registers were last written to: see
+	 * tegra_dc_win_writel(). Under dc->lock. */
+	struct tegra_dc_win_regs	win_regs[DC_N_WINDOWS];
+	/* The shadow may be trusted by this run of window writes. */
+	bool				win_regs_ok;
 	long				bw_kbps; /* bandwidth in KBps */
 	long				new_bw_kbps;
 	struct tegra_dc_shift_clk_div	shift_clk_div;

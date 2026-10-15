@@ -4081,6 +4081,10 @@ static void tegra_dc_underflow_handler(struct tegra_dc *dc)
 	int i;
 
 	dc->stats.underflows++;
+	/* Nothing here is known to touch the window registers; a frame that
+	 * did not make it is reason enough not to trust what the next one
+	 * would skip. Costs one full rewrite. */
+	tegra_dc_forget_win_regs(dc);
 	if (dc->underflow_mask & WIN_A_UF_INT)
 		dc->stats.underflows_a += tegra_dc_underflow_count(dc,
 			DC_WINBUF_AD_UFLOW_STATUS);
@@ -4527,6 +4531,10 @@ static int tegra_dc_init(struct tegra_dc *dc)
 	int i;
 	int int_enable;
 	u32 val;
+
+	/* Every way into a freshly powered or reset controller comes through
+	 * here: whatever the window registers held is gone. */
+	tegra_dc_forget_win_regs(dc);
 
 	tegra_dc_io_start(dc);
 	tegra_dc_writel(dc, 0x00000100, DC_CMD_GENERAL_INCR_SYNCPT_CNTRL);
@@ -4999,6 +5007,7 @@ static void _tegra_dc_controller_disable(struct tegra_dc *dc)
 		tegra_dvfs_set_rate(dc->clk, 0);
 
 	tegra_disp_clk_disable_unprepare(dc->emc_la_clk);
+	tegra_dc_forget_win_regs(dc);
 }
 
 void tegra_dc_stats_enable(struct tegra_dc *dc, bool enable)
