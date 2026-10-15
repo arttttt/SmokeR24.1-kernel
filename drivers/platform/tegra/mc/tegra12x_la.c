@@ -1068,6 +1068,7 @@ static int t12x_handle_disp_la(enum tegra_la_id id,
 	unsigned int total_buf_sz_bytes = 0;
 	int effective_mccif_buf_sz = 0;
 	unsigned int la_bw_upper_bound_nsec_fp = 0;
+	unsigned int arb_nsec_fp = 0;
 	unsigned int la_bw_upper_bound_nsec = 0;
 	unsigned int la_nsec = 0;
 
@@ -1112,11 +1113,18 @@ static int t12x_handle_disp_la(enum tegra_la_id id,
 	la_bw_upper_bound_nsec_fp = la_bw_upper_bound_nsec_fp *
 					T12X_LA_FP_FACTOR /
 					T12X_LA_DISP_CATCHUP_FACTOR_FP;
-	la_bw_upper_bound_nsec_fp =
-		la_bw_upper_bound_nsec_fp -
-		(T12X_LA_ST_LA_MINUS_SNAP_ARB_TO_ROW_SRT_EMCCLKS_FP +
-		T12X_EXP_TIME_EMCCLKS_FP) /
-		(emc_freq_hz / LA_HZ_TO_MHZ_FACTOR);
+	arb_nsec_fp = (T12X_LA_ST_LA_MINUS_SNAP_ARB_TO_ROW_SRT_EMCCLKS_FP +
+		       T12X_EXP_TIME_EMCCLKS_FP) /
+		      (emc_freq_hz / LA_HZ_TO_MHZ_FACTOR);
+	/* At a low memory clock the DVFS threshold leaves the window so
+	 * little of its buffer that the arbitration time exceeds the time
+	 * the rest lasts. The difference, unsigned, wrapped round to a huge
+	 * bound, which became the largest allowance there is: the window
+	 * that needed the memory soonest asked for it last, and the caller,
+	 * told it fitted, never tried a faster clock. It does not fit. */
+	if (la_bw_upper_bound_nsec_fp <= arb_nsec_fp)
+		return -1;
+	la_bw_upper_bound_nsec_fp -= arb_nsec_fp;
 	la_bw_upper_bound_nsec_fp *= LA_USEC_TO_NSEC_FACTOR;
 	la_bw_upper_bound_nsec = T12X_LA_FP_TO_REAL(
 					la_bw_upper_bound_nsec_fp);
