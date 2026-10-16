@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/export.h>
+#include <linux/moduleparam.h>
 #include <linux/delay.h>
 #include <mach/fb.h>
 #include <linux/fb.h>
@@ -135,6 +136,22 @@ struct tegra_dc_ext_flip_data {
 	struct tegra_dc_hdr hdr_data;
 	bool hdr_cache_dirty;
 };
+
+/* Drop a flip that a newer one is already queued behind: the newer one is
+ * shown on the next vblank instead, and the stale one never reaches the
+ * panel. Off by default.
+ *
+ * The flips of a head are worked one at a time, each waiting for its own
+ * latch. When one misses its vblank, every flip after it is a refresh late
+ * as well, for as long as the client keeps posting one a refresh: the queue
+ * stays one deep until a pause in the animation. With back-pressure in
+ * SurfaceFlinger the client drops a frame of its own to drain it; without
+ * it, nothing does. This is the last-flip-wins way the driver already has
+ * for timestamped flips, taken without the timestamps. */
+static bool skip_stale_flips;
+module_param(skip_stale_flips, bool, 0644);
+MODULE_PARM_DESC(skip_stale_flips,
+		 "drop a flip when a newer one for its windows is queued");
 
 static int tegra_dc_ext_set_vblank(struct tegra_dc_ext *ext, bool enable);
 static void tegra_dc_ext_unpin_window(struct tegra_dc_ext_win *win);
@@ -779,6 +796,22 @@ static void tegra_dc_ext_flip_worker(struct kthread_work *work)
 		dev_err(&ext->dc->ndev->dev, "Failed to allocate blank_win.\n");
 
 	BUG_ON(win_num > DC_N_WINDOWS);
+
+	/* Decided for the whole flip before any window is touched: a window
+	 * given its new attributes and then left unlatched would have the
+	 * buffer it is still scanning out unpinned below. */
+	if (skip_stale_flips) {
+		for (i = 0; i < win_num; i++) {
+			int index = data->win[i].attr.index;
+
+			if (index >= 0 && test_bit(index, &dc->valid_windows) &&
+			    atomic_read(&ext->win[index].nr_pending_flips) > 1) {
+				skip_flip = true;
+				break;
+			}
+		}
+	}
+
 	for (i = 0; i < win_num; i++) {
 		struct tegra_dc_ext_flip_win *flip_win = &data->win[i];
 		int index = flip_win->attr.index;
