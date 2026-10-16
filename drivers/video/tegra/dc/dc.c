@@ -4253,6 +4253,18 @@ int tegra_dc_config_frame_end_intr(struct tegra_dc *dc, bool enable)
 	return ret;
 }
 
+/* Whether the frame-end worker has anything to apply. Every flip unmasks
+ * the frame end, so without this the worker woke on each one only to find
+ * nothing shadowed. Each flag is set before its frame-end reference is
+ * taken: one raised after this read keeps the interrupt coming, and the
+ * next frame end queues the worker. */
+static bool tegra_dc_frame_end_pending(struct tegra_dc *dc)
+{
+	return ACCESS_ONCE(dc->cmu_shadow_dirty) ||
+		ACCESS_ONCE(dc->act_vfp_shadow_dirty) ||
+		ACCESS_ONCE(dc->hdr_cache_dirty);
+}
+
 static void tegra_dc_one_shot_irq(struct tegra_dc *dc, unsigned long status,
 		ktime_t timestamp)
 {
@@ -4278,7 +4290,8 @@ static void tegra_dc_one_shot_irq(struct tegra_dc *dc, unsigned long status,
 		if (dc->out->flags & TEGRA_DC_OUT_ONE_SHOT_MODE)
 			tegra_dc_put(dc);
 
-		queue_work(system_freezable_wq, &dc->frame_end_work);
+		if (tegra_dc_frame_end_pending(dc))
+			queue_work(system_freezable_wq, &dc->frame_end_work);
 	}
 
 #if !defined(CONFIG_ARCH_TEGRA_2x_SOC) && !defined(CONFIG_ARCH_TEGRA_3x_SOC)
@@ -4331,7 +4344,8 @@ static void tegra_dc_continuous_irq(struct tegra_dc *dc, unsigned long status,
 
 		tegra_dc_trigger_windows(dc);
 
-		queue_work(system_freezable_wq, &dc->frame_end_work);
+		if (tegra_dc_frame_end_pending(dc))
+			queue_work(system_freezable_wq, &dc->frame_end_work);
 	}
 
 #if !defined(CONFIG_ARCH_TEGRA_2x_SOC) && !defined(CONFIG_ARCH_TEGRA_3x_SOC)
