@@ -833,45 +833,53 @@ static struct vm_reserved_va_node *addr_to_reservation(struct vm_gk20a *vm,
 }
 
 int gk20a_vm_get_buffers(struct vm_gk20a *vm,
-			 struct mapped_buffer_node ***mapped_buffers,
-			 int *num_buffers)
+			 struct vm_gk20a_buffer_set **buffer_set)
 {
 	struct mapped_buffer_node *mapped_buffer;
-	struct mapped_buffer_node **buffer_list;
+	struct vm_gk20a_buffer_set *set;
 	struct rb_node *node;
 	int i = 0;
 
 	if (vm->userspace_managed) {
-		*mapped_buffers = NULL;
-		*num_buffers = 0;
+		*buffer_set = NULL;
 		return 0;
 	}
 
 	mutex_lock(&vm->update_gmmu_lock);
 
-	buffer_list = nvgpu_alloc(sizeof(*buffer_list) *
-			      vm->num_user_mapped_buffers, true);
-	if (!buffer_list) {
-		mutex_unlock(&vm->update_gmmu_lock);
-		return -ENOMEM;
-	}
-
-	node = rb_first(&vm->mapped_buffers);
-	while (node) {
-		mapped_buffer =
-			container_of(node, struct mapped_buffer_node, node);
-		if (mapped_buffer->user_mapped) {
-			buffer_list[i] = mapped_buffer;
-			kref_get(&mapped_buffer->ref);
-			i++;
+	/* the set the previous submit took serves while no user buffer has
+	 * been mapped or unmapped since */
+	set = vm->buffer_set;
+	if (!set) {
+		set = nvgpu_alloc(sizeof(*set) + sizeof(set->buffers[0]) *
+				  vm->num_user_mapped_buffers, true);
+		if (!set) {
+			mutex_unlock(&vm->update_gmmu_lock);
+			return -ENOMEM;
 		}
-		node = rb_next(&mapped_buffer->node);
+
+		node = rb_first(&vm->mapped_buffers);
+		while (node) {
+			mapped_buffer = container_of(node,
+					struct mapped_buffer_node, node);
+			if (mapped_buffer->user_mapped) {
+				set->buffers[i] = mapped_buffer;
+				kref_get(&mapped_buffer->ref);
+				i++;
+			}
+			node = rb_next(&mapped_buffer->node);
+		}
+
+		BUG_ON(i != vm->num_user_mapped_buffers);
+
+		set->num = i;
+		set->vm = vm;
+		kref_init(&set->ref);	/* the VM's */
+		vm->buffer_set = set;
 	}
 
-	BUG_ON(i != vm->num_user_mapped_buffers);
-
-	*num_buffers = vm->num_user_mapped_buffers;
-	*mapped_buffers = buffer_list;
+	kref_get(&set->ref);
+	*buffer_set = set;
 
 	mutex_unlock(&vm->update_gmmu_lock);
 
@@ -912,26 +920,48 @@ void gk20a_vm_mapping_batch_finish(struct vm_gk20a *vm,
 	mutex_unlock(&vm->update_gmmu_lock);
 }
 
-void gk20a_vm_put_buffers(struct vm_gk20a *vm,
-				 struct mapped_buffer_node **mapped_buffers,
-				 int num_buffers)
+/* update_gmmu_lock held, and with it a kref_put_batch or none */
+static void gk20a_vm_buffer_set_release(struct kref *ref)
 {
+	struct vm_gk20a_buffer_set *set =
+		container_of(ref, struct vm_gk20a_buffer_set, ref);
 	int i;
+
+	for (i = 0; i < set->num; ++i)
+		kref_put(&set->buffers[i]->ref, gk20a_vm_unmap_locked_kref);
+
+	nvgpu_free(set);
+}
+
+/* A user buffer is about to be mapped or unmapped: the next submit
+ * needs a set that says so. Jobs keep the one they hold. */
+static void gk20a_vm_drop_buffer_set_locked(struct vm_gk20a *vm)
+{
+	struct vm_gk20a_buffer_set *set = vm->buffer_set;
+
+	if (!set)
+		return;
+	vm->buffer_set = NULL;
+	kref_put(&set->ref, gk20a_vm_buffer_set_release);
+}
+
+void gk20a_vm_put_buffers(struct vm_gk20a *vm,
+			  struct vm_gk20a_buffer_set *buffer_set)
+{
 	struct vm_gk20a_mapping_batch batch;
+
+	if (!buffer_set)
+		return;
 
 	mutex_lock(&vm->update_gmmu_lock);
 	gk20a_vm_mapping_batch_start(&batch);
 	vm->kref_put_batch = &batch;
 
-	for (i = 0; i < num_buffers; ++i)
-		kref_put(&mapped_buffers[i]->ref,
-			 gk20a_vm_unmap_locked_kref);
+	kref_put(&buffer_set->ref, gk20a_vm_buffer_set_release);
 
 	vm->kref_put_batch = NULL;
 	gk20a_vm_mapping_batch_finish_locked(vm, &batch);
 	mutex_unlock(&vm->update_gmmu_lock);
-
-	nvgpu_free(mapped_buffers);
 }
 
 static void gk20a_vm_unmap_user(struct vm_gk20a *vm, u64 offset,
@@ -949,6 +979,10 @@ static void gk20a_vm_unmap_user(struct vm_gk20a *vm, u64 offset,
 		gk20a_err(d, "invalid addr to unmap 0x%llx", offset);
 		return;
 	}
+
+	/* before the wait below: a set held only for the next submit would
+	 * keep the count up for good */
+	gk20a_vm_drop_buffer_set_locked(vm);
 
 	if (mapped_buffer->flags & NVGPU_AS_MAP_BUFFER_FLAGS_FIXED_OFFSET) {
 		mutex_unlock(&vm->update_gmmu_lock);
@@ -1424,8 +1458,10 @@ static u64 gk20a_vm_map_duplicate_locked(struct vm_gk20a *vm,
 
 	/* mark the buffer as used */
 	if (user_mapped) {
-		if (mapped_buffer->user_mapped == 0)
+		if (mapped_buffer->user_mapped == 0) {
+			gk20a_vm_drop_buffer_set_locked(vm);
 			vm->num_user_mapped_buffers++;
+		}
 		mapped_buffer->user_mapped++;
 
 		/* If the mapping comes from user space, we own
@@ -1781,8 +1817,10 @@ u64 gk20a_vm_map(struct vm_gk20a *vm,
 		goto clean_up;
 	}
 	inserted = true;
-	if (user_mapped)
+	if (user_mapped) {
+		gk20a_vm_drop_buffer_set_locked(vm);
 		vm->num_user_mapped_buffers++;
+	}
 
 	gk20a_dbg_info("allocated va @ 0x%llx", map_offset);
 
@@ -2749,6 +2787,8 @@ static void gk20a_vm_remove_support_nofree(struct vm_gk20a *vm)
 
 	/* TBD: add a flag here for the unmap code to recognize teardown
 	 * and short-circuit any otherwise expensive operations. */
+
+	gk20a_vm_drop_buffer_set_locked(vm);
 
 	node = rb_first(&vm->mapped_buffers);
 	while (node) {

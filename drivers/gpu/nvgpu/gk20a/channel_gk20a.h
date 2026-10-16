@@ -68,8 +68,7 @@ struct channel_ctx_gk20a {
 };
 
 struct channel_gk20a_job {
-	struct mapped_buffer_node **mapped_buffers;
-	int num_mapped_buffers;
+	struct vm_gk20a_buffer_set *buffer_set;
 	struct gk20a_fence *pre_fence;
 	struct gk20a_fence *post_fence;
 	struct priv_cmd_entry *wait_cmd;
