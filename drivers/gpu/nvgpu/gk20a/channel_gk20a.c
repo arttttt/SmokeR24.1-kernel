@@ -1550,19 +1550,18 @@ static int gk20a_channel_add_job(struct channel_gk20a *c,
 {
 	struct vm_gk20a *vm = c->vm;
 	struct channel_gk20a_job *job = NULL;
-	struct mapped_buffer_node **mapped_buffers = NULL;
-	int err = 0, num_mapped_buffers = 0;
+	struct vm_gk20a_buffer_set *buffer_set = NULL;
+	int err = 0;
 
 	if (!skip_buffer_refcounting) {
-		err = gk20a_vm_get_buffers(vm, &mapped_buffers,
-					&num_mapped_buffers);
+		err = gk20a_vm_get_buffers(vm, &buffer_set);
 		if (err)
 			return err;
 	}
 
 	job = kzalloc(sizeof(*job), GFP_KERNEL);
 	if (!job) {
-		gk20a_vm_put_buffers(vm, mapped_buffers, num_mapped_buffers);
+		gk20a_vm_put_buffers(vm, buffer_set);
 		return -ENOMEM;
 	}
 
@@ -1570,8 +1569,7 @@ static int gk20a_channel_add_job(struct channel_gk20a *c,
 	c = gk20a_channel_get(c);
 
 	if (c) {
-		job->num_mapped_buffers = num_mapped_buffers;
-		job->mapped_buffers = mapped_buffers;
+		job->buffer_set = buffer_set;
 		job->pre_fence = gk20a_fence_get(pre_fence);
 		job->post_fence = gk20a_fence_get(post_fence);
 		job->wait_cmd = wait_cmd;
@@ -1640,9 +1638,7 @@ static void gk20a_channel_clean_up_jobs(struct work_struct *work)
 		}
 		mutex_unlock(&c->sync_lock);
 
-		if (job->num_mapped_buffers)
-			gk20a_vm_put_buffers(vm, job->mapped_buffers,
-				job->num_mapped_buffers);
+		gk20a_vm_put_buffers(vm, job->buffer_set);
 
 		/* Close the fences (this will unref the semaphores and release
 		 * them to the pool). */
