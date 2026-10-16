@@ -230,6 +230,16 @@ struct vm_gk20a_mapping_batch
 	bool need_tlb_invalidate;
 };
 
+/* The user-mapped buffers of a VM at one moment, each held once. A job
+ * holds the set it was submitted with, so that none of its buffers is
+ * unmapped while the GPU may still use it. */
+struct vm_gk20a_buffer_set {
+	struct kref ref;
+	struct vm_gk20a *vm;
+	int num;
+	struct mapped_buffer_node *buffers[0];
+};
+
 struct vm_gk20a {
 	struct mm_gk20a *mm;
 	struct gk20a_as_share *as_share; /* as_share this represents */
@@ -268,6 +278,10 @@ struct vm_gk20a {
 	/* if non-NULL, kref_put will use this batch when
 	   unmapping. Must hold vm->update_gmmu_lock. */
 	struct vm_gk20a_mapping_batch *kref_put_batch;
+
+	/* the set the next submit is given, until a user buffer is mapped
+	 * or unmapped; under update_gmmu_lock */
+	struct vm_gk20a_buffer_set *buffer_set;
 };
 
 struct gk20a;
@@ -547,13 +561,11 @@ void gk20a_vm_unmap_locked(struct mapped_buffer_node *mapped_buffer,
 
 /* get reference to all currently mapped buffers */
 int gk20a_vm_get_buffers(struct vm_gk20a *vm,
-			 struct mapped_buffer_node ***mapped_buffers,
-			 int *num_buffers);
+			 struct vm_gk20a_buffer_set **buffer_set);
 
 /* put references on the given buffers */
 void gk20a_vm_put_buffers(struct vm_gk20a *vm,
-			  struct mapped_buffer_node **mapped_buffers,
-			  int num_buffers);
+			  struct vm_gk20a_buffer_set *buffer_set);
 
 /* invalidate tlbs for the vm area */
 void gk20a_mm_tlb_invalidate(struct vm_gk20a *vm);
