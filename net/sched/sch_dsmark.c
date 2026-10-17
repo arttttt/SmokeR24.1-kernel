@@ -202,7 +202,7 @@ static int dsmark_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	pr_debug("dsmark_enqueue(skb %p,sch %p,[qdisc %p])\n", skb, sch, p);
 
 	if (p->set_tc_index) {
-		switch (skb->protocol) {
+		switch (tc_skb_protocol(skb)) {
 		case htons(ETH_P_IP):
 			if (skb_cow_head(skb, sizeof(struct iphdr)))
 				goto drop;
@@ -229,7 +229,7 @@ static int dsmark_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	else {
 		struct tcf_result res;
 		struct tcf_proto *fl = rcu_dereference_bh(p->filter_list);
-		int result = tc_classify(skb, fl, &res);
+		int result = tc_classify(skb, fl, &res, false);
 
 		pr_debug("result %d class 0x%04x\n", result, res.classid);
 
@@ -257,7 +257,7 @@ static int dsmark_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	err = qdisc_enqueue(skb, p->q);
 	if (err != NET_XMIT_SUCCESS) {
 		if (net_xmit_drop_count(err))
-			sch->qstats.drops++;
+			qdisc_qstats_drop(sch);
 		return err;
 	}
 
@@ -288,7 +288,7 @@ static struct sk_buff *dsmark_dequeue(struct Qdisc *sch)
 	index = skb->tc_index & (p->indices - 1);
 	pr_debug("index %d->%d\n", skb->tc_index, index);
 
-	switch (skb->protocol) {
+	switch (tc_skb_protocol(skb)) {
 	case htons(ETH_P_IP):
 		ipv4_change_dsfield(ip_hdr(skb), p->mask[index],
 				    p->value[index]);
@@ -305,7 +305,7 @@ static struct sk_buff *dsmark_dequeue(struct Qdisc *sch)
 		 */
 		if (p->mask[index] != 0xff || p->value[index])
 			pr_warning("dsmark_dequeue: unsupported protocol %d\n",
-				   ntohs(skb->protocol));
+				   ntohs(tc_skb_protocol(skb)));
 		break;
 	}
 

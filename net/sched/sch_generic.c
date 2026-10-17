@@ -363,6 +363,7 @@ struct Qdisc noop_qdisc = {
 	.q.lock		=	__SPIN_LOCK_UNLOCKED(noop_qdisc.q.lock),
 	.dev_queue	=	&noop_netdev_queue,
 	.busylock	=	__SPIN_LOCK_UNLOCKED(noop_qdisc.busylock),
+	.owner = -1,
 };
 EXPORT_SYMBOL(noop_qdisc);
 
@@ -556,18 +557,35 @@ struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 	INIT_LIST_HEAD(&sch->list);
 	skb_queue_head_init(&sch->q);
 
+	if (ops->static_flags & TCQ_F_CPUSTATS) {
+		sch->cpu_bstats =
+			netdev_alloc_pcpu_stats(struct gnet_stats_basic_cpu);
+		if (!sch->cpu_bstats)
+			goto errout1;
+
+		sch->cpu_qstats = alloc_percpu(struct gnet_stats_queue);
+		if (!sch->cpu_qstats) {
+			free_percpu(sch->cpu_bstats);
+			goto errout1;
+		}
+	}
+
 	spin_lock_init(&sch->busylock);
 	lockdep_set_class(&sch->busylock,
 			  dev->qdisc_tx_busylock ?: &qdisc_tx_busylock);
 
 	sch->ops = ops;
+	sch->flags = ops->static_flags;
 	sch->enqueue = ops->enqueue;
 	sch->dequeue = ops->dequeue;
 	sch->dev_queue = dev_queue;
+	sch->owner = -1;
 	dev_hold(dev);
 	atomic_set(&sch->refcnt, 1);
 
 	return sch;
+errout1:
+	kfree(p);
 errout:
 	return ERR_PTR(err);
 }
@@ -615,6 +633,11 @@ EXPORT_SYMBOL(qdisc_reset);
 static void qdisc_rcu_free(struct rcu_head *head)
 {
 	struct Qdisc *qdisc = container_of(head, struct Qdisc, rcu_head);
+
+	if (qdisc_is_percpu_stats(qdisc)) {
+		free_percpu(qdisc->cpu_bstats);
+		free_percpu(qdisc->cpu_qstats);
+	}
 
 	kfree((char *) qdisc - qdisc->padded);
 }
@@ -773,7 +796,7 @@ static void dev_deactivate_queue(struct net_device *dev,
 	struct Qdisc *qdisc_default = _qdisc_default;
 	struct Qdisc *qdisc;
 
-	qdisc = dev_queue->qdisc;
+	qdisc = rtnl_dereference(dev_queue->qdisc);
 	if (qdisc) {
 		spin_lock_bh(qdisc_lock(qdisc));
 
@@ -866,7 +889,7 @@ static void dev_init_scheduler_queue(struct net_device *dev,
 {
 	struct Qdisc *qdisc = _qdisc;
 
-	dev_queue->qdisc = qdisc;
+	rcu_assign_pointer(dev_queue->qdisc, qdisc);
 	dev_queue->qdisc_sleeping = qdisc;
 }
 

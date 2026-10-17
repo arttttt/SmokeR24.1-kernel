@@ -606,7 +606,8 @@ void sock_update_memcg(struct sock *sk)
 		memcg = mem_cgroup_from_task(current);
 		cg_proto = sk->sk_prot->proto_cgroup(memcg);
 		if (!mem_cgroup_is_root(memcg) &&
-		    memcg_proto_active(cg_proto) && css_tryget(&memcg->css)) {
+		    memcg_proto_active(cg_proto) &&
+		    css_tryget_online(&memcg->css)) {
 			sk->sk_cgrp = cg_proto;
 		}
 		rcu_read_unlock();
@@ -1786,7 +1787,7 @@ static void mem_cgroup_out_of_memory(struct mem_cgroup *memcg, gfp_t gfp_mask,
 		struct css_task_iter it;
 		struct task_struct *task;
 
-		css_task_iter_start(&iter->css, &it);
+		css_task_iter_start(&iter->css, 0, &it);
 		while ((task = css_task_iter_next(&it))) {
 			switch (oom_scan_process_thread(task, totalpages, NULL,
 							false)) {
@@ -1937,9 +1938,7 @@ int mem_cgroup_select_victim_node(struct mem_cgroup *memcg)
 	mem_cgroup_may_update_nodemask(memcg);
 	node = memcg->last_scanned_node;
 
-	node = next_node(node, memcg->scan_nodes);
-	if (node == MAX_NUMNODES)
-		node = first_node(memcg->scan_nodes);
+	node = next_node_in(node, memcg->scan_nodes);
 	/*
 	 * We call this when we hit limit, not when pages are added to LRU.
 	 * No LRU may hold pages because all pages are UNEVICTABLE or
@@ -4354,8 +4353,8 @@ void mem_cgroup_uncharge_swap(swp_entry_t ent)
 	memcg = mem_cgroup_lookup(id);
 	if (memcg) {
 		/*
-		 * We uncharge this because swap is freed.
-		 * This memcg can be obsolete one. We avoid calling css_tryget
+		 * We uncharge this because swap is freed.  This memcg can
+		 * be obsolete one. We avoid calling css_tryget_online().
 		 */
 		if (!mem_cgroup_is_root(memcg))
 			res_counter_uncharge(&memcg->memsw, PAGE_SIZE);
@@ -5923,10 +5922,10 @@ static void kmem_cgroup_css_offline(struct mem_cgroup *memcg)
 	 * which is then paired with css_put during uncharge resp. here.
 	 *
 	 * Although this might sound strange as this path is called from
-	 * css_offline() when the referencemight have dropped down to 0
-	 * and shouldn't be incremented anymore (css_tryget would fail)
-	 * we do not have other options because of the kmem allocations
-	 * lifetime.
+	 * css_offline() when the referencemight have dropped down to 0 and
+	 * shouldn't be incremented anymore (css_tryget_online() would
+	 * fail) we do not have other options because of the kmem
+	 * allocations lifetime.
 	 */
 	css_get(&memcg->css);
 
@@ -7186,7 +7185,7 @@ static void mem_cgroup_bind(struct cgroup_subsys_state *root_css)
 	 * guarantees that @root doesn't have any children, so turning it
 	 * on for the root memcg is enough.
 	 */
-	if (cgroup_on_dfl(root_css->cgroup))
+	if (cgroup_subsys_on_dfl(memory_cgrp_subsys))
 		mem_cgroup_from_css(root_css)->use_hierarchy = true;
 }
 

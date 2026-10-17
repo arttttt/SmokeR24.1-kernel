@@ -890,7 +890,7 @@ static __always_inline bool perf_raw_frag_last(const struct perf_raw_frag *frag)
 #define perf_output_put(handle, x) perf_output_copy((handle), &(x), sizeof(x))
 
 /*
- * This has to have a higher priority than migration_notifier in sched.c.
+ * This has to have a higher priority than migration_notifier in sched/core.c.
  */
 #define perf_cpu_notifier(fn)						\
 do {									\

@@ -52,89 +52,155 @@ DEFINE_EVENT(cgroup_root, cgroup_remount,
 
 DECLARE_EVENT_CLASS(cgroup,
 
-	TP_PROTO(struct cgroup *cgrp),
+	TP_PROTO(struct cgroup *cgrp, const char *path),
 
-	TP_ARGS(cgrp),
+	TP_ARGS(cgrp, path),
 
 	TP_STRUCT__entry(
 		__field(	int,		root			)
 		__field(	int,		id			)
+		__field(	int,		level			)
+		__string(	path,		path			)
 	),
 
 	TP_fast_assign(
 		__entry->root = cgrp->root->hierarchy_id;
 		__entry->id = cgrp->id;
+		__entry->level = cgrp->level;
+		__assign_str(path, path);
 	),
 
-	TP_printk("root=%d id=%d",
-		  __entry->root, __entry->id)
+	TP_printk("root=%d id=%d level=%d path=%s",
+		  __entry->root, __entry->id, __entry->level, __get_str(path))
 );
 
 DEFINE_EVENT(cgroup, cgroup_mkdir,
 
-	TP_PROTO(struct cgroup *cgroup),
+	TP_PROTO(struct cgroup *cgrp, const char *path),
 
-	TP_ARGS(cgroup)
+	TP_ARGS(cgrp, path)
 );
 
 DEFINE_EVENT(cgroup, cgroup_rmdir,
 
-	TP_PROTO(struct cgroup *cgroup),
+	TP_PROTO(struct cgroup *cgrp, const char *path),
 
-	TP_ARGS(cgroup)
+	TP_ARGS(cgrp, path)
 );
 
 DEFINE_EVENT(cgroup, cgroup_release,
 
-	TP_PROTO(struct cgroup *cgroup),
+	TP_PROTO(struct cgroup *cgrp, const char *path),
 
-	TP_ARGS(cgroup)
+	TP_ARGS(cgrp, path)
 );
 
 DEFINE_EVENT(cgroup, cgroup_rename,
 
-	TP_PROTO(struct cgroup *cgroup),
+	TP_PROTO(struct cgroup *cgrp, const char *path),
 
-	TP_ARGS(cgroup)
+	TP_ARGS(cgrp, path)
+);
+
+DEFINE_EVENT(cgroup, cgroup_freeze,
+
+	TP_PROTO(struct cgroup *cgrp, const char *path),
+
+	TP_ARGS(cgrp, path)
+);
+
+DEFINE_EVENT(cgroup, cgroup_unfreeze,
+
+	TP_PROTO(struct cgroup *cgrp, const char *path),
+
+	TP_ARGS(cgrp, path)
 );
 
 DECLARE_EVENT_CLASS(cgroup_migrate,
 
-	TP_PROTO(struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup),
+	TP_PROTO(struct cgroup *dst_cgrp, const char *path,
+		 struct task_struct *task, bool threadgroup),
 
-	TP_ARGS(dst_cgrp, task, threadgroup),
+	TP_ARGS(dst_cgrp, path, task, threadgroup),
 
 	TP_STRUCT__entry(
 		__field(	int,		dst_root		)
 		__field(	int,		dst_id			)
+		__field(	int,		dst_level		)
 		__field(	int,		pid			)
+		__string(	dst_path,	path			)
 		__string(	comm,		task->comm		)
 	),
 
 	TP_fast_assign(
 		__entry->dst_root = dst_cgrp->root->hierarchy_id;
 		__entry->dst_id = dst_cgrp->id;
+		__entry->dst_level = dst_cgrp->level;
+		__assign_str(dst_path, path);
 		__entry->pid = task->pid;
 		__assign_str(comm, task->comm);
 	),
 
-	TP_printk("dst_root=%d dst_id=%d  pid=%d comm=%s",
-		  __entry->dst_root, __entry->dst_id,
-		  __entry->pid, __get_str(comm))
+	TP_printk("dst_root=%d dst_id=%d dst_level=%d dst_path=%s pid=%d comm=%s",
+		  __entry->dst_root, __entry->dst_id, __entry->dst_level,
+		  __get_str(dst_path), __entry->pid, __get_str(comm))
 );
 
 DEFINE_EVENT(cgroup_migrate, cgroup_attach_task,
 
-	TP_PROTO(struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup),
+	TP_PROTO(struct cgroup *dst_cgrp, const char *path,
+		 struct task_struct *task, bool threadgroup),
 
-	TP_ARGS(dst_cgrp, task, threadgroup)
+	TP_ARGS(dst_cgrp, path, task, threadgroup)
 );
 
 DEFINE_EVENT(cgroup_migrate, cgroup_transfer_tasks,
 
-	TP_PROTO(struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup),
+	TP_PROTO(struct cgroup *dst_cgrp, const char *path,
+		 struct task_struct *task, bool threadgroup),
 
-	TP_ARGS(dst_cgrp, task, threadgroup)
+	TP_ARGS(dst_cgrp, path, task, threadgroup)
+);
+
+DECLARE_EVENT_CLASS(cgroup_event,
+
+	TP_PROTO(struct cgroup *cgrp, const char *path, int val),
+
+	TP_ARGS(cgrp, path, val),
+
+	TP_STRUCT__entry(
+		__field(	int,		root			)
+		__field(	int,		id			)
+		__field(	int,		level			)
+		__string(	path,		path			)
+		__field(	int,		val			)
+	),
+
+	TP_fast_assign(
+		__entry->root = cgrp->root->hierarchy_id;
+		__entry->id = cgrp->id;
+		__entry->level = cgrp->level;
+		__assign_str(path, path);
+		__entry->val = val;
+	),
+
+	TP_printk("root=%d id=%d level=%d path=%s val=%d",
+		  __entry->root, __entry->id, __entry->level, __get_str(path),
+		  __entry->val)
+);
+
+DEFINE_EVENT(cgroup_event, cgroup_notify_populated,
+
+	TP_PROTO(struct cgroup *cgrp, const char *path, int val),
+
+	TP_ARGS(cgrp, path, val)
+);
+
+DEFINE_EVENT(cgroup_event, cgroup_notify_frozen,
+
+	TP_PROTO(struct cgroup *cgrp, const char *path, int val),
+
+	TP_ARGS(cgrp, path, val)
 );
 
 #endif /* _TRACE_CGROUP_H */

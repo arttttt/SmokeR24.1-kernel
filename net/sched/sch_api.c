@@ -923,7 +923,10 @@ qdisc_create(struct net_device *dev, struct netdev_queue *dev_queue,
 	sch->parent = parent;
 
 	if (handle == TC_H_INGRESS) {
-		sch->flags |= TCQ_F_INGRESS;
+		if (!(sch->flags & TCQ_F_INGRESS)) {
+			err = -EINVAL;
+			goto err_out3;
+		}
 		handle = TC_H_MAKE(TC_H_INGRESS, 0);
 		lockdep_set_class(qdisc_lock(sch), &qdisc_rx_lock);
 	} else {
@@ -963,8 +966,11 @@ qdisc_create(struct net_device *dev, struct netdev_queue *dev_queue,
 			else
 				root_lock = qdisc_lock(sch);
 
-			err = gen_new_estimator(&sch->bstats, &sch->rate_est,
-						root_lock, tca[TCA_RATE]);
+			err = gen_new_estimator(&sch->bstats,
+						sch->cpu_bstats,
+						&sch->rate_est,
+						root_lock,
+						tca[TCA_RATE]);
 			if (err)
 				goto err_out4;
 		}
@@ -975,6 +981,8 @@ qdisc_create(struct net_device *dev, struct netdev_queue *dev_queue,
 	}
 err_out3:
 	dev_put(dev);
+	free_percpu(sch->cpu_bstats);
+	free_percpu(sch->cpu_qstats);
 	kfree((char *) sch - sch->padded);
 err_out2:
 	module_put(ops->owner);
@@ -1021,9 +1029,11 @@ static int qdisc_change(struct Qdisc *sch, struct nlattr **tca)
 		   because change can't be undone. */
 		if (sch->flags & TCQ_F_MQROOT)
 			goto out;
-		gen_replace_estimator(&sch->bstats, &sch->rate_est,
-					    qdisc_root_sleeping_lock(sch),
-					    tca[TCA_RATE]);
+		gen_replace_estimator(&sch->bstats,
+				      sch->cpu_bstats,
+				      &sch->rate_est,
+				      qdisc_root_sleeping_lock(sch),
+				      tca[TCA_RATE]);
 	}
 out:
 	return 0;
@@ -1199,6 +1209,8 @@ replay:
 					return -EEXIST;
 				if (tca[TCA_KIND] && nla_strcmp(tca[TCA_KIND], q->ops->id))
 					return -EINVAL;
+				if (q->flags & TCQ_F_INGRESS)
+					return -EINVAL;
 				if (q == p ||
 				    (p && check_loop(q, p, 0)))
 					return -ELOOP;
@@ -1297,11 +1309,14 @@ graft:
 static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 			 u32 portid, u32 seq, u16 flags, int event)
 {
+	struct gnet_stats_basic_cpu __percpu *cpu_bstats = NULL;
+	struct gnet_stats_queue __percpu *cpu_qstats = NULL;
 	struct tcmsg *tcm;
 	struct nlmsghdr  *nlh;
 	unsigned char *b = skb_tail_pointer(skb);
 	struct gnet_dump d;
 	struct qdisc_size_table *stab;
+	__u32 qlen;
 
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*tcm), flags);
 	if (!nlh)
@@ -1318,7 +1333,7 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 		goto nla_put_failure;
 	if (q->ops->dump && q->ops->dump(q, skb) < 0)
 		goto nla_put_failure;
-	q->qstats.qlen = q->q.qlen;
+	qlen = q->q.qlen;
 
 	stab = rtnl_dereference(q->stab);
 	if (stab && qdisc_dump_stab(skb, stab) < 0)
@@ -1331,9 +1346,14 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 	if (q->ops->dump_stats && q->ops->dump_stats(q, &d) < 0)
 		goto nla_put_failure;
 
-	if (gnet_stats_copy_basic(&d, &q->bstats) < 0 ||
+	if (qdisc_is_percpu_stats(q)) {
+		cpu_bstats = q->cpu_bstats;
+		cpu_qstats = q->cpu_qstats;
+	}
+
+	if (gnet_stats_copy_basic(&d, cpu_bstats, &q->bstats) < 0 ||
 	    gnet_stats_copy_rate_est(&d, &q->bstats, &q->rate_est) < 0 ||
-	    gnet_stats_copy_queue(&d, &q->qstats) < 0)
+	    gnet_stats_copy_queue(&d, cpu_qstats, &q->qstats, qlen) < 0)
 		goto nla_put_failure;
 
 	if (gnet_stats_finish_copy(&d) < 0)
@@ -1772,57 +1792,46 @@ done:
  * to this qdisc, (optionally) tests for protocol and asks
  * specific classifiers.
  */
-int tc_classify_compat(struct sk_buff *skb, const struct tcf_proto *tp,
-		       struct tcf_result *res)
+int tc_classify(struct sk_buff *skb, const struct tcf_proto *tp,
+		struct tcf_result *res, bool compat_mode)
 {
-	__be16 protocol = skb->protocol;
-	int err;
+	__be16 protocol = tc_skb_protocol(skb);
+#ifdef CONFIG_NET_CLS_ACT
+	const struct tcf_proto *old_tp = tp;
+	int limit = 0;
 
+reclassify:
+#endif
 	for (; tp; tp = rcu_dereference_bh(tp->next)) {
+		int err;
+
 		if (tp->protocol != protocol &&
 		    tp->protocol != htons(ETH_P_ALL))
 			continue;
+
 		err = tp->classify(skb, tp, res);
-
-		if (err >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
-			if (err != TC_ACT_RECLASSIFY && skb->tc_verd)
-				skb->tc_verd = SET_TC_VERD(skb->tc_verd, 0);
+		if (unlikely(err == TC_ACT_RECLASSIFY && !compat_mode))
+			goto reset;
 #endif
+		if (err >= 0)
 			return err;
-		}
 	}
+
 	return -1;
-}
-EXPORT_SYMBOL(tc_classify_compat);
-
-int tc_classify(struct sk_buff *skb, const struct tcf_proto *tp,
-		struct tcf_result *res)
-{
-	int err = 0;
 #ifdef CONFIG_NET_CLS_ACT
-	const struct tcf_proto *otp = tp;
-reclassify:
-#endif
-
-	err = tc_classify_compat(skb, tp, res);
-#ifdef CONFIG_NET_CLS_ACT
-	if (err == TC_ACT_RECLASSIFY) {
-		u32 verd = G_TC_VERD(skb->tc_verd);
-		tp = otp;
-
-		if (verd++ >= MAX_REC_LOOP) {
-			net_notice_ratelimited("%s: packet reclassify loop rule prio %u protocol %02x\n",
-					       tp->q->ops->id,
-					       tp->prio & 0xffff,
-					       ntohs(tp->protocol));
-			return TC_ACT_SHOT;
-		}
-		skb->tc_verd = SET_TC_VERD(skb->tc_verd, verd);
-		goto reclassify;
+reset:
+	if (unlikely(limit++ >= MAX_REC_LOOP)) {
+		net_notice_ratelimited("%s: reclassify loop, rule prio %u, protocol %02x\n",
+				       tp->q->ops->id, tp->prio & 0xffff,
+				       ntohs(tp->protocol));
+		return TC_ACT_SHOT;
 	}
+
+	tp = old_tp;
+	protocol = tc_skb_protocol(skb);
+	goto reclassify;
 #endif
-	return err;
 }
 EXPORT_SYMBOL(tc_classify);
 

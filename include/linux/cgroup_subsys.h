@@ -36,7 +36,7 @@ SUBSYS(devices)
 SUBSYS(freezer)
 #endif
 
-#if IS_ENABLED(CONFIG_NET_CLS_CGROUP)
+#if IS_ENABLED(CONFIG_CGROUP_NET_CLASSID)
 SUBSYS(net_cls)
 #endif
 
@@ -44,7 +44,7 @@ SUBSYS(net_cls)
 SUBSYS(perf_event)
 #endif
 
-#if IS_ENABLED(CONFIG_NETPRIO_CGROUP)
+#if IS_ENABLED(CONFIG_CGROUP_NET_PRIO)
 SUBSYS(net_prio)
 #endif
 
@@ -62,6 +62,10 @@ SUBSYS(hugetlb)
 
 #if IS_ENABLED(CONFIG_CGROUP_PIDS)
 SUBSYS(pids)
+#endif
+
+#if IS_ENABLED(CONFIG_CGROUP_RDMA)
+SUBSYS(rdma)
 #endif
 
 /*

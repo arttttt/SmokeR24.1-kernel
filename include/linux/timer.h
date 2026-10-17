@@ -156,6 +156,32 @@ static inline void init_timer_on_stack_key(struct timer_list *timer,
 #define setup_deferrable_timer_on_stack(timer, fn, data)		\
 	__setup_timer_on_stack((timer), (fn), (data), TIMER_DEFERRABLE)
 
+#define TIMER_DATA_TYPE		unsigned long
+#define TIMER_FUNC_TYPE		void (*)(TIMER_DATA_TYPE)
+
+#ifndef CONFIG_LOCKDEP
+static inline void timer_setup(struct timer_list *timer,
+			       void (*callback)(struct timer_list *),
+			       unsigned int flags)
+{
+	__setup_timer(timer, (TIMER_FUNC_TYPE)callback,
+		      (TIMER_DATA_TYPE)timer, flags);
+}
+
+#else
+/*
+ * Under LOCKDEP, the timer lock_class_key (set up in __init_timer) needs
+ * to be tied to the caller's context, so an inline (above) won't work. We
+ * do want to keep the inline for argument type checking, though.
+ */
+# define timer_setup(timer, callback, flags)				\
+		__setup_timer(timer, (TIMER_FUNC_TYPE)callback,		\
+			      (TIMER_DATA_TYPE)timer, flags)
+#endif
+
+#define from_timer(var, callback_timer, timer_fieldname) \
+	container_of(callback_timer, typeof(*var), timer_fieldname)
+
 /**
  * timer_pending - is a timer pending?
  * @timer: the timer in question
@@ -176,6 +202,7 @@ extern int del_timer(struct timer_list * timer);
 extern int mod_timer(struct timer_list *timer, unsigned long expires);
 extern int mod_timer_pending(struct timer_list *timer, unsigned long expires);
 extern int mod_timer_pinned(struct timer_list *timer, unsigned long expires);
+extern int timer_reduce(struct timer_list *timer, unsigned long expires);
 
 extern void set_timer_slack(struct timer_list *time, int slack_hz);
 

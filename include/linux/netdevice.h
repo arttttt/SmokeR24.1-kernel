@@ -516,7 +516,7 @@ struct netdev_queue {
  * read mostly part
  */
 	struct net_device	*dev;
-	struct Qdisc		*qdisc;
+	struct Qdisc __rcu	*qdisc;
 	struct Qdisc		*qdisc_sleeping;
 #ifdef CONFIG_SYSFS
 	struct kobject		kobj;
@@ -1204,7 +1204,14 @@ struct net_device {
 	rx_handler_func_t __rcu	*rx_handler;
 	void __rcu		*rx_handler_data;
 
+#ifdef CONFIG_NET_CLS_ACT
+	struct tcf_proto __rcu  *ingress_cl_list;
+#endif
 	struct netdev_queue __rcu *ingress_queue;
+#ifdef CONFIG_NETFILTER_INGRESS
+	struct list_head	nf_hooks_ingress;
+#endif
+
 	unsigned char		broadcast[MAX_ADDR_LEN];	/* hw bcast add	*/
 
 
@@ -1227,6 +1234,9 @@ struct net_device {
 
 #ifdef CONFIG_XPS
 	struct xps_dev_maps __rcu *xps_maps;
+#endif
+#ifdef CONFIG_NET_CLS_ACT
+	struct tcf_proto __rcu  *egress_cl_list;
 #endif
 #ifdef CONFIG_RFS_ACCEL
 	/* CPU reverse-mapping for RX completion interrupts, indexed
@@ -1323,7 +1333,7 @@ struct net_device {
 	/* max exchange id for FCoE LRO by ddp */
 	unsigned int		fcoe_ddp_xid;
 #endif
-#if IS_ENABLED(CONFIG_NETPRIO_CGROUP)
+#if IS_ENABLED(CONFIG_CGROUP_NET_PRIO)
 	struct netprio_map __rcu *priomap;
 #endif
 	/* phy device may attach itself for hardware timestamping */
@@ -1564,6 +1574,20 @@ struct packet_offload {
 	struct list_head	 list;
 };
 
+#define netdev_alloc_pcpu_stats(type)				\
+({								\
+	typeof(type) *pcpu_stats = alloc_percpu(type);		\
+	if (pcpu_stats)	{					\
+		int i;						\
+		for_each_possible_cpu(i) {			\
+			typeof(type) *stat;			\
+			stat = per_cpu_ptr(pcpu_stats, i);	\
+			u64_stats_init(&stat->syncp);		\
+		}						\
+	}							\
+	pcpu_stats;						\
+})
+
 #include <linux/notifier.h>
 
 /* netdevice notifier chain. Please remember to update the rtnetlink
@@ -1676,8 +1700,12 @@ extern int		dev_alloc_name(struct net_device *dev, const char *name);
 extern int		dev_open(struct net_device *dev);
 extern int		dev_close(struct net_device *dev);
 extern void		dev_disable_lro(struct net_device *dev);
-extern int		dev_loopback_xmit(struct sk_buff *newskb);
-extern int		dev_queue_xmit(struct sk_buff *skb);
+extern int		dev_loopback_xmit(struct sock *sk, struct sk_buff *newskb);
+extern int		dev_queue_xmit_sk(struct sock *sk, struct sk_buff *skb);
+static inline int dev_queue_xmit(struct sk_buff *skb)
+{
+	return dev_queue_xmit_sk(skb->sk, skb);
+}
 extern int		register_netdevice(struct net_device *dev);
 extern void		unregister_netdevice_queue(struct net_device *dev,
 						   struct list_head *head);
@@ -1851,11 +1879,7 @@ DECLARE_PER_CPU_ALIGNED(struct softnet_data, softnet_data);
 
 extern void __netif_schedule(struct Qdisc *q);
 
-static inline void netif_schedule_queue(struct netdev_queue *txq)
-{
-	if (!(txq->state & QUEUE_STATE_ANY_XOFF))
-		__netif_schedule(txq->qdisc);
-}
+void netif_schedule_queue(struct netdev_queue *txq);
 
 static inline void netif_tx_schedule_all(struct net_device *dev)
 {
@@ -1891,17 +1915,7 @@ static inline void netif_tx_start_all_queues(struct net_device *dev)
 	}
 }
 
-static inline void netif_tx_wake_queue(struct netdev_queue *dev_queue)
-{
-#ifdef CONFIG_NETPOLL_TRAP
-	if (netpoll_trap()) {
-		netif_tx_start_queue(dev_queue);
-		return;
-	}
-#endif
-	if (test_and_clear_bit(__QUEUE_STATE_DRV_XOFF, &dev_queue->state))
-		__netif_schedule(dev_queue->qdisc);
-}
+void netif_tx_wake_queue(struct netdev_queue *dev_queue);
 
 /**
  *	netif_wake_queue - restart transmit
@@ -2124,23 +2138,7 @@ static inline bool netif_subqueue_stopped(const struct net_device *dev,
 	return __netif_subqueue_stopped(dev, skb_get_queue_mapping(skb));
 }
 
-/**
- *	netif_wake_subqueue - allow sending packets on subqueue
- *	@dev: network device
- *	@queue_index: sub queue index
- *
- * Resume individual transmit queue of a device with multiple transmit queues.
- */
-static inline void netif_wake_subqueue(struct net_device *dev, u16 queue_index)
-{
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, queue_index);
-#ifdef CONFIG_NETPOLL_TRAP
-	if (netpoll_trap())
-		return;
-#endif
-	if (test_and_clear_bit(__QUEUE_STATE_DRV_XOFF, &txq->state))
-		__netif_schedule(txq->qdisc);
-}
+void netif_wake_subqueue(struct net_device *dev, u16 queue_index);
 
 #ifdef CONFIG_XPS
 extern int netif_set_xps_queue(struct net_device *dev, struct cpumask *mask,
@@ -2223,7 +2221,11 @@ extern void dev_kfree_skb_any(struct sk_buff *skb);
 
 extern int		netif_rx(struct sk_buff *skb);
 extern int		netif_rx_ni(struct sk_buff *skb);
-extern int		netif_receive_skb(struct sk_buff *skb);
+extern int		netif_receive_skb_sk(struct sock *sk, struct sk_buff *skb);
+static inline int netif_receive_skb(struct sk_buff *skb)
+{
+	return netif_receive_skb_sk(skb->sk, skb);
+}
 extern gro_result_t	napi_gro_receive(struct napi_struct *napi,
 					 struct sk_buff *skb);
 extern void		napi_gro_flush(struct napi_struct *napi, bool flush_old);

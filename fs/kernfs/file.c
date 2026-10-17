@@ -610,7 +610,7 @@ static void kernfs_put_open_node(struct kernfs_node *kn,
 
 static int kernfs_fop_open(struct inode *inode, struct file *file)
 {
-	struct kernfs_node *kn = file->f_path.dentry->d_fsdata;
+	struct kernfs_node *kn = inode->i_private;
 	struct kernfs_root *root = kernfs_root(kn);
 	const struct kernfs_ops *ops;
 	struct kernfs_open_file *of;
@@ -757,7 +757,7 @@ static void kernfs_release_file(struct kernfs_node *kn,
 
 static int kernfs_fop_release(struct inode *inode, struct file *filp)
 {
-	struct kernfs_node *kn = filp->f_path.dentry->d_fsdata;
+	struct kernfs_node *kn = inode->i_private;
 	struct kernfs_open_file *of = kernfs_of(filp);
 
 	kernfs_release_file(kn, of);
@@ -817,7 +817,7 @@ void kernfs_drain_open_files(struct kernfs_node *kn)
  */
 unsigned int kernfs_generic_poll(struct kernfs_open_file *of, poll_table *wait)
 {
-	struct kernfs_node *kn = of->file->f_path.dentry->d_fsdata;
+	struct kernfs_node *kn = kernfs_dentry_node(of->file->f_path.dentry);
 	struct kernfs_open_node *on = kn->attr.open;
 
 	poll_wait(of->file, &on->poll, wait);
@@ -831,7 +831,7 @@ unsigned int kernfs_generic_poll(struct kernfs_open_file *of, poll_table *wait)
 static unsigned int kernfs_fop_poll(struct file *filp, poll_table *wait)
 {
 	struct kernfs_open_file *of = kernfs_of(filp);
-	struct kernfs_node *kn = filp->f_path.dentry->d_fsdata;
+	struct kernfs_node *kn = kernfs_dentry_node(filp->f_path.dentry);
 	unsigned int ret;
 
 	/* need parent for the kobj, grab both */
@@ -882,7 +882,7 @@ repeat:
 		struct inode *inode;
 		struct dentry *dentry;
 
-		inode = ilookup(info->sb, kn->ino);
+		inode = ilookup(info->sb, kn->id.ino);
 		if (!inode)
 			continue;
 
@@ -943,6 +943,8 @@ const struct file_operations kernfs_file_fops = {
  * @parent: directory to create the file in
  * @name: name of the file
  * @mode: mode of the file
+ * @uid: uid of the file
+ * @gid: gid of the file
  * @size: size of the file
  * @ops: kernfs operations for the file
  * @priv: private data for the file
@@ -954,7 +956,8 @@ const struct file_operations kernfs_file_fops = {
  */
 struct kernfs_node *__kernfs_create_file(struct kernfs_node *parent,
 					 const char *name,
-					 umode_t mode, loff_t size,
+					 umode_t mode, kuid_t uid, kgid_t gid,
+					 loff_t size,
 					 const struct kernfs_ops *ops,
 					 void *priv, const void *ns,
 					 bool name_is_static,
@@ -968,7 +971,8 @@ struct kernfs_node *__kernfs_create_file(struct kernfs_node *parent,
 	if (name_is_static)
 		flags |= KERNFS_STATIC_NAME;
 
-	kn = kernfs_new_node(parent, name, (mode & S_IALLUGO) | S_IFREG, flags);
+	kn = kernfs_new_node(parent, name, (mode & S_IALLUGO) | S_IFREG,
+			     uid, gid, flags);
 	if (!kn)
 		return ERR_PTR(-ENOMEM);
 

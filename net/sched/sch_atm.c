@@ -375,7 +375,7 @@ static int atm_tc_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		list_for_each_entry(flow, &p->flows, list) {
 			fl = rcu_dereference_bh(flow->filter_list);
 			if (fl) {
-				result = tc_classify_compat(skb, fl, &res);
+				result = tc_classify(skb, fl, &res, true);
 				if (result < 0)
 					continue;
 				flow = (struct atm_flow_data *)res.class;
@@ -417,7 +417,7 @@ done:
 	if (ret != NET_XMIT_SUCCESS) {
 drop: __maybe_unused
 		if (net_xmit_drop_count(ret)) {
-			sch->qstats.drops++;
+			qdisc_qstats_drop(sch);
 			if (flow)
 				flow->qstats.drops++;
 		}
@@ -638,10 +638,8 @@ atm_tc_dump_class_stats(struct Qdisc *sch, unsigned long arg,
 {
 	struct atm_flow_data *flow = (struct atm_flow_data *)arg;
 
-	flow->qstats.qlen = flow->q->q.qlen;
-
-	if (gnet_stats_copy_basic(d, &flow->bstats) < 0 ||
-	    gnet_stats_copy_queue(d, &flow->qstats) < 0)
+	if (gnet_stats_copy_basic(d, NULL, &flow->bstats) < 0 ||
+	    gnet_stats_copy_queue(d, NULL, &flow->qstats, flow->q->q.qlen) < 0)
 		return -1;
 
 	return 0;

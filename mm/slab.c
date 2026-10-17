@@ -696,22 +696,15 @@ static DEFINE_PER_CPU(unsigned long, slab_reap_node);
 
 static void init_reap_node(int cpu)
 {
-	int node;
-
-	node = next_node(cpu_to_mem(cpu), node_online_map);
-	if (node == MAX_NUMNODES)
-		node = first_node(node_online_map);
-
-	per_cpu(slab_reap_node, cpu) = node;
+	per_cpu(slab_reap_node, cpu) = next_node_in(cpu_to_mem(cpu),
+						    node_online_map);
 }
 
 static void next_reap_node(void)
 {
 	int node = __this_cpu_read(slab_reap_node);
 
-	node = next_node(node, node_online_map);
-	if (unlikely(node >= MAX_NUMNODES))
-		node = first_node(node_online_map);
+	node = next_node_in(node, node_online_map);
 	__this_cpu_write(slab_reap_node, node);
 }
 
@@ -3067,7 +3060,7 @@ out:
 
 #ifdef CONFIG_NUMA
 /*
- * Try allocating on another node if PF_SPREAD_SLAB is a mempolicy is set.
+ * Try allocating on another node if PFA_SPREAD_SLAB is a mempolicy is set.
  *
  * If we are in_interrupt, then process context, including cpusets and
  * mempolicy, may not apply and should not be used for allocation policy.
@@ -3124,7 +3117,7 @@ retry:
 	for_each_zone_zonelist(zone, z, zonelist, high_zoneidx) {
 		nid = zone_to_nid(zone);
 
-		if (cpuset_zone_allowed_hardwall(zone, flags) &&
+		if (cpuset_zone_allowed(zone, flags | __GFP_HARDWALL) &&
 			cache->node[nid] &&
 			cache->node[nid]->free_objects) {
 				obj = ____cache_alloc_node(cache,
@@ -3299,7 +3292,7 @@ __do_cache_alloc(struct kmem_cache *cache, gfp_t flags)
 {
 	void *objp;
 
-	if (current->mempolicy || unlikely(current->flags & PF_SPREAD_SLAB)) {
+	if (current->mempolicy || cpuset_do_slab_mem_spread()) {
 		objp = alternate_node_alloc(cache, flags);
 		if (objp)
 			goto out;

@@ -13,6 +13,7 @@
 #include <linux/wait.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
+#include <linux/refcount.h>
 #include <linux/percpu-refcount.h>
 #include <linux/percpu-rwsem.h>
 #include <linux/workqueue.h>
@@ -49,6 +50,7 @@ enum {
 	CSS_ONLINE	= (1 << 1), /* between ->css_online() and ->css_offline() */
 	CSS_RELEASED	= (1 << 2), /* refcnt reached zero, released */
 	CSS_VISIBLE	= (1 << 3), /* css is visible to userland */
+	CSS_DYING	= (1 << 4), /* css is dying */
 };
 
 /* bits in struct cgroup flags field */
@@ -61,20 +63,41 @@ enum {
 	 * specified at mount time and thus is implemented here.
 	 */
 	CGRP_CPUSET_CLONE_CHILDREN,
+
+	/* Control group has to be frozen. */
+	CGRP_FREEZE,
+
+	/* Cgroup is frozen. */
+	CGRP_FROZEN,
 };
 
 /* cgroup_root->flags */
 enum {
 	CGRP_ROOT_NOPREFIX	= (1 << 1), /* mounted subsystems have no named prefix */
 	CGRP_ROOT_XATTR		= (1 << 2), /* supports extended attributes */
+
+	/*
+	 * Consider namespaces as delegation boundaries.  If this flag is
+	 * set, controller specific interface files in a namespace root
+	 * aren't writeable from inside the namespace.
+	 */
+	CGRP_ROOT_NS_DELEGATE	= (1 << 3),
+
+	/*
+	 * Enable cpuset controller in v1 cgroup to use v2 behavior.
+	 */
+	CGRP_ROOT_CPUSET_V2_MODE = (1 << 4),
 };
 
 /* cftype->flags */
 enum {
 	CFTYPE_ONLY_ON_ROOT	= (1 << 0),	/* only create on root cgrp */
 	CFTYPE_NOT_ON_ROOT	= (1 << 1),	/* don't create on root cgrp */
+	CFTYPE_NS_DELEGATABLE	= (1 << 2),	/* writeable beyond delegation boundaries */
+
 	CFTYPE_NO_PREFIX	= (1 << 3),	/* (DON'T USE FOR NEW FILES) no subsys prefix */
 	CFTYPE_WORLD_WRITABLE	= (1 << 4),	/* (DON'T USE FOR NEW FILES) S_IWUGO */
+	CFTYPE_DEBUG		= (1 << 5),	/* create when cgroup_debug */
 	CFTYPE_PRESSURE		= (1 << 6),	/* only if pressure feature is enabled */
 
 	/* internal flags, do not use outside cgroup core proper */
@@ -90,6 +113,8 @@ enum {
 struct cgroup_file {
 	/* do not access any fields from outside cgroup core */
 	struct kernfs_node *kn;
+	unsigned long notified_at;
+	struct timer_list notify_timer;
 };
 
 /*
@@ -108,9 +133,6 @@ struct cgroup_subsys_state {
 
 	/* reference count - access via css_[try]get() and css_put() */
 	struct percpu_ref refcnt;
-
-	/* PI: the parent css */
-	struct cgroup_subsys_state *parent;
 
 	/* siblings list anchored at the parent's ->children */
 	struct list_head sibling;
@@ -141,6 +163,12 @@ struct cgroup_subsys_state {
 	/* percpu_ref killing and RCU release */
 	struct rcu_head rcu_head;
 	struct work_struct destroy_work;
+
+	/*
+	 * PI: the parent css.	Placed here for cache proximity to following
+	 * fields of the containing structure.
+	 */
+	struct cgroup_subsys_state *parent;
 };
 
 /*
@@ -159,10 +187,21 @@ struct css_set {
 	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
 
 	/* reference count */
-	atomic_t refcount;
+	refcount_t refcount;
+
+	/*
+	 * For a domain cgroup, the following points to self.  If threaded,
+	 * to the matching cset of the nearest domain ancestor.  The
+	 * dom_cset provides access to the domain cgroup and its csses to
+	 * which domain level resource consumptions should be charged.
+	 */
+	struct css_set *dom_cset;
 
 	/* the default cgroup associated with this css_set */
 	struct cgroup *dfl_cgrp;
+
+	/* internal task count, protected by css_set_lock */
+	int nr_tasks;
 
 	/*
 	 * Lists running through all tasks using this cgroup group.
@@ -173,6 +212,7 @@ struct css_set {
 	 */
 	struct list_head tasks;
 	struct list_head mg_tasks;
+	struct list_head dying_tasks;
 
 	/* all css_task_iters currently walking this cset */
 	struct list_head task_iters;
@@ -185,6 +225,10 @@ struct css_set {
 	 * iterate through all css's attached to a given cgroup.
 	 */
 	struct list_head e_cset_node[CGROUP_SUBSYS_COUNT];
+
+	/* all threaded csets whose ->dom_cset points to this cset */
+	struct list_head threaded_csets;
+	struct list_head threaded_csets_node;
 
 	/*
 	 * List running through all cgroup groups in the same hash
@@ -223,6 +267,25 @@ struct css_set {
 	struct rcu_head rcu_head;
 };
 
+struct cgroup_freezer_state {
+	/* Should the cgroup and its descendants be frozen. */
+	bool freeze;
+
+	/* Should the cgroup actually be frozen? */
+	int e_freeze;
+
+	/* Fields below are protected by css_set_lock */
+
+	/* Number of frozen descendant cgroups */
+	int nr_frozen_descendants;
+
+	/*
+	 * Number of tasks, which are counted as frozen:
+	 * frozen, SIGSTOPped, and PTRACEd.
+	 */
+	int nr_frozen_tasks;
+};
+
 struct cgroup {
 	/* self css with NULL ->ss, points back to this cgroup */
 	struct cgroup_subsys_state self;
@@ -247,13 +310,40 @@ struct cgroup {
 	 */
 	int level;
 
+	/* Maximum allowed descent tree depth */
+	int max_depth;
+
+	/*
+	 * Keep track of total numbers of visible and dying descent cgroups.
+	 * Dying cgroups are cgroups which were deleted by a user,
+	 * but are still existing because someone else is holding a reference.
+	 * max_descendants is a maximum allowed number of descent cgroups.
+	 *
+	 * nr_descendants and nr_dying_descendants are protected
+	 * by cgroup_mutex and css_set_lock. It's fine to read them holding
+	 * any of cgroup_mutex and css_set_lock; for writing both locks
+	 * should be held.
+	 */
+	int nr_descendants;
+	int nr_dying_descendants;
+	int max_descendants;
+
 	/*
 	 * Each non-empty css_set associated with this cgroup contributes
-	 * one to populated_cnt.  All children with non-zero popuplated_cnt
-	 * of their own contribute one.  The count is zero iff there's no
-	 * task in this cgroup or its subtree.
+	 * one to nr_populated_csets.  The counter is zero iff this cgroup
+	 * doesn't have any tasks.
+	 *
+	 * All children which have non-zero nr_populated_csets and/or
+	 * nr_populated_children of their own contribute one to either
+	 * nr_populated_domain_children or nr_populated_threaded_children
+	 * depending on their type.  Each counter is zero iff all cgroups
+	 * of the type in the subtree proper don't have any tasks.
 	 */
-	int populated_cnt;
+	int nr_populated_csets;
+	int nr_populated_domain_children;
+	int nr_populated_threaded_children;
+
+	int nr_threaded_children;	/* # of live threaded child cgroups */
 
 	struct kernfs_node *kn;		/* cgroup kernfs entry */
 	struct cgroup_file procs_file;	/* handle for "cgroup.procs" */
@@ -292,6 +382,16 @@ struct cgroup {
 	struct list_head e_csets[CGROUP_SUBSYS_COUNT];
 
 	/*
+	 * If !threaded, self.  If threaded, it points to the nearest
+	 * domain ancestor.  Inside a threaded subtree, cgroups are exempt
+	 * from process granularity and no-internal-task constraint.
+	 * Domain level resource consumptions which aren't tied to a
+	 * specific task are charged to the dom_cgrp.
+	 */
+	struct cgroup *dom_cgrp;
+	struct cgroup *old_dom_cgrp;		/* used while enabling threaded */
+
+	/*
 	 * list of pidlists, up to two for each namespace (one for procs, one
 	 * for tasks); created on demand.
 	 */
@@ -309,6 +409,9 @@ struct cgroup {
 
 	/* used to store eBPF programs */
 	struct cgroup_bpf bpf;
+
+	/* Used to store internal freezer state */
+	struct cgroup_freezer_state freezer;
 
 	/* ids of the ancestors at each level including self */
 	int ancestor_ids[];
@@ -447,7 +550,7 @@ struct cftype {
 
 /*
  * Control Group subsystem type.
- * See Documentation/cgroups/cgroups.txt for details
+ * See Documentation/cgroup-v1/cgroups.txt for details
  */
 struct cgroup_subsys {
 	struct cgroup_subsys_state *(*css_alloc)(struct cgroup_subsys_state *parent_css);
@@ -462,15 +565,15 @@ struct cgroup_subsys {
 	int (*can_attach)(struct cgroup_taskset *tset);
 	void (*cancel_attach)(struct cgroup_taskset *tset);
 	void (*attach)(struct cgroup_taskset *tset);
+	void (*post_attach)(void);
 	int (*can_fork)(struct task_struct *task);
 	void (*cancel_fork)(struct task_struct *task);
 	void (*fork)(struct task_struct *task);
 	void (*exit)(struct task_struct *task);
-	void (*free)(struct task_struct *task);
+	void (*release)(struct task_struct *task);
 	void (*bind)(struct cgroup_subsys_state *root_css);
 
-	int disabled;
-	int early_init;
+	bool early_init:1;
 
 	/*
 	 * If %true, the controller, on the default hierarchy, doesn't show
@@ -486,6 +589,18 @@ struct cgroup_subsys {
 	bool implicit_on_dfl:1;
 
 	/*
+	 * If %true, the controller, supports threaded mode on the default
+	 * hierarchy.  In a threaded subtree, both process granularity and
+	 * no-internal-process constraint are ignored and a threaded
+	 * controllers should be able to handle that.
+	 *
+	 * Note that as an implicit controller is automatically enabled on
+	 * all cgroups on the default hierarchy, it should also be
+	 * threaded.  implicit && !threaded is not supported.
+	 */
+	bool threaded:1;
+
+	/*
 	 * If %false, this subsystem is properly hierarchical -
 	 * configuration, resource accounting and restriction on a parent
 	 * cgroup cover those of its children.  If %true, hierarchy support
@@ -497,8 +612,8 @@ struct cgroup_subsys {
 	 * cases.  Eventually, all subsystems will be made properly
 	 * hierarchical and this will go away.
 	 */
-	bool broken_hierarchy;
-	bool warned_broken_hierarchy;
+	bool broken_hierarchy:1;
+	bool warned_broken_hierarchy:1;
 
 	/* the following two fields are initialized automtically during boot */
 	int id;
@@ -542,8 +657,8 @@ extern struct percpu_rw_semaphore cgroup_threadgroup_rwsem;
  * cgroup_threadgroup_change_begin - threadgroup exclusion for cgroups
  * @tsk: target task
  *
- * Called from threadgroup_change_begin() and allows cgroup operations to
- * synchronize against threadgroup changes using a percpu_rw_semaphore.
+ * Allows cgroup operations to synchronize against threadgroup changes
+ * using a percpu_rw_semaphore.
  */
 static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk)
 {
@@ -554,8 +669,7 @@ static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk)
  * cgroup_threadgroup_change_end - threadgroup exclusion for cgroups
  * @tsk: target task
  *
- * Called from threadgroup_change_end().  Counterpart of
- * cgroup_threadcgroup_change_begin().
+ * Counterpart of cgroup_threadcgroup_change_begin().
  */
 static inline void cgroup_threadgroup_change_end(struct task_struct *tsk)
 {
@@ -566,7 +680,11 @@ static inline void cgroup_threadgroup_change_end(struct task_struct *tsk)
 
 #define CGROUP_SUBSYS_COUNT 0
 
-static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk) {}
+static inline void cgroup_threadgroup_change_begin(struct task_struct *tsk)
+{
+	might_sleep();
+}
+
 static inline void cgroup_threadgroup_change_end(struct task_struct *tsk) {}
 
 #endif	/* CONFIG_CGROUPS */
@@ -647,7 +765,7 @@ static inline u32 sock_cgroup_classid(struct sock_cgroup_data *skcd)
 static inline void sock_cgroup_set_prioidx(struct sock_cgroup_data *skcd,
 					   u16 prioidx)
 {
-	struct sock_cgroup_data skcd_buf = { .val = READ_ONCE(skcd->val) };
+	struct sock_cgroup_data skcd_buf = {{ .val = READ_ONCE(skcd->val) }};
 
 	if (sock_cgroup_prioidx(&skcd_buf) == prioidx)
 		return;
@@ -664,7 +782,7 @@ static inline void sock_cgroup_set_prioidx(struct sock_cgroup_data *skcd,
 static inline void sock_cgroup_set_classid(struct sock_cgroup_data *skcd,
 					   u32 classid)
 {
-	struct sock_cgroup_data skcd_buf = { .val = READ_ONCE(skcd->val) };
+	struct sock_cgroup_data skcd_buf = {{ .val = READ_ONCE(skcd->val) }};
 
 	if (sock_cgroup_classid(&skcd_buf) == classid)
 		return;

@@ -253,7 +253,8 @@ int tcf_hash_create(u32 index, struct nlattr *est, struct tc_action *a,
 	p->tcfc_tm.install = jiffies;
 	p->tcfc_tm.lastuse = jiffies;
 	if (est) {
-		int err = gen_new_estimator(&p->tcfc_bstats, &p->tcfc_rate_est,
+		int err = gen_new_estimator(&p->tcfc_bstats, NULL,
+					    &p->tcfc_rate_est,
 					    &p->tcfc_lock, est);
 		if (err) {
 			kfree(p);
@@ -392,11 +393,6 @@ int tcf_action_exec(struct sk_buff *skb, const struct list_head *actions,
 	list_for_each_entry(a, actions, list) {
 repeat:
 		ret = a->ops->act(skb, a, res);
-		if (TC_MUNGED & skb->tc_verd) {
-			/* copied already, allow trampling */
-			skb->tc_verd = SET_TC_OK2MUNGE(skb->tc_verd);
-			skb->tc_verd = CLR_TC_MUNGED(skb->tc_verd);
-		}
 		if (ret == TC_ACT_REPEAT)
 			goto repeat;	/* we need a ttl - JHS */
 		if (ret != TC_ACT_PIPE)
@@ -620,10 +616,12 @@ int tcf_action_copy_stats(struct sk_buff *skb, struct tc_action *a,
 	if (err < 0)
 		goto errout;
 
-	if (gnet_stats_copy_basic(&d, &p->tcfc_bstats) < 0 ||
+	if (gnet_stats_copy_basic(&d, NULL, &p->tcfc_bstats) < 0 ||
 	    gnet_stats_copy_rate_est(&d, &p->tcfc_bstats,
 				     &p->tcfc_rate_est) < 0 ||
-	    gnet_stats_copy_queue(&d, &p->tcfc_qstats) < 0)
+	    gnet_stats_copy_queue(&d, NULL,
+				  &p->tcfc_qstats,
+				  p->tcfc_qstats.qlen) < 0)
 		goto errout;
 
 	if (gnet_stats_finish_copy(&d) < 0)

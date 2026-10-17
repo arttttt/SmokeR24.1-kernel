@@ -21,6 +21,7 @@
  * @target: target node for the symlink to point to
  *
  * Returns the created node on success, ERR_PTR() value on error.
+ * Ownership of the link matches ownership of the target.
  */
 struct kernfs_node *kernfs_create_link(struct kernfs_node *parent,
 				       const char *name,
@@ -28,8 +29,16 @@ struct kernfs_node *kernfs_create_link(struct kernfs_node *parent,
 {
 	struct kernfs_node *kn;
 	int error;
+	kuid_t uid = GLOBAL_ROOT_UID;
+	kgid_t gid = GLOBAL_ROOT_GID;
 
-	kn = kernfs_new_node(parent, name, S_IFLNK|S_IRWXUGO, KERNFS_LINK);
+	if (target->iattr) {
+		uid = target->iattr->ia_iattr.ia_uid;
+		gid = target->iattr->ia_iattr.ia_gid;
+	}
+
+	kn = kernfs_new_node(parent, name, S_IFLNK|S_IRWXUGO, uid, gid,
+			     KERNFS_LINK);
 	if (!kn)
 		return ERR_PTR(-ENOMEM);
 
@@ -98,9 +107,9 @@ static int kernfs_get_target_path(struct kernfs_node *parent,
 	return 0;
 }
 
-static int kernfs_getlink(struct dentry *dentry, char *path)
+static int kernfs_getlink(struct inode *inode, char *path)
 {
-	struct kernfs_node *kn = dentry->d_fsdata;
+	struct kernfs_node *kn = inode->i_private;
 	struct kernfs_node *parent = kn->parent;
 	struct kernfs_node *target = kn->symlink.target_kn;
 	int error;
@@ -117,7 +126,7 @@ static void *kernfs_iop_follow_link(struct dentry *dentry, struct nameidata *nd)
 	int error = -ENOMEM;
 	unsigned long page = get_zeroed_page(GFP_KERNEL);
 	if (page) {
-		error = kernfs_getlink(dentry, (char *) page);
+		error = kernfs_getlink(dentry->d_inode, (char *) page);
 		if (error < 0)
 			free_page((unsigned long)page);
 	}

@@ -92,7 +92,7 @@ void ip_send_check(struct iphdr *iph)
 }
 EXPORT_SYMBOL(ip_send_check);
 
-int __ip_local_out(struct sk_buff *skb)
+static int __ip_local_out_sk(struct sock *sk, struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
 
@@ -101,21 +101,26 @@ int __ip_local_out(struct sk_buff *skb)
 
 	skb->protocol = htons(ETH_P_IP);
 
-	return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT, skb, NULL,
-		       skb_dst(skb)->dev, dst_output);
+	return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT, sk, skb, NULL,
+		       skb_dst(skb)->dev, dst_output_sk);
 }
 
-int ip_local_out(struct sk_buff *skb)
+int __ip_local_out(struct sk_buff *skb)
+{
+	return __ip_local_out_sk(skb->sk, skb);
+}
+
+int ip_local_out_sk(struct sock *sk, struct sk_buff *skb)
 {
 	int err;
 
-	err = __ip_local_out(skb);
+	err = __ip_local_out_sk(sk, skb);
 	if (likely(err == 1))
-		err = dst_output(skb);
+		err = dst_output_sk(sk, skb);
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(ip_local_out);
+EXPORT_SYMBOL_GPL(ip_local_out_sk);
 
 static inline int ip_select_ttl(struct inet_sock *inet, struct dst_entry *dst)
 {
@@ -167,7 +172,7 @@ int ip_build_and_send_pkt(struct sk_buff *skb, struct sock *sk,
 }
 EXPORT_SYMBOL_GPL(ip_build_and_send_pkt);
 
-static inline int ip_finish_output2(struct sk_buff *skb)
+static inline int ip_finish_output2(struct sock *sk, struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 	struct rtable *rt = (struct rtable *)dst;
@@ -223,11 +228,11 @@ static inline int ip_skb_dst_mtu(struct sk_buff *skb)
 	       skb_dst(skb)->dev->mtu : dst_mtu(skb_dst(skb));
 }
 
-static int ip_finish_output(struct sk_buff *skb)
+static int ip_finish_output(struct sock *sk, struct sk_buff *skb)
 {
 	int ret;
 
-	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(skb->sk, skb);
+	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(sk, skb);
 	if (ret) {
 		kfree_skb(skb);
 		return ret;
@@ -237,31 +242,30 @@ static int ip_finish_output(struct sk_buff *skb)
 	/* Policy lookup after SNAT yielded a new policy */
 	if (skb_dst(skb)->xfrm != NULL) {
 		IPCB(skb)->flags |= IPSKB_REROUTED;
-		return dst_output(skb);
+		return dst_output_sk(sk, skb);
 	}
 #endif
 	if (skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb))
-		return ip_fragment(skb, ip_finish_output2);
+		return ip_fragment(sk, skb, ip_finish_output2);
 	else
-		return ip_finish_output2(skb);
+		return ip_finish_output2(sk, skb);
 }
 
-static int ip_mc_finish_output(struct sk_buff *skb)
+static int ip_mc_finish_output(struct sock *sk, struct sk_buff *skb)
 {
 	int ret;
 
-	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(skb->sk, skb);
+	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(sk, skb);
 	if (ret) {
 		kfree_skb(skb);
 		return ret;
 	}
 
-	return dev_loopback_xmit(skb);
+	return dev_loopback_xmit(sk, skb);
 }
 
-int ip_mc_output(struct sk_buff *skb)
+int ip_mc_output(struct sock *sk, struct sk_buff *skb)
 {
-	struct sock *sk = skb->sk;
 	struct rtable *rt = skb_rtable(skb);
 	struct net_device *dev = rt->dst.dev;
 
@@ -296,7 +300,7 @@ int ip_mc_output(struct sk_buff *skb)
 			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
 			if (newskb)
 				NF_HOOK(NFPROTO_IPV4, NF_INET_POST_ROUTING,
-					newskb, NULL, newskb->dev,
+					sk, newskb, NULL, newskb->dev,
 					ip_mc_finish_output);
 		}
 
@@ -311,16 +315,16 @@ int ip_mc_output(struct sk_buff *skb)
 	if (rt->rt_flags&RTCF_BROADCAST) {
 		struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
 		if (newskb)
-			NF_HOOK(NFPROTO_IPV4, NF_INET_POST_ROUTING, newskb,
+			NF_HOOK(NFPROTO_IPV4, NF_INET_POST_ROUTING, sk, newskb,
 				NULL, newskb->dev, ip_mc_finish_output);
 	}
 
-	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb, NULL,
+	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, sk, skb, NULL,
 			    skb->dev, ip_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));
 }
 
-int ip_output(struct sk_buff *skb)
+int ip_output(struct sock *sk, struct sk_buff *skb)
 {
 	struct net_device *dev = skb_dst(skb)->dev;
 
@@ -329,7 +333,8 @@ int ip_output(struct sk_buff *skb)
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_IP);
 
-	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb, NULL, dev,
+	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, sk, skb,
+			    NULL, dev,
 			    ip_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));
 }
@@ -424,7 +429,7 @@ packet_routed:
 	skb->priority = sk->sk_priority;
 	skb->mark = sk->sk_mark;
 
-	res = ip_local_out(skb);
+	res = ip_local_out_sk(sk, skb);
 	rcu_read_unlock();
 	return res;
 
@@ -470,7 +475,8 @@ static void ip_copy_metadata(struct sk_buff *to, struct sk_buff *from)
  *	single device frame, and queue such a frame for sending.
  */
 
-int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
+int ip_fragment(struct sock *sk, struct sk_buff *skb,
+		int (*output)(struct sock *, struct sk_buff *))
 {
 	struct iphdr *iph;
 	int ptr;
@@ -582,7 +588,7 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 				ip_send_check(iph);
 			}
 
-			err = output(skb);
+			err = output(sk, skb);
 
 			if (!err)
 				IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGCREATES);
@@ -724,7 +730,7 @@ slow_path:
 
 		ip_send_check(iph);
 
-		err = output(skb2);
+		err = output(sk, skb2);
 		if (err)
 			goto fail;
 

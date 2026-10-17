@@ -710,7 +710,7 @@ extern int			ipv6_rcv(struct sk_buff *skb,
 					 struct packet_type *pt,
 					 struct net_device *orig_dev);
 
-extern int			ip6_rcv_finish(struct sk_buff *skb);
+extern int			ip6_rcv_finish(struct sock *sk, struct sk_buff *skb);
 
 /*
  *	upper-layer output functions
@@ -758,7 +758,7 @@ extern struct dst_entry *	ip6_blackhole_route(struct net *net,
  *	skb processing functions
  */
 
-extern int			ip6_output(struct sk_buff *skb);
+extern int			ip6_output(struct sock *sk, struct sk_buff *skb);
 extern int			ip6_forward(struct sk_buff *skb);
 extern int			ip6_input(struct sk_buff *skb);
 extern int			ip6_mc_input(struct sk_buff *skb);

@@ -74,27 +74,27 @@ int xfrm4_prepare_output(struct xfrm_state *x, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(xfrm4_prepare_output);
 
-int xfrm4_output_finish(struct sk_buff *skb)
+int xfrm4_output_finish(struct sock *sk, struct sk_buff *skb)
 {
 #ifdef CONFIG_NETFILTER
 	if (!skb_dst(skb)->xfrm) {
 		IPCB(skb)->flags |= IPSKB_REROUTED;
-		return dst_output(skb);
+		return dst_output_sk(sk, skb);
 	}
 
 	IPCB(skb)->flags |= IPSKB_XFRM_TRANSFORMED;
 #endif
 
 	skb->protocol = htons(ETH_P_IP);
-	return xfrm_output(skb);
+	return xfrm_output(sk, skb);
 }
 
-int xfrm4_output(struct sk_buff *skb)
+int xfrm4_output(struct sock *sk, struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 	struct xfrm_state *x = dst->xfrm;
 
-	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb,
+	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, sk, skb,
 			    NULL, dst->dev,
 			    x->outer_mode->afinfo->output_finish,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));

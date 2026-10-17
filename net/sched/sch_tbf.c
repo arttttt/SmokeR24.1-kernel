@@ -127,7 +127,7 @@ static int tbf_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	ret = qdisc_enqueue(skb, q->qdisc);
 	if (ret != NET_XMIT_SUCCESS) {
 		if (net_xmit_drop_count(ret))
-			sch->qstats.drops++;
+			qdisc_qstats_drop(sch);
 		return ret;
 	}
 
@@ -142,7 +142,7 @@ static unsigned int tbf_drop(struct Qdisc *sch)
 
 	if (q->qdisc->ops->drop && (len = q->qdisc->ops->drop(q->qdisc)) != 0) {
 		sch->q.qlen--;
-		sch->qstats.drops++;
+		qdisc_qstats_drop(sch);
 	}
 	return len;
 }
@@ -202,7 +202,7 @@ static struct sk_buff *tbf_dequeue(struct Qdisc *sch)
 		   (cf. CSZ, HPFQ, HFSC)
 		 */
 
-		sch->qstats.overlimits++;
+		qdisc_qstats_overlimit(sch);
 	}
 	return NULL;
 }

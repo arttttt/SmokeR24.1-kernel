@@ -9,7 +9,6 @@
 #include <linux/tick.h>
 
 #include "cpupri.h"
-#include "cpuacct.h"
 
 extern __read_mostly int scheduler_running;
 

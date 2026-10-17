@@ -129,6 +129,7 @@
 #include <linux/inetdevice.h>
 #include <linux/cpu_rmap.h>
 #include <linux/static_key.h>
+#include <linux/netfilter_ingress.h>
 
 #include "net-sysfs.h"
 
@@ -1557,6 +1558,38 @@ int call_netdevice_notifiers(unsigned long val, struct net_device *dev)
 }
 EXPORT_SYMBOL(call_netdevice_notifiers);
 
+#ifdef CONFIG_NET_INGRESS
+static struct static_key ingress_needed __read_mostly;
+
+void net_inc_ingress_queue(void)
+{
+	static_key_slow_inc(&ingress_needed);
+}
+EXPORT_SYMBOL_GPL(net_inc_ingress_queue);
+
+void net_dec_ingress_queue(void)
+{
+	static_key_slow_dec(&ingress_needed);
+}
+EXPORT_SYMBOL_GPL(net_dec_ingress_queue);
+#endif
+
+#ifdef CONFIG_NET_EGRESS
+static struct static_key egress_needed __read_mostly;
+
+void net_inc_egress_queue(void)
+{
+	static_key_slow_inc(&egress_needed);
+}
+EXPORT_SYMBOL_GPL(net_inc_egress_queue);
+
+void net_dec_egress_queue(void)
+{
+	static_key_slow_dec(&egress_needed);
+}
+EXPORT_SYMBOL_GPL(net_dec_egress_queue);
+#endif
+
 static struct static_key netstamp_needed __read_mostly;
 #ifdef HAVE_JUMP_LABEL
 static atomic_t netstamp_needed_deferred;
@@ -2139,6 +2172,63 @@ void __netif_schedule(struct Qdisc *q)
 }
 EXPORT_SYMBOL(__netif_schedule);
 
+void netif_schedule_queue(struct netdev_queue *txq)
+{
+	rcu_read_lock();
+	if (!(txq->state & QUEUE_STATE_ANY_XOFF)) {
+		struct Qdisc *q = rcu_dereference(txq->qdisc);
+
+		__netif_schedule(q);
+	}
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL(netif_schedule_queue);
+
+/**
+ *	netif_wake_subqueue - allow sending packets on subqueue
+ *	@dev: network device
+ *	@queue_index: sub queue index
+ *
+ * Resume individual transmit queue of a device with multiple transmit queues.
+ */
+void netif_wake_subqueue(struct net_device *dev, u16 queue_index)
+{
+	struct netdev_queue *txq = netdev_get_tx_queue(dev, queue_index);
+
+#ifdef CONFIG_NETPOLL_TRAP
+	if (netpoll_trap())
+		return;
+#endif
+	if (test_and_clear_bit(__QUEUE_STATE_DRV_XOFF, &txq->state)) {
+		struct Qdisc *q;
+
+		rcu_read_lock();
+		q = rcu_dereference(txq->qdisc);
+		__netif_schedule(q);
+		rcu_read_unlock();
+	}
+}
+EXPORT_SYMBOL(netif_wake_subqueue);
+
+void netif_tx_wake_queue(struct netdev_queue *dev_queue)
+{
+#ifdef CONFIG_NETPOLL_TRAP
+	if (netpoll_trap()) {
+		netif_tx_start_queue(dev_queue);
+		return;
+	}
+#endif
+	if (test_and_clear_bit(__QUEUE_STATE_DRV_XOFF, &dev_queue->state)) {
+		struct Qdisc *q;
+
+		rcu_read_lock();
+		q = rcu_dereference(dev_queue->qdisc);
+		__netif_schedule(q);
+		rcu_read_unlock();
+	}
+}
+EXPORT_SYMBOL(netif_tx_wake_queue);
+
 void dev_kfree_skb_irq(struct sk_buff *skb)
 {
 	if (atomic_dec_and_test(&skb->users)) {
@@ -2678,8 +2768,12 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 	bool contended;
 	int rc;
 
-	qdisc_pkt_len_init(skb);
 	qdisc_calculate_pkt_len(skb, q);
+
+	if (unlikely(READ_ONCE(q->owner) == smp_processor_id())) {
+		kfree_skb(skb);
+		return NET_XMIT_DROP;
+	}
 	/*
 	 * Heuristic to force contended enqueues to serialize on a
 	 * separate lock before trying to get qdisc main lock.
@@ -2718,7 +2812,9 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 		rc = NET_XMIT_SUCCESS;
 	} else {
 		skb_dst_force(skb);
+		WRITE_ONCE(q->owner, smp_processor_id());
 		rc = q->enqueue(skb, q) & NET_XMIT_MASK;
+		WRITE_ONCE(q->owner, -1);
 		if (qdisc_run_begin(q)) {
 			if (unlikely(contended)) {
 				spin_unlock(&q->busylock);
@@ -2733,7 +2829,7 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 	return rc;
 }
 
-#if IS_ENABLED(CONFIG_NETPRIO_CGROUP)
+#if IS_ENABLED(CONFIG_CGROUP_NET_PRIO)
 static void skb_update_prio(struct sk_buff *skb)
 {
 	struct netprio_map *map = rcu_dereference_bh(skb->dev->priomap);
@@ -2756,7 +2852,7 @@ DEFINE_PER_CPU(int, xmit_recursion);
  *	dev_loopback_xmit - loop back @skb
  *	@skb: buffer to transmit
  */
-int dev_loopback_xmit(struct sk_buff *skb)
+int dev_loopback_xmit(struct sock *sk, struct sk_buff *skb)
 {
 	skb_reset_mac_header(skb);
 	__skb_pull(skb, skb_network_offset(skb));
@@ -2768,6 +2864,49 @@ int dev_loopback_xmit(struct sk_buff *skb)
 	return 0;
 }
 EXPORT_SYMBOL(dev_loopback_xmit);
+
+#ifdef CONFIG_NET_EGRESS
+static struct sk_buff *
+sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+{
+	struct tcf_proto *cl = rcu_dereference_bh(dev->egress_cl_list);
+	struct tcf_result cl_res;
+
+	if (!cl)
+		return skb;
+
+	/* skb->tc_verd and qdisc_skb_cb(skb)->pkt_len were already set
+	 * earlier by the caller.
+	 */
+	qdisc_bstats_cpu_update(cl->q, skb);
+
+	switch (tc_classify(skb, cl, &cl_res, false)) {
+	case TC_ACT_OK:
+	case TC_ACT_RECLASSIFY:
+		skb->tc_index = TC_H_MIN(cl_res.classid);
+		break;
+	case TC_ACT_SHOT:
+		qdisc_qstats_cpu_drop(cl->q);
+		*ret = NET_XMIT_DROP;
+		goto drop;
+	case TC_ACT_STOLEN:
+	case TC_ACT_QUEUED:
+		*ret = NET_XMIT_SUCCESS;
+drop:
+		kfree_skb(skb);
+		return NULL;
+	case TC_ACT_REDIRECT:
+		/* No need to push/pop skb's mac_header here on egress! */
+		skb_do_redirect(skb);
+		*ret = NET_XMIT_SUCCESS;
+		return NULL;
+	default:
+		break;
+	}
+
+	return skb;
+}
+#endif /* CONFIG_NET_EGRESS */
 
 /**
  *	dev_queue_xmit - transmit a buffer
@@ -2794,7 +2933,7 @@ EXPORT_SYMBOL(dev_loopback_xmit);
  *      the BH enable code must have IRQs enabled so that it will not deadlock.
  *          --BLG
  */
-int dev_queue_xmit(struct sk_buff *skb)
+int dev_queue_xmit_sk(struct sock *sk, struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
 	struct netdev_queue *txq;
@@ -2810,12 +2949,20 @@ int dev_queue_xmit(struct sk_buff *skb)
 
 	skb_update_prio(skb);
 
+	qdisc_pkt_len_init(skb);
+#ifdef CONFIG_NET_CLS_ACT
+	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_EGRESS);
+# ifdef CONFIG_NET_EGRESS
+	if (static_key_false(&egress_needed)) {
+		skb = sch_handle_egress(skb, &rc, dev);
+		if (!skb)
+			goto out;
+	}
+# endif
+#endif
 	txq = netdev_pick_tx(dev, skb);
 	q = rcu_dereference_bh(txq->qdisc);
 
-#ifdef CONFIG_NET_CLS_ACT
-	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_EGRESS);
-#endif
 	trace_net_dev_queue(skb);
 	if (q->enqueue) {
 		rc = __dev_xmit_skb(skb, q, dev, txq);
@@ -2876,7 +3023,7 @@ out:
 	rcu_read_unlock_bh();
 	return rc;
 }
-EXPORT_SYMBOL(dev_queue_xmit);
+EXPORT_SYMBOL(dev_queue_xmit_sk);
 
 
 /*=======================================================================
@@ -3297,59 +3444,39 @@ int (*br_fdb_test_addr_hook)(struct net_device *dev,
 EXPORT_SYMBOL_GPL(br_fdb_test_addr_hook);
 #endif
 
+static inline struct sk_buff *
+sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
+		   struct net_device *orig_dev)
+{
 #ifdef CONFIG_NET_CLS_ACT
-/* TODO: Maybe we should just force sch_ingress to be compiled in
- * when CONFIG_NET_CLS_ACT is? otherwise some useless instructions
- * a compare and 2 stores extra right now if we dont have it on
- * but have CONFIG_NET_CLS_ACT
- * NOTE: This doesn't stop any functionality; if you dont have
- * the ingress scheduler, you just can't add policies on ingress.
- *
- */
-static int ing_filter(struct sk_buff *skb, struct netdev_queue *rxq)
-{
-	struct net_device *dev = skb->dev;
-	u32 ttl = G_TC_RTTL(skb->tc_verd);
-	int result = TC_ACT_OK;
-	struct Qdisc *q;
+	struct tcf_proto *cl = rcu_dereference_bh(skb->dev->ingress_cl_list);
+	struct tcf_result cl_res;
 
-	if (unlikely(MAX_RED_LOOP < ttl++)) {
-		net_warn_ratelimited("Redir loop detected Dropping packet (%d->%d)\n",
-				     skb->skb_iif, dev->ifindex);
-		return TC_ACT_SHOT;
-	}
-
-	skb->tc_verd = SET_TC_RTTL(skb->tc_verd, ttl);
-	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_INGRESS);
-
-	q = rxq->qdisc;
-	if (q != &noop_qdisc) {
-		spin_lock(qdisc_lock(q));
-		if (likely(!test_bit(__QDISC_STATE_DEACTIVATED, &q->state)))
-			result = qdisc_enqueue_root(skb, q);
-		spin_unlock(qdisc_lock(q));
-	}
-
-	return result;
-}
-
-static inline struct sk_buff *handle_ing(struct sk_buff *skb,
-					 struct packet_type **pt_prev,
-					 int *ret, struct net_device *orig_dev)
-{
-	struct netdev_queue *rxq = rcu_dereference(skb->dev->ingress_queue);
-
-	if (!rxq || rxq->qdisc == &noop_qdisc)
-		goto out;
-
+	/* If there's at least one ingress present somewhere (so
+	 * we get here via enabled static key), remaining devices
+	 * that are not configured with an ingress qdisc will bail
+	 * out here.
+	 */
+	if (!cl)
+		return skb;
 	if (*pt_prev) {
 		*ret = deliver_skb(skb, *pt_prev, orig_dev);
 		*pt_prev = NULL;
 	}
 
-	switch (ing_filter(skb, rxq)) {
+	qdisc_skb_cb(skb)->pkt_len = skb->len;
+	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_INGRESS);
+	qdisc_bstats_cpu_update(cl->q, skb);
+
+	switch (tc_classify(skb, cl, &cl_res, false)) {
+	case TC_ACT_OK:
+	case TC_ACT_RECLASSIFY:
+		skb->tc_index = TC_H_MIN(cl_res.classid);
+		break;
 	case TC_ACT_SHOT:
+		qdisc_qstats_cpu_drop(cl->q);
 	case TC_ACT_STOLEN:
+	case TC_ACT_QUEUED:
 		kfree_skb(skb);
 		return NULL;
 	case TC_ACT_REDIRECT:
@@ -3363,12 +3490,9 @@ static inline struct sk_buff *handle_ing(struct sk_buff *skb,
 	default:
 		break;
 	}
-
-out:
-	skb->tc_verd = 0;
+#endif /* CONFIG_NET_CLS_ACT */
 	return skb;
 }
-#endif
 
 /**
  *	netdev_is_rx_handler_busy - check if receive handler is registered
@@ -3457,6 +3581,22 @@ static bool skb_pfmemalloc_protocol(struct sk_buff *skb)
 	}
 }
 
+static inline int nf_ingress(struct sk_buff *skb, struct packet_type **pt_prev,
+			     int *ret, struct net_device *orig_dev)
+{
+#ifdef CONFIG_NETFILTER_INGRESS
+	if (nf_hook_ingress_active(skb)) {
+		if (*pt_prev) {
+			*ret = deliver_skb(skb, *pt_prev, orig_dev);
+			*pt_prev = NULL;
+		}
+
+		return nf_hook_ingress(skb);
+	}
+#endif /* CONFIG_NETFILTER_INGRESS */
+	return 0;
+}
+
 static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 {
 	struct packet_type *ptype, *pt_prev;
@@ -3515,13 +3655,20 @@ another_round:
 	}
 
 skip_taps:
+#ifdef CONFIG_NET_INGRESS
+	if (static_key_false(&ingress_needed)) {
+		skb = sch_handle_ingress(skb, &pt_prev, &ret, orig_dev);
+		if (!skb)
+			goto out;
+
+		if (nf_ingress(skb, &pt_prev, &ret, orig_dev) < 0)
+			goto out;
+	}
+#endif
 #ifdef CONFIG_NET_CLS_ACT
-	skb = handle_ing(skb, &pt_prev, &ret, orig_dev);
-	if (!skb)
-		goto out;
+	skb->tc_verd = 0;
 ncls:
 #endif
-
 	if (pfmemalloc && !skb_pfmemalloc_protocol(skb))
 		goto drop;
 
@@ -3641,7 +3788,7 @@ static int __netif_receive_skb(struct sk_buff *skb)
  *	NET_RX_SUCCESS: no congestion
  *	NET_RX_DROP: packet was dropped
  */
-int netif_receive_skb(struct sk_buff *skb)
+int netif_receive_skb_sk(struct sock *sk, struct sk_buff *skb)
 {
 	int ret;
 
@@ -3668,7 +3815,7 @@ int netif_receive_skb(struct sk_buff *skb)
 	rcu_read_unlock();
 	return ret;
 }
-EXPORT_SYMBOL(netif_receive_skb);
+EXPORT_SYMBOL(netif_receive_skb_sk);
 
 /* Network device is going away, flush any packets still pending
  * Called with irqs disabled.
@@ -5760,6 +5907,9 @@ struct net_device *alloc_netdev_mqs(int sizeof_priv, const char *name,
 	dev->group = INIT_NETDEV_GROUP;
 	if (!dev->ethtool_ops)
 		dev->ethtool_ops = &default_ethtool_ops;
+
+	nf_hook_ingress_init(dev);
+
 	return dev;
 
 free_all:

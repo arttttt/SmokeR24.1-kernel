@@ -149,9 +149,7 @@ extern int do_swap_account;
 
 static inline bool mem_cgroup_disabled(void)
 {
-	if (memory_cgrp_subsys.disabled)
-		return true;
-	return false;
+	return !cgroup_subsys_enabled(memory_cgrp_subsys);
 }
 
 void __mem_cgroup_begin_update_page_stat(struct page *page, bool *locked,
