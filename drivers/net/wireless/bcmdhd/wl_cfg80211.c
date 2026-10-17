@@ -104,6 +104,12 @@ static struct device *cfg80211_parent_dev = NULL;
 /* g_bcm_cfg should be static. Do not change */
 static struct bcm_cfg80211 *g_bcm_cfg = NULL;
 u32 wl_dbg_level = WL_DBG_ERR;
+/* The cfg80211 and P2P logging, WL_DBG_* bits, beside dhd_msg_level: in
+ * /sys/module/bcmdhd/parameters, so that P2P and scan problems can be
+ * looked at on a running device -- also where debugfs is not mounted,
+ * unlike the debug_level file DEBUGFS_CFG80211 brings.
+ */
+module_param(wl_dbg_level, uint, 0644);
 
 extern int op_mode;
 
@@ -1482,7 +1488,6 @@ wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	struct net_device *primary_ndev;
 	struct net_device *new_ndev;
-	struct ether_addr primary_mac;
 #ifdef PROP_TXSTATUS_VSDB
 #if defined(BCMSDIO)
 	s32 up = 1;
@@ -1634,9 +1639,7 @@ if (bcmdhd_prop_txstatus_vsdb) {
 			p2p_on(cfg) = true;
 			wl_cfgp2p_set_firm_p2p(cfg);
 			wl_cfgp2p_init_discovery(cfg);
-			get_primary_mac(cfg, &primary_mac);
-			wl_cfgp2p_generate_bss_mac(&primary_mac,
-				&cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+			wl_cfgp2p_update_bss_mac(cfg);
 		}
 
 		memset(cfg->p2p->vir_ifname, 0, IFNAMSIZ);
@@ -2792,7 +2795,6 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 {
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	struct cfg80211_ssid *ssids;
-	struct ether_addr primary_mac;
 	bool p2p_ssid;
 #ifdef WL11U
 	bcm_tlv_t *interworking_ie;
@@ -2891,9 +2893,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 					/* p2p on at the first time */
 					p2p_on(cfg) = true;
 					wl_cfgp2p_set_firm_p2p(cfg);
-					get_primary_mac(cfg, &primary_mac);
-					wl_cfgp2p_generate_bss_mac(&primary_mac,
-						&cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+					wl_cfgp2p_update_bss_mac(cfg);
 #if defined(P2P_IE_MISSING_FIX)
 					cfg->p2p_prb_noti = false;
 #endif
@@ -6141,7 +6141,6 @@ wl_cfg80211_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 	s32 target_channel;
 	u32 id;
 	s32 err = BCME_OK;
-	struct ether_addr primary_mac;
 	struct net_device *ndev = NULL;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 
@@ -6219,8 +6218,7 @@ wl_cfg80211_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 		/* In case of p2p_listen command, supplicant send remain_on_channel
 		 * without turning on P2P
 		 */
-		get_primary_mac(cfg, &primary_mac);
-		wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+		wl_cfgp2p_update_bss_mac(cfg);
 		p2p_on(cfg) = true;
 	}
 
@@ -14531,17 +14529,13 @@ static void wl_delay(u32 ms)
 s32 wl_cfg80211_get_p2p_dev_addr(struct net_device *net, struct ether_addr *p2pdev_addr)
 {
 	struct bcm_cfg80211 *cfg = g_bcm_cfg;
-	struct ether_addr primary_mac;
 	if (!cfg->p2p)
 		return -1;
 	/* Into cfg->p2p, where a random address chosen before is kept: into
 	 * the caller's buffer it would be chosen afresh on every question.
 	 */
-	if (!p2p_is_on(cfg)) {
-		get_primary_mac(cfg, &primary_mac);
-		wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr,
-			&cfg->p2p->int_addr);
-	}
+	if (!p2p_is_on(cfg))
+		wl_cfgp2p_update_bss_mac(cfg);
 	memcpy(p2pdev_addr->octet, cfg->p2p->dev_addr.octet, ETHER_ADDR_LEN);
 
 
@@ -14808,7 +14802,6 @@ s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len,
 {
 	struct bcm_cfg80211 *cfg;
 	struct net_device *ndev = NULL;
-	struct ether_addr primary_mac;
 	s32 ret = 0;
 	s32 bssidx = 0;
 	s32 pktflag = 0;
@@ -14822,12 +14815,19 @@ s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len,
 	} else if (wl_get_drv_status(cfg, AP_CREATED, net)) {
 		ndev = net;
 		bssidx = 0;
+	} else if (net->ieee80211_ptr &&
+		net->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
+		/* hostapd sends its WPS/P2P IEs for an AP interface it has not
+		 * started yet. Not a P2P matter: taken for one, it started P2P
+		 * discovery, which the firmware refuses while the AP holds the
+		 * one further BSS (p2p_disc answers BCME_BUSY). The IEs reach the
+		 * firmware with the AP, as they do for AP_CREATING above.
+		 */
+		goto exit;
 	} else if (cfg->p2p) {
 		net = ndev_to_wlc_ndev(net, cfg);
 		if (!cfg->p2p->on) {
-			get_primary_mac(cfg, &primary_mac);
-			wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr,
-				&cfg->p2p->int_addr);
+			wl_cfgp2p_update_bss_mac(cfg);
 			/* In case of p2p_listen command, supplicant send remain_on_channel
 			* without turning on P2P
 			*/
@@ -14836,6 +14836,10 @@ s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len,
 			ret = wl_cfgp2p_enable_discovery(cfg, net, NULL, 0);
 
 			if (unlikely(ret)) {
+				/* P2P is not on: left set, the paths that turn it on
+				 * when it is off would not.
+				 */
+				p2p_on(cfg) = false;
 				goto exit;
 			}
 		}

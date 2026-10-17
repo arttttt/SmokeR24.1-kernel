@@ -244,7 +244,7 @@ static int max77660_sys_wdt_probe(struct platform_device *pdev)
 
 	if (pdata && pdata->system_watchdog_reset_timeout &&
 			pdata->system_watchdog_timeout) {
-		init_kthread_worker(&wdt->wdt_kworker);
+		kthread_init_worker(&wdt->wdt_kworker);
 		wdt->wdt_kworker_task = kthread_run(kthread_worker_fn,
 				&wdt->wdt_kworker, dev_name(&pdev->dev));
 		if (IS_ERR(wdt->wdt_kworker_task)) {
@@ -254,7 +254,7 @@ static int max77660_sys_wdt_probe(struct platform_device *pdev)
 			goto scrub;
 		}
 
-		init_kthread_work(&wdt->wdt_work, max77660_work_thread);
+		kthread_init_work(&wdt->wdt_work, max77660_work_thread);
 		sched_setscheduler(wdt->wdt_kworker_task,
 				SCHED_FIFO, &max77660_wdt_kthread_param);
 		wdt->sw_wdt_reset = true;
@@ -275,7 +275,7 @@ static int max77660_sys_wdt_probe(struct platform_device *pdev)
 			goto scrub;
 		}
 		if (wdt->sw_wdt_reset) {
-			queue_kthread_work(&wdt->wdt_kworker, &wdt->wdt_work);
+			kthread_queue_work(&wdt->wdt_kworker, &wdt->wdt_work);
 			dev_info(wdt->dev, "Starting system wdt kthread\n");
 		}
 	}

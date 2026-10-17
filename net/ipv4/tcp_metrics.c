@@ -32,6 +32,11 @@ struct tcp_fastopen_metrics {
 	struct	tcp_fastopen_cookie	cookie;
 };
 
+/* TCP_METRIC_MAX includes 2 extra fields for userspace compatibility
+ * Kernel only stores RTT and RTTVAR in usec resolution
+ */
+#define TCP_METRIC_MAX_KERNEL (TCP_METRIC_MAX - 2)
+
 struct tcp_metrics_block {
 	struct tcp_metrics_block __rcu	*tcpm_next;
 	struct inetpeer_addr		tcpm_addr;
@@ -39,7 +44,7 @@ struct tcp_metrics_block {
 	u32				tcpm_ts;
 	u32				tcpm_ts_stamp;
 	u32				tcpm_lock;
-	u32				tcpm_vals[TCP_METRIC_MAX + 1];
+	u32				tcpm_vals[TCP_METRIC_MAX_KERNEL + 1];
 	struct tcp_fastopen_metrics	tcpm_fastopen;
 
 	struct rcu_head			rcu_head;
@@ -57,24 +62,11 @@ static u32 tcp_metric_get(struct tcp_metrics_block *tm,
 	return tm->tcpm_vals[idx];
 }
 
-static u32 tcp_metric_get_jiffies(struct tcp_metrics_block *tm,
-				  enum tcp_metric_index idx)
-{
-	return msecs_to_jiffies(tm->tcpm_vals[idx]);
-}
-
 static void tcp_metric_set(struct tcp_metrics_block *tm,
 			   enum tcp_metric_index idx,
 			   u32 val)
 {
 	tm->tcpm_vals[idx] = val;
-}
-
-static void tcp_metric_set_msecs(struct tcp_metrics_block *tm,
-				 enum tcp_metric_index idx,
-				 u32 val)
-{
-	tm->tcpm_vals[idx] = jiffies_to_msecs(val);
 }
 
 static bool addr_same(const struct inetpeer_addr *a,
@@ -99,9 +91,11 @@ struct tcpm_hash_bucket {
 
 static DEFINE_SPINLOCK(tcp_metrics_lock);
 
-static void tcpm_suck_dst(struct tcp_metrics_block *tm, struct dst_entry *dst,
+static void tcpm_suck_dst(struct tcp_metrics_block *tm,
+			  const struct dst_entry *dst,
 			  bool fastopen_clear)
 {
+	u32 msval;
 	u32 val;
 
 	tm->tcpm_stamp = jiffies;
@@ -119,8 +113,11 @@ static void tcpm_suck_dst(struct tcp_metrics_block *tm, struct dst_entry *dst,
 		val |= 1 << TCP_METRIC_REORDERING;
 	tm->tcpm_lock = val;
 
-	tm->tcpm_vals[TCP_METRIC_RTT] = dst_metric_raw(dst, RTAX_RTT);
-	tm->tcpm_vals[TCP_METRIC_RTTVAR] = dst_metric_raw(dst, RTAX_RTTVAR);
+	msval = dst_metric_raw(dst, RTAX_RTT);
+	tm->tcpm_vals[TCP_METRIC_RTT] = msval * USEC_PER_MSEC;
+
+	msval = dst_metric_raw(dst, RTAX_RTTVAR);
+	tm->tcpm_vals[TCP_METRIC_RTTVAR] = msval * USEC_PER_MSEC;
 	tm->tcpm_vals[TCP_METRIC_SSTHRESH] = dst_metric_raw(dst, RTAX_SSTHRESH);
 	tm->tcpm_vals[TCP_METRIC_CWND] = dst_metric_raw(dst, RTAX_CWND);
 	tm->tcpm_vals[TCP_METRIC_REORDERING] = dst_metric_raw(dst, RTAX_REORDERING);
@@ -347,7 +344,7 @@ void tcp_update_metrics(struct sock *sk)
 		dst_confirm(dst);
 
 	rcu_read_lock();
-	if (icsk->icsk_backoff || !tp->srtt) {
+	if (icsk->icsk_backoff || !tp->srtt_us) {
 		/* This session failed to estimate rtt. Why?
 		 * Probably, no packets returned in time.  Reset our
 		 * results.
@@ -362,8 +359,8 @@ void tcp_update_metrics(struct sock *sk)
 	if (!tm)
 		goto out_unlock;
 
-	rtt = tcp_metric_get_jiffies(tm, TCP_METRIC_RTT);
-	m = rtt - tp->srtt;
+	rtt = tcp_metric_get(tm, TCP_METRIC_RTT);
+	m = rtt - tp->srtt_us;
 
 	/* If newly calculated rtt larger than stored one, store new
 	 * one. Otherwise, use EWMA. Remember, rtt overestimation is
@@ -371,10 +368,10 @@ void tcp_update_metrics(struct sock *sk)
 	 */
 	if (!tcp_metric_locked(tm, TCP_METRIC_RTT)) {
 		if (m <= 0)
-			rtt = tp->srtt;
+			rtt = tp->srtt_us;
 		else
 			rtt -= (m >> 3);
-		tcp_metric_set_msecs(tm, TCP_METRIC_RTT, rtt);
+		tcp_metric_set(tm, TCP_METRIC_RTT, rtt);
 	}
 
 	if (!tcp_metric_locked(tm, TCP_METRIC_RTTVAR)) {
@@ -385,16 +382,16 @@ void tcp_update_metrics(struct sock *sk)
 
 		/* Scale deviation to rttvar fixed point */
 		m >>= 1;
-		if (m < tp->mdev)
-			m = tp->mdev;
+		if (m < tp->mdev_us)
+			m = tp->mdev_us;
 
-		var = tcp_metric_get_jiffies(tm, TCP_METRIC_RTTVAR);
+		var = tcp_metric_get(tm, TCP_METRIC_RTTVAR);
 		if (m >= var)
 			var = m;
 		else
 			var -= (var - m) >> 2;
 
-		tcp_metric_set_msecs(tm, TCP_METRIC_RTTVAR, var);
+		tcp_metric_set(tm, TCP_METRIC_RTTVAR, var);
 	}
 
 	if (tcp_in_initial_slowstart(tp)) {
@@ -456,7 +453,7 @@ void tcp_init_metrics(struct sock *sk)
 	struct dst_entry *dst = __sk_dst_get(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_metrics_block *tm;
-	u32 val;
+	u32 val, crtt = 0; /* cached RTT scaled by 8 */
 
 	if (dst == NULL)
 		goto reset;
@@ -491,15 +488,19 @@ void tcp_init_metrics(struct sock *sk)
 		tp->reordering = val;
 	}
 
-	val = tcp_metric_get(tm, TCP_METRIC_RTT);
-	if (val == 0 || tp->srtt == 0) {
-		rcu_read_unlock();
-		goto reset;
-	}
-	/* Initial rtt is determined from SYN,SYN-ACK.
-	 * The segment is small and rtt may appear much
-	 * less than real one. Use per-dst memory
-	 * to make it more realistic.
+	crtt = tcp_metric_get(tm, TCP_METRIC_RTT);
+	rcu_read_unlock();
+reset:
+	/* The initial RTT measurement from the SYN/SYN-ACK is not ideal
+	 * to seed the RTO for later data packets because SYN packets are
+	 * small. Use the per-dst cached values to seed the RTO but keep
+	 * the RTT estimator variables intact (e.g., srtt, mdev, rttvar).
+	 * Later the RTO will be updated immediately upon obtaining the first
+	 * data RTT sample (tcp_rtt_estimator()). Hence the cached RTT only
+	 * influences the first RTO but not later RTT estimation.
+	 *
+	 * But if RTT is not available from the SYN (due to retransmits or
+	 * syn cookies) or the cache, force a conservative 3secs timeout.
 	 *
 	 * A bit of theory. RTT is time passed after "normal" sized packet
 	 * is sent until it is ACKed. In normal circumstances sending small
@@ -510,28 +511,20 @@ void tcp_init_metrics(struct sock *sk)
 	 * to low value, and then abruptly stops to do it and starts to delay
 	 * ACKs, wait for troubles.
 	 */
-	val = msecs_to_jiffies(val);
-	if (val > tp->srtt) {
-		tp->srtt = val;
-		tp->rtt_seq = tp->snd_nxt;
-	}
-	val = tcp_metric_get_jiffies(tm, TCP_METRIC_RTTVAR);
-	if (val > tp->mdev) {
-		tp->mdev = val;
-		tp->mdev_max = tp->rttvar = max(tp->mdev, tcp_rto_min(sk));
-	}
-	rcu_read_unlock();
-
-	tcp_set_rto(sk);
-reset:
-	if (tp->srtt == 0) {
+	if (crtt > tp->srtt_us) {
+		/* Set RTO like tcp_rtt_estimator(), but from cached RTT. */
+		crtt /= 8 * USEC_PER_MSEC;
+		inet_csk(sk)->icsk_rto = crtt + max(2 * crtt, tcp_rto_min(sk));
+	} else if (tp->srtt_us == 0) {
 		/* RFC6298: 5.7 We've failed to get a valid RTT sample from
 		 * 3WHS. This is most likely due to retransmission,
 		 * including spurious one. Reset the RTO back to 3secs
 		 * from the more aggressive 1sec to avoid more spurious
 		 * retransmission.
 		 */
-		tp->mdev = tp->mdev_max = tp->rttvar = TCP_TIMEOUT_FALLBACK;
+		tp->rttvar_us = jiffies_to_usecs(TCP_TIMEOUT_FALLBACK);
+		tp->mdev_us = tp->mdev_max_us = tp->rttvar_us;
+
 		inet_csk(sk)->icsk_rto = TCP_TIMEOUT_FALLBACK;
 	}
 	/* Cut cwnd down to 1 per RFC5681 if SYN or SYN-ACK has been
@@ -689,8 +682,9 @@ void tcp_fastopen_cache_set(struct sock *sk, u16 mss,
 		struct tcp_fastopen_metrics *tfom = &tm->tcpm_fastopen;
 
 		write_seqlock_bh(&fastopen_seqlock);
-		tfom->mss = mss;
-		if (cookie->len > 0)
+		if (mss)
+			tfom->mss = mss;
+		if (cookie && cookie->len > 0)
 			tfom->cookie = *cookie;
 		if (syn_lost) {
 			++tfom->syn_loss;
@@ -771,10 +765,26 @@ static int tcp_metrics_fill_info(struct sk_buff *msg,
 		nest = nla_nest_start(msg, TCP_METRICS_ATTR_VALS);
 		if (!nest)
 			goto nla_put_failure;
-		for (i = 0; i < TCP_METRIC_MAX + 1; i++) {
-			if (!tm->tcpm_vals[i])
+		for (i = 0; i < TCP_METRIC_MAX_KERNEL + 1; i++) {
+			u32 val = tm->tcpm_vals[i];
+
+			if (!val)
 				continue;
-			if (nla_put_u32(msg, i + 1, tm->tcpm_vals[i]) < 0)
+			if (i == TCP_METRIC_RTT) {
+				if (nla_put_u32(msg, TCP_METRIC_RTT_US + 1,
+						val) < 0)
+					goto nla_put_failure;
+				n++;
+				val = max(val / 1000, 1U);
+			}
+			if (i == TCP_METRIC_RTTVAR) {
+				if (nla_put_u32(msg, TCP_METRIC_RTTVAR_US + 1,
+						val) < 0)
+					goto nla_put_failure;
+				n++;
+				val = max(val / 1000, 1U);
+			}
+			if (nla_put_u32(msg, i + 1, val) < 0)
 				goto nla_put_failure;
 			n++;
 		}

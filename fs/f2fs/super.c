@@ -71,7 +71,8 @@ static void f2fs_build_fault_attr(struct f2fs_sb_info *sbi,
 
 /* f2fs-wide shrinker description */
 static struct shrinker f2fs_shrinker_info = {
-	.shrink = f2fs_shrink_scan,
+	.scan_objects = f2fs_shrink_scan,
+	.count_objects = f2fs_shrink_count,
 	.seeks = DEFAULT_SEEKS,
 };
 

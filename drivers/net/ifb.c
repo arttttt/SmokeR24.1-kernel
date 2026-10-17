@@ -136,18 +136,18 @@ static struct rtnl_link_stats64 *ifb_stats64(struct net_device *dev,
 	unsigned int start;
 
 	do {
-		start = u64_stats_fetch_begin_bh(&dp->rsync);
+		start = u64_stats_fetch_begin_irq(&dp->rsync);
 		stats->rx_packets = dp->rx_packets;
 		stats->rx_bytes = dp->rx_bytes;
-	} while (u64_stats_fetch_retry_bh(&dp->rsync, start));
+	} while (u64_stats_fetch_retry_irq(&dp->rsync, start));
 
 	do {
-		start = u64_stats_fetch_begin_bh(&dp->tsync);
+		start = u64_stats_fetch_begin_irq(&dp->tsync);
 
 		stats->tx_packets = dp->tx_packets;
 		stats->tx_bytes = dp->tx_bytes;
 
-	} while (u64_stats_fetch_retry_bh(&dp->tsync, start));
+	} while (u64_stats_fetch_retry_irq(&dp->tsync, start));
 
 	stats->rx_dropped = dev->stats.rx_dropped;
 	stats->tx_dropped = dev->stats.tx_dropped;
@@ -265,6 +265,7 @@ MODULE_PARM_DESC(numifbs, "Number of ifb devices");
 static int __init ifb_init_one(int index)
 {
 	struct net_device *dev_ifb;
+	struct ifb_private *dp;
 	int err;
 
 	dev_ifb = alloc_netdev(sizeof(struct ifb_private),
@@ -272,6 +273,10 @@ static int __init ifb_init_one(int index)
 
 	if (!dev_ifb)
 		return -ENOMEM;
+
+	dp = netdev_priv(dev_ifb);
+	u64_stats_init(&dp->rsync);
+	u64_stats_init(&dp->tsync);
 
 	dev_ifb->rtnl_link_ops = &ifb_link_ops;
 	err = register_netdevice(dev_ifb);

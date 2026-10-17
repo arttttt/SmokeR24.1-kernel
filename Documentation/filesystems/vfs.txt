@@ -347,6 +347,8 @@ struct inode_operations {
 	int (*mknod) (struct inode *,struct dentry *,umode_t,dev_t);
 	int (*rename) (struct inode *, struct dentry *,
 			struct inode *, struct dentry *);
+	int (*rename2) (struct inode *, struct dentry *,
+			struct inode *, struct dentry *, unsigned int);
 	int (*readlink) (struct dentry *, char __user *,int);
         void * (*follow_link) (struct dentry *, struct nameidata *);
         void (*put_link) (struct dentry *, struct nameidata *, void *);
@@ -413,6 +415,20 @@ otherwise noted.
 
   rename: called by the rename(2) system call to rename the object to
 	have the parent and name given by the second inode and dentry.
+
+  rename2: this has an additional flags argument compared to rename.
+	If no flags are supported by the filesystem then this method
+	need not be implemented.  If some flags are supported then the
+	filesystem must return -EINVAL for any unsupported or unknown
+	flags.  Currently the following flags are implemented:
+	(1) RENAME_NOREPLACE: this flag indicates that if the target
+	of the rename exists the rename should fail with -EEXIST
+	instead of replacing the target.  The VFS already checks for
+	existence, so for local filesystems the RENAME_NOREPLACE
+	implementation is equivalent to plain rename.
+	(2) RENAME_EXCHANGE: exchange source and target.  Both must
+	exist; this is checked by the VFS.  Unlike plain rename,
+	source and target may be of different type.
 
   readlink: called by the readlink(2) system call. Only required if
 	you want to support reading symbolic links
@@ -549,7 +565,7 @@ struct address_space_operations
 -------------------------------
 
 This describes how the VFS can manipulate mapping of a file to page cache in
-your filesystem. As of kernel 2.6.22, the following members are defined:
+your filesystem. The following members are defined:
 
 struct address_space_operations {
 	int (*writepage)(struct page *page, struct writeback_control *wbc);
@@ -566,7 +582,7 @@ struct address_space_operations {
 				loff_t pos, unsigned len, unsigned copied,
 				struct page *page, void *fsdata);
 	sector_t (*bmap)(struct address_space *, sector_t);
-	int (*invalidatepage) (struct page *, unsigned long);
+	void (*invalidatepage) (struct page *, unsigned int, unsigned int);
 	int (*releasepage) (struct page *, int);
 	void (*freepage)(struct page *);
 	ssize_t (*direct_IO)(int, struct kiocb *, const struct iovec *iov,
@@ -685,14 +701,14 @@ struct address_space_operations {
   invalidatepage: If a page has PagePrivate set, then invalidatepage
         will be called when part or all of the page is to be removed
 	from the address space.  This generally corresponds to either a
-	truncation or a complete invalidation of the address space
-	(in the latter case 'offset' will always be 0).
-	Any private data associated with the page should be updated
-	to reflect this truncation.  If offset is 0, then
-	the private data should be released, because the page
-	must be able to be completely discarded.  This may be done by
-        calling the ->releasepage function, but in this case the
-        release MUST succeed.
+	truncation, punch hole  or a complete invalidation of the address
+	space (in the latter case 'offset' will always be 0 and 'length'
+	will be PAGE_CACHE_SIZE). Any private data associated with the page
+	should be updated to reflect this truncation.  If offset is 0 and
+	length is PAGE_CACHE_SIZE, then the private data should be released,
+	because the page must be able to be completely discarded.  This may
+	be done by calling the ->releasepage function, but in this case the
+	release MUST succeed.
 
   releasepage: releasepage is called on PagePrivate pages to indicate
         that the page should be freed if possible.  ->releasepage

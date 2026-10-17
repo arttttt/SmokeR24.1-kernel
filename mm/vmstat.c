@@ -737,6 +737,9 @@ const char * const vmstat_text[] = {
 	"numa_local",
 	"numa_other",
 #endif
+	"workingset_refault",
+	"workingset_activate",
+	"workingset_nodereclaim",
 	"nr_anon_transparent_hugepages",
 	"nr_free_cma",
 	"nr_dirty_threshold",
@@ -818,6 +821,10 @@ const char * const vmstat_text[] = {
 	"thp_zero_page_alloc",
 	"thp_zero_page_alloc_failed",
 #endif
+
+	/* Sums over all zones: the names userspace lmkd parses */
+	"pgscan_kswapd",
+	"pgscan_direct",
 
 #endif /* CONFIG_VM_EVENTS_COUNTERS */
 };
@@ -1106,7 +1113,8 @@ static void *vmstat_start(struct seq_file *m, loff_t *pos)
 			  NR_VM_WRITEBACK_STAT_ITEMS * sizeof(unsigned long);
 
 #ifdef CONFIG_VM_EVENT_COUNTERS
-	stat_items_size += sizeof(struct vm_event_state);
+	stat_items_size += sizeof(struct vm_event_state) +
+			   2 * sizeof(unsigned long);
 #endif
 
 	v = kmalloc(stat_items_size, GFP_KERNEL);
@@ -1125,6 +1133,13 @@ static void *vmstat_start(struct seq_file *m, loff_t *pos)
 	all_vm_events(v);
 	v[PGPGIN] /= 2;		/* sectors -> kbytes */
 	v[PGPGOUT] /= 2;
+
+	v[NR_VM_EVENT_ITEMS] = 0;
+	v[NR_VM_EVENT_ITEMS + 1] = 0;
+	for (i = 0; i < MAX_NR_ZONES; i++) {
+		v[NR_VM_EVENT_ITEMS] += v[PGSCAN_KSWAPD_NORMAL - ZONE_NORMAL + i];
+		v[NR_VM_EVENT_ITEMS + 1] += v[PGSCAN_DIRECT_NORMAL - ZONE_NORMAL + i];
+	}
 #endif
 	return (unsigned long *)m->private + *pos;
 }

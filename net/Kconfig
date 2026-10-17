@@ -5,6 +5,7 @@
 menuconfig NET
 	bool "Networking support"
 	select NLATTR
+	select BPF
 	---help---
 	  Unless you really know what you are doing, you should say Y here.
 	  The reason is that some programs need kernel networking support even
@@ -101,8 +102,12 @@ config NETWORK_SECMARK
 	  to nfmark, but designated for security purposes.
 	  If you are unsure how to answer this question, answer N.
 
+config NET_PTP_CLASSIFY
+	def_bool n
+
 config NETWORK_PHY_TIMESTAMPING
 	bool "Timestamping in PHY devices"
+	select NET_PTP_CLASSIFY
 	help
 	  This allows timestamping of network packets by PHYs with
 	  hardware timestamping capabilities. This option adds some
@@ -249,12 +254,22 @@ config XPS
 	depends on SMP && USE_GENERIC_SMP_HELPERS
 	default y
 
-config NETPRIO_CGROUP
-	tristate "Network priority cgroup"
+config CGROUP_NET_PRIO
+	bool "Network priority cgroup"
 	depends on CGROUPS
+	select SOCK_CGROUP_DATA
 	---help---
 	  Cgroup subsystem for use in assigning processes to network priorities on
-	  a per-interface basis
+	  a per-interface basis.
+
+config CGROUP_NET_CLASSID
+	bool "Network classid cgroup"
+	depends on CGROUPS
+	select SOCK_CGROUP_DATA
+	---help---
+	  Cgroup subsystem for use as general purpose socket classid marker that is
+	  being used in cls_cgroup and for netfilter matching.
+
 
 config BQL
 	boolean
@@ -270,8 +285,12 @@ config BPF_JIT
 	  Berkeley Packet Filter filtering capabilities are normally handled
 	  by an interpreter. This option allows kernel to generate a native
 	  code when filter is loaded in memory. This should speedup
-	  packet sniffing (libpcap/tcpdump). Note : Admin should enable
-	  this feature changing /proc/sys/net/core/bpf_jit_enable
+	  packet sniffing (libpcap/tcpdump).
+
+	  Note, admin should enable this feature changing:
+	  /proc/sys/net/core/bpf_jit_enable
+	  /proc/sys/net/core/bpf_jit_harden   (optional)
+	  /proc/sys/net/core/bpf_jit_kallsyms (optional)
 
 menu "Network testing"
 

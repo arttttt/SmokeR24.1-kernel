@@ -560,7 +560,7 @@ struct frame_tail {
  */
 static struct frame_tail __user *
 user_backtrace(struct frame_tail __user *tail,
-	       struct perf_callchain_entry *entry)
+	       struct perf_callchain_entry_ctx *entry)
 {
 	struct frame_tail buftail;
 
@@ -809,7 +809,7 @@ static int is_func_prologue_epilogue(unsigned long *addr)
 
 #ifndef CONFIG_PERF_ANDROID_BACKTRACE
 void
-perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
+perf_callchain_user(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs)
 {
 	struct frame_tail __user *tail;
 
@@ -821,7 +821,7 @@ perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 	perf_callchain_store(entry, regs->ARM_pc);
 	tail = (struct frame_tail __user *)regs->ARM_fp - 1;
 
-	while ((entry->nr < PERF_MAX_STACK_DEPTH) &&
+	while ((entry->entry->nr < entry->max_stack) &&
 	       tail && !((unsigned long)tail & 0x3))
 		tail = user_backtrace(tail, entry);
 }
@@ -841,7 +841,7 @@ perf_check_frame_address(unsigned long addr, struct vm_area_struct *vma)
 }
 
 void
-perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
+perf_callchain_user(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs)
 {
 	struct frame_tail __user *tail;
 	unsigned long *fp, reg;
@@ -900,7 +900,8 @@ perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 		return;
 	}
 
-	while (tail && !((unsigned long)tail & 0x3)) {
+	while ((entry->entry->nr < entry->max_stack) &&
+	       tail && !((unsigned long)tail & 0x3)) {
 		if (perf_check_frame_address((unsigned long)tail, vma) ||
 			tail->lr < AB_USER_SPACE_MIN_ADDR) {
 			return;
@@ -919,13 +920,13 @@ static int
 callchain_trace(struct stackframe *fr,
 		void *data)
 {
-	struct perf_callchain_entry *entry = data;
+	struct perf_callchain_entry_ctx *entry = data;
 	perf_callchain_store(entry, fr->pc);
 	return 0;
 }
 
 void
-perf_callchain_kernel(struct perf_callchain_entry *entry, struct pt_regs *regs)
+perf_callchain_kernel(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs)
 {
 	struct stackframe fr;
 

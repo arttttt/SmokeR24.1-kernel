@@ -48,8 +48,8 @@ static struct blkcg_gq *__blkg_lookup(struct blkcg *blkcg,
  * subtree.
  */
 #define blkg_for_each_descendant_pre(d_blkg, pos_cgrp, p_blkg)		\
-	cgroup_for_each_descendant_pre((pos_cgrp), (p_blkg)->blkcg->css.cgroup) \
-		if (((d_blkg) = __blkg_lookup(cgroup_to_blkcg(pos_cgrp), \
+	css_for_each_descendant_pre((pos_cgrp), &(p_blkg)->blkcg->css) \
+		if (((d_blkg) = __blkg_lookup(css_to_blkcg(pos_cgrp), \
 					      (p_blkg)->q, false)))
 
 static bool blkcg_policy_enabled(struct request_queue *q,
@@ -206,7 +206,7 @@ EXPORT_SYMBOL_GPL(blkg_lookup);
 
 /*
  * If @new_blkg is %NULL, this function tries to allocate a new one as
- * necessary using %GFP_ATOMIC.  @new_blkg is always consumed on return.
+ * necessary using %GFP_NOWAIT.  @new_blkg is always consumed on return.
  */
 static struct blkcg_gq *blkg_create(struct blkcg *blkcg,
 				    struct request_queue *q,
@@ -219,14 +219,14 @@ static struct blkcg_gq *blkg_create(struct blkcg *blkcg,
 	lockdep_assert_held(q->queue_lock);
 
 	/* blkg holds a reference to blkcg */
-	if (!css_tryget(&blkcg->css)) {
+	if (!css_tryget_online(&blkcg->css)) {
 		ret = -EINVAL;
 		goto err_free_blkg;
 	}
 
 	/* allocate */
 	if (!new_blkg) {
-		new_blkg = blkg_alloc(blkcg, q, GFP_ATOMIC);
+		new_blkg = blkg_alloc(blkcg, q, GFP_NOWAIT);
 		if (unlikely(!new_blkg)) {
 			ret = -ENOMEM;
 			goto err_put_css;
@@ -454,10 +454,10 @@ struct request_list *__blk_queue_next_rl(struct request_list *rl,
 	return &blkg->rl;
 }
 
-static int blkcg_reset_stats(struct cgroup *cgroup, struct cftype *cftype,
-			     u64 val)
+static int blkcg_reset_stats(struct cgroup_subsys_state *css,
+			     struct cftype *cftype, u64 val)
 {
-	struct blkcg *blkcg = cgroup_to_blkcg(cgroup);
+	struct blkcg *blkcg = css_to_blkcg(css);
 	struct blkcg_gq *blkg;
 	int i;
 
@@ -631,15 +631,13 @@ u64 blkg_stat_recursive_sum(struct blkg_policy_data *pd, int off)
 {
 	struct blkcg_policy *pol = blkcg_policy[pd->plid];
 	struct blkcg_gq *pos_blkg;
-	struct cgroup *pos_cgrp;
-	u64 sum;
+	struct cgroup_subsys_state *pos_css;
+	u64 sum = 0;
 
 	lockdep_assert_held(pd->blkg->q->queue_lock);
 
-	sum = blkg_stat_read((void *)pd + off);
-
 	rcu_read_lock();
-	blkg_for_each_descendant_pre(pos_blkg, pos_cgrp, pd_to_blkg(pd)) {
+	blkg_for_each_descendant_pre(pos_blkg, pos_css, pd_to_blkg(pd)) {
 		struct blkg_policy_data *pos_pd = blkg_to_pd(pos_blkg, pol);
 		struct blkg_stat *stat = (void *)pos_pd + off;
 
@@ -666,16 +664,14 @@ struct blkg_rwstat blkg_rwstat_recursive_sum(struct blkg_policy_data *pd,
 {
 	struct blkcg_policy *pol = blkcg_policy[pd->plid];
 	struct blkcg_gq *pos_blkg;
-	struct cgroup *pos_cgrp;
-	struct blkg_rwstat sum;
+	struct cgroup_subsys_state *pos_css;
+	struct blkg_rwstat sum = { };
 	int i;
 
 	lockdep_assert_held(pd->blkg->q->queue_lock);
 
-	sum = blkg_rwstat_read((void *)pd + off);
-
 	rcu_read_lock();
-	blkg_for_each_descendant_pre(pos_blkg, pos_cgrp, pd_to_blkg(pd)) {
+	blkg_for_each_descendant_pre(pos_blkg, pos_css, pd_to_blkg(pd)) {
 		struct blkg_policy_data *pos_pd = blkg_to_pd(pos_blkg, pol);
 		struct blkg_rwstat *rwstat = (void *)pos_pd + off;
 		struct blkg_rwstat tmp;
@@ -786,18 +782,18 @@ struct cftype blkcg_files[] = {
 
 /**
  * blkcg_css_offline - cgroup css_offline callback
- * @cgroup: cgroup of interest
+ * @css: css of interest
  *
- * This function is called when @cgroup is about to go away and responsible
- * for shooting down all blkgs associated with @cgroup.  blkgs should be
+ * This function is called when @css is about to go away and responsible
+ * for shooting down all blkgs associated with @css.  blkgs should be
  * removed while holding both q and blkcg locks.  As blkcg lock is nested
  * inside q lock, this function performs reverse double lock dancing.
  *
  * This is the blkcg counterpart of ioc_release_fn().
  */
-static void blkcg_css_offline(struct cgroup *cgroup)
+static void blkcg_css_offline(struct cgroup_subsys_state *css)
 {
-	struct blkcg *blkcg = cgroup_to_blkcg(cgroup);
+	struct blkcg *blkcg = css_to_blkcg(css);
 
 	spin_lock_irq(&blkcg->lock);
 
@@ -819,21 +815,21 @@ static void blkcg_css_offline(struct cgroup *cgroup)
 	spin_unlock_irq(&blkcg->lock);
 }
 
-static void blkcg_css_free(struct cgroup *cgroup)
+static void blkcg_css_free(struct cgroup_subsys_state *css)
 {
-	struct blkcg *blkcg = cgroup_to_blkcg(cgroup);
+	struct blkcg *blkcg = css_to_blkcg(css);
 
 	if (blkcg != &blkcg_root)
 		kfree(blkcg);
 }
 
-static struct cgroup_subsys_state *blkcg_css_alloc(struct cgroup *cgroup)
+static struct cgroup_subsys_state *
+blkcg_css_alloc(struct cgroup_subsys_state *parent_css)
 {
 	static atomic64_t id_seq = ATOMIC64_INIT(0);
 	struct blkcg *blkcg;
-	struct cgroup *parent = cgroup->parent;
 
-	if (!parent) {
+	if (!parent_css) {
 		blkcg = &blkcg_root;
 		goto done;
 	}
@@ -847,7 +843,7 @@ static struct cgroup_subsys_state *blkcg_css_alloc(struct cgroup *cgroup)
 	blkcg->id = atomic64_inc_return(&id_seq); /* root is 0, start from 1 */
 done:
 	spin_lock_init(&blkcg->lock);
-	INIT_RADIX_TREE(&blkcg->blkg_tree, GFP_ATOMIC);
+	INIT_RADIX_TREE(&blkcg->blkg_tree, GFP_NOWAIT);
 	INIT_HLIST_HEAD(&blkcg->blkg_list);
 
 	return &blkcg->css;
@@ -918,14 +914,15 @@ void blkcg_exit_queue(struct request_queue *q)
  * of the main cic data structures.  For now we allow a task to change
  * its cgroup only if it's the only owner of its ioc.
  */
-static int blkcg_can_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
+static int blkcg_can_attach(struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
+	struct cgroup_subsys_state *dst_css;
 	struct io_context *ioc;
 	int ret = 0;
 
 	/* task_lock() is needed to avoid races with exit_io_context() */
-	cgroup_taskset_for_each(task, cgrp, tset) {
+	cgroup_taskset_for_each(task, dst_css, tset) {
 		task_lock(task);
 		ioc = task->io_context;
 		if (ioc && atomic_read(&ioc->nr_tasks) > 1)
@@ -937,15 +934,12 @@ static int blkcg_can_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
 	return ret;
 }
 
-struct cgroup_subsys blkio_subsys = {
-	.name = "blkio",
+struct cgroup_subsys blkio_cgrp_subsys = {
 	.css_alloc = blkcg_css_alloc,
 	.css_offline = blkcg_css_offline,
 	.css_free = blkcg_css_free,
 	.can_attach = blkcg_can_attach,
-	.subsys_id = blkio_subsys_id,
-	.base_cftypes = blkcg_files,
-	.module = THIS_MODULE,
+	.dfl_cftypes = blkcg_files,
 
 	/*
 	 * blkio subsystem is utterly broken in terms of hierarchy support.
@@ -955,7 +949,7 @@ struct cgroup_subsys blkio_subsys = {
 	 */
 	.broken_hierarchy = true,
 };
-EXPORT_SYMBOL_GPL(blkio_subsys);
+EXPORT_SYMBOL_GPL(blkio_cgrp_subsys);
 
 /**
  * blkcg_activate_policy - activate a blkcg policy on a request_queue
@@ -1147,7 +1141,8 @@ int blkcg_policy_register(struct blkcg_policy *pol)
 
 	/* everything is in place, add intf files for the new policy */
 	if (pol->cftypes)
-		WARN_ON(cgroup_add_cftypes(&blkio_subsys, pol->cftypes));
+		WARN_ON(cgroup_add_legacy_cftypes(&blkio_cgrp_subsys,
+						  pol->cftypes));
 	ret = 0;
 out_unlock:
 	mutex_unlock(&blkcg_pol_mutex);
@@ -1170,7 +1165,7 @@ void blkcg_policy_unregister(struct blkcg_policy *pol)
 
 	/* kill the intf files first */
 	if (pol->cftypes)
-		cgroup_rm_cftypes(&blkio_subsys, pol->cftypes);
+		cgroup_rm_cftypes(pol->cftypes);
 
 	/* unregister and update blkgs */
 	blkcg_policy[pol->plid] = NULL;

@@ -9,7 +9,7 @@ obj-$(CONFIG_SYSCTL) += sysctl_net_core.o
 
 obj-y		     += dev.o ethtool.o dev_addr_lists.o dst.o netevent.o \
 			neighbour.o rtnetlink.o utils.o link_watch.o filter.o \
-			sock_diag.o dev_ioctl.o
+			sock_diag.o dev_ioctl.o sock_reuseport.o
 
 obj-$(CONFIG_XFRM) += flow.o
 obj-y += net-sysfs.o
@@ -22,3 +22,5 @@ obj-$(CONFIG_TRACEPOINTS) += net-traces.o
 obj-$(CONFIG_NET_DROP_MONITOR) += drop_monitor.o
 obj-$(CONFIG_NETWORK_PHY_TIMESTAMPING) += timestamping.o
 obj-$(CONFIG_NETPRIO_CGROUP) += netprio_cgroup.o
+obj-$(CONFIG_NET_PTP_CLASSIFY) += ptp_classifier.o
+obj-$(CONFIG_BPF_SYSCALL) += bpf_sk_storage.o

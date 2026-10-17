@@ -1084,13 +1084,13 @@ static struct rtnl_link_stats64 *xennet_get_stats64(struct net_device *dev,
 		unsigned int start;
 
 		do {
-			start = u64_stats_fetch_begin_bh(&stats->syncp);
+			start = u64_stats_fetch_begin_irq(&stats->syncp);
 
 			rx_packets = stats->rx_packets;
 			tx_packets = stats->tx_packets;
 			rx_bytes = stats->rx_bytes;
 			tx_bytes = stats->tx_bytes;
-		} while (u64_stats_fetch_retry_bh(&stats->syncp, start));
+		} while (u64_stats_fetch_retry_irq(&stats->syncp, start));
 
 		tot->rx_packets += rx_packets;
 		tot->tx_packets += tx_packets;
@@ -1279,6 +1279,12 @@ static struct net_device *xennet_create_dev(struct xenbus_device *dev)
 	np->stats = alloc_percpu(struct netfront_stats);
 	if (np->stats == NULL)
 		goto exit;
+
+	for_each_possible_cpu(i) {
+		struct netfront_stats *xen_nf_stats;
+		xen_nf_stats = per_cpu_ptr(np->stats, i);
+		u64_stats_init(&xen_nf_stats->syncp);
+	}
 
 	/* Initialise tx_skbs as a free chain containing every entry. */
 	np->tx_skb_freelist = 0;

@@ -443,7 +443,8 @@ static inline void __sdfat_set_bio_iterate(struct bio *bio, sector_t sector,
 static void __sdfat_truncate_pagecache(struct inode *inode,
 					loff_t to, loff_t newsize)
 {
-	truncate_pagecache(inode, to, newsize);
+	/* this 3.10 kernel has the 3.12 truncate_pagecache() (7caef26767c1) */
+	truncate_pagecache(inode, newsize);
 }
 
 static int sdfat_d_hash(const struct dentry *dentry,
@@ -4084,7 +4085,7 @@ static int sdfat_write_inode(struct inode *inode, struct writeback_control *wbc)
 
 static void sdfat_evict_inode(struct inode *inode)
 {
-	truncate_inode_pages(&inode->i_data, 0);
+	truncate_inode_pages_final(&inode->i_data);
 
 	if (!inode->i_nlink) {
 		loff_t old_size = i_size_read(inode);

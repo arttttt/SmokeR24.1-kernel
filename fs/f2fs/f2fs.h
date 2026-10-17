@@ -194,28 +194,6 @@ static inline void inode_nohighmem(struct inode *inode)
 	mapping_set_gfp_mask(inode->i_mapping, GFP_USER);
 }
 
-/**
- * current_time - Return FS time
- * @inode: inode.
- *
- * Return the current time truncated to the time granularity supported by
- * the fs.
- *
- * Note that inode and inode->sb cannot be NULL.
- * Otherwise, the function warns and returns time without truncation.
- */
-static inline struct timespec current_time(struct inode *inode)
-{
-	struct timespec now = current_kernel_time();
-
-	if (unlikely(!inode->i_sb)) {
-		WARN(1, "current_time() called with uninitialized super_block in the inode");
-		return now; 
-	}    
-
-	return timespec_trunc(now, inode->i_sb->s_time_gran);
-}
-
 /*
  * For checkpoint manager
  */
@@ -2471,7 +2449,8 @@ int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
 int f2fs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 			u64 start, u64 len);
 void f2fs_set_page_dirty_nobuffers(struct page *page);
-void f2fs_invalidate_page(struct page *page, unsigned long int offset);
+void f2fs_invalidate_page(struct page *page, unsigned int offset,
+			unsigned int length);
 int f2fs_release_page(struct page *page, gfp_t wait);
 #ifdef CONFIG_MIGRATION
 int f2fs_migrate_page(struct address_space *mapping, struct page *newpage,
@@ -2727,9 +2706,9 @@ int f2fs_inline_data_fiemap(struct inode *inode,
 /*
  * shrinker.c
  */
-int f2fs_shrink_count(struct shrinker *shrink,
+unsigned long f2fs_shrink_count(struct shrinker *shrink,
 			struct shrink_control *sc);
-int f2fs_shrink_scan(struct shrinker *shrink,
+unsigned long f2fs_shrink_scan(struct shrinker *shrink,
 			struct shrink_control *sc);
 void f2fs_join_shrinker(struct f2fs_sb_info *sbi);
 void f2fs_leave_shrinker(struct f2fs_sb_info *sbi);

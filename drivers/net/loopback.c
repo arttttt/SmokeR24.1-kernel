@@ -112,10 +112,10 @@ static struct rtnl_link_stats64 *loopback_get_stats64(struct net_device *dev,
 
 		lb_stats = per_cpu_ptr(dev->lstats, i);
 		do {
-			start = u64_stats_fetch_begin_bh(&lb_stats->syncp);
+			start = u64_stats_fetch_begin_irq(&lb_stats->syncp);
 			tbytes = lb_stats->bytes;
 			tpackets = lb_stats->packets;
-		} while (u64_stats_fetch_retry_bh(&lb_stats->syncp, start));
+		} while (u64_stats_fetch_retry_irq(&lb_stats->syncp, start));
 		bytes   += tbytes;
 		packets += tpackets;
 	}
@@ -137,10 +137,16 @@ static const struct ethtool_ops loopback_ethtool_ops = {
 
 static int loopback_dev_init(struct net_device *dev)
 {
+	int i;
 	dev->lstats = alloc_percpu(struct pcpu_lstats);
 	if (!dev->lstats)
 		return -ENOMEM;
 
+	for_each_possible_cpu(i) {
+		struct pcpu_lstats *lb_stats;
+		lb_stats = per_cpu_ptr(dev->lstats, i);
+		u64_stats_init(&lb_stats->syncp);
+	}
 	return 0;
 }
 

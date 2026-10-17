@@ -452,10 +452,11 @@ static inline notrace int ftrace_get_offsets_##call(			\
  * };
  *
  * static struct ftrace_event_call event_<call> = {
- *	.name			= "<call>",
+ *	.tp			= &__tracepoint_<call>,
  *	.class			= event_class_<template>,
  *	.event			= &ftrace_event_type_<call>,
  *	.print_fmt		= print_fmt_<call>,
+ *	.flags			= TRACE_EVENT_FL_TRACEPOINT,
  * };
  * // its only safe to use pointers when doing linker tricks to
  * // create an array.
@@ -592,10 +593,11 @@ static struct ftrace_event_class __used __refdata event_class_##call = { \
 #define DEFINE_EVENT(template, call, proto, args)			\
 									\
 static struct ftrace_event_call __used event_##call = {			\
-	.name			= #call,				\
+	.tp			= &__tracepoint_##call,			\
 	.class			= &event_class_##template,		\
 	.event.funcs		= &ftrace_event_type_funcs_##template,	\
 	.print_fmt		= print_fmt_##template,			\
+	.flags			= TRACE_EVENT_FL_TRACEPOINT,		\
 };									\
 static struct ftrace_event_call __used					\
 __attribute__((section("_ftrace_events"))) *__event_##call = &event_##call
@@ -606,10 +608,11 @@ __attribute__((section("_ftrace_events"))) *__event_##call = &event_##call
 static const char print_fmt_##call[] = print;				\
 									\
 static struct ftrace_event_call __used event_##call = {			\
-	.name			= #call,				\
+	.tp			= &__tracepoint_##call,			\
 	.class			= &event_class_##template,		\
 	.event.funcs		= &ftrace_event_type_funcs_##call,	\
 	.print_fmt		= print_fmt_##call,			\
+	.flags			= TRACE_EVENT_FL_TRACEPOINT,		\
 };									\
 static struct ftrace_event_call __used					\
 __attribute__((section("_ftrace_events"))) *__event_##call = &event_##call
@@ -629,9 +632,6 @@ __attribute__((section("_ftrace_events"))) *__event_##call = &event_##call
 #undef __get_str
 #define __get_str(field) (char *)__get_dynamic_array(field)
 
-#undef __perf_addr
-#define __perf_addr(a) __addr = (a)
-
 #undef __perf_count
 #define __perf_count(c) __count = (c)
 
@@ -649,37 +649,34 @@ perf_trace_##call(void *__data, proto)					\
 	struct ftrace_event_call *event_call = __data;			\
 	struct ftrace_data_offsets_##call __maybe_unused __data_offsets;\
 	struct ftrace_raw_##call *entry;				\
-	struct pt_regs __regs;						\
-	u64 __addr = 0, __count = 1;					\
+	struct pt_regs *__regs;						\
+	u64 __count = 1;					\
 	struct task_struct *__task = NULL;				\
 	struct hlist_head *head;					\
 	int __entry_size;						\
 	int __data_size;						\
 	int rctx;							\
 									\
-	perf_fetch_caller_regs(&__regs);				\
-									\
 	__data_size = ftrace_get_offsets_##call(&__data_offsets, args); \
+									\
+	head = this_cpu_ptr(event_call->perf_events);			\
 	__entry_size = ALIGN(__data_size + sizeof(*entry) + sizeof(u32),\
 			     sizeof(u64));				\
 	__entry_size -= sizeof(u32);					\
 									\
-	if (WARN_ONCE(__entry_size > PERF_MAX_TRACE_SIZE,		\
-		      "profile buffer not large enough"))		\
-		return;							\
-									\
-	entry = (struct ftrace_raw_##call *)perf_trace_buf_prepare(	\
-		__entry_size, event_call->event.type, &__regs, &rctx);	\
+	entry = perf_trace_buf_alloc(__entry_size, &__regs, &rctx);	\
 	if (!entry)							\
 		return;							\
 									\
+	perf_fetch_caller_regs(__regs);					\
+                                                                        \
 	tstruct								\
 									\
 	{ assign; }							\
 									\
-	head = this_cpu_ptr(event_call->perf_events);			\
-	perf_trace_buf_submit(entry, __entry_size, rctx, __addr,	\
-		__count, &__regs, head, __task);			\
+	perf_trace_run_bpf_submit(entry, __entry_size, rctx,		\
+				  event_call, __count, __regs,		\
+				  head, __task);			\
 }
 
 /*

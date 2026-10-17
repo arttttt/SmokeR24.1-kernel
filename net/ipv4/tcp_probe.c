@@ -46,6 +46,10 @@ static unsigned int bufsize __read_mostly = 4096;
 MODULE_PARM_DESC(bufsize, "Log buffer size in packets (4096)");
 module_param(bufsize, uint, 0);
 
+static unsigned int fwmark __read_mostly = 0;
+MODULE_PARM_DESC(fwmark, "skb mark to match (0=no mark)");
+module_param(fwmark, uint, 0);
+
 static int full __read_mostly;
 MODULE_PARM_DESC(full, "Full log (1=every ack packet received,  0=only cwnd changes)");
 module_param(full, int, 0);
@@ -90,15 +94,17 @@ static inline int tcp_probe_avail(void)
  * Hook inserted to be called before each receive packet.
  * Note: arguments must match tcp_rcv_established()!
  */
-static int jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
+static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			       struct tcphdr *th, unsigned int len)
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_sock *inet = inet_sk(sk);
 
-	/* Only update if port matches */
-	if ((port == 0 || ntohs(inet->inet_dport) == port ||
-	     ntohs(inet->inet_sport) == port) &&
+	/* Only update if port or skb mark matches */
+	if (((port == 0 && fwmark == 0) ||
+	     ntohs(inet->inet_dport) == port ||
+	     ntohs(inet->inet_sport) == port ||
+	     (fwmark > 0 && skb->mark == fwmark)) &&
 	    (full || tp->snd_cwnd != tcp_probe.lastcwnd)) {
 
 		spin_lock(&tcp_probe.lock);
@@ -117,7 +123,7 @@ static int jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			p->snd_cwnd = tp->snd_cwnd;
 			p->snd_wnd = tp->snd_wnd;
 			p->ssthresh = tcp_current_ssthresh(sk);
-			p->srtt = tp->srtt >> 3;
+			p->srtt = tp->srtt_us >> 3;
 
 			tcp_probe.head = (tcp_probe.head + 1) & (bufsize - 1);
 		}
@@ -128,7 +134,6 @@ static int jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 	}
 
 	jprobe_return();
-	return 0;
 }
 
 static struct jprobe tcp_jprobe = {
@@ -176,7 +181,7 @@ static ssize_t tcpprobe_read(struct file *file, char __user *buf,
 		return -EINVAL;
 
 	while (cnt < len) {
-		char tbuf[164];
+		char tbuf[256];
 		int width;
 
 		/* Wait for data in buffer */
@@ -241,7 +246,8 @@ static __init int tcpprobe_init(void)
 	if (ret)
 		goto err1;
 
-	pr_info("probe registered (port=%d) bufsize=%u\n", port, bufsize);
+	pr_info("probe registered (port=%d/fwmark=%u) bufsize=%u\n",
+		port, fwmark, bufsize);
 	return 0;
  err1:
 	remove_proc_entry(procname, init_net.proc_net);

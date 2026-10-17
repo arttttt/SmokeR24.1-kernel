@@ -22,7 +22,7 @@
 #include <linux/prefetch.h>
 
 #include <net/dst.h>
-
+#include <net/dst_metadata.h>
 /*
  * Theory of operations:
  * 1) We use a list, protected by a spinlock, to add
@@ -159,18 +159,10 @@ const u32 dst_default_metrics[RTAX_MAX + 1] = {
 };
 
 
-void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
-		int initial_ref, int initial_obsolete, unsigned short flags)
+void dst_init(struct dst_entry *dst, struct dst_ops *ops,
+	      struct net_device *dev, int initial_ref, int initial_obsolete,
+	      unsigned short flags)
 {
-	struct dst_entry *dst;
-
-	if (ops->gc && dst_entries_get_fast(ops) > ops->gc_thresh) {
-		if (ops->gc(ops))
-			return NULL;
-	}
-	dst = kmem_cache_alloc(ops->kmem_cachep, GFP_ATOMIC);
-	if (!dst)
-		return NULL;
 	dst->child = NULL;
 	dst->dev = dev;
 	if (dev)
@@ -200,6 +192,25 @@ void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
 	dst->next = NULL;
 	if (!(flags & DST_NOCOUNT))
 		dst_entries_add(ops, 1);
+}
+EXPORT_SYMBOL(dst_init);
+
+void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
+		int initial_ref, int initial_obsolete, unsigned short flags)
+{
+	struct dst_entry *dst;
+
+	if (ops->gc && dst_entries_get_fast(ops) > ops->gc_thresh) {
+		if (ops->gc(ops))
+			return NULL;
+	}
+
+	dst = kmem_cache_alloc(ops->kmem_cachep, GFP_ATOMIC);
+	if (!dst)
+		return NULL;
+
+	dst_init(dst, ops, dev, initial_ref, initial_obsolete, flags);
+
 	return dst;
 }
 EXPORT_SYMBOL(dst_alloc);
@@ -246,7 +257,11 @@ again:
 		dst->ops->destroy(dst);
 	if (dst->dev)
 		dev_put(dst->dev);
-	kmem_cache_free(dst->ops->kmem_cachep, dst);
+
+	if (dst->flags & DST_METADATA)
+		kfree(dst);
+	else
+		kmem_cache_free(dst->ops->kmem_cachep, dst);
 
 	dst = child;
 	if (dst) {
@@ -327,6 +342,70 @@ void __dst_destroy_metrics_generic(struct dst_entry *dst, unsigned long old)
 		kfree(__DST_METRICS_PTR(old));
 }
 EXPORT_SYMBOL(__dst_destroy_metrics_generic);
+
+static struct dst_ops md_dst_ops = {
+	.family =		AF_UNSPEC,
+};
+
+static int dst_md_discard_sk(struct sk_buff *skb)
+{
+	WARN_ONCE(1, "Attempting to call output on metadata dst\n");
+	kfree_skb(skb);
+	return 0;
+}
+
+static int dst_md_discard(struct sk_buff *skb)
+{
+	WARN_ONCE(1, "Attempting to call input on metadata dst\n");
+	kfree_skb(skb);
+	return 0;
+}
+
+static void __metadata_dst_init(struct metadata_dst *md_dst, u8 optslen)
+{
+	struct dst_entry *dst;
+
+	dst = &md_dst->dst;
+	dst_init(dst, &md_dst_ops, NULL, 1, DST_OBSOLETE_NONE,
+		 DST_METADATA | DST_NOCACHE | DST_NOCOUNT);
+
+	dst->input = dst_md_discard;
+	dst->output = dst_md_discard_sk;
+
+	memset(dst + 1, 0, sizeof(*md_dst) + optslen - sizeof(*dst));
+	md_dst->opts_len = optslen;
+}
+
+struct metadata_dst *metadata_dst_alloc(u8 optslen, gfp_t flags)
+{
+	struct metadata_dst *md_dst;
+
+	md_dst = kmalloc(sizeof(*md_dst) + optslen, flags);
+	if (!md_dst)
+		return NULL;
+
+	__metadata_dst_init(md_dst, optslen);
+
+	return md_dst;
+}
+EXPORT_SYMBOL_GPL(metadata_dst_alloc);
+
+struct metadata_dst __percpu *metadata_dst_alloc_percpu(u8 optslen, gfp_t flags)
+{
+	int cpu;
+	struct metadata_dst __percpu *md_dst;
+
+	md_dst = __alloc_percpu_gfp(sizeof(struct metadata_dst) + optslen,
+				    __alignof__(struct metadata_dst), flags);
+	if (!md_dst)
+		return NULL;
+
+	for_each_possible_cpu(cpu)
+		__metadata_dst_init(per_cpu_ptr(md_dst, cpu), optslen);
+
+	return md_dst;
+}
+
 
 /**
  * __skb_dst_set_noref - sets skb dst, without a reference
@@ -415,7 +494,7 @@ static struct notifier_block dst_dev_notifier = {
 	.priority = -10, /* must be called after other network notifiers */
 };
 
-void __init dst_init(void)
+void __init dst_subsys_init(void)
 {
 	register_netdevice_notifier(&dst_dev_notifier);
 }

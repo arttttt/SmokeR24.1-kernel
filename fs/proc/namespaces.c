@@ -32,6 +32,9 @@ static const struct proc_ns_operations *ns_entries[] = {
 	&userns_operations,
 #endif
 	&mntns_operations,
+#ifdef CONFIG_CGROUPS
+	&cgroupns_operations,
+#endif
 };
 
 static const struct file_operations ns_file_operations = {
@@ -42,16 +45,10 @@ static const struct inode_operations ns_inode_operations = {
 	.setattr	= proc_setattr,
 };
 
-static int ns_delete_dentry(const struct dentry *dentry)
-{
-	/* Don't cache namespace inodes when not in use */
-	return 1;
-}
-
 static char *ns_dname(struct dentry *dentry, char *buffer, int buflen)
 {
 	struct inode *inode = dentry->d_inode;
-	const struct proc_ns_operations *ns_ops = PROC_I(inode)->ns.ns_ops;
+	const struct proc_ns_operations *ns_ops = dentry->d_fsdata;
 
 	return dynamic_dname(dentry, buffer, buflen, "%s:[%lu]",
 		ns_ops->name, inode->i_ino);
@@ -59,7 +56,7 @@ static char *ns_dname(struct dentry *dentry, char *buffer, int buflen)
 
 const struct dentry_operations ns_dentry_operations =
 {
-	.d_delete	= ns_delete_dentry,
+	.d_delete	= always_delete_dentry,
 	.d_dname	= ns_dname,
 };
 
@@ -70,7 +67,7 @@ static struct dentry *proc_ns_get_dentry(struct super_block *sb,
 	struct inode *inode;
 	struct proc_inode *ei;
 	struct qstr qname = { .name = "", };
-	void *ns;
+	struct ns_common *ns;
 
 	ns = ns_ops->get(task);
 	if (!ns)
@@ -81,8 +78,9 @@ static struct dentry *proc_ns_get_dentry(struct super_block *sb,
 		ns_ops->put(ns);
 		return ERR_PTR(-ENOMEM);
 	}
+	dentry->d_fsdata = (void *)ns_ops;
 
-	inode = iget_locked(sb, ns_ops->inum(ns));
+	inode = iget_locked(sb, ns->inum);
 	if (!inode) {
 		dput(dentry);
 		ns_ops->put(ns);
@@ -150,7 +148,7 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 	struct proc_inode *ei = PROC_I(inode);
 	const struct proc_ns_operations *ns_ops = ei->ns.ns_ops;
 	struct task_struct *task;
-	void *ns;
+	struct ns_common *ns;
 	char name[50];
 	int len = -EACCES;
 
@@ -166,7 +164,7 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 	if (!ns)
 		goto out_put_task;
 
-	snprintf(name, sizeof(name), "%s:[%u]", ns_ops->name, ns_ops->inum(ns));
+	snprintf(name, sizeof(name), "%s:[%u]", ns_ops->name, ns->inum);
 	len = strlen(name);
 
 	if (len > buflen)
@@ -337,9 +335,9 @@ out_invalid:
 	return ERR_PTR(-EINVAL);
 }
 
-struct proc_ns *get_proc_ns(struct inode *inode)
+struct ns_common *get_proc_ns(struct inode *inode)
 {
-	return &PROC_I(inode)->ns;
+	return PROC_I(inode)->ns.ns;
 }
 
 bool proc_ns_inode(struct inode *inode)

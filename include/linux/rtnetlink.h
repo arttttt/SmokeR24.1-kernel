@@ -24,6 +24,11 @@ extern int rtnl_trylock(void);
 extern int rtnl_is_locked(void);
 #ifdef CONFIG_PROVE_LOCKING
 extern int lockdep_rtnl_is_held(void);
+#else
+static inline bool lockdep_rtnl_is_held(void)
+{
+	return true;
+}
 #endif /* #ifdef CONFIG_PROVE_LOCKING */
 
 /**
@@ -35,6 +40,16 @@ extern int lockdep_rtnl_is_held(void);
  */
 #define rcu_dereference_rtnl(p)					\
 	rcu_dereference_check(p, lockdep_rtnl_is_held())
+
+/**
+ * rcu_dereference_bh_rtnl - rcu_dereference_bh with debug checking
+ * @p: The pointer to read, prior to dereference
+ *
+ * Do an rcu_dereference_bh(p), but check caller either holds rcu_read_lock_bh()
+ * or RTNL. Note : Please prefer rtnl_dereference() or rcu_dereference_bh()
+ */
+#define rcu_dereference_bh_rtnl(p)				\
+	rcu_dereference_bh_check(p, lockdep_rtnl_is_held())
 
 /**
  * rtnl_dereference - fetch RCU pointer when updates are prevented by RTNL

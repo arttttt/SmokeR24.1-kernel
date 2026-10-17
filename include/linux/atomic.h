@@ -17,6 +17,51 @@
 #ifndef cmpxchg_release
 #define cmpxchg_release		cmpxchg
 #endif
+#ifndef atomic_cmpxchg_relaxed
+#define atomic_cmpxchg_relaxed	atomic_cmpxchg
+#endif
+#ifndef atomic_cmpxchg_acquire
+#define atomic_cmpxchg_acquire	atomic_cmpxchg
+#endif
+#ifndef atomic_cmpxchg_release
+#define atomic_cmpxchg_release	atomic_cmpxchg
+#endif
+
+/*
+ * Provide __deprecated wrappers for the new interface, avoid flag day changes.
+ * We need the ugly external functions to break header recursion hell.
+ */
+#ifndef smp_mb__before_atomic_inc
+static inline void __deprecated smp_mb__before_atomic_inc(void)
+{
+	extern void __smp_mb__before_atomic(void);
+	__smp_mb__before_atomic();
+}
+#endif
+
+#ifndef smp_mb__after_atomic_inc
+static inline void __deprecated smp_mb__after_atomic_inc(void)
+{
+	extern void __smp_mb__after_atomic(void);
+	__smp_mb__after_atomic();
+}
+#endif
+
+#ifndef smp_mb__before_atomic_dec
+static inline void __deprecated smp_mb__before_atomic_dec(void)
+{
+	extern void __smp_mb__before_atomic(void);
+	__smp_mb__before_atomic();
+}
+#endif
+
+#ifndef smp_mb__after_atomic_dec
+static inline void __deprecated smp_mb__after_atomic_dec(void)
+{
+	extern void __smp_mb__after_atomic(void);
+	__smp_mb__after_atomic();
+}
+#endif
 
 /**
  * atomic_add_unless - add unless the number is already a given value

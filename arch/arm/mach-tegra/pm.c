@@ -1959,6 +1959,6 @@ late_initcall(tegra_pm_core_debug_init);
 #ifdef CONFIG_DEBUG_RODATA
 void set_platform_text_rw(void)
 {
-	set_memory_rw((unsigned long)tegra_restart_prev_smc, 1);
+	rodata_set_memory_rw((unsigned long)tegra_restart_prev_smc, 1);
 }
 #endif

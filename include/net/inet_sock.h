@@ -78,6 +78,8 @@ struct inet_request_sock {
 	__be32			loc_addr;
 	__be32			rmt_addr;
 	__be16			rmt_port;
+#define ir_cookie		req.__req_common.skc_cookie
+#define ireq_net		req.__req_common.skc_net
 	kmemcheck_bitfield_begin(flags);
 	u16			snd_wscale : 4,
 				rcv_wscale : 4,

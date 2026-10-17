@@ -438,7 +438,7 @@ static int sdcardfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	err = vfs_rename2(lower_mnt,
 			 lower_old_dir_dentry->d_inode, lower_old_dentry,
-			 lower_new_dir_dentry->d_inode, lower_new_dentry);
+			 lower_new_dir_dentry->d_inode, lower_new_dentry, 0);
 	if (err)
 		goto out;
 

@@ -471,15 +471,6 @@ struct rpc_filelist {
 	umode_t mode;
 };
 
-static int rpc_delete_dentry(const struct dentry *dentry)
-{
-	return 1;
-}
-
-static const struct dentry_operations rpc_dentry_operations = {
-	.d_delete = rpc_delete_dentry,
-};
-
 static struct inode *
 rpc_get_inode(struct super_block *sb, umode_t mode)
 {
@@ -667,7 +658,7 @@ static struct dentry *__rpc_lookup_create_exclusive(struct dentry *parent,
 			return ERR_PTR(-ENOMEM);
 	}
 	if (dentry->d_inode == NULL) {
-		d_set_d_op(dentry, &rpc_dentry_operations);
+		d_set_d_op(dentry, &simple_dentry_operations);
 		return dentry;
 	}
 	dput(dentry);
@@ -1148,7 +1139,10 @@ static struct dentry *
 rpc_mount(struct file_system_type *fs_type,
 		int flags, const char *dev_name, void *data)
 {
-	return mount_ns(fs_type, flags, current->nsproxy->net_ns, rpc_fill_super);
+	struct net *net = current->nsproxy->net_ns;
+
+	/* rpc_fill_super() takes the namespace as its data */
+	return mount_ns(fs_type, flags, net, net, net->user_ns, rpc_fill_super);
 }
 
 static void rpc_kill_sb(struct super_block *sb)

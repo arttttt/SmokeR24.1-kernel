@@ -23,12 +23,13 @@ static int backtrace_stack(void *data, char *name)
 	return 0;
 }
 
-static void backtrace_address(void *data, unsigned long addr, int reliable)
+static int backtrace_address(void *data, unsigned long addr, int reliable)
 {
 	unsigned int *depth = data;
 
 	if ((*depth)--)
 		oprofile_add_trace(addr);
+	return 0;
 }
 
 static struct stacktrace_ops backtrace_ops = {
@@ -47,7 +48,7 @@ dump_user_backtrace_32(struct stack_frame_ia32 *head)
 	unsigned long bytes;
 
 	bytes = copy_from_user_nmi(bufhead, head, sizeof(bufhead));
-	if (bytes != sizeof(bufhead))
+	if (bytes != 0)
 		return NULL;
 
 	fp = (struct stack_frame_ia32 *) compat_ptr(bufhead[0].next_frame);
@@ -93,7 +94,7 @@ static struct stack_frame *dump_user_backtrace(struct stack_frame *head)
 	unsigned long bytes;
 
 	bytes = copy_from_user_nmi(bufhead, head, sizeof(bufhead));
-	if (bytes != sizeof(bufhead))
+	if (bytes != 0)
 		return NULL;
 
 	oprofile_add_trace(bufhead[0].return_address);

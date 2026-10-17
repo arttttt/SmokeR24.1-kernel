@@ -6,7 +6,7 @@
  *
  * See Documentation/trace/tracepoints.txt.
  *
- * (C) Copyright 2008 Mathieu Desnoyers <mathieu.desnoyers@polymtl.ca>
+ * Copyright (C) 2008-2014 Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
  *
  * Heavily inspired from the Linux Kernel Markers.
  *
@@ -24,6 +24,7 @@
 
 struct module;
 struct tracepoint;
+struct notifier_block;
 
 struct tracepoint_func {
 	void *func;
@@ -38,18 +39,13 @@ struct tracepoint {
 	struct tracepoint_func __rcu *funcs;
 };
 
-/*
- * Connect a probe to a tracepoint.
- * Internal API, should not be used directly.
- */
-extern int tracepoint_probe_register(const char *name, void *probe, void *data);
-
-/*
- * Disconnect a probe from a tracepoint.
- * Internal API, should not be used directly.
- */
 extern int
-tracepoint_probe_unregister(const char *name, void *probe, void *data);
+tracepoint_probe_register(struct tracepoint *tp, void *probe, void *data);
+extern int
+tracepoint_probe_unregister(struct tracepoint *tp, void *probe, void *data);
+extern void
+for_each_kernel_tracepoint(void (*fct)(struct tracepoint *tp, void *priv),
+		void *priv);
 
 extern int tracepoint_probe_register_noupdate(const char *name, void *probe,
 					      void *data);
@@ -63,11 +59,24 @@ struct tp_module {
 	unsigned int num_tracepoints;
 	struct tracepoint * const *tracepoints_ptrs;
 };
+
 bool trace_module_has_bad_taint(struct module *mod);
+extern int register_tracepoint_module_notifier(struct notifier_block *nb);
+extern int unregister_tracepoint_module_notifier(struct notifier_block *nb);
 #else
 static inline bool trace_module_has_bad_taint(struct module *mod)
 {
 	return false;
+}
+static inline
+int register_tracepoint_module_notifier(struct notifier_block *nb)
+{
+	return 0;
+}
+static inline
+int unregister_tracepoint_module_notifier(struct notifier_block *nb)
+{
+	return 0;
 }
 #endif /* CONFIG_MODULES */
 
@@ -181,14 +190,14 @@ static inline void tracepoint_synchronize_unregister(void)
 	static inline int						\
 	register_trace_##name(void (*probe)(data_proto), void *data)	\
 	{								\
-		return tracepoint_probe_register(#name, (void *)probe,	\
-						 data);			\
+		return tracepoint_probe_register(&__tracepoint_##name,	\
+						(void *)probe, data);	\
 	}								\
 	static inline int						\
 	unregister_trace_##name(void (*probe)(data_proto), void *data)	\
 	{								\
-		return tracepoint_probe_unregister(#name, (void *)probe, \
-						   data);		\
+		return tracepoint_probe_unregister(&__tracepoint_##name,\
+						(void *)probe, data);	\
 	}								\
 	static inline void						\
 	check_trace_callback_type_##name(void (*cb)(data_proto))	\

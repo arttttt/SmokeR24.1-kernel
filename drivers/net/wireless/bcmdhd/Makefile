@@ -21,6 +21,9 @@ DHDCFLAGS += -Wall -Wstrict-prototypes -Dlinux -DLINUX -DBCMDRIVER            \
 # Common feature
 #################
 DHDCFLAGS += -DWL_CFG80211
+# debug_level in debugfs (bcmdhd/), the same wl_dbg_level as the module
+# parameter, by name: echo +p2p_action > .../debug_level
+DHDCFLAGS += -DDEBUGFS_CFG80211
 # Print out kernel panic point of file and line info when assertion happened
 DHDCFLAGS += -DBCMASSERT_LOG
 

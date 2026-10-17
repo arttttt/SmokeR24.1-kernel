@@ -379,7 +379,6 @@ s32
 wl_cfgp2p_set_firm_p2p(struct bcm_cfg80211 *cfg)
 {
 	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
-	struct ether_addr primary_mac;
 	s32 ret = BCME_OK;
 	s32 val = 0;
 	/* Do we have to check whether APSTA is enabled or not ? */
@@ -412,8 +411,7 @@ wl_cfgp2p_set_firm_p2p(struct bcm_cfg80211 *cfg)
 	 * administered bit set, which is the primary address itself once that
 	 * has been randomized (see wl_cfgp2p_generate_bss_mac).
 	 */
-	get_primary_mac(cfg, &primary_mac);
-	wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+	wl_cfgp2p_update_bss_mac(cfg);
 	ret = wldev_iovar_setbuf_bsscfg(ndev, "p2p_da_override", &cfg->p2p->dev_addr,
 		sizeof(cfg->p2p->dev_addr), cfg->ioctl_buf, WLC_IOCTL_MAXLEN, 0,
 		&cfg->ioctl_buf_sync);
@@ -737,7 +735,26 @@ wl_cfgp2p_deinit_discovery(struct bcm_cfg80211 *cfg)
 	/* Clear our saved WPS and P2P IEs for the discovery BSS.  The driver
 	 * deleted these IEs when wl_cfgp2p_set_discovery() deleted the discovery
 	 * BSS.
+	 *
+	 * The clearing itself was missing: the copies outlived the BSS, and the
+	 * next discovery BSS -- after the P2P device was stopped and started
+	 * again, as Android does to an idle one -- was never given its IEs,
+	 * wl_cfgp2p_set_management_ie finding them "equal to the previous" ones.
+	 * Its probe requests then went without the P2P IE, no P2P device
+	 * answered them, and Wi-Fi Direct found nothing.
 	 */
+#define CLEAR_SAVED_IE(IE_TYPE)		\
+	do {							\
+		memset(wl_to_p2p_bss_saved_ie(cfg, P2PAPI_BSSCFG_DEVICE).p2p_ ## IE_TYPE ## _ie, \
+		   0, sizeof(wl_to_p2p_bss_saved_ie(cfg, P2PAPI_BSSCFG_DEVICE).p2p_ ## IE_TYPE ## _ie)); \
+		wl_to_p2p_bss_saved_ie(cfg, P2PAPI_BSSCFG_DEVICE).p2p_ ## IE_TYPE ## _ie_len = 0; \
+	} while (0)
+	CLEAR_SAVED_IE(probe_req);
+	CLEAR_SAVED_IE(probe_res);
+	CLEAR_SAVED_IE(assoc_req);
+	CLEAR_SAVED_IE(assoc_res);
+	CLEAR_SAVED_IE(beacon);
+#undef CLEAR_SAVED_IE
 
 	/* Clear the saved bsscfg index of the discovery BSSCFG to indicate we
 	 * have no discovery BSS.
@@ -2068,6 +2085,39 @@ wl_cfgp2p_generate_bss_mac(struct ether_addr *primary_addr,
 
 }
 
+/* Bring cfg->p2p's addresses up to date before P2P is used.
+ *
+ * Once the P2P device is registered its address is the one it was
+ * registered with: the supplicant takes that as its own when it adds the
+ * device, and never asks again. cfg->p2p does not live as long -- it is
+ * allocated afresh, its addresses zeroed, every time Wi-Fi comes up -- so
+ * generating the address again from the primary one, which Android
+ * randomizes, gave the firmware an address of its own choosing. Peers
+ * answered that address, and the supplicant dropped every answer as a
+ * frame for a foreign address: provision discovery never completed and no
+ * Wi-Fi Direct connection could be made.
+ *
+ * The registered address is kept for as long as it stays apart from the
+ * primary one, which the firmware needs for the discovery BSS (see
+ * wl_cfgp2p_generate_bss_mac).
+ */
+void
+wl_cfgp2p_update_bss_mac(struct bcm_cfg80211 *cfg)
+{
+	struct ether_addr primary_mac;
+
+	get_primary_mac(cfg, &primary_mac);
+	wl_cfgp2p_generate_bss_mac(&primary_mac, &cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+	if (cfg->p2p_wdev && !ETHER_ISNULLADDR(cfg->p2p_wdev->address) &&
+		memcmp(cfg->p2p_wdev->address, &primary_mac, ETHER_ADDR_LEN)) {
+		memcpy(&cfg->p2p->dev_addr, cfg->p2p_wdev->address, ETHER_ADDR_LEN);
+		memcpy(&cfg->p2p->int_addr, &cfg->p2p->dev_addr, ETHER_ADDR_LEN);
+#ifndef  P2PONEINT
+		cfg->p2p->int_addr.octet[4] ^= 0x80;
+#endif
+	}
+}
+
 /* P2P IF Address change to Virtual Interface MAC Address */
 void
 wl_cfg80211_change_ifaddr(u8* buf, struct ether_addr *p2p_int_addr, u8 element_id)
@@ -2534,7 +2584,6 @@ wl_cfgp2p_register_ndev(struct bcm_cfg80211 *cfg)
 {
 
 	struct net_device *_ndev;
-	struct ether_addr primary_mac;
 	struct net_device *new_ndev;
 	chanspec_t chspec;
 	uint8 name[IFNAMSIZ];
@@ -2561,9 +2610,7 @@ wl_cfgp2p_register_ndev(struct bcm_cfg80211 *cfg)
 		p2p_on(cfg) = true;
 		wl_cfgp2p_set_firm_p2p(cfg);
 		wl_cfgp2p_init_discovery(cfg);
-		get_primary_mac(cfg, &primary_mac);
-		wl_cfgp2p_generate_bss_mac(&primary_mac,
-			&cfg->p2p->dev_addr, &cfg->p2p->int_addr);
+		wl_cfgp2p_update_bss_mac(cfg);
 	}
 
 	_ndev = bcmcfg_to_prmry_ndev(cfg);

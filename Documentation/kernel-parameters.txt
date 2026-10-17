@@ -459,9 +459,11 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 	ccw_timeout_log [S390]
 			See Documentation/s390/CommonIO for details.
 
-	cgroup_disable= [KNL] Disable a particular controller
-			Format: {name of the controller(s) to disable}
+	cgroup_disable= [KNL] Disable a particular controller or optional feature
+			Format: {name of the controller(s) or feature(s) to disable}
 				{Currently supported controllers - "memory"}
+			Specifying "pressure" disables per-cgroup pressure
+			stall information accounting feature
 
 	checkreqprot	[SELINUX] Set initial checkreqprot flag value.
 			Format: { "0" | "1" }
@@ -2511,6 +2513,10 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 	prompt_ramdisk=	[RAM] List of RAM disks to prompt for floppy disk
 			before loading.
 			See Documentation/blockdev/ramdisk.txt.
+
+	psi=		[KNL] Enable or disable pressure stall information
+			tracking.
+			Format: <bool>
 
 	psmouse.proto=	[HW,MOUSE] Highest PS2 mouse protocol extension to
 			probe for; one of (bare|imps|exps|lifebook|any).

@@ -926,7 +926,7 @@ static __be16 vxlan_src_port(const struct vxlan_dev *vxlan, struct sk_buff *skb)
 	unsigned int range = (vxlan->port_max - vxlan->port_min) + 1;
 	u32 hash;
 
-	hash = skb_get_rxhash(skb);
+	hash = skb_get_hash(skb);
 	if (!hash)
 		hash = jhash(skb->data, 2 * ETH_ALEN,
 			     (__force u32) skb->protocol);
@@ -1217,9 +1217,17 @@ static void vxlan_cleanup(unsigned long arg)
 /* Setup stats when device is created */
 static int vxlan_init(struct net_device *dev)
 {
+	int i;
+
 	dev->tstats = alloc_percpu(struct pcpu_tstats);
 	if (!dev->tstats)
 		return -ENOMEM;
+
+	for_each_possible_cpu(i) {
+		struct pcpu_tstats *vxlan_stats;
+		vxlan_stats = per_cpu_ptr(dev->tstats, i);
+		u64_stats_init(&vxlan_stats->syncp);
+	}
 
 	return 0;
 }
