@@ -415,6 +415,8 @@ typedef struct dhd_pub {
 #endif
 	struct reorder_info *reorder_bufs[WLHOST_REORDERDATA_MAXFLOWS];
 	char  fw_capabilities[WLC_IOCTL_SMLEN];
+	/* DHD_FW_UNSUP_* iovars the firmware has answered BCME_UNSUPPORTED */
+	uint32 fw_unsupported;
 	#define MAXSKBPEND 1024
 	void *skbbuf[MAXSKBPEND];
 	uint32 store_idx;
@@ -1089,6 +1091,30 @@ extern void dhd_wait_event_wakeup(dhd_pub_t*dhd);
 #define IFUNLOCK(lock)  InterlockedExchange((lock), 0)
 #define IFLOCK_FREE(lock)
 #define FW_SUPPORTED(dhd, capa) ((strstr(dhd->fw_capabilities, #capa) != NULL))
+
+/*
+ * Iovars the driver sets as a matter of course which a firmware may not
+ * have. The answer does not change while the same image runs, so once one
+ * comes back BCME_UNSUPPORTED it is not asked again: the firmware is
+ * reloaded on every Wi-Fi start, and some of these are set on every
+ * suspend and resume besides, each time logging the same refusal.
+ *
+ * Only that answer is remembered. Any other error may be the bus or the
+ * moment, and is left to be retried as before.
+ */
+#define DHD_FW_UNSUP_PSPRETEND		(1 << 0)	/* pspretend_threshold */
+#define DHD_FW_UNSUP_WNM		(1 << 1)	/* wnm */
+#define DHD_FW_UNSUP_ND_HOSTIP		(1 << 2)	/* nd_hostip */
+#define DHD_FW_UNSUP_ND_HOSTIP_CLEAR	(1 << 3)	/* nd_hostip_clear */
+#define DHD_FW_UNSUP_ND_RA_FILTER	(1 << 4)	/* nd_ra_filter_enable */
+#define DHD_FW_UNSUP_PKT_FILTER_PORTS	(1 << 5)	/* pkt_filter_ports */
+
+#define DHD_FW_UNSUPPORTED(dhd, bit)	(((dhd)->fw_unsupported & (bit)) != 0)
+#define DHD_FW_NOTE_UNSUPPORTED(dhd, bit, ret) \
+	do { \
+		if ((ret) == BCME_UNSUPPORTED) \
+			(dhd)->fw_unsupported |= (bit); \
+	} while (0)
 #ifdef ARP_OFFLOAD_SUPPORT
 #define MAX_IPV4_ENTRIES	8
 void dhd_arp_offload_set(dhd_pub_t * dhd, int arp_mode);

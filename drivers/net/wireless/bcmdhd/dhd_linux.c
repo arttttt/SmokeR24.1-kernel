@@ -1717,13 +1717,16 @@ dhd_enable_packet_filter_ports(dhd_pub_t *dhd, bool enable)
 		portlist->count));
 
 	/* update ports */
-	bcm_mkiovar("pkt_filter_ports",
-		(char*)portlist,
-		(WL_PKT_FILTER_PORTS_FIXED_LEN + (portlist->count * sizeof(uint16))),
-		iovbuf, sizeof(iovbuf));
-	error = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
-	if (error < 0)
-		DHD_ERROR(("%s: set pkt_filter_ports failed %d\n", __FUNCTION__, error));
+	if (!DHD_FW_UNSUPPORTED(dhd, DHD_FW_UNSUP_PKT_FILTER_PORTS)) {
+		bcm_mkiovar("pkt_filter_ports",
+			(char*)portlist,
+			(WL_PKT_FILTER_PORTS_FIXED_LEN + (portlist->count * sizeof(uint16))),
+			iovbuf, sizeof(iovbuf));
+		error = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+		DHD_FW_NOTE_UNSUPPORTED(dhd, DHD_FW_UNSUP_PKT_FILTER_PORTS, error);
+		if (error < 0)
+			DHD_ERROR(("%s: set pkt_filter_ports failed %d\n", __FUNCTION__, error));
+	}
 
 	/* update mode */
 	bcm_mkiovar("pkt_filter_mode", (char*)&dhd_master_mode,
@@ -1846,7 +1849,8 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 							sizeof(roamvar), NULL, 0, TRUE);
 				}
 #endif /* ENABLE_FW_ROAM_SUSPEND */
-				if (FW_SUPPORTED(dhd, ndoe)) {
+				if (FW_SUPPORTED(dhd, ndoe) &&
+				    !DHD_FW_UNSUPPORTED(dhd, DHD_FW_UNSUP_ND_RA_FILTER)) {
 					/* enable IPv6 RA filter in  firmware during suspend */
 					nd_ra_filter = 1;
 					ret = dhd_iovar(dhd, 0,
@@ -1854,6 +1858,8 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 							(char *)&nd_ra_filter,
 							sizeof(nd_ra_filter),
 							NULL, 0, TRUE);
+					DHD_FW_NOTE_UNSUPPORTED(dhd,
+						DHD_FW_UNSUP_ND_RA_FILTER, ret);
 					if (ret < 0)
 						DHD_ERROR(("nd_ra_filter :%d\n",
 							ret));
@@ -1900,7 +1906,8 @@ if (bcmdhd_support_p2p_go_ps) {
 						  NULL, 0, TRUE);
 				}
 #endif /* ENABLE_FW_ROAM_SUSPEND */
-				if (FW_SUPPORTED(dhd, ndoe)) {
+				if (FW_SUPPORTED(dhd, ndoe) &&
+				    !DHD_FW_UNSUPPORTED(dhd, DHD_FW_UNSUP_ND_RA_FILTER)) {
 					/* disable IPv6 RA filter in  firmware during suspend */
 					nd_ra_filter = 0;
 					ret = dhd_iovar(dhd, 0,
@@ -1908,6 +1915,8 @@ if (bcmdhd_support_p2p_go_ps) {
 							(char *)&nd_ra_filter,
 							sizeof(nd_ra_filter),
 							NULL, 0, TRUE);
+					DHD_FW_NOTE_UNSUPPORTED(dhd,
+						DHD_FW_UNSUP_ND_RA_FILTER, ret);
 					if (ret < 0)
 						DHD_ERROR(("nd_ra_filter: %d\n",
 							  ret));
@@ -4519,11 +4528,14 @@ static int dhd_interworking_enable(dhd_pub_t *dhd)
 	if (ret < 0)
 		DHD_ERROR(("%s: enableing interworking failed, ret=%d\n", __FUNCTION__, ret));
 
-	if (ret == BCME_OK) {
+	if (ret == BCME_OK && DHD_FW_UNSUPPORTED(dhd, DHD_FW_UNSUP_WNM)) {
+		ret = BCME_UNSUPPORTED;
+	} else if (ret == BCME_OK) {
 		/* basic capabilities for HS20 REL2 */
 		uint32 cap = WL_WNM_BSSTRANS | WL_WNM_NOTIF;
 		ret = dhd_iovar(dhd, 0, "wnm", (char *)&cap, sizeof(cap), NULL,
 				0, TRUE);
+		DHD_FW_NOTE_UNSUPPORTED(dhd, DHD_FW_UNSUP_WNM, ret);
 		if (ret < 0)
 			DHD_ERROR(("%s: failed to set WNM info, ret=%d\n", __FUNCTION__, ret));
 	}
@@ -6741,10 +6753,12 @@ if (bcmdhd_use_custom_ampdu_mpdu) {
 #endif /* CUSTOM_AMSDU_AGGSF */
 
 #ifdef CUSTOM_PSPRETEND_THR
-if (bcmdhd_use_custom_pspretend_thr) {
+if (bcmdhd_use_custom_pspretend_thr &&
+    !DHD_FW_UNSUPPORTED(dhd, DHD_FW_UNSUP_PSPRETEND)) {
 	/* Turn off MPC in AP mode */
 	ret = dhd_iovar(dhd, 0, "pspretend_threshold", (char *)&pspretend_thr,
 			sizeof(pspretend_thr), NULL, 0, TRUE);
+	DHD_FW_NOTE_UNSUPPORTED(dhd, DHD_FW_UNSUP_PSPRETEND, ret);
 	if (ret < 0)
 		DHD_ERROR(("%s pspretend_threshold for HostAPD failed  %d\n",
 			__FUNCTION__, ret));
@@ -7368,6 +7382,8 @@ dhd_inet6_work_handler(void *dhd_info, void *event_data, u8 event)
 				DHD_ERROR(("%s: Enabling NDO Failed %d\n", __FUNCTION__, ret));
 			}
 
+			if (DHD_FW_UNSUPPORTED(pub, DHD_FW_UNSUP_ND_HOSTIP))
+				break;
 			ret = dhd_ndo_add_ip(pub, &ndo_work->ipv6_addr[0], ndo_work->if_idx);
 			if (ret < 0) {
 				DHD_ERROR(("%s: Adding host ip for NDO failed %d\n",
@@ -7376,6 +7392,9 @@ dhd_inet6_work_handler(void *dhd_info, void *event_data, u8 event)
 			break;
 		case NETDEV_DOWN:
 			DHD_TRACE(("%s: clear ipv6 table \n", __FUNCTION__));
+			/* As if the removal had failed, which it would. */
+			if (DHD_FW_UNSUPPORTED(pub, DHD_FW_UNSUP_ND_HOSTIP_CLEAR))
+				goto done;
 			ret = dhd_ndo_remove_ip(pub, ndo_work->if_idx);
 			if (ret < 0) {
 				DHD_ERROR(("%s: Removing host ip for NDO failed %d\n",
