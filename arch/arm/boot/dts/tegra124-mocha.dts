@@ -506,6 +506,11 @@
 		status = "disabled";
 	};
 
+	/*
+	 * clock-frequency is the ceiling of this board's CPU DVFS table
+	 * (cpuinfo_max_freq 2218500 kHz). The ARM topology code reads it to
+	 * weigh the cores against each other; all four are the same here.
+	 */
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -514,24 +519,28 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a15";
 			reg = <0>;
+			clock-frequency = <2218500000>;
 		};
 
 		cpu@1 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a15";
 			reg = <1>;
+			clock-frequency = <2218500000>;
 		};
 
 		cpu@2 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a15";
 			reg = <2>;
+			clock-frequency = <2218500000>;
 		};
 
 		cpu@3 {
 			device_type = "cpu";
 			compatible = "arm,cortex-a15";
 			reg = <3>;
+			clock-frequency = <2218500000>;
 		};
 	};
 };
