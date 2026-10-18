@@ -2732,11 +2732,50 @@ tegra12_plld_clk_cfg_ex(struct clk *c, enum tegra_clk_ex_param p, u32 setting)
 	return 0;
 }
 
+/*
+ * What tegra12_pll_clk_set_rate will make of a rate: a tabulated one exactly,
+ * any other through the comparison frequency, whose whole multiple the
+ * feedback divider takes -- 644.6 MHz asked of PLLD is 644 MHz given. A
+ * display needs to know that before it tells anyone its refresh rate.
+ */
+static long tegra12_plld_clk_round_rate(struct clk *c, unsigned long rate)
+{
+	const struct clk_pll_freq_table *sel;
+	unsigned long input_rate = clk_get_rate(c->parent);
+	unsigned long cfreq, vco, output_rate;
+	u32 p_div = 0;
+	u32 n;
+
+	for (sel = c->u.pll.freq_table; sel->input_rate != 0; sel++) {
+		if (sel->input_rate == input_rate && sel->output_rate == rate)
+			return rate;
+	}
+
+	if (!rate)
+		return -EINVAL;
+
+	cfreq = get_pll_cfreq_special(c, input_rate, rate, &vco);
+	if (!cfreq)
+		cfreq = get_pll_cfreq_common(c, input_rate, rate, &vco);
+
+	for (output_rate = rate; output_rate < vco; p_div++)
+		output_rate <<= 1;
+
+	n = output_rate / cfreq;
+	if ((n > (PLLD_BASE_DIVN_MASK >> PLL_BASE_DIVN_SHIFT)) ||
+	    (p_div > (PLL_BASE_DIVP_MASK >> PLL_BASE_DIVP_SHIFT)) ||
+	    (output_rate > c->u.pll.vco_max))
+		return -EINVAL;
+
+	return (cfreq * n) >> p_div;
+}
+
 static struct clk_ops tegra_plld_ops = {
 	.init			= tegra12_pll_clk_init,
 	.enable			= tegra12_pll_clk_enable,
 	.disable		= tegra12_pll_clk_disable,
 	.set_rate		= tegra12_pll_clk_set_rate,
+	.round_rate		= tegra12_plld_clk_round_rate,
 	.clk_cfg_ex		= tegra12_plld_clk_cfg_ex,
 };
 
