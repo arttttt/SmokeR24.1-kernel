@@ -3289,6 +3289,19 @@ const u8 *cfg80211_find_vendor_ie(unsigned int oui, u8 oui_type,
 extern int regulatory_hint(struct wiphy *wiphy, const char *alpha2);
 
 /**
+ * cfg80211_notify_reg_change - tell userspace the device's country changed
+ * @wiphy: the wireless device
+ * @alpha2: the ISO/IEC 3166 alpha2 the device now runs under
+ *
+ * For a device with its own regulatory domain (WIPHY_FLAG_CUSTOM_REGULATORY)
+ * whose country is set in its firmware, not through cfg80211. Sends the
+ * NL80211_CMD_REG_CHANGE that a regulatory domain set through cfg80211
+ * would, so that userspace following the regulatory multicast group learns
+ * the country. Nothing in cfg80211's own regulatory state changes.
+ */
+extern void cfg80211_notify_reg_change(struct wiphy *wiphy, const char *alpha2);
+
+/**
  * wiphy_apply_custom_regulatory - apply a custom driver regulatory domain
  * @wiphy: the wireless device we want to process the regulatory domain on
  * @regd: the custom regulatory domain to use for this wiphy

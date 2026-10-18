@@ -1718,6 +1718,31 @@ int regulatory_hint(struct wiphy *wiphy, const char *alpha2)
 EXPORT_SYMBOL(regulatory_hint);
 
 /*
+ * regulatory_hint() needs the rules for the country, from CRDA or the
+ * internal database, before anything is announced; a device that keeps its
+ * own regulatory domain, its country set in the firmware, has
+ * neither to offer and nothing for cfg80211 to apply. All it has to say is
+ * the country, to the userspace that follows the regulatory group -- on
+ * Android, wificond, which hands it to the framework.
+ */
+void cfg80211_notify_reg_change(struct wiphy *wiphy, const char *alpha2)
+{
+	struct regulatory_request request;
+
+	if (WARN_ON(!wiphy || !alpha2))
+		return;
+
+	memset(&request, 0, sizeof(request));
+	request.wiphy_idx = get_wiphy_idx(wiphy);
+	request.initiator = NL80211_REGDOM_SET_BY_DRIVER;
+	request.alpha2[0] = alpha2[0];
+	request.alpha2[1] = alpha2[1];
+
+	nl80211_send_reg_change_event(&request);
+}
+EXPORT_SYMBOL(cfg80211_notify_reg_change);
+
+/*
  * We hold wdev_lock() here so we cannot hold cfg80211_mutex() and
  * therefore cannot iterate over the rdev list here.
  */
