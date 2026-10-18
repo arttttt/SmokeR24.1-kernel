@@ -5719,14 +5719,15 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 
 #ifndef BCMEMBEDIMAGE
 	/* fw_path and nv_path are not mandatory for BCMEMBEDIMAGE */
-	if (dhdinfo->fw_path[0] == '\0') {
-		DHD_ERROR(("firmware path not found\n"));
+	/*
+	 * No paths yet is the normal state at attach: /vendor, where the
+	 * firmware and nvram live, is not mounted until later, and the
+	 * paths are set again when the interface comes up. Say nothing.
+	 */
+	if (dhdinfo->fw_path[0] == '\0')
 		return FALSE;
-	}
-	if (dhdinfo->nv_path[0] == '\0') {
-		DHD_ERROR(("nvram path not found\n"));
+	if (dhdinfo->nv_path[0] == '\0')
 		return FALSE;
-	}
 #endif /* BCMEMBEDIMAGE */
 
 	return TRUE;
