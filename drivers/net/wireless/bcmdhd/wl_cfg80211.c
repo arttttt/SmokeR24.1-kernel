@@ -7170,40 +7170,37 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	} else if (chan->band == IEEE80211_BAND_2GHZ)
 		bw = WL_CHANSPEC_BW_20;
 
-	/* In 5GHz band If AP is connected in 20 MHz then follow AP's bw
-	   else 40MHz by default. */
+	/*
+	 * The firmware runs one channel at a time (op_mode CONCURR_SINGLE), so
+	 * with the station associated a hotspot can only go where the station
+	 * is. Asked for another channel, the firmware brought the AP up there
+	 * all the same -- channel 36 beside a station on 40 at 80 MHz -- and
+	 * the station lost its link some ten seconds later. On 2.4 GHz it
+	 * happened to move the AP itself.
+	 *
+	 * So with wlan0 associated, take its channel and bandwidth whatever
+	 * was asked, as bcmdhd 1.100.15 does under APSTA_RESTRICTED_CHANNEL.
+	 * hostapd learns the real channel from the channel switch event, and
+	 * Android shows that.
+	 */
 	for_each_ndev(cfg, iter, next) {
 		/* In case interface name is not wlan0 put the right
 		   interface name. */
-		if(!strncmp(iter->ndev->name, "wlan0", strlen("wlan0"))) {
-			if (wl_get_drv_status(cfg, CONNECTED, iter->ndev)) {
-				if (chan->band == IEEE80211_BAND_5GHZ) {
-					if(wldev_iovar_getint(iter->ndev,
-						"chanspec", (s32 *)&chanspec) == BCME_OK) {
-						chanspec = wl_chspec_driver_to_host(chanspec);
-						/* bits 11,12 and 13 starting from 0 are bw
-						   bits. So, values formed with these bits
-						   are 0 ,1, 2, 3, 4, 5, 6 which are mapped
-						   to 5, 10, 20 ,40 ,80, 160, 80+80 MHz
-						   respectively. In below case, 0x1000 = 2
-						   which is for 20 MHz */
-						if ((chanspec & 0x3800) == WL_CHANSPEC_BW_20) {
-							bw = WL_CHANSPEC_BW_20;
-						} else if ((chanspec & 0x3800) == WL_CHANSPEC_BW_40) {
-							bw = WL_CHANSPEC_BW_40;
-						} else if ((chanspec & 0x3800) == WL_CHANSPEC_BW_80) {
-							bw = WL_CHANSPEC_BW_80;
-						} else if ((chanspec & 0x3800) == WL_CHANSPEC_BW_160) {
-							bw = WL_CHANSPEC_BW_160;
-						} else if ((chanspec & 0x3800) == WL_CHANSPEC_BW_8080) {
-							bw = WL_CHANSPEC_BW_8080;
-						}
-					}
-				} else {
-					/* In 2.4 GHz supported bw is 20 MHz */
-					bw = WL_CHANSPEC_BW_20;
-				}
-			}
+		if (!strncmp(iter->ndev->name, "wlan0", strlen("wlan0")) &&
+		    wl_get_drv_status(cfg, CONNECTED, iter->ndev) &&
+		    wldev_iovar_getint(iter->ndev, "chanspec",
+		                       (s32 *)&chanspec) == BCME_OK) {
+			s32 sta_chan;
+
+			chanspec = wl_chspec_driver_to_host(chanspec);
+			sta_chan = wf_chspec_ctlchan(chanspec);
+			if (sta_chan != _chan)
+				WL_ERR(("AP follows the station to channel %d, not %d\n",
+					sta_chan, _chan));
+			_chan = sta_chan;
+			/* 2.4 GHz is 20 MHz here; on 5 GHz, the station's width. */
+			bw = CHSPEC_IS2G(chanspec) ? WL_CHANSPEC_BW_20 :
+				(chanspec & WL_CHANSPEC_BW_MASK);
 		}
 	}
 
