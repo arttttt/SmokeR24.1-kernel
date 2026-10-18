@@ -180,6 +180,35 @@ static int wl_cfgvendor_set_country(struct wiphy *wiphy,
         return err;
 }
 
+/*
+ * The HAL asks for DFS channels on every station interface it creates
+ * (nodfs 0) and logged "Failed to set DFS flag" each time, the command
+ * having no handler here. This driver never takes DFS channels away: the
+ * firmware scans them passively and associates on them as its country
+ * allows. So a request for them is already granted, and one to give them
+ * up is refused rather than acknowledged -- nothing here could honour it.
+ */
+static int wl_cfgvendor_set_nodfs_flag(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	const struct nlattr *iter;
+	int rem, type;
+	u32 nodfs = 0;
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		if (type == ANDR_WIFI_ATTRIBUTE_NODFS_SET)
+			nodfs = nla_get_u32(iter);
+	}
+
+	if (nodfs) {
+		WL_INFORM(("nodfs %u: DFS channels cannot be withdrawn\n", nodfs));
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
 #ifdef GSCAN_SUPPORT
 static int wl_cfgvendor_gscan_get_channel_list(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -903,6 +932,14 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_set_pno_mac_oui
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_WIFI_NODFS_CHANNELS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_nodfs_flag
 	},
 #ifdef LINKSTAT_SUPPORT
 	{
