@@ -2204,7 +2204,7 @@ vbus_node:
 }
 
 static ssize_t bq2419x_proc_init(struct bq2419x_chip *bq2419x) {
-	char *driver_path, *disabled_by_user_sysfs_node;
+	char *kobj_path, *disabled_by_user_sysfs_node;
 	struct proc_dir_entry *proc_symlink_tmp;
 	int ret = 0;
 
@@ -2213,28 +2213,24 @@ static ssize_t bq2419x_proc_init(struct bq2419x_chip *bq2419x) {
 		bq2419x->charger_proc = NULL;
 	}
 
-	driver_path = kzalloc(PATH_MAX, GFP_KERNEL);
-
-	if (!driver_path) {
-		pr_err("%s: failed to allocate memory\n", __func__);
-
+	/* kobject_get_path() allocates; the old code never gave it back. */
+	kobj_path = kobject_get_path(&bq2419x->dev->kobj, GFP_KERNEL);
+	if (!kobj_path)
 		return -ENOMEM;
-	}
 
- 	sprintf(driver_path, "/sys%s",
-			kobject_get_path(&bq2419x->dev->kobj, GFP_KERNEL));
+	disabled_by_user_sysfs_node = kasprintf(GFP_KERNEL,
+			"/sys%s/disabled_by_user", kobj_path);
+	kfree(kobj_path);
+	if (!disabled_by_user_sysfs_node)
+		return -ENOMEM;
 
- 	pr_debug("%s: driver_path=%s\n", __func__, driver_path);
+	pr_debug("%s: node=%s\n", __func__, disabled_by_user_sysfs_node);
 
 	bq2419x->charger_proc = proc_mkdir("charger", NULL);
-
-	if (!bq2419x->charger_proc)
+	if (!bq2419x->charger_proc) {
+		kfree(disabled_by_user_sysfs_node);
 		return -ENOMEM;
-
-	disabled_by_user_sysfs_node = kzalloc(PATH_MAX, GFP_KERNEL);
-
-	if (disabled_by_user_sysfs_node)
-		sprintf(disabled_by_user_sysfs_node, "%s/%s", driver_path, "disabled_by_user");
+	}
 
 	proc_symlink_tmp = proc_symlink("force_disable",
 			bq2419x->charger_proc, disabled_by_user_sysfs_node);
@@ -2244,7 +2240,6 @@ static ssize_t bq2419x_proc_init(struct bq2419x_chip *bq2419x) {
 		pr_err("%s: Couldn't create force_disable symlink\n", __func__);
 	}
 
- 	kfree(driver_path);
 	kfree(disabled_by_user_sysfs_node);
 
 	return ret;
