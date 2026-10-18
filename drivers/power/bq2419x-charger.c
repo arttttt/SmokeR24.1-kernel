@@ -67,6 +67,7 @@
 #define BQ2419x_SW_CHG_CURRENT_LIMIT	2000
 
 extern int tps6591x_gpio7_enable(bool enable);
+extern int tps6591x_gpio7_get(void);
 
 /* input current limit */
 static const unsigned int iinlim[] = {
@@ -147,6 +148,7 @@ struct bq2419x_chip {
 	int				wdt_time_sec;
 	int				charge_hw_current_limit;
 	bool			disabled_by_user;
+	bool			force_bypass;
 	struct proc_dir_entry *charger_proc;
 };
 
@@ -161,12 +163,28 @@ static int current_to_reg(const unsigned int *tbl,
 	return i > 0 ? i - 1 : -EINVAL;
 }
 
+/*
+ * Charging can be held off from two places: disabled_by_user, which Lineage's
+ * charging control drives, and force_bypass, the quick settings switch. Either
+ * one keeps the battery out of it while the system runs from the input.
+ */
+static bool bq2419x_held_off(struct bq2419x_chip *bq2419x)
+{
+	return bq2419x->disabled_by_user || bq2419x->force_bypass;
+}
+
 static int bq2419x_charger_enable(struct bq2419x_chip *bq2419x)
 {
 	int ret;
 
 	if (bq2419x->battery_presense) {
-		if (bq2419x->disabled_by_user) {
+		if (bq2419x_held_off(bq2419x)) {
+			/*
+			 * /CE as well as the register: the watchdog, resume
+			 * and the thermal path all write the register back to
+			 * charging, and none of them touches /CE.
+			 */
+			tps6591x_gpio7_enable(1);
 			ret = regmap_update_bits(bq2419x->regmap, BQ2419X_PWR_ON_REG,
 				BQ2419X_ENABLE_CHARGE_MASK, BQ2419X_DISABLE_CHARGE);
 			dev_info(bq2419x->dev, "Charging disabled by user\n");
@@ -189,6 +207,8 @@ static int bq2419x_charger_enable(struct bq2419x_chip *bq2419x)
 			ret = regmap_update_bits(bq2419x->regmap, BQ2419X_PWR_ON_REG,
 					BQ2419X_ENABLE_CHARGE_MASK,
 					BQ2419X_ENABLE_CHARGE);
+			if (bq2419x->cable_connected)
+				tps6591x_gpio7_enable(0);
 		}
 	} else {
 		dev_info(bq2419x->dev, "Charging disabled\n");
@@ -754,7 +774,8 @@ static int bq2419x_set_charging_current(struct regulator_dev *rdev,
 		if (ret < 0)
 			dev_err(bq2419x->dev, "JEITA_VSET update failed: %d\n",
 					ret);
-	} else if ((val & BQ2419x_CHRG_STATE_MASK) ==
+	} else if (!bq2419x_held_off(bq2419x) &&
+			(val & BQ2419x_CHRG_STATE_MASK) ==
 				BQ2419x_CHRG_STATE_CHARGE_DONE) {
 		dev_info(bq2419x->dev, "Charging completed\n");
 		bq2419x->chg_status = BATTERY_CHARGING_DONE;
@@ -765,7 +786,8 @@ static int bq2419x_set_charging_current(struct regulator_dev *rdev,
 	} else {
 		in_current_limit = max_uA/1000;
 		bq2419x->cable_connected = 1;
-		bq2419x->chg_status = BATTERY_CHARGING;
+		bq2419x->chg_status = bq2419x_held_off(bq2419x) ?
+				BATTERY_NOT_CHARGING : BATTERY_CHARGING;
 		battery_charger_thermal_start_monitoring(
 				bq2419x->bc_dev);
 		/* Set JEITA_VSET bit if charger cable connected */
@@ -781,7 +803,7 @@ static int bq2419x_set_charging_current(struct regulator_dev *rdev,
 	if (ret < 0)
 		goto error;
 
-	if (max_uA > 0)
+	if (max_uA > 0 && !bq2419x_held_off(bq2419x))
 		tps6591x_gpio7_enable(0);
 	else
 		tps6591x_gpio7_enable(1);
@@ -1410,12 +1432,36 @@ static ssize_t bq2419x_set_input_charging_current(struct device *dev,
 	return count;
 }
 
+/*
+ * Whether the charger is really kept from charging: the register does not
+ * say charge, or, with a cable in, /CE is high. Without a cable /CE is high
+ * anyway and says nothing about anyone's choice. Call with the mutex held.
+ */
+static int bq2419x_charging_inhibited(struct bq2419x_chip *bq2419x)
+{
+	unsigned int reg_val;
+	int ce, ret;
+
+	ret = regmap_read(bq2419x->regmap, BQ2419X_PWR_ON_REG, &reg_val);
+	if (ret < 0) {
+		dev_err(bq2419x->dev,
+			"BQ2419X_PWR_ON register read failed: %d\n", ret);
+		return ret;
+	}
+	if ((reg_val & BQ2419X_ENABLE_CHARGE_MASK) != BQ2419X_ENABLE_CHARGE)
+		return 1;
+	if (!bq2419x->cable_connected)
+		return 0;
+
+	ce = tps6591x_gpio7_get();
+	return ce < 0 ? 0 : ce;
+}
+
 static ssize_t bq2419x_show_charging_state(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
-	unsigned int reg_val;
 	int ret;
 
 	mutex_lock(&bq2419x->mutex);
@@ -1423,17 +1469,12 @@ static ssize_t bq2419x_show_charging_state(struct device *dev,
 		mutex_unlock(&bq2419x->mutex);
 		return -EIO;
 	}
-	ret = regmap_read(bq2419x->regmap, BQ2419X_PWR_ON_REG, &reg_val);
+	ret = bq2419x_charging_inhibited(bq2419x);
 	mutex_unlock(&bq2419x->mutex);
-	if (ret < 0) {
-		dev_err(dev, "BQ2419X_PWR_ON register read failed: %d\n", ret);
+	if (ret < 0)
 		return ret;
-	}
 
-	if ((reg_val & BQ2419X_ENABLE_CHARGE_MASK) == BQ2419X_ENABLE_CHARGE)
-		return snprintf(buf, MAX_STR_PRINT, "enabled\n");
-	else
-		return snprintf(buf, MAX_STR_PRINT, "disabled\n");
+	return snprintf(buf, MAX_STR_PRINT, ret ? "disabled\n" : "enabled\n");
 }
 
 static ssize_t bq2419x_set_charging_state(struct device *dev,
@@ -1606,14 +1647,63 @@ static ssize_t bq2419x_show_output_charging_current_values(struct device *dev,
 	return ret;
 }
 
+/*
+ * Set one of the two hold-off flags and let the charger and the battery's
+ * status follow. Writing the value it already has does nothing: Lineage's
+ * charging control writes its wish on every battery event.
+ */
+static ssize_t bq2419x_store_hold_off(struct bq2419x_chip *bq2419x,
+				bool *flag, const char *buf, size_t count)
+{
+	bool val;
+	int ret = 0;
+
+	if (strtobool(buf, &val))
+		return -EINVAL;
+
+	mutex_lock(&bq2419x->mutex);
+	if (bq2419x->shutdown_complete) {
+		mutex_unlock(&bq2419x->mutex);
+		return -EIO;
+	}
+	if (*flag != val) {
+		*flag = val;
+		ret = bq2419x_charger_enable(bq2419x);
+		if (ret >= 0 && bq2419x->cable_connected) {
+			bq2419x->chg_status = bq2419x_held_off(bq2419x) ?
+				BATTERY_NOT_CHARGING : BATTERY_CHARGING;
+			battery_charging_status_update(bq2419x->bc_dev,
+						bq2419x->chg_status);
+		}
+	}
+	mutex_unlock(&bq2419x->mutex);
+
+	return ret < 0 ? ret : count;
+}
+
+/*
+ * Read back from the hardware, not from the flag, so that whoever asks
+ * learns whether the battery is really kept from charging -- whatever did it.
+ */
 static ssize_t bq2419x_show_disabled_by_user(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
+	int ret;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", bq2419x->disabled_by_user);
+	mutex_lock(&bq2419x->mutex);
+	if (bq2419x->shutdown_complete) {
+		mutex_unlock(&bq2419x->mutex);
+		return -EIO;
+	}
+	ret = bq2419x_charging_inhibited(bq2419x);
+	mutex_unlock(&bq2419x->mutex);
+	if (ret < 0)
+		return ret;
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", ret);
 }
 
 static ssize_t bq2419x_set_disabled_by_user(struct device *dev,
@@ -1622,20 +1712,40 @@ static ssize_t bq2419x_set_disabled_by_user(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
-	int val;
 
-	sscanf(buf, "%d", &val);
-
-	bq2419x->disabled_by_user = val;
-
-	bq2419x_charger_enable(bq2419x);
-
-	return count;
+	return bq2419x_store_hold_off(bq2419x, &bq2419x->disabled_by_user,
+				buf, count);
 }
 
 static DEVICE_ATTR(disabled_by_user, (S_IRUGO | (S_IWUSR | S_IWGRP)),
 		bq2419x_show_disabled_by_user,
 		bq2419x_set_disabled_by_user);
+
+/* The quick settings switch: its own choice, kept apart from Lineage's. */
+static ssize_t bq2419x_show_force_bypass(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", bq2419x->force_bypass);
+}
+
+static ssize_t bq2419x_set_force_bypass(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq2419x_chip *bq2419x = i2c_get_clientdata(client);
+
+	return bq2419x_store_hold_off(bq2419x, &bq2419x->force_bypass,
+				buf, count);
+}
+
+static DEVICE_ATTR(force_bypass, (S_IRUGO | (S_IWUSR | S_IWGRP)),
+		bq2419x_show_force_bypass,
+		bq2419x_set_force_bypass);
 
 static DEVICE_ATTR(output_charging_current, (S_IRUGO | (S_IWUSR | S_IWGRP)),
 		bq2419x_show_output_charging_current,
@@ -1656,6 +1766,7 @@ static DEVICE_ATTR(input_cable_state, (S_IRUGO | (S_IWUSR | S_IWGRP)),
 
 static struct attribute *bq2419x_attributes[] = {
 	&dev_attr_disabled_by_user.attr,
+	&dev_attr_force_bypass.attr,
 	&dev_attr_output_charging_current.attr,
 	&dev_attr_output_current_allowed_values.attr,
 	&dev_attr_input_charging_current_mA.attr,
@@ -2320,6 +2431,27 @@ skip_bcharger_init:
 	if (ret < 0) {
 		dev_err(&client->dev, "VBUS regulator init failed %d\n", ret);
 		goto scrub_wq;
+	}
+
+	/*
+	 * GPIO7 keeps its level across a warm reboot. Found high with a cable
+	 * in, it is a hold-off left from before the reboot: keep it rather
+	 * than charging for the moment until userspace states its wishes again.
+	 * It goes to disabled_by_user, which Lineage's charging control corrects
+	 * on the first battery event if it no longer wants it.
+	 */
+	if (bq2419x->battery_presense) {
+		unsigned int sys_stat;
+
+		/* No cable event has come yet; ask the charger for its input. */
+		if (!regmap_read(bq2419x->regmap, BQ2419X_SYS_STAT_REG,
+					&sys_stat) &&
+				(sys_stat & BQ2419x_VBUS_PG_STAT) &&
+				tps6591x_gpio7_get() == 1) {
+			dev_info(bq2419x->dev,
+				"Charging was held off before boot\n");
+			bq2419x->disabled_by_user = true;
+		}
 	}
 
 	/* enable charging */
