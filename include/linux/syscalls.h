@@ -45,6 +45,7 @@ struct shmid_ds;
 struct sockaddr;
 struct stat;
 struct stat64;
+struct statx;
 struct statfs;
 struct statfs64;
 struct __sysctl_args;
@@ -840,6 +841,8 @@ asmlinkage long sys_open_by_handle_at(int mountdirfd,
 				      int flags);
 asmlinkage long sys_setns(int fd, int nstype);
 asmlinkage long sys_pidfd_open(pid_t pid, unsigned int flags);
+asmlinkage long sys_statx(int dfd, const char __user *path, unsigned flags,
+			  unsigned mask, struct statx __user *buffer);
 asmlinkage long sys_process_vm_readv(pid_t pid,
 				     const struct iovec __user *lvec,
 				     unsigned long liovcnt,

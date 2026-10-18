@@ -406,7 +406,7 @@
 		CALL(sys_ni_syscall)
 /* 395 */	CALL(sys_ni_syscall)
 		CALL(sys_ni_syscall)
-		CALL(sys_ni_syscall)
+		CALL(sys_statx)
 		CALL(sys_ni_syscall)
 		CALL(sys_ni_syscall)
 /* 400 */	CALL(sys_ni_syscall)
