@@ -261,6 +261,9 @@ struct cfq_group {
 	unsigned int new_leaf_weight;
 	unsigned int dev_leaf_weight;
 
+	/* group_idle of this cfqg's blkcg, in jiffies */
+	unsigned int group_idle;
+
 	/* number of cfqq currently on this group */
 	int nr_cfqq;
 
@@ -777,6 +780,17 @@ static inline void cfqg_stats_update_completion(struct cfq_group *cfqg,
 
 #endif	/* CONFIG_CFQ_GROUP_IOSCHED */
 
+static inline unsigned int get_group_idle(struct cfq_data *cfqd)
+{
+#ifdef CONFIG_CFQ_GROUP_IOSCHED
+	struct cfq_queue *cfqq = cfqd->active_queue;
+
+	if (cfqq && cfqq->cfqg)
+		return cfqq->cfqg->group_idle;
+#endif
+	return cfqd->cfq_group_idle;
+}
+
 #define cfq_log(cfqd, fmt, args...)	\
 	blk_add_trace_msg((cfqd)->queue, "cfq " fmt, ##args)
 
@@ -797,7 +811,7 @@ static inline bool cfq_io_thinktime_big(struct cfq_data *cfqd,
 	if (!sample_valid(ttime->ttime_samples))
 		return false;
 	if (group_idle)
-		slice = cfqd->cfq_group_idle;
+		slice = get_group_idle(cfqd);
 	else
 		slice = cfqd->cfq_slice_idle;
 	return ttime->ttime_mean > slice;
@@ -1519,6 +1533,7 @@ static void cfq_pd_init(struct blkcg_gq *blkg)
 	cfq_init_cfqg_base(cfqg);
 	cfqg->weight = blkg->blkcg->cfq_weight;
 	cfqg->leaf_weight = blkg->blkcg->cfq_leaf_weight;
+	cfqg->group_idle = blkg->blkcg->cfq_group_idle;
 }
 
 static void cfq_pd_offline(struct blkcg_gq *blkg)
@@ -1738,6 +1753,40 @@ static int cfq_set_leaf_weight(struct cgroup_subsys_state *css,
 	return __cfq_set_weight(css, cft, val, true);
 }
 
+static int cfq_print_group_idle(struct seq_file *sf, void *v)
+{
+	struct blkcg *blkcg = css_to_blkcg(seq_css(sf));
+
+	seq_printf(sf, "%u\n", jiffies_to_usecs(blkcg->cfq_group_idle));
+	return 0;
+}
+
+static int cfq_set_group_idle(struct cgroup_subsys_state *css,
+			      struct cftype *cft, u64 val)
+{
+	struct blkcg *blkcg = css_to_blkcg(css);
+	struct blkcg_gq *blkg;
+
+	if (val > UINT_MAX)
+		return -EINVAL;
+
+	spin_lock_irq(&blkcg->lock);
+
+	blkcg->cfq_group_idle = usecs_to_jiffies(val);
+
+	hlist_for_each_entry(blkg, &blkcg->blkg_list, blkcg_node) {
+		struct cfq_group *cfqg = blkg_to_cfqg(blkg);
+
+		if (!cfqg)
+			continue;
+
+		cfqg->group_idle = blkcg->cfq_group_idle;
+	}
+
+	spin_unlock_irq(&blkcg->lock);
+	return 0;
+}
+
 static int cfqg_print_stat(struct seq_file *sf, void *v)
 {
 	blkcg_print_blkgs(sf, css_to_blkcg(seq_css(sf)), blkg_prfill_stat,
@@ -1848,6 +1897,11 @@ static struct cftype cfq_blkcg_files[] = {
 		.name = "leaf_weight",
 		.seq_show = cfq_print_leaf_weight,
 		.write_u64 = cfq_set_leaf_weight,
+	},
+	{
+		.name = "group_idle",
+		.seq_show = cfq_print_group_idle,
+		.write_u64 = cfq_set_group_idle,
 	},
 
 	/* statistics, covers only the tasks in the cfqg */
@@ -2705,9 +2759,8 @@ static void cfq_arm_slice_timer(struct cfq_data *cfqd)
 	 */
 	if (!cfq_should_idle(cfqd, cfqq)) {
 		/* no queue idling. Check for group idling */
-		if (cfqd->cfq_group_idle)
-			group_idle = cfqd->cfq_group_idle;
-		else
+		group_idle = get_group_idle(cfqd);
+		if (!group_idle)
 			return;
 	}
 
@@ -2743,7 +2796,7 @@ static void cfq_arm_slice_timer(struct cfq_data *cfqd)
 	cfq_mark_cfqq_wait_request(cfqq);
 
 	if (group_idle)
-		sl = cfqd->cfq_group_idle;
+		sl = group_idle;
 	else
 		sl = cfqd->cfq_slice_idle;
 
@@ -3089,7 +3142,7 @@ static struct cfq_queue *cfq_select_queue(struct cfq_data *cfqd)
 	 * this group, wait for requests to complete.
 	 */
 check_group_idle:
-	if (cfqd->cfq_group_idle && cfqq->cfqg->nr_cfqq == 1 &&
+	if (get_group_idle(cfqd) && cfqq->cfqg->nr_cfqq == 1 &&
 	    cfqq->cfqg->dispatched &&
 	    !cfq_io_thinktime_big(cfqd, &cfqq->cfqg->ttime, true)) {
 		cfqq = NULL;
@@ -3662,7 +3715,7 @@ cfq_update_io_thinktime(struct cfq_data *cfqd, struct cfq_queue *cfqq,
 			cfqd->cfq_slice_idle);
 	}
 #ifdef CONFIG_CFQ_GROUP_IOSCHED
-	__cfq_update_io_thinktime(&cfqq->cfqg->ttime, cfqd->cfq_group_idle);
+	__cfq_update_io_thinktime(&cfqq->cfqg->ttime, get_group_idle(cfqd));
 #endif
 }
 
@@ -4041,7 +4094,7 @@ static void cfq_completed_request(struct request_queue *q, struct request *rq)
 		if (cfq_should_wait_busy(cfqd, cfqq)) {
 			unsigned long extend_sl = cfqd->cfq_slice_idle;
 			if (!cfqd->cfq_slice_idle)
-				extend_sl = cfqd->cfq_group_idle;
+				extend_sl = get_group_idle(cfqd);
 			cfqq->slice_end = jiffies + extend_sl;
 			cfq_mark_cfqq_wait_busy(cfqq);
 			cfq_log_cfqq(cfqd, cfqq, "will busy wait");

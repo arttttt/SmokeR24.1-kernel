@@ -26,6 +26,7 @@
 #define CFQ_WEIGHT_MIN		10
 #define CFQ_WEIGHT_MAX		1000
 #define CFQ_WEIGHT_DEFAULT	500
+#define CFQ_GROUP_IDLE_DEFAULT	(HZ / 125)
 
 #ifdef CONFIG_BLK_CGROUP
 
@@ -55,6 +56,7 @@ struct blkcg {
 	/* TODO: per-policy storage in blkcg */
 	unsigned int			cfq_weight;	/* belongs to cfq */
 	unsigned int			cfq_leaf_weight;
+	unsigned int			cfq_group_idle;	/* jiffies */
 };
 
 struct blkg_stat {
