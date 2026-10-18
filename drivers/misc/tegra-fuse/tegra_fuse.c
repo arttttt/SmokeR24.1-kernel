@@ -1590,6 +1590,14 @@ static struct platform_driver fuse_driver = {
 
 static int __init tegra_fuse_init(void)
 {
+	/*
+	 * The platform driver is the fuse programming interface: the sysfs
+	 * nodes that burn fuses, and the vpp_fuse supply. Reading the fuses
+	 * -- SKU, speedo and process IDs for DVFS, the chip UID -- does not
+	 * go through it, so a board can go without it.
+	 */
+	if (!IS_ENABLED(CONFIG_TEGRA_FUSE_SYSFS))
+		return 0;
 	return platform_driver_register(&fuse_driver);
 }
 fs_initcall_sync(tegra_fuse_init);

@@ -594,6 +594,16 @@ config THERM_EST
 	---help---
 	Thermal driver which estimates temperature based of other sensors.
 
+config TEGRA_FUSE_SYSFS
+	bool "Tegra fuse programming interface"
+	depends on PLATFORM_TEGRA
+	default y
+	help
+	  Registers the tegra-fuse platform driver, whose sysfs nodes burn
+	  fuses (secure boot key, JTAG disable, ODM production mode and
+	  others). Reading the fuses for DVFS and the chip ID does not need
+	  it. Say N on a device that must never burn its fuses.
+
 config TEGRA_THROUGHPUT
 	bool "Device node to set throughput target"
 	depends on TEGRA_DC && TEGRA_DC_EXTENSIONS
