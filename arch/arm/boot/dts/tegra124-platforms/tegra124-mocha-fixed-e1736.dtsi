@@ -13,12 +13,6 @@
 			regulator-min-microvolt = <5000000>;
 			regulator-max-microvolt = <5000000>;
 			regulator-always-on;
-
-			consumers {
-				c1 {
-					regulator-consumer-supply = "vdd_sys_bl";
-				};
-			};
 		};
 
 		usb0_vbus: regulator@1 {
@@ -96,12 +90,6 @@
 			regulator-boot-on;
 			gpio = <&gpio 68 0>;
 			enable-active-high;
-
-			consumers {
-				c1 {
-					regulator-consumer-supply = "avdd_lcd";
-				};
-			};
 		};
 		
 		bvdd_lcd: regulator@42 {
@@ -113,29 +101,6 @@
 				regulator-boot-on;
 				gpio = <&gpio 146 0>;
 				enable-active-high;
-
-				consumers {
-						c1 {
-								regulator-consumer-supply = "bvdd_lcd";
-						};
-				};
-		};
-
-
-		vdd_lcd: regulator@5 {
-			compatible = "regulator-fixed-sync";
-			reg = <5>;
-			regulator-name = "vdd-lcd";
-			regulator-min-microvolt = <1200000>;
-			regulator-max-microvolt = <1200000>;
-			enable-active-high;
-			vin-supply = <&palmas_smps8>;
-
-			consumers {
-				c1 {
-					regulator-consumer-supply = "vdd_lcd_1v2_s";
-				};
-			};
 		};
 
 		en_lcd_bl: regulator@8 {
@@ -150,6 +115,7 @@
 			consumers {
 				c1 {
 					regulator-consumer-supply = "vdd_lcd_bl_en";
+					regulator-consumer-device = "tegradc.0";
 				};
 			};
 		};
