@@ -118,14 +118,38 @@ static int palmas_gpio_output(struct gpio_chip *gc, unsigned offset,
 	return ret;
 }
 
+/*
+ * GPIO7 drives the charger's CHG_EN, which is its /CE: high holds charging
+ * off while the system keeps running from the input. The charger can come
+ * up before this chip, so both helpers check that it is there.
+ */
 int tps6591x_gpio7_enable(bool enable)
 {
-	if (enable)
-		palmas_gpio_output(&tps65910_gpio->gpio_chip, PALMAS_GPIO7, 1);
-	else
-		palmas_gpio_output(&tps65910_gpio->gpio_chip, PALMAS_GPIO7, 0);
+	if (!tps65910_gpio)
+		return -EPROBE_DEFER;
 
-	return 0;
+	return palmas_gpio_output(&tps65910_gpio->gpio_chip, PALMAS_GPIO7,
+				  enable ? 1 : 0);
+}
+
+/* The level GPIO7 is driven to, or -ENODEV while it is not an output. */
+int tps6591x_gpio7_get(void)
+{
+	struct palmas *palmas;
+	unsigned int dir;
+	int ret;
+
+	if (!tps65910_gpio)
+		return -EPROBE_DEFER;
+
+	palmas = tps65910_gpio->palmas;
+	ret = palmas_read(palmas, PALMAS_GPIO_BASE, PALMAS_GPIO_DATA_DIR, &dir);
+	if (ret < 0)
+		return ret;
+	if (!(dir & BIT(PALMAS_GPIO7)))
+		return -ENODEV;
+
+	return palmas_gpio_get(&tps65910_gpio->gpio_chip, PALMAS_GPIO7);
 }
 
 
