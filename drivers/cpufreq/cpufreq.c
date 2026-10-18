@@ -840,11 +840,25 @@ static int cpufreq_add_dev_interface(unsigned int cpu,
 	int ret = 0;
 	unsigned int j;
 
-	/* prepare interface data */
-	ret = kobject_init_and_add(&policy->kobj, &ktype_cpufreq,
-				   &dev->kobj, "cpufreq");
+	/*
+	 * prepare interface data: the policy lives where later kernels keep
+	 * it, /sys/devices/system/cpu/cpufreq/policyN, and every CPU it
+	 * governs links to it as cpuN/cpufreq -- this one included, so the
+	 * old paths still lead to the same files. Android's time_in_state
+	 * finds the policies only there.
+	 */
+	ret = cpufreq_get_global_kobject();
 	if (ret)
 		return ret;
+
+	ret = kobject_init_and_add(&policy->kobj, &ktype_cpufreq,
+				   cpufreq_global_kobject, "policy%u", cpu);
+	if (ret)
+		return ret;
+
+	ret = sysfs_create_link(&dev->kobj, &policy->kobj, "cpufreq");
+	if (ret)
+		goto err_out_kobj_put;
 
 	/* set up files for this cpu device */
 	drv_attr = cpufreq_driver->attr;
@@ -898,8 +912,8 @@ static int cpufreq_add_dev_interface(unsigned int cpu,
 	return ret;
 
 err_out_kobj_put:
-	kobject_put(&policy->kobj);
-	wait_for_completion(&policy->kobj_unregister);
+	/* the caller puts the kobject, and the global one with it */
+	sysfs_remove_link(&dev->kobj, "cpufreq");
 	return ret;
 }
 
@@ -1067,6 +1081,7 @@ err_out_unregister:
 
 	kobject_put(&policy->kobj);
 	wait_for_completion(&policy->kobj_unregister);
+	cpufreq_put_global_kobject();
 
 err_set_policy_cpu:
 	per_cpu(cpufreq_policy_cpu, cpu) = -1;
@@ -1105,7 +1120,7 @@ static void update_policy_cpu(struct cpufreq_policy *policy, unsigned int cpu)
  */
 static int __cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif)
 {
-	unsigned int cpu = dev->id, ret, cpus;
+	unsigned int cpu = dev->id, cpus;
 	unsigned long flags;
 	struct cpufreq_policy *data;
 	struct kobject *kobj;
@@ -1142,34 +1157,21 @@ static int __cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif
 		cpumask_clear_cpu(cpu, data->cpus);
 	unlock_policy_rwsem_write(cpu);
 
-	if (cpu != data->cpu) {
-		sysfs_remove_link(&dev->kobj, "cpufreq");
-	} else if (cpus > 1) {
-		/* first sibling now owns the new sysfs dir */
+	/* every CPU of the policy links to it, its owner too */
+	sysfs_remove_link(&dev->kobj, "cpufreq");
+
+	if (cpu == data->cpu && cpus > 1) {
+		/*
+		 * The first sibling owns the policy now. Its directory stays
+		 * where it is, under the name it was made with, as policyN
+		 * does in later kernels: nothing to move.
+		 */
 		cpu_dev = get_cpu_device(cpumask_first(data->cpus));
-		sysfs_remove_link(&cpu_dev->kobj, "cpufreq");
-		ret = kobject_move(&data->kobj, &cpu_dev->kobj);
-		if (ret) {
-			pr_err("%s: Failed to move kobj: %d", __func__, ret);
-
-			WARN_ON(lock_policy_rwsem_write(cpu));
-			cpumask_set_cpu(cpu, data->cpus);
-
-			write_lock_irqsave(&cpufreq_driver_lock, flags);
-			per_cpu(cpufreq_cpu_data, cpu) = data;
-			write_unlock_irqrestore(&cpufreq_driver_lock, flags);
-
-			unlock_policy_rwsem_write(cpu);
-
-			ret = sysfs_create_link(&cpu_dev->kobj, &data->kobj,
-					"cpufreq");
-			return -EINVAL;
-		}
 
 		WARN_ON(lock_policy_rwsem_write(cpu));
 		update_policy_cpu(data, cpu_dev->id);
 		unlock_policy_rwsem_write(cpu);
-		pr_debug("%s: policy Kobject moved to cpu: %d from: %d\n",
+		pr_debug("%s: policy now owned by cpu: %d from: %d\n",
 				__func__, cpu_dev->id, cpu);
 	}
 
@@ -1191,6 +1193,7 @@ static int __cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif
 		pr_debug("waiting for dropping of refcount\n");
 		wait_for_completion(cmp);
 		pr_debug("wait complete\n");
+		cpufreq_put_global_kobject();
 
 		if (cpufreq_driver->exit)
 			cpufreq_driver->exit(data);
