@@ -377,6 +377,7 @@ static enum power_supply_property bq27x00_battery_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_CAPACITY,
+	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
@@ -1003,7 +1004,28 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		ret = bq27x00_battery_current(di, val);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
-		ret = bq27x00_simple_value(di->cache.raw_capacity, val);
+		/*
+		 * A level, not a percentage: sysfs indexes its names with it.
+		 * Android shuts down on CRITICAL when the level is there, so
+		 * CRITICAL is only an empty battery -- what it did on 0%
+		 * without the level.
+		 */
+		if (di->fake_battery) {
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
+			break;
+		}
+		ret = bq27x00_simple_value(di->cache.capacity, val);
+		if (ret < 0)
+			break;
+		if (di->bat_status == POWER_SUPPLY_STATUS_FULL ||
+				val->intval >= 100)
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_FULL;
+		else if (val->intval <= 0)
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_CRITICAL;
+		else if (val->intval <= 20)
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_LOW;
+		else
+			val->intval = POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
 		ret = bq27x00_battery_qpassed(di, val);
