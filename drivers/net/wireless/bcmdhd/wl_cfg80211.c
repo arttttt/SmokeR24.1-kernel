@@ -13600,6 +13600,15 @@ static int wl_construct_reginfo(struct bcm_cfg80211 *cfg, s32 bw_cap)
 	bool ht40_allowed;
 	u8 *pbuf = NULL;
 	bool dfs_radar_disabled = FALSE;
+	/* The 5 GHz table as it is built in, before the loop below writes the
+	 * firmware's list over it. */
+	static struct ieee80211_channel all_5g[ARRAYSIZE(__wl_5ghz_a_channels)];
+	static bool all_5g_saved;
+
+	if (!all_5g_saved) {
+		memcpy(all_5g, __wl_5ghz_a_channels, sizeof(all_5g));
+		all_5g_saved = true;
+	}
 
 #define LOCAL_BUF_LEN 1024
 	pbuf = kzalloc(LOCAL_BUF_LEN, GFP_KERNEL);
@@ -13734,6 +13743,36 @@ static int wl_construct_reginfo(struct bcm_cfg80211 *cfg, s32 bw_cap)
 		}
 
 	}
+
+	/*
+	 * A firmware on a country without 5 GHz -- its world default among
+	 * them, until Android gives it a real one -- lists no 5 GHz channels
+	 * at all. A band with no channels is left out of the wiphy -- and
+	 * wificond maps each band
+	 * to its wiphy once, when the first interface is created, and keeps
+	 * that map for as long as the wiphy has one. So 5 GHz was missing from
+	 * the map for the whole Wi-Fi session, and a 5 GHz hotspot found "No
+	 * available channels" even after the country had opened them.
+	 *
+	 * Until the firmware lists them, offer the 5 GHz channels as passive:
+	 * receive only, no transmitting of our own and no IBSS -- what a radio
+	 * that does not know where it is may do anywhere. The band is then
+	 * there from the start, and the firmware's own list replaces these as
+	 * soon as it has one (wldev_set_country -> wl_update_wiphybands).
+	 */
+	if (n_5g == 0) {
+		for (i = 0; i < ARRAYSIZE(__wl_5ghz_a_channels); i++) {
+			__wl_5ghz_a_channels[i] = all_5g[i];
+			__wl_5ghz_a_channels[i].flags = IEEE80211_CHAN_NO_HT40 |
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0))
+				IEEE80211_CHAN_PASSIVE_SCAN | IEEE80211_CHAN_NO_IBSS;
+#else
+				IEEE80211_CHAN_NO_IR;
+#endif
+		}
+		n_5g = ARRAYSIZE(__wl_5ghz_a_channels);
+	}
+
 	__wl_band_2ghz.n_channels = n_2g;
 	__wl_band_5ghz_a.n_channels = n_5g;
 	kfree(pbuf);
