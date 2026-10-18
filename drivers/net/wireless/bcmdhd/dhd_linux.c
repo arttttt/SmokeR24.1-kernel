@@ -8995,11 +8995,31 @@ void dhd_bus_country_set(struct net_device *dev, wl_country_t *cspec, bool notif
 		 * country changes, and they learn of that from
 		 * NL80211_CMD_REG_CHANGE -- which cfg80211 sends only for a
 		 * domain it has the rules for, and it has none here.
+		 *
+		 * Say what the firmware runs under, not what was asked: the
+		 * customized table may have put another code in its place.
+		 * Broadcom's own codes -- XZ, XV and the like, or with digits
+		 * -- are no ISO country; they are world rules, "00".
 		 */
-		if (dev->ieee80211_ptr && cspec->country_abbrev[0] &&
-		    cspec->country_abbrev[1])
+		if (dev->ieee80211_ptr) {
+			wl_country_t cur;
+			char alpha2[3] = "00";
+
+			memset(&cur, 0, sizeof(cur));
+			if (dhd_iovar(&dhd->pub, 0, "country", NULL, 0,
+					(char *)&cur, sizeof(cur), FALSE) < 0) {
+				DHD_ERROR(("%s: country get failed\n", __FUNCTION__));
+				return;
+			}
+			if (cur.ccode[0] >= 'A' && cur.ccode[0] <= 'Z' &&
+			    cur.ccode[0] != 'X' &&
+			    cur.ccode[1] >= 'A' && cur.ccode[1] <= 'Z') {
+				alpha2[0] = cur.ccode[0];
+				alpha2[1] = cur.ccode[1];
+			}
 			cfg80211_notify_reg_change(dev->ieee80211_ptr->wiphy,
-						   cspec->country_abbrev);
+						   alpha2);
+		}
 #endif
 	}
 }
