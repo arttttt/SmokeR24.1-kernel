@@ -914,6 +914,18 @@ static u32 tegra_sdhci_readl(struct sdhci_host *host, int reg)
 		val = readl(host->ioaddr + reg);
 		return val | SDHCI_WRITE_PROTECT;
 	}
+	if (unlikely(reg == SDHCI_CAPABILITIES)) {
+		/*
+		 * The controller leaves the max block length field at the
+		 * reserved value 3. Its buffer is a fixed 512 bytes (TRM,
+		 * SDMMC: "internal 512 byte buffer"), so say so: 0 is 512,
+		 * which sdhci_add_host() would assume anyway after warning.
+		 */
+		val = readl(host->ioaddr + reg);
+		if ((val & SDHCI_MAX_BLOCK_MASK) == SDHCI_MAX_BLOCK_MASK)
+			val &= ~SDHCI_MAX_BLOCK_MASK;
+		return val;
+	}
 	return readl(host->ioaddr + reg);
 }
 
