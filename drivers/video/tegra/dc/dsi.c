@@ -680,6 +680,41 @@ static void tegra_dsi_pix_correction(struct tegra_dc *dc,
 	dc->mode.h_active += h_act_corr;
 }
 
+/*
+ * The panel runs at the pixel clock PLLD can make, not the one the mode asks
+ * for: 214.868 MHz asked is 644.6 MHz of PLLD, which takes whole megahertz,
+ * so 644 -- 214.667 MHz of pixels and 59.955 Hz, where the mode said 60.012.
+ * Everything above the driver, the framebuffer's mode and through it the
+ * composer and Android's refresh rate, takes its rate from the mode; give it
+ * the rate the panel runs at. Rounded up to the kilohertz, so that
+ * tegra_dc_dsi_setup_clk, multiplying it back, asks PLLD for the same 644.
+ */
+static void tegra_dsi_achievable_pclk(struct tegra_dc *dc,
+				      struct tegra_dc_dsi_data *dsi)
+{
+	struct clk *parent_clk;
+	unsigned long plld_khz;
+	long rate;
+
+	if (dc->out->flags & TEGRA_DC_OUT_ONE_SHOT_MODE || !dc->mode.pclk)
+		return;
+
+	parent_clk = clk_get_sys(NULL, dc->out->parent_clk ? : "pll_d_out0");
+	if (IS_ERR_OR_NULL(parent_clk))
+		return;
+
+	/* As tegra_dc_dsi_setup_clk asks it of the PLL */
+	plld_khz = (dc->mode.pclk / 1000) * dsi->shift_clk_div.mul * 2 /
+			dsi->shift_clk_div.div;
+
+	rate = clk_round_rate(clk_get_parent(parent_clk), plld_khz * 1000);
+	if (rate <= 0)
+		return;
+
+	dc->mode.pclk = DIV_ROUND_UP(rate / 1000 * dsi->shift_clk_div.div,
+				     dsi->shift_clk_div.mul * 2) * 1000;
+}
+
 void tegra_dsi_init_clock_param(struct tegra_dc *dc)
 {
 	u32 h_width_pixels;
@@ -774,6 +809,7 @@ void tegra_dsi_init_clock_param(struct tegra_dc *dc)
 
 	/* Get the actual shift_clk_div and clock rates. */
 	dsi->shift_clk_div = tegra_dsi_get_shift_clk_div(dsi);
+	tegra_dsi_achievable_pclk(dc, dsi);
 	dsi->target_lp_clk_khz =
 			tegra_dsi_get_lp_clk_rate(dsi, DSI_LP_OP_WRITE);
 	dsi->target_hs_clk_khz = tegra_dsi_get_hs_clk_rate(dsi);
