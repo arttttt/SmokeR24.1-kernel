@@ -1545,11 +1545,30 @@ void tegra_get_pmu_board_info(struct board_info *bi)
 
 early_param("pmuboard", tegra_pmu_board_info);
 
+/*
+ * Bootloaders that do not put a display-board node under /chosen pass the
+ * same five fields on the command line instead, as for pmuboard.
+ */
+static bool display_board_from_cmdline;
+
+static int __init tegra_display_board_info(char *info)
+{
+	char *p = info;
+	display_board_info.board_id = memparse(p, &p);
+	display_board_info.sku = memparse(p+1, &p);
+	display_board_info.fab = memparse(p+1, &p);
+	display_board_info.major_revision = memparse(p+1, &p);
+	display_board_info.minor_revision = memparse(p+1, &p);
+	display_board_from_cmdline = true;
+	return 0;
+}
+early_param("displayboard", tegra_display_board_info);
+
 void tegra_get_display_board_info(struct board_info *bi)
 {
 	static bool parsed = 0;
 
-	if (!parsed) {
+	if (!parsed && !display_board_from_cmdline) {
 		int ret;
 		parsed = 1;
 		ret = tegra_get_board_info_properties(bi, "display-board");
