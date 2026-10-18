@@ -844,6 +844,8 @@ static int bq27x00_update_battery_status(struct battery_gauge_dev *bg_dev,
 		di->bat_status = POWER_SUPPLY_STATUS_CHARGING;
 	else if (status == BATTERY_CHARGING_DONE)
 		di->bat_status = POWER_SUPPLY_STATUS_FULL;
+	else if (status == BATTERY_NOT_CHARGING)
+		di->bat_status = POWER_SUPPLY_STATUS_NOT_CHARGING;
 	else
 		di->bat_status = POWER_SUPPLY_STATUS_DISCHARGING;
 

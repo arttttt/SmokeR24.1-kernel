@@ -30,6 +30,8 @@ enum battery_charger_status {
 	BATTERY_DISCHARGING,
 	BATTERY_CHARGING,
 	BATTERY_CHARGING_DONE,
+	/* An input is there, but the charger has been told not to charge. */
+	BATTERY_NOT_CHARGING,
 };
 
 struct battery_gauge_dev;
