@@ -2428,27 +2428,6 @@ skip_bcharger_init:
 		goto scrub_wq;
 	}
 
-	/*
-	 * GPIO7 keeps its level across a warm reboot. Found high with a cable
-	 * in, it is a hold-off left from before the reboot: keep it rather
-	 * than charging for the moment until userspace states its wishes again.
-	 * It goes to disabled_by_user, which Lineage's charging control corrects
-	 * on the first battery event if it no longer wants it.
-	 */
-	if (bq2419x->battery_presense) {
-		unsigned int sys_stat;
-
-		/* No cable event has come yet; ask the charger for its input. */
-		if (!regmap_read(bq2419x->regmap, BQ2419X_SYS_STAT_REG,
-					&sys_stat) &&
-				(sys_stat & BQ2419x_VBUS_PG_STAT) &&
-				tps6591x_gpio7_get() == 1) {
-			dev_info(bq2419x->dev,
-				"Charging was held off before boot\n");
-			bq2419x->disabled_by_user = true;
-		}
-	}
-
 	/* enable charging */
 	ret = bq2419x_charger_enable(bq2419x);
 	if (ret < 0)
