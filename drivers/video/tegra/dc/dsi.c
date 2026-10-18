@@ -1927,9 +1927,15 @@ static void tegra_dsi_set_dsi_clk(struct tegra_dc *dc,
 	if (rm != 0)
 		clk -= rm;
 
-	/* Set up pixel clock */
-	pclk_khz = (clk * dsi->shift_clk_div.div) /
-				dsi->shift_clk_div.mul;
+	/*
+	 * Set up pixel clock. Rounded up: tegra_dc_dsi_setup_clk multiplies
+	 * it back into the PLL rate, which the PLL takes in whole megahertz,
+	 * and 214666 kHz came back as 643998 kHz: after any full
+	 * re-initialisation the PLL ran a megahertz low, 643 instead of 644,
+	 * and the panel at 59.86 Hz instead of 59.96.
+	 */
+	pclk_khz = DIV_ROUND_UP(clk * dsi->shift_clk_div.div,
+				dsi->shift_clk_div.mul);
 
 	dc->mode.pclk = pclk_khz * 1000;
 
