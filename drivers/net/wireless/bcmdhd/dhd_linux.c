@@ -8988,6 +8988,18 @@ void dhd_bus_country_set(struct net_device *dev, wl_country_t *cspec, bool notif
 		memcpy(&dhd->pub.dhd_cspec, cspec, sizeof(wl_country_t));
 #ifdef WL_CFG80211
 		wl_update_wiphybands(NULL, notify);
+
+		/*
+		 * And say so. Android 13 and later take the channels a hotspot
+		 * may use from a list they refresh only when the driver's
+		 * country changes, and they learn of that from
+		 * NL80211_CMD_REG_CHANGE -- which cfg80211 sends only for a
+		 * domain it has the rules for, and it has none here.
+		 */
+		if (dev->ieee80211_ptr && cspec->country_abbrev[0] &&
+		    cspec->country_abbrev[1])
+			cfg80211_notify_reg_change(dev->ieee80211_ptr->wiphy,
+						   cspec->country_abbrev);
 #endif
 	}
 }
