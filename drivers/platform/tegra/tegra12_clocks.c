@@ -8214,6 +8214,7 @@ static struct clk tegra_clk_c4bus = {
 		.inputs    = _inputs,			\
 		.flags     = _flags,			\
 		.max_rate  = _max,			\
+		.clk_id    = _clk_num,			\
 		.u.periph = {				\
 			.clk_num   = _clk_num,		\
 		},					\
@@ -8232,6 +8233,7 @@ static struct clk tegra_clk_c4bus = {
 		.inputs    = _inputs,			\
 		.flags     = _flags,			\
 		.max_rate  = _max,			\
+		.clk_id    = _clk_num,			\
 		.u.periph = {				\
 			.clk_num   = _clk_num,		\
 		},					\
