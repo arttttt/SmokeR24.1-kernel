@@ -302,6 +302,8 @@ static int __init nvmap_co_setup(struct reserved_mem *rmem)
 	if (!strcmp(co->name, "composer")) {
 		tegra_composer_carveout_start = rmem->base;
 		tegra_composer_carveout_size = rmem->size;
+		pr_info("composer zone at %pa, size %pa\n",
+			&rmem->base, &rmem->size);
 	}
 
 	if (!of_get_flat_dt_prop(rmem->fdt_node, "reusable", NULL) ||

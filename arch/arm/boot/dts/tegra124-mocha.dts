@@ -64,14 +64,21 @@
 	 * with room to breathe; the 24M the old 64M reservation kept idle went
 	 * back to the system.
 	 *
-	 * The base is the shared boundary, the size is the free edge. This
-	 * node is removed from memblock in the device tree scan, which runs
-	 * before the platform reserves, so the resizable vpr's top-down search
-	 * finds it already gone and parks its 188M flush under the base (read
-	 * back live: vpr at e5000000, its ceiling the zone's floor exactly).
-	 * Above the zone's own ceiling lies plain system RAM, so trimming the
-	 * top hands the difference straight back, with neither neighbour
-	 * moving.
+	 * Placed by size, not by address: the bootloader's secure regions do
+	 * not sit in the same place on every unit (some put tzram and tsec at
+	 * f2000000, inside the window a fixed base once claimed, and the
+	 * memory controller then refused the merge engine its own slots).
+	 * The platform takes those regions out of the memory map before this
+	 * node is placed, and reserves the bootloader's other fixed regions,
+	 * so the top-down search below the ceiling only ever lands in plain
+	 * RAM, in one contiguous piece.
+	 *
+	 * The ceiling keeps the old layout where it was sound: with the RAM
+	 * under f3400000 free the zone lands on f0c00000 exactly, and the
+	 * resizable vpr, placed later by the platform, still finds it gone
+	 * and parks its 188M flush under the base (read back live: vpr at
+	 * e5000000, its ceiling the zone's floor exactly). Where the secure
+	 * regions cut into that RAM, the zone and vpr both settle lower.
 	 */
 	reserved-memory {
 		#address-cells = <2>;
@@ -80,7 +87,9 @@
 
 		composer_carveout: composer-carveout {
 			compatible = "nvidia,composer-carveout";
-			reg = <0x0 0xF0C00000 0x0 0x02800000>;
+			size = <0x0 0x02800000>;
+			alignment = <0x0 0x00400000>;
+			alloc-ranges = <0x0 0x80000000 0x0 0x73400000>;
 			no-map;
 		};
 	};
