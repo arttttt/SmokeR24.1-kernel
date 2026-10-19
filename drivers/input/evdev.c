@@ -89,17 +89,36 @@ static void __pass_event(struct evdev_client *client,
 	}
 }
 
+enum evdev_clock_type {
+	EV_CLK_REAL = 0,
+	EV_CLK_MONO,
+	EV_CLK_BOOT,
+	EV_CLK_MAX
+};
+
+static ktime_t evdev_client_time(struct evdev_client *client,
+				 const ktime_t *ev_time)
+{
+	switch (client->clkid) {
+	case CLOCK_MONOTONIC:
+		return ev_time[EV_CLK_MONO];
+	case CLOCK_BOOTTIME:
+		return ev_time[EV_CLK_BOOT];
+	default:
+		return ev_time[EV_CLK_REAL];
+	}
+}
+
 static void evdev_pass_values(struct evdev_client *client,
 			const struct input_value *vals, unsigned int count,
-			ktime_t mono, ktime_t real)
+			const ktime_t *ev_time)
 {
 	struct evdev *evdev = client->evdev;
 	const struct input_value *v;
 	struct input_event event;
 	bool wakeup = false;
 
-	event.time = ktime_to_timeval(client->clkid == CLOCK_MONOTONIC ?
-				      mono : real);
+	event.time = ktime_to_timeval(evdev_client_time(client, ev_time));
 
 	/* Interrupts are disabled, just acquire the lock. */
 	spin_lock(&client->buffer_lock);
@@ -127,21 +146,22 @@ static void evdev_events(struct input_handle *handle,
 {
 	struct evdev *evdev = handle->private;
 	struct evdev_client *client;
-	ktime_t time_mono, time_real;
+	ktime_t ev_time[EV_CLK_MAX];
 
-	time_mono = ktime_get();
-	time_real = ktime_sub(time_mono, ktime_get_monotonic_offset());
+	ev_time[EV_CLK_MONO] = ktime_get();
+	ev_time[EV_CLK_REAL] = ktime_sub(ev_time[EV_CLK_MONO],
+					 ktime_get_monotonic_offset());
+	ev_time[EV_CLK_BOOT] = ktime_get_boottime();
 
 	rcu_read_lock();
 
 	client = rcu_dereference(evdev->grab);
 
 	if (client)
-		evdev_pass_values(client, vals, count, time_mono, time_real);
+		evdev_pass_values(client, vals, count, ev_time);
 	else
 		list_for_each_entry_rcu(client, &evdev->client_list, node)
-			evdev_pass_values(client, vals, count,
-					  time_mono, time_real);
+			evdev_pass_values(client, vals, count, ev_time);
 
 	rcu_read_unlock();
 }
@@ -791,7 +811,8 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 	case EVIOCSCLOCKID:
 		if (copy_from_user(&i, p, sizeof(unsigned int)))
 			return -EFAULT;
-		if (i != CLOCK_MONOTONIC && i != CLOCK_REALTIME)
+		if (i != CLOCK_MONOTONIC && i != CLOCK_REALTIME &&
+		    i != CLOCK_BOOTTIME)
 			return -EINVAL;
 		client->clkid = i;
 		return 0;
