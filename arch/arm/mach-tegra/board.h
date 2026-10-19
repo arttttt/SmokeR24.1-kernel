@@ -101,6 +101,7 @@ void __init tegra12x_init_early(void);
 void __init tegra21x_init_early(void);
 void __init tegra_map_common_io(void);
 phys_addr_t __init tegra_reserve_adsp(unsigned long size);
+void __init tegra_reserve_bootloader_regions(void);
 void __init tegra_reserve(unsigned long carveout_size, unsigned long fb_size,
 	unsigned long fb2_size);
 void __init tegra_reserve4(ulong carveout_size, ulong fb_size,

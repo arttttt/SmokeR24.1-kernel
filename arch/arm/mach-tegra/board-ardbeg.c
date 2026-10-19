@@ -716,6 +716,7 @@ DT_MACHINE_START(TN8, "tn8")
 	.atag_offset	= 0x100,
 	.smp		= smp_ops(tegra_smp_ops),
 	.map_io		= tegra_map_common_io,
+	.reserve_early	= tegra_reserve_bootloader_regions,
 	.reserve	= tegra_ardbeg_reserve,
 	.init_early	= tegra_ardbeg_init_early,
 	.init_irq	= irqchip_init,

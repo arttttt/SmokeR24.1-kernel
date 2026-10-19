@@ -188,6 +188,8 @@ phys_addr_t tegra_composer_carveout_start;
 phys_addr_t tegra_composer_carveout_size;
 phys_addr_t tegra_tsec_start;
 phys_addr_t tegra_tsec_size;
+static phys_addr_t tegra_tzram_start;
+static phys_addr_t tegra_tzram_size;
 phys_addr_t tegra_lp0_vec_start;
 phys_addr_t tegra_lp0_vec_size;
 bool tegra_vpr_resize;
@@ -197,6 +199,7 @@ EXPORT_SYMBOL(tegra_bl_debug_data_start);
 
 phys_addr_t tegra_bl_debug_data_size = 0;
 EXPORT_SYMBOL(tegra_bl_debug_data_size);
+static bool tegra_bl_debug_data_reserved;
 
 phys_addr_t tegra_bl_prof_start;
 EXPORT_SYMBOL(tegra_bl_prof_start);
@@ -1149,6 +1152,20 @@ static int __init tegra_tsec_arg(char *options)
 }
 early_param("tsec", tegra_tsec_arg);
 
+/* The trusted OS's own RAM, named by the bootloader next to tsec */
+static int __init tegra_tzram_arg(char *options)
+{
+	char *p = options;
+
+	tegra_tzram_size = memparse(p, &p);
+	if (*p == '@')
+		tegra_tzram_start = memparse(p+1, &p);
+	pr_info("Found tzram, start=0x%llx size=%llx\n",
+		(u64)tegra_tzram_start, (u64)tegra_tzram_size);
+	return 0;
+}
+early_param("tzram", tegra_tzram_arg);
+
 static int __init serialnumber(char *options)
 {
 	serial_number = options;
@@ -1902,6 +1919,134 @@ phys_addr_t __init tegra_reserve_adsp(unsigned long size)
 	return reserve;
 }
 
+static void __init tegra_remove_secure_region(const char *name,
+	phys_addr_t start, phys_addr_t size)
+{
+	if (!size)
+		return;
+
+	if (memblock_remove(start, size))
+		pr_err("Failed to remove %s %08llx@%08llx from memory map\n",
+			name, (u64)size, (u64)start);
+	else
+		pr_info("Secure %s %08llx - %08llx kept out of the memory map\n",
+			name, (u64)start, (u64)(start + size - 1));
+}
+
+/*
+ * The regions the bootloader placed itself and names on the command line.
+ * They are settled before the device tree's reserved-memory nodes, so a
+ * node placed by size alone finds them already taken and goes elsewhere;
+ * the platform's own placements in tegra_reserve() come after both.
+ *
+ * The secure ones leave the memory map outright: the memory controller
+ * refuses every non-secure access to them, from the CPU and the engines
+ * alike, and a bootloader is free to put them inside the RAM it reports.
+ * Where they lie outside it, the removal is a no-op.
+ *
+ * Machines that set it as their reserve_early hook get it before the
+ * device tree scan; tegra_reserve() runs it for the rest.
+ */
+void __init tegra_reserve_bootloader_regions(void)
+{
+	static bool done;
+
+	if (done)
+		return;
+	done = true;
+
+	tegra_remove_secure_region("tzram", tegra_tzram_start, tegra_tzram_size);
+	tegra_remove_secure_region("tsec", tegra_tsec_start, tegra_tsec_size);
+
+	if (tegra_lp0_vec_size &&
+	   (tegra_lp0_vec_start < memblock_end_of_DRAM())) {
+		if (memblock_reserve(tegra_lp0_vec_start, tegra_lp0_vec_size)) {
+			pr_err("Failed to reserve lp0_vec %08llx@%08llx\n",
+				(u64)tegra_lp0_vec_size,
+				(u64)tegra_lp0_vec_start);
+			tegra_lp0_vec_start = 0;
+			tegra_lp0_vec_size = 0;
+		}
+		tegra_lp0_vec_relocate = false;
+	} else
+		tegra_lp0_vec_relocate = true;
+
+	if (tegra_bl_debug_data_size &&
+		(tegra_bl_debug_data_start < memblock_end_of_DRAM())) {
+		if (memblock_reserve(tegra_bl_debug_data_start, tegra_bl_debug_data_size)) {
+			pr_err("Failed to reserve bl_debug_data %08llx@%08llx\n",
+				(u64)tegra_bl_debug_data_size,
+				(u64)tegra_bl_debug_data_start);
+			tegra_bl_debug_data_start = 0;
+			tegra_bl_debug_data_size = 0;
+		}
+		tegra_bl_debug_data_reserved = true;
+	}
+
+	if (tegra_bl_prof_size &&
+		tegra_bl_prof_start) {
+		if (memblock_reserve(tegra_bl_prof_start, tegra_bl_prof_size)) {
+			pr_err("Failed to reserve bl_prof %08llx@%08llx\n",
+				(u64)tegra_bl_prof_size,
+				(u64)tegra_bl_prof_start);
+				tegra_bl_prof_start = 0;
+				tegra_bl_prof_size = 0;
+		}
+	}
+
+#ifdef CONFIG_TEGRA_NVDUMPER
+	if (nvdumper_reserved) {
+		if (memblock_reserve(nvdumper_reserved, NVDUMPER_RESERVED_SIZE)) {
+			pr_err("Failed to reserve nvdumper page %08lx@%08lx\n",
+			       nvdumper_reserved, NVDUMPER_RESERVED_SIZE);
+			nvdumper_reserved = 0;
+		}
+	}
+#endif
+
+#ifdef CONFIG_TEGRA_USE_NCT
+	if (tegra_nck_size &&
+	   (tegra_nck_start < memblock_end_of_DRAM())) {
+		if (memblock_reserve(tegra_nck_start, tegra_nck_size)) {
+			pr_err("Failed to reserve nck %08lx@%08lx\n",
+				tegra_nck_size, tegra_nck_start);
+			tegra_nck_start = 0;
+			tegra_nck_size = 0;
+		}
+	}
+#endif
+
+	/*
+	 * The bootloader's framebuffer is copied to the platform's own one
+	 * later, and then freed.
+	 */
+	if (tegra_bootloader_fb_size) {
+		tegra_bootloader_fb_size = PAGE_ALIGN(tegra_bootloader_fb_size);
+		if (memblock_reserve(tegra_bootloader_fb_start,
+				tegra_bootloader_fb_size)) {
+			pr_err("Failed to reserve bootloader frame buffer "
+				"%08llx@%08llx\n",
+				(u64)tegra_bootloader_fb_size,
+				(u64)tegra_bootloader_fb_start);
+			tegra_bootloader_fb_start = 0;
+			tegra_bootloader_fb_size = 0;
+		}
+	}
+
+	if (tegra_bootloader_fb2_size) {
+		tegra_bootloader_fb2_size =
+				PAGE_ALIGN(tegra_bootloader_fb2_size);
+		if (memblock_reserve(tegra_bootloader_fb2_start,
+				tegra_bootloader_fb2_size)) {
+			pr_err("Failed to reserve bootloader fb2 %08llx@%08llx\n",
+				(u64)tegra_bootloader_fb2_size,
+				(u64)tegra_bootloader_fb2_start);
+			tegra_bootloader_fb2_start = 0;
+			tegra_bootloader_fb2_size = 0;
+		}
+	}
+}
+
 void __init tegra_reserve(unsigned long carveout_size, unsigned long fb_size,
 	unsigned long fb2_size)
 {
@@ -2045,29 +2190,13 @@ void __init tegra_reserve(unsigned long carveout_size, unsigned long fb_size,
 	if (tegra_carveout_size && tegra_carveout_start < tegra_grhost_aperture)
 		tegra_grhost_aperture = tegra_carveout_start;
 
-	if (tegra_lp0_vec_size &&
-	   (tegra_lp0_vec_start < memblock_end_of_DRAM())) {
-		if (memblock_reserve(tegra_lp0_vec_start, tegra_lp0_vec_size)) {
-			pr_err("Failed to reserve lp0_vec %08llx@%08llx\n",
-				(u64)tegra_lp0_vec_size,
-				(u64)tegra_lp0_vec_start);
-			tegra_lp0_vec_start = 0;
-			tegra_lp0_vec_size = 0;
-		}
-		tegra_lp0_vec_relocate = false;
-	} else
-		tegra_lp0_vec_relocate = true;
+	tegra_reserve_bootloader_regions();
 
-	if (tegra_bl_debug_data_size &&
-		(tegra_bl_debug_data_start < memblock_end_of_DRAM())) {
-		if (memblock_reserve(tegra_bl_debug_data_start, tegra_bl_debug_data_size)) {
-			pr_err("Failed to reserve bl_debug_data %08llx@%08llx\n",
-				(u64)tegra_bl_debug_data_size,
-				(u64)tegra_bl_debug_data_start);
-			tegra_bl_debug_data_start = 0;
-			tegra_bl_debug_data_size = 0;
-		}
-	} else if (tegra_bl_debug_data_size) {
+	/*
+	 * Debug data the bootloader left above the end of DRAM is copied
+	 * down instead, as there is nothing to reserve there.
+	 */
+	if (tegra_bl_debug_data_size && !tegra_bl_debug_data_reserved) {
 		unsigned char *reloc_bl_debug_data;
 		unsigned long tmp;
 		void __iomem *orig;
@@ -2098,69 +2227,6 @@ void __init tegra_reserve(unsigned long carveout_size, unsigned long fb_size,
 	}
 
 out:
-	if (tegra_bl_prof_size &&
-		tegra_bl_prof_start) {
-		if (memblock_reserve(tegra_bl_prof_start, tegra_bl_prof_size)) {
-			pr_err("Failed to reserve bl_prof %08llx@%08llx\n",
-				(u64)tegra_bl_prof_size,
-				(u64)tegra_bl_prof_start);
-				tegra_bl_prof_start = 0;
-				tegra_bl_prof_size = 0;
-		}
-	}
-
-#ifdef CONFIG_TEGRA_NVDUMPER
-	if (nvdumper_reserved) {
-		if (memblock_reserve(nvdumper_reserved, NVDUMPER_RESERVED_SIZE)) {
-			pr_err("Failed to reserve nvdumper page %08lx@%08lx\n",
-			       nvdumper_reserved, NVDUMPER_RESERVED_SIZE);
-			nvdumper_reserved = 0;
-		}
-	}
-#endif
-
-#ifdef CONFIG_TEGRA_USE_NCT
-	if (tegra_nck_size &&
-	   (tegra_nck_start < memblock_end_of_DRAM())) {
-		if (memblock_reserve(tegra_nck_start, tegra_nck_size)) {
-			pr_err("Failed to reserve nck %08lx@%08lx\n",
-				tegra_nck_size, tegra_nck_start);
-			tegra_nck_start = 0;
-			tegra_nck_size = 0;
-		}
-	}
-#endif
-
-	/*
-	 * We copy the bootloader's framebuffer to the framebuffer allocated
-	 * above, and then free this one.
-	 * */
-	if (tegra_bootloader_fb_size) {
-		tegra_bootloader_fb_size = PAGE_ALIGN(tegra_bootloader_fb_size);
-		if (memblock_reserve(tegra_bootloader_fb_start,
-				tegra_bootloader_fb_size)) {
-			pr_err("Failed to reserve bootloader frame buffer "
-				"%08llx@%08llx\n",
-				(u64)tegra_bootloader_fb_size,
-				(u64)tegra_bootloader_fb_start);
-			tegra_bootloader_fb_start = 0;
-			tegra_bootloader_fb_size = 0;
-		}
-	}
-
-	if (tegra_bootloader_fb2_size) {
-		tegra_bootloader_fb2_size =
-				PAGE_ALIGN(tegra_bootloader_fb2_size);
-		if (memblock_reserve(tegra_bootloader_fb2_start,
-				tegra_bootloader_fb2_size)) {
-			pr_err("Failed to reserve bootloader fb2 %08llx@%08llx\n",
-				(u64)tegra_bootloader_fb2_size,
-				(u64)tegra_bootloader_fb2_start);
-			tegra_bootloader_fb2_start = 0;
-			tegra_bootloader_fb2_size = 0;
-		}
-	}
-
 	pr_info("Tegra reserved memory:\n"
 		"LP0:                    %08llx - %08llx\n"
 		"Bootloader framebuffer: %08llx - %08llx\n"
