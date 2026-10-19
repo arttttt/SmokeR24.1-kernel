@@ -532,6 +532,14 @@ static int st_hub_batch_mode(struct i2c_client *client,
 
 	sdata->current_batch = st_hub_batch_list[batch_list_index].id;
 
+	/*
+	 * Going into or out of batching puts the hub back to a rate of its
+	 * own for the sensor, while current_sf still holds the one it was
+	 * given -- and a write of that same value is skipped. Send it again.
+	 */
+	if (sdata->current_sf > 0)
+		return st_hub_set_freq(client, sdata->current_sf, index);
+
 	return 0;
 }
 
