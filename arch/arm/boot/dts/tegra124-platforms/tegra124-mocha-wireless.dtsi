@@ -49,6 +49,12 @@
 		fw_path = "/vendor/firmware/mocha_fw_bcmdhd.bin";
 		nv_path = "/vendor/etc/mocha_nvram.txt";
 		/*
+		 * Some units' 4354 does not answer cold before the fourth
+		 * power-up: three tries more, each a power cycle and a wait for
+		 * the chip on SDIO. A chip that answers first time spends none.
+		 */
+		pwr-retry-cnt = <3>;
+		/*
 		 * The firmware's own roaming stays off, as it was when the driver
 		 * was built with DISABLE_BUILTIN_ROAM; the driver taken from 4.9
 		 * builds roaming in and asks the tree whether to turn it off.

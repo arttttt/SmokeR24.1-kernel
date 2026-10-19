@@ -154,10 +154,6 @@ enum dhd_op_flags {
 #define DHD_SCAN_UNASSOC_ACTIVE_TIME 65 /* ms: Embedded def. Unassoc Active setting from DHD */
 #define DHD_SCAN_PASSIVE_TIME		130 /* ms: Embedded default Passive setting from DHD */
 
-/* Controlling number of retries from DT */
-#ifndef POWERUP_MAX_RETRY
-#define POWERUP_MAX_RETRY	0 /* how many times we retry to power up the chip */
-#endif
 #ifndef POWERUP_WAIT_MS
 #define POWERUP_WAIT_MS		2000 /* ms: time out in waiting wifi to come up */
 #endif
@@ -485,6 +481,10 @@ typedef struct dhd_pub {
 	bool pkt_wake;		/* the wake's first frame or event is yet to come */
 #endif /* DHD_WAKE_STATUS */
 } dhd_pub_t;
+
+/* How many times powering the chip up is retried after a failure: the
+ * device tree's pwr-retry-cnt, 0 when it gives none. */
+extern int dhd_pwr_retry_cnt(dhd_pub_t *dhdp);
 
 #ifdef DHD_WAKE_STATUS
 extern void dhd_wake_isr(dhd_pub_t *dhdp);

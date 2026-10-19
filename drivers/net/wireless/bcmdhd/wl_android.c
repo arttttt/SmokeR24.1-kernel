@@ -937,23 +937,20 @@ wl_android_set_mac_address_filter(struct net_device *dev, const char* str)
 int wl_android_wifi_on(struct net_device *dev)
 {
 	int ret = 0;
-#ifdef CONFIG_MACH_UNIVERSAL5433
 	int retry;
-	/* Do not retry old revision Helsinki Prime */
-	if (!check_rev()) {
-		retry = 1;
-	} else {
-		retry = POWERUP_MAX_RETRY;
-	}
-#else
-	int retry = POWERUP_MAX_RETRY;
-#endif /* CONFIG_MACH_UNIVERSAL5433 */
 
 	DHD_ERROR(("%s in\n", __FUNCTION__));
 	if (!dev) {
 		DHD_ERROR(("%s: dev is null\n", __FUNCTION__));
 		return -EINVAL;
 	}
+
+#ifdef CONFIG_MACH_UNIVERSAL5433
+	/* Do not retry old revision Helsinki Prime */
+	retry = check_rev() ? dhd_net_pwr_retry_cnt(dev) : 1;
+#else
+	retry = dhd_net_pwr_retry_cnt(dev);
+#endif /* CONFIG_MACH_UNIVERSAL5433 */
 
 	dhd_net_if_lock(dev);
 	if (!g_wifi_on) {

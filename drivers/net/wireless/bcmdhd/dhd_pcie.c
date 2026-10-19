@@ -2635,7 +2635,8 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 	dhd_bus_t *bus = dhdp->bus;
 	int bcmerror = 0;
 #ifdef CONFIG_ARCH_MSM
-	int retry = POWERUP_MAX_RETRY;
+	/* Counted down before each try: one try and as many again. */
+	int retry = dhd_pwr_retry_cnt(dhdp) + 1;
 #endif /* CONFIG_ARCH_MSM */
 
 	if (dhd_download_fw_on_driverload) {

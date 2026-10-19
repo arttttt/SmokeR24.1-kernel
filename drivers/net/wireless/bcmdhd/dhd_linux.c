@@ -7934,7 +7934,6 @@ static int __init
 dhd_module_init(void)
 {
 	int err;
-	int retry = POWERUP_MAX_RETRY;
 
 	DHD_ERROR(("%s in\n", __FUNCTION__));
 
@@ -7957,24 +7956,21 @@ dhd_module_init(void)
 		nv_bak_path[MOD_PARAM_PATHLEN-1] = '\0';
 	}
 
-	do {
-		err = dhd_wifi_platform_register_drv();
-		if (!err) {
-			register_reboot_notifier(&dhd_reboot_notifier);
-			break;
-		}
-		else {
-			DHD_ERROR(("%s: Failed to load the driver, try cnt %d\n",
-				__FUNCTION__, retry));
-			strncpy(firmware_path, fw_bak_path, MOD_PARAM_PATHLEN);
-			firmware_path[MOD_PARAM_PATHLEN-1] = '\0';
-			strncpy(nvram_path, nv_bak_path, MOD_PARAM_PATHLEN);
-			nvram_path[MOD_PARAM_PATHLEN-1] = '\0';
-		}
-	} while (retry--);
-
-	if (err)
-		DHD_ERROR(("%s: Failed to load driver max retry reached**\n", __FUNCTION__));
+	/*
+	 * Registered once: powering the chip up is retried within, as many
+	 * times as the device tree's pwr-retry-cnt says. Retrying the whole
+	 * registration as well would multiply the two.
+	 */
+	err = dhd_wifi_platform_register_drv();
+	if (!err) {
+		register_reboot_notifier(&dhd_reboot_notifier);
+	} else {
+		DHD_ERROR(("%s: Failed to load the driver\n", __FUNCTION__));
+		strncpy(firmware_path, fw_bak_path, MOD_PARAM_PATHLEN);
+		firmware_path[MOD_PARAM_PATHLEN-1] = '\0';
+		strncpy(nvram_path, nv_bak_path, MOD_PARAM_PATHLEN);
+		nvram_path[MOD_PARAM_PATHLEN-1] = '\0';
+	}
 
 	return err;
 }
@@ -8972,6 +8968,18 @@ int dhd_net_wifi_platform_set_power(struct net_device *dev, bool on, unsigned lo
 {
 	dhd_info_t *dhd = DHD_DEV_INFO(dev);
 	return wifi_platform_set_power(dhd->adapter, on, delay_msec);
+}
+
+int dhd_pwr_retry_cnt(dhd_pub_t *dhdp)
+{
+	dhd_info_t *dhd = dhdp->info;
+	return dhd->adapter ? dhd->adapter->pwr_retry_cnt : 0;
+}
+
+int dhd_net_pwr_retry_cnt(struct net_device *dev)
+{
+	dhd_info_t *dhd = DHD_DEV_INFO(dev);
+	return dhd->adapter ? dhd->adapter->pwr_retry_cnt : 0;
 }
 
 void dhd_get_customized_country_code(struct net_device *dev, char *country_iso_code,

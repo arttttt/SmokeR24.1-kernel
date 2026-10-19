@@ -762,8 +762,9 @@ static int dhd_wifi_platform_load_pcie(void)
 #endif	/* CUSTOMER_HW5 */
 			/* power up all adapters */
 			for (i = 0; i < dhd_wifi_platdata->num_adapters; i++) {
-				int retry = POWERUP_MAX_RETRY;
+				int retry;
 				adapter = &dhd_wifi_platdata->adapters[i];
+				retry = adapter->pwr_retry_cnt;
 
 				DHD_ERROR(("Power-up adapter '%s'\n", adapter->name));
 				DHD_INFO((" - irq %d [flags %d], firmware: %s, nvram: %s\n",
