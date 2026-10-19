@@ -21,6 +21,7 @@
 #include <linux/spinlock.h>
 #include <linux/irq.h>
 #include <linux/hrtimer.h>
+#include <linux/completion.h>
 #include <linux/firmware.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/buffer.h>
@@ -48,6 +49,7 @@
 #define ST_HUB_FIFO_INDEX_SIZE				(1)
 #define ST_HUB_FIFO_1BYTE_TIMESTAMP_SIZE		(1)
 #define ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE		(4)
+#define ST_HUB_FIFO_DRAIN_TIMEOUT_MS			(2000)
 
 #define ST_HUB_BATCH_BUF_DEFAULT_LENGTH			(2)
 
@@ -100,19 +102,30 @@ struct st_hub_data {
 	int gpio_irq;
 
 	size_t fifo_slot_size;
-	size_t fifo_skip_byte;
 	size_t fifo_max_size;
 
 	size_t accel_offset_size;
 	size_t magn_offset_size;
 	size_t gyro_offset_size;
 
-	u8 fifo_saved_data[30];
+	/*
+	 * One read-out of the FIFO, gathered slot by slot until the hub's end
+	 * mark: fifo_read_len bytes, the first fifo_read_parsed of them whole
+	 * elements. fifo_read_time is when the read-out began, which is when
+	 * the newest element in it had just been taken; fifo_read_asked says
+	 * the host began it, rather than the hub on filling up.
+	 */
+	u8 *fifo_read;
+	size_t fifo_read_size;
+	size_t fifo_read_len;
+	size_t fifo_read_parsed;
+	int64_t fifo_read_time;
+	bool fifo_read_asked;
+	struct completion fifo_drained;
 
 	spinlock_t timestamp_lock;
 	int64_t timestamp;
 	int64_t timestamp_sync;
-	int64_t timestamp_fifo;
 
 	char *irq_name;
 
@@ -646,12 +659,29 @@ ssize_t st_hub_get_batch_buffer_length(struct device *dev,
 }
 EXPORT_SYMBOL(st_hub_get_batch_buffer_length);
 
+/*
+ * Asks the hub to hand over its FIFO. The read-out's elements are timed back
+ * from this moment: the newest of them had just been taken.
+ */
+static int st_hub_ask_fifo_read(struct st_hub_data *hdata,
+						struct i2c_client *client)
+{
+	u8 command = ST_HUB_SINGLE_READ_FIFO;
+	unsigned long flags;
+
+	spin_lock_irqsave(&hdata->timestamp_lock, flags);
+	hdata->fifo_read_time = st_hub_get_time_ns();
+	hdata->fifo_read_asked = true;
+	spin_unlock_irqrestore(&hdata->timestamp_lock, flags);
+
+	return st_hub_send(client, &command, 1, true);
+}
+
 ssize_t st_hub_flush(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
 	int err;
 	bool flush;
-	u8 command = ST_HUB_SINGLE_READ_FIFO;
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct st_hub_core_data *cdata = iio_priv(indio_dev);
 	struct st_hub_data *hdata = i2c_get_clientdata(cdata->client);
@@ -667,7 +697,9 @@ ssize_t st_hub_flush(struct device *dev,
 	if (err < 0)
 		return err;
 
-	err = st_hub_send(cdata->client, &command, 1, true);
+	INIT_COMPLETION(hdata->fifo_drained);
+
+	err = st_hub_ask_fifo_read(hdata, cdata->client);
 	if (err < 0) {
 		dev_err(hdata->dev, "failed to send fifo flush command.\n");
 		return err;
@@ -675,6 +707,15 @@ ssize_t st_hub_flush(struct device *dev,
 
 	hrtimer_cancel(&hdata->fifo_timer);
 	hrtimer_start(&hdata->fifo_timer, hdata->fifo_ktime, HRTIMER_MODE_REL);
+
+	/*
+	 * The write returns once everything the FIFO held has been pushed to
+	 * the buffers, so a reader that drains its buffer after it has all the
+	 * data the flush covers: that is the moment a flush is complete.
+	 */
+	if (!wait_for_completion_timeout(&hdata->fifo_drained,
+			msecs_to_jiffies(ST_HUB_FIFO_DRAIN_TIMEOUT_MS)))
+		return -ETIMEDOUT;
 
 	return size;
 }
@@ -786,90 +827,144 @@ static void st_hub_send_events(struct st_hub_data *hdata,
 	}
 }
 
-static void st_hub_parse_fifo_data(struct st_hub_data *hdata, u8 *data)
+static size_t st_hub_fifo_element_size(struct st_hub_data *hdata, u8 index)
 {
-	int shift;
-	size_t sensor_byte;
-	int64_t timestamp;
-	u8 *index, *data_init, *timestamp_init;
+	return ST_HUB_FIFO_INDEX_SIZE + hdata->st_hub_cdata[index].payload_byte +
+				hdata->st_hub_cdata[index].fifo_timestamp_byte;
+}
 
-	shift = hdata->fifo_skip_byte;
+static void st_hub_reset_fifo_read(struct st_hub_data *hdata)
+{
+	hdata->fifo_read_len = 0;
+	hdata->fifo_read_parsed = 0;
+}
 
-	if (shift > 0) {
-		index = &hdata->fifo_saved_data[0];
-		if (*index >= ST_INDEX_MAX)
-			goto skip_data;
+/*
+ * Pushes the first len bytes of the read-out, all whole elements.
+ *
+ * An element's 1-byte stamp is the hub's milliseconds since the previous
+ * element's, 0 for one taken in the same tick: it gives the spacing, never
+ * an absolute time. So the newest element is put at the moment the read-out
+ * began and every other one back from it by the spacing. Counting forward
+ * from the moment batching was enabled instead, as this driver used to,
+ * piles up the drift between the hub's clock and ours, and dates the samples
+ * taken during a sleep after the wakeup.
+ *
+ * A 4-byte stamp is absolute: the hub's milliseconds since the time sync at
+ * probe.
+ */
+static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
+{
+	u8 *p, *end = hdata->fifo_read + len;
+	int64_t span = 0, elapsed = 0, timestamp;
+	size_t size;
+	u8 index;
 
-		sensor_byte = ST_HUB_FIFO_INDEX_SIZE +
-				hdata->st_hub_cdata[*index].payload_byte +
-				hdata->st_hub_cdata[*index].fifo_timestamp_byte;
-
-		memcpy(&hdata->fifo_saved_data[sensor_byte - shift],
-					&data[0], hdata->fifo_skip_byte);
-
-		if ((hdata->en_batch_sensor & (1 << *index)) == 0)
-			goto skip_data;
-
-		data_init = index + ST_HUB_FIFO_INDEX_SIZE;
-		timestamp_init = data_init +
-				hdata->st_hub_cdata[*index].payload_byte;
-
-		if (hdata->st_hub_cdata[*index].fifo_timestamp_byte == 1) {
-			hdata->timestamp_fifo += MS_TO_NS(*timestamp_init);
-			timestamp = hdata->timestamp_fifo;
-		} else {
-			timestamp = hdata->timestamp_sync +
-				MS_TO_NS(get_unaligned_le32(timestamp_init));
-		}
-
-		hdata->callback[*index].push_data(hdata->callback[*index].pdev,
-							data_init, timestamp);
+	for (p = hdata->fifo_read; p < end; p += size) {
+		size = st_hub_fifo_element_size(hdata, *p);
+		if (hdata->st_hub_cdata[*p].fifo_timestamp_byte ==
+					ST_HUB_FIFO_1BYTE_TIMESTAMP_SIZE)
+			span += MS_TO_NS((int64_t)p[size - 1]);
 	}
 
-skip_data:
+	for (p = hdata->fifo_read; p < end; p += size) {
+		index = *p;
+		size = st_hub_fifo_element_size(hdata, index);
 
-	hdata->fifo_skip_byte = 0;
-
-	while ((hdata->fifo_slot_size - shift) > 0) {
-		index = &data[shift];
-		if (*index >= ST_INDEX_MAX)
-			return;
-
-		sensor_byte = ST_HUB_FIFO_INDEX_SIZE +
-				hdata->st_hub_cdata[*index].payload_byte +
-				hdata->st_hub_cdata[*index].fifo_timestamp_byte;
-
-		if ((shift + sensor_byte) > hdata->fifo_slot_size) {
-			hdata->fifo_skip_byte = sensor_byte -
-						(hdata->fifo_slot_size - shift);
-
-			memcpy(hdata->fifo_saved_data, index,
-						hdata->fifo_slot_size - shift);
+		switch (hdata->st_hub_cdata[index].fifo_timestamp_byte) {
+		case ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE:
+			timestamp = hdata->timestamp_sync + MS_TO_NS((int64_t)
+				get_unaligned_le32(&p[size -
+					ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE]));
+			break;
+		case ST_HUB_FIFO_1BYTE_TIMESTAMP_SIZE:
+			elapsed += MS_TO_NS((int64_t)p[size - 1]);
+			/* fall through */
+		default:
+			/* Unstamped, it was taken with the one before it. */
+			timestamp = hdata->fifo_read_time - (span - elapsed);
 			break;
 		}
 
-		if ((hdata->en_batch_sensor & (1 << *index)) == 0) {
-			shift += sensor_byte;
+		if ((hdata->en_batch_sensor & (1 << index)) == 0)
 			continue;
-		}
 
-		data_init = index + ST_HUB_FIFO_INDEX_SIZE;
-		timestamp_init = data_init +
-				hdata->st_hub_cdata[*index].payload_byte;
-
-		if (hdata->st_hub_cdata[*index].fifo_timestamp_byte == 1) {
-			hdata->timestamp_fifo += MS_TO_NS(*timestamp_init);
-			timestamp = hdata->timestamp_fifo;
-		} else {
-			timestamp = hdata->timestamp_sync +
-				MS_TO_NS(get_unaligned_le32(timestamp_init));
-		}
-
-		hdata->callback[*index].push_data(hdata->callback[*index].pdev,
-							data_init, timestamp);
-
-		shift += sensor_byte;
+		hdata->callback[index].push_data(hdata->callback[index].pdev,
+				p + ST_HUB_FIFO_INDEX_SIZE, timestamp);
 	}
+}
+
+/*
+ * Takes in one slot of a FIFO read-out. The hub hands the FIFO over in
+ * fixed-size slots, an element may run on into the next slot, and the last
+ * slot ends the data with an index of 0xff. Only on that mark are the
+ * elements pushed: their times are counted back from the newest one.
+ */
+static void st_hub_parse_fifo_data(struct st_hub_data *hdata, u8 *data,
+							int64_t irq_time)
+{
+	size_t pos, size;
+	unsigned long flags;
+	bool done = false, answered;
+
+	spin_lock_irqsave(&hdata->timestamp_lock, flags);
+	if (hdata->fifo_read_len == 0 && !hdata->fifo_read_asked)
+		/* The hub began it on filling up, and interrupted at once. */
+		hdata->fifo_read_time = irq_time;
+	spin_unlock_irqrestore(&hdata->timestamp_lock, flags);
+
+	if (hdata->fifo_read_len + hdata->fifo_slot_size >
+						hdata->fifo_read_size) {
+		/*
+		 * More than the FIFO holds, so the read-out was started over
+		 * and its end mark never came: let go of what is whole.
+		 */
+		dev_warn(hdata->dev, "fifo read-out overran, timing is approximate.\n");
+		st_hub_push_fifo_read(hdata, hdata->fifo_read_parsed);
+		memmove(hdata->fifo_read,
+			hdata->fifo_read + hdata->fifo_read_parsed,
+			hdata->fifo_read_len - hdata->fifo_read_parsed);
+		hdata->fifo_read_len -= hdata->fifo_read_parsed;
+		hdata->fifo_read_parsed = 0;
+	}
+
+	memcpy(hdata->fifo_read + hdata->fifo_read_len, data,
+						hdata->fifo_slot_size);
+	hdata->fifo_read_len += hdata->fifo_slot_size;
+
+	for (pos = hdata->fifo_read_parsed; pos < hdata->fifo_read_len;
+								pos += size) {
+		if (hdata->fifo_read[pos] >= ST_INDEX_MAX) {
+			done = true;
+			break;
+		}
+
+		size = st_hub_fifo_element_size(hdata, hdata->fifo_read[pos]);
+		if (pos + size > hdata->fifo_read_len)
+			break;
+	}
+
+	if (!done) {
+		hdata->fifo_read_parsed = pos;
+		return;
+	}
+
+	st_hub_push_fifo_read(hdata, pos);
+	st_hub_reset_fifo_read(hdata);
+
+	/*
+	 * A read-out asked for while this one was ending is still to come:
+	 * the hub starts over on the command and brings its own end mark.
+	 * Only an end interrupting after the last request answers it.
+	 */
+	spin_lock_irqsave(&hdata->timestamp_lock, flags);
+	answered = irq_time >= hdata->fifo_read_time;
+	if (answered)
+		hdata->fifo_read_asked = false;
+	spin_unlock_irqrestore(&hdata->timestamp_lock, flags);
+
+	if (answered)
+		complete_all(&hdata->fifo_drained);
 }
 
 static int st_hub_read_sensors_data(struct st_hub_data *hdata,
@@ -935,7 +1030,7 @@ static int st_hub_read_sensors_data(struct st_hub_data *hdata,
 	}
 
 	if (fifo_sensor > 0)
-		st_hub_parse_fifo_data(hdata, &outdata[shift]);
+		st_hub_parse_fifo_data(hdata, &outdata[shift], timestamp);
 
 st_hub_free_outdata:
 	kfree(outdata);
@@ -1043,7 +1138,6 @@ int st_hub_set_default_values(struct st_hub_sensor_data *sdata,
 	sdata->current_batch = ST_HUB_BATCH_DISABLED_ID;
 	sdata->batch_timeout = ST_HUB_DEFAULT_BATCH_TIMEOUT_MS;
 	hdata->indio_dev[info->index] = indio_dev;
-	hdata->fifo_skip_byte = 0;
 
 	if (sdata->cdata->sf_avl[0] > 0) {
 		sdata->current_sf = sdata->cdata->sf_avl[0];
@@ -1114,14 +1208,14 @@ int st_hub_set_enable(struct i2c_client *client, unsigned int index,
 			if ((!hdata->en_batch_sensor) && new_batch_status) {
 				hrtimer_start(&hdata->fifo_timer,
 					hdata->fifo_ktime, HRTIMER_MODE_REL);
-				hdata->timestamp_fifo = st_hub_get_time_ns();
+				st_hub_reset_fifo_read(hdata);
 				new_sensor_status |= ST_FIFO_MASK;
 			}
 
 			if (hdata->en_batch_sensor && (!new_batch_status)) {
 				hrtimer_cancel(&hdata->fifo_timer);
 				new_sensor_status &= ~ST_FIFO_MASK;
-				hdata->fifo_skip_byte = 0;
+				st_hub_reset_fifo_read(hdata);
 			}
 
 			hdata->en_batch_sensor = new_batch_status;
@@ -1225,7 +1319,16 @@ static int st_hub_read_configuration_data(struct i2c_client *client)
 
 	hdata->fifo_slot_size = get_unaligned_le16(data);
 	hdata->fifo_max_size = get_unaligned_le16(&data[2]);
-	hdata->fifo_skip_byte = hdata->fifo_slot_size;
+
+	/* A whole FIFO, and the slot that brings its end mark. */
+	hdata->fifo_read_size = hdata->fifo_max_size +
+					2 * hdata->fifo_slot_size;
+	hdata->fifo_read = devm_kzalloc(hdata->dev, hdata->fifo_read_size,
+								GFP_KERNEL);
+	if (!hdata->fifo_read) {
+		err = -ENOMEM;
+		goto st_hub_config_free_fw_version;
+	}
 
 	command[0] = ST_HUB_SINGLE_READ_CALIB_SIZE;
 	command[1] = ST_ACCEL_INDEX;
@@ -1468,15 +1571,13 @@ st_hub_free_wakeup_gpio:
 static void st_hub_fifo_work(struct work_struct *work)
 {
 	int err;
-	u8 command;
 	struct st_hub_data *hdata;
 	struct i2c_client *client;
 
 	hdata = container_of(work, struct st_hub_data, fifo_work_timer);
 	client = container_of(hdata->dev, struct i2c_client, dev);
 
-	command = ST_HUB_SINGLE_READ_FIFO;
-	err = st_hub_send(client, &command, 1, true);
+	err = st_hub_ask_fifo_read(hdata, client);
 	if (err < 0)
 		dev_err(hdata->dev, "failed to send fifo read command.\n");
 }
@@ -1858,6 +1959,7 @@ static int st_sensor_hub_i2c_probe(struct i2c_client *client,
 	mutex_init(&hdata->gpio_wake_lock);
 	mutex_init(&hdata->send_and_receive_lock);
 	spin_lock_init(&hdata->timestamp_lock);
+	init_completion(&hdata->fifo_drained);
 	hdata->dev = &client->dev;
 	i2c_set_clientdata(client, hdata);
 
@@ -2046,11 +2148,9 @@ static int st_sensor_hub_resume(struct device *dev)
 		}
 	}
 
-	if (hdata->en_batch_sensor) {
+	if (hdata->en_batch_sensor)
 		hrtimer_start(&hdata->fifo_timer,
 					hdata->fifo_ktime, HRTIMER_MODE_REL);
-		hdata->timestamp_fifo = st_hub_get_time_ns();
-	}
 
 	return 0;
 }
