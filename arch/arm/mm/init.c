@@ -371,6 +371,14 @@ void __init arm_memblock_init(struct meminfo *mi, struct machine_desc *mdesc)
 	arm_mm_memblock_reserve();
 	arm_dt_memblock_reserve();
 
+	/*
+	 * Regions the platform cannot move, settled before the device
+	 * tree's reserved-memory nodes so that one placed by size alone
+	 * goes around them
+	 */
+	if (mdesc->reserve_early)
+		mdesc->reserve_early();
+
 	early_init_fdt_scan_reserved_mem();
 	/* reserve any platform specific memblock areas */
 	if (mdesc->reserve)
