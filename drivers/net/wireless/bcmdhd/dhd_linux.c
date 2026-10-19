@@ -8972,14 +8972,13 @@ int dhd_net_wifi_platform_set_power(struct net_device *dev, bool on, unsigned lo
 
 int dhd_pwr_retry_cnt(dhd_pub_t *dhdp)
 {
-	dhd_info_t *dhd = dhdp->info;
-	return dhd->adapter ? dhd->adapter->pwr_retry_cnt : 0;
+	wifi_adapter_info_t *adapter = (wifi_adapter_info_t *)dhdp->info->adapter;
+	return adapter ? adapter->pwr_retry_cnt : 0;
 }
 
 int dhd_net_pwr_retry_cnt(struct net_device *dev)
 {
-	dhd_info_t *dhd = DHD_DEV_INFO(dev);
-	return dhd->adapter ? dhd->adapter->pwr_retry_cnt : 0;
+	return dhd_pwr_retry_cnt(&DHD_DEV_INFO(dev)->pub);
 }
 
 void dhd_get_customized_country_code(struct net_device *dev, char *country_iso_code,
