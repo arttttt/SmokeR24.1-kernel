@@ -143,6 +143,17 @@ struct st_hub_core_data {
 	struct i2c_client *client;
 };
 
+/*
+ * The time every sample is stamped with. Android takes sensor timestamps on
+ * the boot-time clock, the one elapsedRealtimeNanos() reads; iio_get_time_ns()
+ * is the wall clock, which is a different time altogether and jumps whenever
+ * the clock is set.
+ */
+static inline int64_t st_hub_get_time_ns(void)
+{
+	return ktime_to_ns(ktime_get_boottime());
+}
+
 static const struct st_hub_supported_sensors {
 	u8 wai;
 	char names[2][15];
@@ -937,7 +948,7 @@ static irqreturn_t st_hub_get_timestamp(int irq, void *private)
 	struct st_hub_data *hdata = private;
 
 	spin_lock_irqsave(&hdata->timestamp_lock, flags);
-	hdata->timestamp = iio_get_time_ns();
+	hdata->timestamp = st_hub_get_time_ns();
 	spin_unlock_irqrestore(&hdata->timestamp_lock, flags);
 
 	return IRQ_WAKE_THREAD;
@@ -1103,7 +1114,7 @@ int st_hub_set_enable(struct i2c_client *client, unsigned int index,
 			if ((!hdata->en_batch_sensor) && new_batch_status) {
 				hrtimer_start(&hdata->fifo_timer,
 					hdata->fifo_ktime, HRTIMER_MODE_REL);
-				hdata->timestamp_fifo = iio_get_time_ns();
+				hdata->timestamp_fifo = st_hub_get_time_ns();
 				new_sensor_status |= ST_FIFO_MASK;
 			}
 
@@ -1205,7 +1216,7 @@ static int st_hub_read_configuration_data(struct i2c_client *client)
 	if (err < 0)
 		goto st_hub_config_free_fw_version;
 
-	hdata->timestamp_sync = iio_get_time_ns();
+	hdata->timestamp_sync = st_hub_get_time_ns();
 
 	command[0] = ST_HUB_GLOBAL_FIFO_SIZE;
 	err = st_hub_send_and_receive(hdata, command, 1, data, 4, true);
@@ -1958,17 +1969,18 @@ static int st_sensor_hub_suspend(struct device *dev)
 		return 0;
 #endif /* CONFIG_IIO_ST_HUB_RAM_LOADER */
 
+	/*
+	 * Only the sensors that interrupt for every sample are stopped: their
+	 * samples would wake nobody. The batched ones go on filling the hub's
+	 * FIFO through the sleep and are read out after it, as Android expects
+	 * of sensors that do not wake the system.
+	 */
 	if (hdata->en_batch_sensor | hdata->en_irq_sensor) {
 		for (i = 0; i < ST_INDEX_MAX; i++) {
 			if ((hdata->slist & (1 << i)) == 0)
 				continue;
 
-#ifdef IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND
-			if ((hdata->en_irq_sensor |
-						hdata->en_batch_sensor) & (1 << i)) {
-#else /* IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND */
 			if (hdata->en_irq_sensor & (1 << i)) {
-#endif /* IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND */
 				command[0] = ST_HUB_SINGLE_DISABLE;
 				command[1] = i;
 
@@ -1983,14 +1995,12 @@ static int st_sensor_hub_suspend(struct device *dev)
 		}
 	}
 
-#ifndef IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND
 	command[0] = ST_HUB_GLOBAL_SUSPEND;
 	err = st_hub_send(client, &command[0], 1, true);
 	if (err < 0) {
 		dev_err(hdata->dev, "failed to send suspend command.\n");
 		return err;
 	}
-#endif /* IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND */
 
 	hrtimer_cancel(&hdata->fifo_timer);
 
@@ -2009,26 +2019,19 @@ static int st_sensor_hub_resume(struct device *dev)
 		return 0;
 #endif /* CONFIG_IIO_ST_HUB_RAM_LOADER */
 
-#ifndef IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND
 	command[0] = ST_HUB_GLOBAL_RESUME;
 	err = st_hub_send(client, command, 1, true);
 	if (err < 0) {
 		dev_err(hdata->dev, "failed to send resume command.\n");
 		return err;
 	}
-#endif /* IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND */
 
 	if (hdata->en_batch_sensor | hdata->en_irq_sensor) {
 		for (i = 0; i < ST_INDEX_MAX; i++) {
 			if ((hdata->slist & (1 << i)) == 0)
 				continue;
 
-#ifdef IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND
-			if ((hdata->en_irq_sensor |
-					hdata->en_batch_sensor) & (1 << i)) {
-#else /* IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND */
 			if (hdata->en_irq_sensor & (1 << i)) {
-#endif /* IIO_ST_HUB_DISABLE_ALL_SENSORS_ON_SUSPEND */
 				command[0] = ST_HUB_SINGLE_ENABLE;
 				command[1] = i;
 
@@ -2046,7 +2049,7 @@ static int st_sensor_hub_resume(struct device *dev)
 	if (hdata->en_batch_sensor) {
 		hrtimer_start(&hdata->fifo_timer,
 					hdata->fifo_ktime, HRTIMER_MODE_REL);
-		hdata->timestamp_fifo = iio_get_time_ns();
+		hdata->timestamp_fifo = st_hub_get_time_ns();
 	}
 
 	return 0;
