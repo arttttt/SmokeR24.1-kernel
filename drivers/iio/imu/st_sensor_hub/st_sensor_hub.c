@@ -51,6 +51,8 @@
 #define ST_HUB_FIFO_1BYTE_TIMESTAMP_SIZE		(1)
 #define ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE		(4)
 #define ST_HUB_FIFO_DRAIN_TIMEOUT_MS			(2000)
+/* Past this the hub starts a read-out itself, and drops the oldest when full. */
+#define ST_HUB_FIFO_FILLED_BYTES			(16000)
 
 #define ST_HUB_BATCH_BUF_DEFAULT_LENGTH			(2)
 
@@ -116,7 +118,9 @@ struct st_hub_data {
 	 * the newest element in it had just been taken; fifo_read_asked says
 	 * the host began it, rather than the hub on filling up.
 	 * fifo_read_prev is when the read-out before it began, or batching
-	 * started; fifo_period_ns the spacing each sensor's samples came to.
+	 * started; fifo_period_ns the spacing each sensor's samples came to;
+	 * fifo_read_first that the read-out is the first since batching
+	 * started, and may still hold what an earlier batching left behind.
 	 */
 	u8 *fifo_read;
 	size_t fifo_read_size;
@@ -125,6 +129,7 @@ struct st_hub_data {
 	int64_t fifo_read_time;
 	int64_t fifo_read_prev;
 	int64_t fifo_period_ns[ST_INDEX_MAX];
+	bool fifo_read_first;
 	bool fifo_read_asked;
 	struct completion fifo_drained;
 
@@ -849,6 +854,7 @@ static void st_hub_restart_fifo_timing(struct st_hub_data *hdata)
 {
 	st_hub_reset_fifo_read(hdata);
 	hdata->fifo_read_prev = st_hub_get_time_ns();
+	hdata->fifo_read_first = true;
 	memset(hdata->fifo_period_ns, 0, sizeof(hdata->fifo_period_ns));
 }
 
@@ -864,10 +870,15 @@ static void st_hub_restart_fifo_timing(struct st_hub_data *hdata)
  * A sensor's samples are evenly spaced, though, and those in a read-out were
  * taken since the read-out before began (or batching started) up to this
  * one's start, the newest just before it. So each sensor's elements are
- * spread evenly over that interval and end at its end. If the interval
- * gives a sensor half again its last spacing, the hub dropped its oldest
- * elements to make room; the last spacing is kept and counted back from the
- * end.
+ * spread evenly over that interval and end at its end. If the FIFO had
+ * filled and the interval gives a sensor half again its last spacing, the
+ * hub dropped its oldest elements to make room; the last spacing is kept
+ * and counted back from the end.
+ *
+ * The hub never empties its FIFO when batching stops, so the first read-out
+ * after it starts again opens with what the last one left. Of each sensor's
+ * elements in it only as many are kept as the sensor can have taken since
+ * the start, at its rate and a third over; the older ones are dropped.
  *
  * A 4-byte stamp is absolute: the hub's milliseconds since the time sync at
  * probe.
@@ -876,8 +887,11 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 {
 	u8 *p, *end = hdata->fifo_read + len;
 	unsigned int count[ST_INDEX_MAX] = { 0 }, seen[ST_INDEX_MAX] = { 0 };
+	unsigned int stale[ST_INDEX_MAX] = { 0 };
 	int64_t interval = hdata->fifo_read_time - hdata->fifo_read_prev;
-	int64_t period, timestamp;
+	bool filled = len >= ST_HUB_FIFO_FILLED_BYTES;
+	struct st_hub_sensor_data *sdata;
+	int64_t period, timestamp, fresh;
 	size_t size;
 	u8 index;
 
@@ -890,8 +904,20 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 		if (count[index] == 0 || interval <= 0)
 			continue;
 
+		if (hdata->fifo_read_first && hdata->indio_dev[index] &&
+			hdata->st_hub_cdata[index].fifo_timestamp_byte !=
+					ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE) {
+			sdata = iio_priv(hdata->indio_dev[index]);
+			fresh = div64_s64(interval * sdata->current_sf * 4,
+						3 * NSEC_PER_SEC) + 1;
+			if (count[index] > fresh) {
+				stale[index] = count[index] - fresh;
+				count[index] = fresh;
+			}
+		}
+
 		period = div64_s64(interval, count[index]);
-		if (hdata->fifo_period_ns[index] > 0 &&
+		if (filled && hdata->fifo_period_ns[index] > 0 &&
 				2 * period > 3 * hdata->fifo_period_ns[index])
 			continue;
 
@@ -901,6 +927,11 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 	for (p = hdata->fifo_read; p < end; p += size) {
 		index = *p;
 		size = st_hub_fifo_element_size(hdata, index);
+
+		if (stale[index] > 0) {
+			stale[index]--;
+			continue;
+		}
 
 		if (hdata->st_hub_cdata[index].fifo_timestamp_byte ==
 					ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE)
@@ -921,6 +952,7 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 	}
 
 	hdata->fifo_read_prev = hdata->fifo_read_time;
+	hdata->fifo_read_first = false;
 }
 
 /*
