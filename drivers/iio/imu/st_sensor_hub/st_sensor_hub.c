@@ -760,10 +760,14 @@ int st_hub_buffer_preenable(struct iio_dev *indio_dev)
 		buffer->length = ST_HUB_BATCH_BUF_DEFAULT_LENGTH;
 		break;
 	case ST_HUB_BATCH_CONTINUOS_ID:
+		/*
+		 * A read-out is pushed whole once its end mark is in, so the
+		 * buffer has to take as many of the sensor's elements as the
+		 * hub's FIFO can hold, not a slot's worth.
+		 */
 		fifo_element_size += (sdata->cdata->payload_byte +
 					sdata->cdata->fifo_timestamp_byte);
-		buffer->length = ST_HUB_BATCH_BUF_DEFAULT_LENGTH *
-				(hdata->fifo_slot_size / fifo_element_size);
+		buffer->length = hdata->fifo_max_size / fifo_element_size + 1;
 		break;
 	default:
 		break;
