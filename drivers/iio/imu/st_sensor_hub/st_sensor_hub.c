@@ -1245,6 +1245,18 @@ int st_hub_set_enable(struct i2c_client *client, unsigned int index,
 	if (err < 0)
 		goto set_enable_mutex_unlock;
 
+	/*
+	 * A rate written while the sensor is off reaches the hub only now
+	 * and then -- an idle hub misses it, the write still counts it as
+	 * sent, and a later write of the same value is skipped. Send it
+	 * again now that the sensor is on and the hub awake.
+	 */
+	if (en && sdata->current_sf > 0) {
+		err = st_hub_set_freq(client, sdata->current_sf, index);
+		if (err < 0)
+			goto set_enable_mutex_unlock;
+	}
+
 	if (en)
 		new_sensor_status = hdata->enabled_sensor | (1 << index);
 	else
