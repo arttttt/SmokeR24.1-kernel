@@ -909,7 +909,7 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 					ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE) {
 			sdata = iio_priv(hdata->indio_dev[index]);
 			fresh = div64_s64(interval * sdata->current_sf * 4,
-						3 * NSEC_PER_SEC) + 1;
+						3LL * NSEC_PER_SEC) + 1;
 			if (count[index] > fresh) {
 				stale[index] = count[index] - fresh;
 				count[index] = fresh;
