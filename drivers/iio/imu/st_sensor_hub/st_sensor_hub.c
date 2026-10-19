@@ -22,6 +22,7 @@
 #include <linux/irq.h>
 #include <linux/hrtimer.h>
 #include <linux/completion.h>
+#include <linux/math64.h>
 #include <linux/firmware.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/buffer.h>
@@ -114,12 +115,17 @@ struct st_hub_data {
 	 * elements. fifo_read_time is when the read-out began, which is when
 	 * the newest element in it had just been taken; fifo_read_asked says
 	 * the host began it, rather than the hub on filling up.
+	 * fifo_read_prev is when the read-out before it began, 0 if none
+	 * since batching started; fifo_tick_ns the length of a hub tick the
+	 * last read-out came to.
 	 */
 	u8 *fifo_read;
 	size_t fifo_read_size;
 	size_t fifo_read_len;
 	size_t fifo_read_parsed;
 	int64_t fifo_read_time;
+	int64_t fifo_read_prev;
+	int64_t fifo_tick_ns;
 	bool fifo_read_asked;
 	struct completion fifo_drained;
 
@@ -839,16 +845,28 @@ static void st_hub_reset_fifo_read(struct st_hub_data *hdata)
 	hdata->fifo_read_parsed = 0;
 }
 
+/* Batching starts over: no read-out before the next one to time it from. */
+static void st_hub_restart_fifo_timing(struct st_hub_data *hdata)
+{
+	st_hub_reset_fifo_read(hdata);
+	hdata->fifo_read_prev = 0;
+}
+
 /*
  * Pushes the first len bytes of the read-out, all whole elements.
  *
- * An element's 1-byte stamp is the hub's milliseconds since the previous
- * element's, 0 for one taken in the same tick: it gives the spacing, never
- * an absolute time. So the newest element is put at the moment the read-out
- * began and every other one back from it by the spacing. Counting forward
- * from the moment batching was enabled instead, as this driver used to,
- * piles up the drift between the hub's clock and ours, and dates the samples
- * taken during a sleep after the wakeup.
+ * An element's 1-byte stamp counts the hub's ticks since the element before
+ * it, 0 for one taken in the same tick. The hub counts 5 to a tick as if a
+ * tick were 5 ms (fw 0x10022644), but its loop runs at the rate of the
+ * fastest sensor on: with only the accelerometer at 15 Hz a tick is about
+ * 59 ms. So the stamps give the spacing, never the time.
+ *
+ * The time is ours: the newest element was taken just before the read-out
+ * began, and the elements of a read-out were taken since the newest one of
+ * the read-out before. They are spread over that interval by their ticks,
+ * which is right at whatever rate the hub runs. The first read-out after
+ * batching starts has no interval before it, and is counted back from its
+ * end by the tick the last read-out came to.
  *
  * A 4-byte stamp is absolute: the hub's milliseconds since the time sync at
  * probe.
@@ -856,7 +874,7 @@ static void st_hub_reset_fifo_read(struct st_hub_data *hdata)
 static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 {
 	u8 *p, *end = hdata->fifo_read + len;
-	int64_t span = 0, elapsed = 0, timestamp;
+	int64_t ticks = 0, elapsed = 0, start, tick_ns, timestamp;
 	size_t size;
 	u8 index;
 
@@ -864,8 +882,18 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 		size = st_hub_fifo_element_size(hdata, *p);
 		if (hdata->st_hub_cdata[*p].fifo_timestamp_byte ==
 					ST_HUB_FIFO_1BYTE_TIMESTAMP_SIZE)
-			span += MS_TO_NS((int64_t)p[size - 1]);
+			ticks += p[size - 1];
 	}
+
+	if (hdata->fifo_read_prev > 0 && ticks > 0 &&
+			hdata->fifo_read_time > hdata->fifo_read_prev) {
+		tick_ns = div64_s64(hdata->fifo_read_time -
+						hdata->fifo_read_prev, ticks);
+		hdata->fifo_tick_ns = tick_ns;
+	} else {
+		tick_ns = hdata->fifo_tick_ns;
+	}
+	start = hdata->fifo_read_time - ticks * tick_ns;
 
 	for (p = hdata->fifo_read; p < end; p += size) {
 		index = *p;
@@ -878,11 +906,11 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 					ST_HUB_FIFO_4BYTE_TIMESTAMP_SIZE]));
 			break;
 		case ST_HUB_FIFO_1BYTE_TIMESTAMP_SIZE:
-			elapsed += MS_TO_NS((int64_t)p[size - 1]);
+			elapsed += p[size - 1];
 			/* fall through */
 		default:
 			/* Unstamped, it was taken with the one before it. */
-			timestamp = hdata->fifo_read_time - (span - elapsed);
+			timestamp = start + elapsed * tick_ns;
 			break;
 		}
 
@@ -892,6 +920,8 @@ static void st_hub_push_fifo_read(struct st_hub_data *hdata, size_t len)
 		hdata->callback[index].push_data(hdata->callback[index].pdev,
 				p + ST_HUB_FIFO_INDEX_SIZE, timestamp);
 	}
+
+	hdata->fifo_read_prev = hdata->fifo_read_time;
 }
 
 /*
@@ -1208,7 +1238,7 @@ int st_hub_set_enable(struct i2c_client *client, unsigned int index,
 			if ((!hdata->en_batch_sensor) && new_batch_status) {
 				hrtimer_start(&hdata->fifo_timer,
 					hdata->fifo_ktime, HRTIMER_MODE_REL);
-				st_hub_reset_fifo_read(hdata);
+				st_hub_restart_fifo_timing(hdata);
 				new_sensor_status |= ST_FIFO_MASK;
 			}
 
@@ -1960,6 +1990,8 @@ static int st_sensor_hub_i2c_probe(struct i2c_client *client,
 	mutex_init(&hdata->send_and_receive_lock);
 	spin_lock_init(&hdata->timestamp_lock);
 	init_completion(&hdata->fifo_drained);
+	/* What the hub takes a tick for, until a read-out tells better. */
+	hdata->fifo_tick_ns = MS_TO_NS(1LL);
 	hdata->dev = &client->dev;
 	i2c_set_clientdata(client, hdata);
 
