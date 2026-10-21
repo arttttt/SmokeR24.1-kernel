@@ -867,6 +867,20 @@ static int ov5693_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *param)
 	return 0;
 }
 
+/* Setting the format picks the mode; the timing controls' ranges follow
+ * it, so userspace reads them for the mode it configured. */
+static int ov5693_s_mbus_fmt(struct v4l2_subdev *sd,
+			     struct v4l2_mbus_framefmt *mf)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+	int ret = camera_common_s_fmt(sd, mf);
+
+	if (!ret)
+		ov5693_update_mode_ranges((struct ov5693 *)s_data->priv);
+	return ret;
+}
+
 static struct v4l2_subdev_video_ops ov5693_subdev_video_ops = {
 	.s_stream	= ov5693_s_stream,
 	.s_mbus_fmt	= ov5693_s_mbus_fmt,
@@ -890,20 +904,6 @@ static int ov5693_get_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_format *format)
 {
 	return camera_common_g_fmt(sd, &format->format);
-}
-
-/* Setting the format picks the mode; the timing controls' ranges follow
- * it, so userspace reads them for the mode it configured. */
-static int ov5693_s_mbus_fmt(struct v4l2_subdev *sd,
-			     struct v4l2_mbus_framefmt *mf)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct camera_common_data *s_data = to_camera_common_data(client);
-	int ret = camera_common_s_fmt(sd, mf);
-
-	if (!ret)
-		ov5693_update_mode_ranges((struct ov5693 *)s_data->priv);
-	return ret;
 }
 
 static int ov5693_set_fmt(struct v4l2_subdev *sd,
