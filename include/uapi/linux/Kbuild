@@ -371,6 +371,7 @@ header-y += sysinfo.h
 header-y += taskstats.h
 header-y += tcp.h
 header-y += tcp_metrics.h
+header-y += tegra-v4l2-camera.h
 header-y += telephony.h
 header-y += termios.h
 header-y += time.h

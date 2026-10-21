@@ -27,6 +27,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/videodev2.h>
+#include <linux/tegra-v4l2-camera.h>
 
 #include <linux/kernel.h>
 #include <linux/debugfs.h>
@@ -36,26 +37,6 @@
 #include <media/v4l2-ctrls.h>
 #include <media/soc_camera.h>
 #include <media/nvc_focus.h>
-
-#define V4L2_CID_TEGRA_CAMERA_BASE	(V4L2_CTRL_CLASS_CAMERA | 0x2000)
-
-#define V4L2_CID_FRAME_LENGTH		(V4L2_CID_TEGRA_CAMERA_BASE+0)
-#define V4L2_CID_COARSE_TIME		(V4L2_CID_TEGRA_CAMERA_BASE+1)
-#define V4L2_CID_COARSE_TIME_SHORT	(V4L2_CID_TEGRA_CAMERA_BASE+2)
-#define V4L2_CID_GROUP_HOLD		(V4L2_CID_TEGRA_CAMERA_BASE+3)
-#define V4L2_CID_HDR_EN			(V4L2_CID_TEGRA_CAMERA_BASE+4)
-#define V4L2_CID_EEPROM_DATA		(V4L2_CID_TEGRA_CAMERA_BASE+5)
-#define V4L2_CID_OTP_DATA		(V4L2_CID_TEGRA_CAMERA_BASE+6)
-#define V4L2_CID_FUSE_ID		(V4L2_CID_TEGRA_CAMERA_BASE+7)
-
-#define V4L2_CID_TEGRA_CAMERA_LAST	(V4L2_CID_TEGRA_CAMERA_BASE+8)
-#define V4L2_CID_VI_BYPASS_MODE		(V4L2_CID_TEGRA_CAMERA_BASE+9)
-/* How long the VI channel waits for a frame to start or land, in µs.
- * Set by userspace, which knows the period of the frames in flight. */
-#define V4L2_CID_VI_CAPTURE_TIMEOUT	(V4L2_CID_TEGRA_CAMERA_BASE+10)
-/* The sensor's line time in the current mode, in ns, read-only: what
- * userspace converts exposure and frame length with. */
-#define V4L2_CID_LINE_TIME_NS		(V4L2_CID_TEGRA_CAMERA_BASE+11)
 
 #define MAX_BUFFER_SIZE			32
 #define MAX_CID_CONTROLS		16
