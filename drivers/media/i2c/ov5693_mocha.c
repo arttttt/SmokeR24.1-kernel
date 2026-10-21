@@ -106,6 +106,9 @@ struct ov5693 {
 	u32				cur_frame_length;
 	u32				cur_coarse;
 	u32				cur_line_length;
+	/* Kept from ctrls_init: s_ctrl runs under the handler's lock, which
+	 * v4l2_ctrl_find takes again. */
+	struct v4l2_ctrl		*exposure_ctrl;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -1515,8 +1518,7 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 		/* Within the mode's range (the control's minimum). The exposure
 		 * in µs is counted again in the new lines: when only the line
 		 * length changes, the framework does not set the exposure. */
-		struct v4l2_ctrl *exp = v4l2_ctrl_find(&priv->ctrl_handler,
-						       V4L2_CID_EXPOSURE);
+		struct v4l2_ctrl *exp = priv->exposure_ctrl;
 		u32 coarse;
 
 		err = ov5693_set_line_length(priv, ctrl->val);
@@ -1609,6 +1611,8 @@ static int ov5693_ctrls_init(struct ov5693 *priv, bool eeprom_ctrl)
 				return -ENOMEM;
 		}
 		priv->ctrls[i] = ctrl;
+		if (ctrl->id == V4L2_CID_EXPOSURE)
+			priv->exposure_ctrl = ctrl;
 	}
 
 	priv->numctrls = numctrls;
