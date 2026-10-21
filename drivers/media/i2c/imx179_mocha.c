@@ -126,9 +126,6 @@ struct imx179 {
 	u32				cur_frame_length;
 	u32				cur_coarse;
 	u32				cur_line_length;
-	/* Kept from ctrls_init: s_ctrl runs under the handler's lock, which
-	 * v4l2_ctrl_find takes again. */
-	struct v4l2_ctrl		*exposure_ctrl;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -1151,6 +1148,18 @@ static int imx179_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 
+/* One of the driver's own controls. s_ctrl runs under the handler's
+ * lock, which v4l2_ctrl_find takes again; this looks in priv->ctrls. */
+static struct v4l2_ctrl *imx179_ctrl(struct imx179 *priv, u32 id)
+{
+	int i;
+
+	for (i = 0; i < priv->numctrls; i++)
+		if (priv->ctrls[i] && priv->ctrls[i]->id == id)
+			return priv->ctrls[i];
+	return NULL;
+}
+
 static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx179 *priv =
@@ -1178,7 +1187,7 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 		/* Within the mode's range (the control's minimum). The exposure
 		 * in µs is counted again in the new lines: when only the line
 		 * length changes, the framework does not set the exposure. */
-		struct v4l2_ctrl *exp = priv->exposure_ctrl;
+		struct v4l2_ctrl *exp = imx179_ctrl(priv, V4L2_CID_EXPOSURE);
 		u32 coarse;
 
 		err = imx179_set_line_length(priv, ctrl->val);
@@ -1343,8 +1352,6 @@ static int imx179_ctrls_init(struct imx179 *priv)
 				return -ENOMEM;
 		}
 		priv->ctrls[i] = ctrl;
-		if (ctrl->id == V4L2_CID_EXPOSURE)
-			priv->exposure_ctrl = ctrl;
 	}
 
 	priv->numctrls = numctrls;
