@@ -251,6 +251,17 @@ static inline void imx179_get_gain_reg(imx179_reg *regs, u16 gain)
 	regs->val = gain & 0xff;
 }
 
+/* V4L2_CID_GAIN (Q8, 256 = 1.00x) to register 0x0205, which encodes the
+ * analog gain as actual = 256 / (256 - reg): reg = 256 - 65536 / Q8. */
+static u16 imx179_gain_reg(s32 val)
+{
+	if (val <= (1 << IMX179_GAIN_SHIFT))
+		return 0;
+	if (val >= (256 << IMX179_GAIN_SHIFT))
+		return 255;
+	return (u16)(256 - 65536 / val);
+}
+
 /* The current mode's entry in the format table, found by mode: the table
  * leaves out the disabled modes, so its index is not the mode number. */
 static const struct camera_common_frmfmt *imx179_mode_fmt(struct imx179 *priv)
@@ -749,7 +760,7 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 		/* Build override register list */
 		imx179_get_frame_length_regs(overrides, frame_length);
 		imx179_get_coarse_time_regs(overrides + 2, coarse_time);
-		imx179_get_gain_reg(overrides + 4, gain);
+		imx179_get_gain_reg(overrides + 4, imx179_gain_reg(gain));
 
 		/* What the sensor runs with, for the s_ctrl clamps. */
 		priv->cur_frame_length = frame_length;
@@ -943,20 +954,7 @@ static int imx179_set_gain(struct imx179 *priv, s32 val)
 	if (!priv->group_hold_prev)
 		imx179_set_group_hold(priv);
 
-	/* IMX179 register 0x0205 encodes analog gain as
-	 *    actual_gain = 256 / (256 - reg).
-	 * V4L2_CID_GAIN is advertised in Q8 (256 = 1.00x), so the
-	 * register value for any advertised multiplier m = val_Q8 / 256
-	 * is reg = 256 - 256 / m = 256 - 65536 / val_Q8.
-	 * Keeping the divide in integer arithmetic on val_Q8 avoids the
-	 * fractional-gain step-loss the old integer-multiplier semantic
-	 * had (val=1→2 meant a literal 2x jump at the sensor). */
-	if (val <= (1 << IMX179_GAIN_SHIFT))
-		gain = 0;
-	else if (val >= (256 << IMX179_GAIN_SHIFT))
-		gain = 255;
-	else
-		gain = (u16)(256 - 65536 / val);
+	gain = imx179_gain_reg(val);
 
 	imx179_get_gain_reg(&reg_list, gain);
 	dev_dbg(&priv->i2c_client->dev,
