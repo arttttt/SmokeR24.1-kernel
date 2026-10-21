@@ -348,10 +348,10 @@ static u32 ov5693_us_to_lines(struct ov5693 *priv, u32 us)
 	return ns ? (u32)div_u64((u64)us * 1000, ns) : 0;
 }
 
-/* Lines to µs, rounded up. */
-static u32 ov5693_lines_to_us(struct ov5693 *priv, u32 lines)
+/* Lines of `line_ns` to µs, rounded up. */
+static u32 ov5693_lines_to_us(u32 lines, u32 line_ns)
 {
-	return (u32)div_u64((u64)lines * ov5693_line_time_ns(priv) + 999, 1000);
+	return (u32)div_u64((u64)lines * line_ns + 999, 1000);
 }
 
 /* What the sensor can integrate within a frame of `frame_length` lines:
@@ -381,14 +381,13 @@ static void ov5693_update_mode_ranges(struct ov5693 *priv)
 	struct v4l2_ctrl *exp = v4l2_ctrl_find(&priv->ctrl_handler,
 					       V4L2_CID_EXPOSURE);
 	u32 mode_line_ns = ov5693_line_time_ns_at(priv, mode_ll);
-	u32 exp_min = (u32)div_u64((u64)OV5693_MIN_EXPOSURE_COARSE *
-				   mode_line_ns + 999, 1000);
-	u32 exp_max = (u32)div_u64((u64)(OV5693_MAX_FRAME_LENGTH -
-				   OV5693_MAX_COARSE_DIFF) *
-				   ov5693_line_time_ns_at(priv,
-					OV5693_MAX_LINE_LENGTH), 1000);
-	u32 exp_def = (u32)div_u64((u64)ov5693_clamp_coarse(mode_fl, mode_fl) *
-				   mode_line_ns + 999, 1000);
+	u32 exp_min = ov5693_lines_to_us(OV5693_MIN_EXPOSURE_COARSE,
+					   mode_line_ns);
+	u32 exp_max = ov5693_lines_to_us(OV5693_MAX_FRAME_LENGTH -
+					   OV5693_MAX_COARSE_DIFF,
+			ov5693_line_time_ns_at(priv, OV5693_MAX_LINE_LENGTH));
+	u32 exp_def = ov5693_lines_to_us(ov5693_clamp_coarse(mode_fl, mode_fl),
+					   mode_line_ns);
 
 	if (fl && v4l2_ctrl_modify_range(fl, mode_fl, OV5693_MAX_FRAME_LENGTH,
 					 1, mode_fl))
