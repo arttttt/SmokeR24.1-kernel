@@ -434,6 +434,7 @@ static int imx179_write_table_with_overrides(struct imx179 *priv,
 {
 	const imx179_reg *next;
 	int err, i;
+	u8 val;
 
 	for (next = table; next->addr != IMX179_TABLE_END; next++) {
 		if (next->addr == IMX179_TABLE_WAIT_MS) {
@@ -441,7 +442,7 @@ static int imx179_write_table_with_overrides(struct imx179 *priv,
 			continue;
 		}
 
-		u8 val = next->val;
+		val = next->val;
 
 		if (overrides) {
 			for (i = 0; i < num_overrides; i++) {
