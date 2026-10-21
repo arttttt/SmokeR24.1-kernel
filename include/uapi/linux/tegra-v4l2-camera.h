@@ -40,8 +40,16 @@
 /* How long the VI channel waits for a frame to start or land, in µs.
  * Set by userspace, which knows the period of the frames in flight. */
 #define V4L2_CID_VI_CAPTURE_TIMEOUT	(V4L2_CID_TEGRA_CAMERA_BASE+10)
-/* The sensor's line time in the current mode, in ns, read-only: what
- * userspace converts exposure and frame length with. */
+/* The sensor's line time in the current mode at the mode's own line
+ * length (the minimum of V4L2_CID_LINE_LENGTH), in ns, read-only: what
+ * userspace converts exposure and frame length with. At another line
+ * length the line time scales with it. */
 #define V4L2_CID_LINE_TIME_NS		(V4L2_CID_TEGRA_CAMERA_BASE+11)
+/* Line length in pixel clocks (HTS): from the mode's own up. Longer
+ * lines make a longer line time, so an exposure longer than the
+ * sensor's line counter holds at the mode's line time still fits.
+ * Userspace sets it with the frame length; the exposure in µs is
+ * counted in lines of the length in effect. */
+#define V4L2_CID_LINE_LENGTH		(V4L2_CID_TEGRA_CAMERA_BASE+12)
 
 #endif /* __UAPI_TEGRA_V4L2_CAMERA_H__ */

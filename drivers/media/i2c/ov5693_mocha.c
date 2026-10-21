@@ -56,7 +56,13 @@ static struct tegra_io_dpd csie_io = {
 #define OV5693_MIN_GAIN		(1 << OV5693_GAIN_SHIFT)
 #define OV5693_MAX_GAIN		(16 << OV5693_GAIN_SHIFT)
 #define OV5693_MIN_FRAME_LENGTH	(0x0)
-#define OV5693_MAX_FRAME_LENGTH	(0xffff)
+/* The sensor counts frame and exposure lines in 15 bits: an exposure of
+ * 0x8b82, 0xba03 or 0xf804 lines came out as that less 0x8000 (FRAME_START
+ * periods 0.2 / 0.374 / 0.774 s for 0.9 / 1.2 / 1.6 s asked; 22.10.2026).
+ * Longer exposures take longer lines (V4L2_CID_LINE_LENGTH). */
+#define OV5693_MAX_FRAME_LENGTH	(0x7fff)
+/* HTS, kept within the same 15 bits. */
+#define OV5693_MAX_LINE_LENGTH	(0x7fff)
 #define OV5693_MIN_EXPOSURE_COARSE	(0x0002)
 #define OV5693_MAX_EXPOSURE_COARSE	\
 	(OV5693_MAX_FRAME_LENGTH-OV5693_MAX_COARSE_DIFF)
@@ -99,6 +105,7 @@ struct ov5693 {
 
 	u32				cur_frame_length;
 	u32				cur_coarse;
+	u32				cur_line_length;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -171,6 +178,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 		.min = 0,
 		.max = 1000000,
 		.def = 0,
+		.step = 1,
+	},
+	{
+		.ops = &ov5693_ctrl_ops,
+		.id = V4L2_CID_LINE_LENGTH,
+		.name = "Line Length",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+		.min = 1,
+		.max = OV5693_MAX_LINE_LENGTH,
+		.def = 1,
 		.step = 1,
 	},
 	{
@@ -299,7 +317,7 @@ static const struct camera_common_frmfmt *ov5693_mode_fmt(struct ov5693 *priv)
  * written earlier. Read from there rather than kept as a second copy,
  * which drifted: the copy stayed at the reference HTS while the tables
  * were retuned for fps, and exposures ran 1.5x long (22.10.2026). */
-static u32 ov5693_line_length(struct ov5693 *priv)
+static u32 ov5693_mode_line_length(struct ov5693 *priv)
 {
 	return camera_common_table_reg16(mode_table[priv->s_data->mode],
 					 OV5693_LINE_LENGTH_ADDR_MSB,
@@ -307,10 +325,19 @@ static u32 ov5693_line_length(struct ov5693 *priv)
 					 OV5693_TABLE_END);
 }
 
+/* The line time at `line_length` pixel clocks, in ns. */
+static u32 ov5693_line_time_ns_at(struct ov5693 *priv, u32 line_length)
+{
+	return (u32)div_u64((u64)line_length * 1000000000ULL,
+			    ov5693_mode_fmt(priv)->pix_clk_hz);
+}
+
+/* The line time of the lines in effect: the line length userspace set
+ * (V4L2_CID_LINE_LENGTH), never below the mode's. */
 static u32 ov5693_line_time_ns(struct ov5693 *priv)
 {
-	return (u32)div_u64((u64)ov5693_line_length(priv) * 1000000000ULL,
-			    ov5693_mode_fmt(priv)->pix_clk_hz);
+	return ov5693_line_time_ns_at(priv, max(priv->cur_line_length,
+						ov5693_mode_line_length(priv)));
 }
 
 /* Exposure in µs to lines, rounded down: never longer than asked. */
@@ -346,20 +373,31 @@ static u32 ov5693_clamp_coarse(u32 coarse, u32 frame_length)
 static void ov5693_update_mode_ranges(struct ov5693 *priv)
 {
 	u32 mode_fl = ov5693_mode_frame_length[priv->s_data->mode];
+	u32 mode_ll = ov5693_mode_line_length(priv);
 	struct v4l2_ctrl *fl = v4l2_ctrl_find(&priv->ctrl_handler,
 					      V4L2_CID_FRAME_LENGTH);
+	struct v4l2_ctrl *ll = v4l2_ctrl_find(&priv->ctrl_handler,
+					      V4L2_CID_LINE_LENGTH);
 	struct v4l2_ctrl *exp = v4l2_ctrl_find(&priv->ctrl_handler,
 					       V4L2_CID_EXPOSURE);
-	u32 exp_min = ov5693_lines_to_us(priv, OV5693_MIN_EXPOSURE_COARSE);
-	u32 exp_max = ov5693_lines_to_us(priv,
-			OV5693_MAX_FRAME_LENGTH - OV5693_MAX_COARSE_DIFF);
-	u32 exp_def = ov5693_lines_to_us(priv,
-			ov5693_clamp_coarse(mode_fl, mode_fl));
+	u32 mode_line_ns = ov5693_line_time_ns_at(priv, mode_ll);
+	u32 exp_min = (u32)div_u64((u64)OV5693_MIN_EXPOSURE_COARSE *
+				   mode_line_ns + 999, 1000);
+	u32 exp_max = (u32)div_u64((u64)(OV5693_MAX_FRAME_LENGTH -
+				   OV5693_MAX_COARSE_DIFF) *
+				   ov5693_line_time_ns_at(priv,
+					OV5693_MAX_LINE_LENGTH), 1000);
+	u32 exp_def = (u32)div_u64((u64)ov5693_clamp_coarse(mode_fl, mode_fl) *
+				   mode_line_ns + 999, 1000);
 
 	if (fl && v4l2_ctrl_modify_range(fl, mode_fl, OV5693_MAX_FRAME_LENGTH,
 					 1, mode_fl))
 		dev_err(&priv->i2c_client->dev,
 			"%s: frame length range update failed\n", __func__);
+	if (ll && v4l2_ctrl_modify_range(ll, mode_ll, OV5693_MAX_LINE_LENGTH,
+					 1, mode_ll))
+		dev_err(&priv->i2c_client->dev,
+			"%s: line length range update failed\n", __func__);
 	if (exp && v4l2_ctrl_modify_range(exp, exp_min, exp_max, 1, exp_def))
 		dev_err(&priv->i2c_client->dev,
 			"%s: exposure range update failed\n", __func__);
@@ -729,6 +767,7 @@ static int ov5693_power_get(struct ov5693 *priv)
 
 static int ov5693_set_gain(struct ov5693 *priv, s32 val);
 static int ov5693_set_frame_length(struct ov5693 *priv, s32 val);
+static int ov5693_set_line_length(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time_short(struct ov5693 *priv, s32 val);
 static int ov5693_set_group_hold(struct ov5693 *priv);
@@ -772,6 +811,18 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		if (err)
 			dev_dbg(&client->dev,
 				"%s: warning gain override failed\n",
+				__func__);
+
+		/* The line length first: the exposure below is counted in
+		 * its lines. */
+		control.id = V4L2_CID_LINE_LENGTH;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		err = ov5693_set_line_length(priv, max_t(u32,
+				err ? 0 : (u32)control.value,
+				ov5693_mode_line_length(priv)));
+		if (err)
+			dev_dbg(&client->dev,
+				"%s: warning line length override failed\n",
 				__func__);
 
 		control.id = V4L2_CID_FRAME_LENGTH;
@@ -1068,6 +1119,30 @@ fail:
 	dev_dbg(&priv->i2c_client->dev,
 		 "%s: FRAME_LENGTH control error\n", __func__);
 	return err;
+}
+
+static int ov5693_set_line_length(struct ov5693 *priv, s32 val)
+{
+	int err;
+
+	if (!priv->group_hold_prev)
+		ov5693_set_group_hold(priv);
+
+	dev_dbg(&priv->i2c_client->dev, "%s: val: %d\n", __func__, val);
+
+	err = ov5693_write_reg(priv->s_data, OV5693_LINE_LENGTH_ADDR_MSB,
+			       (val >> 8) & 0xff);
+	if (!err)
+		err = ov5693_write_reg(priv->s_data,
+				       OV5693_LINE_LENGTH_ADDR_LSB, val & 0xff);
+	if (err) {
+		dev_dbg(&priv->i2c_client->dev,
+			"%s: LINE_LENGTH control error\n", __func__);
+		return err;
+	}
+
+	priv->cur_line_length = val;
+	return 0;
 }
 
 static int ov5693_set_coarse_time(struct ov5693 *priv, s32 val)
@@ -1390,7 +1465,8 @@ static int ov5693_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 
 	/* No register read: the mode's table holds it. */
 	if (ctrl->id == V4L2_CID_LINE_TIME_NS) {
-		ctrl->val = ov5693_line_time_ns(priv);
+		ctrl->val = ov5693_line_time_ns_at(priv,
+					ov5693_mode_line_length(priv));
 		return 0;
 	}
 
@@ -1432,6 +1508,24 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 
 		err = ov5693_set_frame_length(priv, ctrl->val);
 		if (!err && coarse != priv->cur_coarse)
+			err = ov5693_set_coarse_time(priv, coarse);
+		break;
+	}
+	case V4L2_CID_LINE_LENGTH: {
+		/* Within the mode's range (the control's minimum). The exposure
+		 * in µs is counted again in the new lines: when only the line
+		 * length changes, the framework does not set the exposure. */
+		struct v4l2_ctrl *exp = v4l2_ctrl_find(&priv->ctrl_handler,
+						       V4L2_CID_EXPOSURE);
+		u32 coarse;
+
+		err = ov5693_set_line_length(priv, ctrl->val);
+		if (err || !exp)
+			break;
+		coarse = ov5693_clamp_coarse(ov5693_us_to_lines(priv,
+							exp->cur.val),
+					     priv->cur_frame_length);
+		if (coarse != priv->cur_coarse)
 			err = ov5693_set_coarse_time(priv, coarse);
 		break;
 	}
