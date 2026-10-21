@@ -236,7 +236,11 @@ static int t124_capture_start(struct tegra_channel *chan,
 			tegra_channel_ec_recover(chan);
 			chan->capture_state = CAPTURE_TIMEOUT;
 			buffer_done(chan, &buf->buf, &ts, VB2_BUF_STATE_ERROR);
-			return err;
+			/* Recovered: the next buffer is captured as usual.
+			 * A non-zero return stops the capture thread for
+			 * good (it skips every buffer after an error), so a
+			 * single late frame would end the stream. */
+			return 0;
 		}
 	}
 
