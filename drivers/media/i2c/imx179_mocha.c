@@ -251,15 +251,19 @@ static inline void imx179_get_gain_reg(imx179_reg *regs, u16 gain)
 	regs->val = gain & 0xff;
 }
 
-/* V4L2_CID_GAIN (Q8, 256 = 1.00x) to register 0x0205, which encodes the
- * analog gain as actual = 256 / (256 - reg): reg = 256 - 65536 / Q8. */
+/* Register 0x0205 encodes the analog gain as
+ * actual = IMX179_GAIN_REG_BASE / (IMX179_GAIN_REG_BASE - reg). */
+#define IMX179_GAIN_REG_BASE		256
+#define IMX179_GAIN_REG_MAX		255
+
+/* V4L2_CID_GAIN (Q8) to the register code, within the gain the driver
+ * advertises: reg = BASE - BASE / gain = BASE - (BASE << Q8 shift) / val. */
 static u16 imx179_gain_reg(s32 val)
 {
-	if (val <= (1 << IMX179_GAIN_SHIFT))
-		return 0;
-	if (val >= (256 << IMX179_GAIN_SHIFT))
-		return 255;
-	return (u16)(256 - 65536 / val);
+	val = clamp_t(s32, val, IMX179_MIN_GAIN, IMX179_MAX_GAIN);
+	return (u16)min_t(s32, IMX179_GAIN_REG_MAX,
+		IMX179_GAIN_REG_BASE -
+		(IMX179_GAIN_REG_BASE << IMX179_GAIN_SHIFT) / val);
 }
 
 /* The current mode's entry in the format table, found by mode: the table
