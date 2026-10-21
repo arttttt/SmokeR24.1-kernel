@@ -50,6 +50,9 @@
 
 #define V4L2_CID_TEGRA_CAMERA_LAST	(V4L2_CID_TEGRA_CAMERA_BASE+8)
 #define V4L2_CID_VI_BYPASS_MODE		(V4L2_CID_TEGRA_CAMERA_BASE+9)
+/* How long the VI channel waits for a frame to start or land, in µs.
+ * Set by userspace, which knows the period of the frames in flight. */
+#define V4L2_CID_VI_CAPTURE_TIMEOUT	(V4L2_CID_TEGRA_CAMERA_BASE+10)
 
 #define MAX_BUFFER_SIZE			32
 #define MAX_CID_CONTROLS		16

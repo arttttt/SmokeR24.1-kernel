@@ -171,6 +171,9 @@ struct tegra_channel {
 	atomic_t power_on_refcnt;
 	struct v4l2_fh *fh;
 	bool bypass;
+	/* V4L2_CID_VI_CAPTURE_TIMEOUT, µs: the bound on each syncpt wait
+	 * of a capture (frame start, memory write done). */
+	u32 capture_timeout_us;
 	const struct tegra_vi_capture_ops *capture_ops;
 	bool bfirst_fstart;
 	enum channel_capture_state capture_state;

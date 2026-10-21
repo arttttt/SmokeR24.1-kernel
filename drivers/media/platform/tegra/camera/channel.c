@@ -653,29 +653,15 @@ static void tegra_channel_ec_init(struct tegra_channel *chan)
 	tegra_channel_write(chan, TEGRA_VI_CFG_VI_INCR_SYNCPT_CNTRL, 0x100);
 }
 
-/* Per-capture syncpt timeout. Baseline covers the default ~33 ms
- * exposure; long exposures stretch the wait window so VI doesn't
- * give up before the sensor releases the frame.
- *
- * Reads V4L2_CID_EXPOSURE (µs) from the sensor subdev — populated by
- * the HAL's ExposureControl path. The HAL-side raw V4L2_CID_COARSE_TIME
- * path leaves CID_EXPOSURE at its default and falls back to baseline,
- * which is fine because that path is only used at default exposure
- * lengths where 200 ms is plenty. */
+/* Per-capture syncpt timeout: V4L2_CID_VI_CAPTURE_TIMEOUT, which
+ * userspace sets from the period of the frames in flight. The sensor's
+ * exposure control is no measure of it: it changes the moment a request
+ * is written, while the frames already in flight keep the old length
+ * (a long exposure followed by a short one timed out on the long frame
+ * still being read out). */
 unsigned long tegra_channel_capture_timeout_jiffies(struct tegra_channel *chan)
 {
-	struct v4l2_subdev *sd = chan->subdev_on_csi;
-	struct v4l2_control ctrl = { .id = V4L2_CID_EXPOSURE };
-	unsigned long timeout_ms = 200;
-
-	if (sd && sd->ctrl_handler &&
-	    !v4l2_g_ctrl(sd->ctrl_handler, &ctrl) && ctrl.value > 0) {
-		unsigned long t = (unsigned long)ctrl.value / 1000 + 200;
-		if (t > timeout_ms)
-			timeout_ms = t;
-	}
-
-	return msecs_to_jiffies(timeout_ms);
+	return usecs_to_jiffies(ACCESS_ONCE(chan->capture_timeout_us));
 }
 
 static void tegra_channel_clear_singleshot(struct tegra_channel *chan,
@@ -1650,6 +1636,9 @@ static int tegra_channel_s_ctrl(struct v4l2_ctrl *ctrl)
 		else
 			chan->bypass = false;
 		break;
+	case V4L2_CID_VI_CAPTURE_TIMEOUT:
+		ACCESS_ONCE(chan->capture_timeout_us) = (u32)ctrl->val;
+		break;
 	default:
 		dev_err(&chan->video.dev, "%s:Not valid ctrl\n", __func__);
 		return -EINVAL;
@@ -1678,6 +1667,23 @@ static const struct v4l2_ctrl_config bypass_mode_ctrl = {
 	.qmenu_int = switch_ctrl_qmenu,
 };
 
+/* Until userspace says otherwise, wait as long as the longest frame
+ * a sensor of this board can send: 0xffff lines at ~17 µs a line is
+ * 1.13 s, plus a margin. Userspace that knows the frames in flight
+ * sets it shorter, so a stalled stream is noticed sooner. */
+#define VI_CAPTURE_TIMEOUT_DEFAULT_US	1500000
+
+static const struct v4l2_ctrl_config capture_timeout_ctrl = {
+	.ops = &channel_ctrl_ops,
+	.id = V4L2_CID_VI_CAPTURE_TIMEOUT,
+	.name = "Capture Timeout (us)",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 20000,
+	.max = 10000000,
+	.step = 1,
+	.def = VI_CAPTURE_TIMEOUT_DEFAULT_US,
+};
+
 static int tegra_channel_setup_controls(struct tegra_channel *chan)
 {
 	int num_sd = 0;
@@ -1700,6 +1706,14 @@ static int tegra_channel_setup_controls(struct tegra_channel *chan)
 	if (chan->ctrl_handler.error) {
 		dev_err(chan->vi->dev,
 			"Failed to add bypass control\n");
+		return chan->ctrl_handler.error;
+	}
+
+	chan->capture_timeout_us = VI_CAPTURE_TIMEOUT_DEFAULT_US;
+	v4l2_ctrl_new_custom(&chan->ctrl_handler, &capture_timeout_ctrl, NULL);
+	if (chan->ctrl_handler.error) {
+		dev_err(chan->vi->dev,
+			"Failed to add capture timeout control\n");
 		return chan->ctrl_handler.error;
 	}
 
