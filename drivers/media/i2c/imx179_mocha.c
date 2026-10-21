@@ -119,6 +119,7 @@ struct imx179 {
 	struct regulator		*ext_reg3;
 
 	u32				cur_frame_length;
+	u32				cur_coarse;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -183,6 +184,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 	},
 	{
 		.ops = &imx179_ctrl_ops,
+		.id = V4L2_CID_LINE_TIME_NS,
+		.name = "Line Time (ns)",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_VOLATILE,
+		.min = 0,
+		.max = 1000000,
+		.def = 0,
+		.step = 1,
+	},
+	{
+		.ops = &imx179_ctrl_ops,
 		.id = V4L2_CID_GROUP_HOLD,
 		.name = "Group Hold",
 		.type = V4L2_CTRL_TYPE_INTEGER_MENU,
@@ -237,6 +249,89 @@ static inline void imx179_get_gain_reg(imx179_reg *regs, u16 gain)
 {
 	regs->addr = IMX179_GAIN_ADDR;
 	regs->val = gain & 0xff;
+}
+
+/* The current mode's entry in the format table, found by mode: the table
+ * leaves out the disabled modes, so its index is not the mode number. */
+static const struct camera_common_frmfmt *imx179_mode_fmt(struct imx179 *priv)
+{
+	struct camera_common_data *s_data = priv->s_data;
+	int i;
+
+	for (i = 0; i < s_data->numfmts; i++)
+		if (s_data->frmfmt[i].mode == s_data->mode)
+			return &s_data->frmfmt[i];
+	return &s_data->frmfmt[0];
+}
+
+/* The current mode's line length in pixel clocks: what the mode's own
+ * register table last writes to 0x0342/0x0343. Read from there rather
+ * than kept as a second copy, so a change to a mode table cannot leave
+ * the exposure conversion, or the line time userspace reads, behind. */
+static u32 imx179_line_length(struct imx179 *priv)
+{
+	return camera_common_table_reg16(mode_table[priv->s_data->mode],
+					 IMX179_LINE_LENGTH_ADDR_MSB,
+					 IMX179_LINE_LENGTH_ADDR_LSB,
+					 IMX179_TABLE_END);
+}
+
+static u32 imx179_line_time_ns(struct imx179 *priv)
+{
+	return (u32)div_u64((u64)imx179_line_length(priv) * 1000000000ULL,
+			    imx179_mode_fmt(priv)->pix_clk_hz);
+}
+
+/* Exposure in µs to lines, rounded down: never longer than asked. */
+static u32 imx179_us_to_lines(struct imx179 *priv, u32 us)
+{
+	u32 ns = imx179_line_time_ns(priv);
+
+	return ns ? (u32)div_u64((u64)us * 1000, ns) : 0;
+}
+
+/* Lines to µs, rounded up. */
+static u32 imx179_lines_to_us(struct imx179 *priv, u32 lines)
+{
+	return (u32)div_u64((u64)lines * imx179_line_time_ns(priv) + 999, 1000);
+}
+
+/* What the sensor can integrate within a frame of `frame_length` lines:
+ * at least the minimum coarse time, at most the frame less its margin. */
+static u32 imx179_clamp_coarse(u32 coarse, u32 frame_length)
+{
+	u32 max = IMX179_MIN_EXPOSURE_COARSE;
+
+	if (frame_length > IMX179_MIN_EXPOSURE_COARSE + IMX179_MAX_COARSE_DIFF)
+		max = frame_length - IMX179_MAX_COARSE_DIFF;
+	return clamp_t(u32, coarse, IMX179_MIN_EXPOSURE_COARSE, max);
+}
+
+/* The ranges of the timing controls in the current mode: a frame no
+ * shorter than the mode's, an exposure from the minimum coarse time to
+ * the longest frame. Run when the mode changes, so userspace reads the
+ * mode it configured. The frame length is userspace's to choose within
+ * them; the driver does not stretch it. */
+static void imx179_update_mode_ranges(struct imx179 *priv)
+{
+	u32 mode_fl = imx179_mode_frame_length[priv->s_data->mode];
+	struct v4l2_ctrl *fl = v4l2_ctrl_find(&priv->ctrl_handler,
+					      V4L2_CID_FRAME_LENGTH);
+	struct v4l2_ctrl *exp = v4l2_ctrl_find(&priv->ctrl_handler,
+					       V4L2_CID_EXPOSURE);
+	u32 exp_min = imx179_lines_to_us(priv, IMX179_MIN_EXPOSURE_COARSE);
+	u32 exp_max = imx179_lines_to_us(priv,
+			IMX179_MAX_FRAME_LENGTH - IMX179_MAX_COARSE_DIFF);
+	u32 exp_def = imx179_lines_to_us(priv,
+			imx179_clamp_coarse(mode_fl, mode_fl));
+
+	if (fl && v4l2_ctrl_modify_range(fl, mode_fl, IMX179_MAX_FRAME_LENGTH,
+					 1, mode_fl))
+		dev_err(&priv->i2c_client->dev,
+			"%s: frame length range update failed\n", __func__);
+	if (exp && v4l2_ctrl_modify_range(exp, exp_min, exp_max, 1, exp_def))
+		dev_err(&priv->i2c_client->dev,
+			"%s: exposure range update failed\n", __func__);
 }
 
 static inline int imx179_read_reg(struct camera_common_data *s_data,
@@ -619,42 +714,27 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 
 	/* Build override list for exposure/gain/frame_length —
 	 * stock driver replaces these registers during mode table write
-	 * so they take effect BEFORE stream starts */
+	 * so they take effect BEFORE stream starts. The frame length is
+	 * userspace's (V4L2_CID_FRAME_LENGTH, never below the mode's); the
+	 * exposure is fitted into it, not the other way round. */
 	{
 		imx179_reg overrides[5]; /* 2 frame_length + 2 coarse + 1 gain */
 		u32 frame_length, coarse_time, gain;
-		const struct camera_common_frmfmt *fmt =
-			&s_data->frmfmt[s_data->mode];
 		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
-		u32 desired_coarse = 0;
 
-		/* Resolve desired coarse_time. V4L2_CID_EXPOSURE (µs) takes
-		 * priority over the raw V4L2_CID_COARSE_TIME (lines). */
-		control.id = V4L2_CID_EXPOSURE;
+		imx179_update_mode_ranges(priv);
+
+		control.id = V4L2_CID_FRAME_LENGTH;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		if (!err && control.value > 0) {
-			desired_coarse = (u32)div_u64(
-				(u64)control.value * fmt->pix_clk_hz,
-				(u64)fmt->line_length * 1000000ULL);
-		} else {
-			control.id = V4L2_CID_COARSE_TIME;
-			err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-			if (!err && control.value > 0)
-				desired_coarse = (u32)control.value;
-		}
-
-		/* Auto-extend frame_length to fit requested exposure;
-		 * never shrink below mode default, never exceed register cap. */
-		frame_length = desired_coarse + IMX179_MAX_COARSE_DIFF;
+		frame_length = err ? mode_fl : (u32)control.value;
 		if (frame_length < mode_fl)
 			frame_length = mode_fl;
-		if (frame_length > IMX179_MAX_FRAME_LENGTH)
-			frame_length = IMX179_MAX_FRAME_LENGTH;
-		coarse_time = desired_coarse;
-		if (coarse_time > frame_length - IMX179_MAX_COARSE_DIFF)
-			coarse_time = frame_length - IMX179_MAX_COARSE_DIFF;
-		if (coarse_time == 0)
-			coarse_time = frame_length - IMX179_MAX_COARSE_DIFF;
+
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		coarse_time = err ? frame_length :
+			imx179_us_to_lines(priv, (u32)control.value);
+		coarse_time = imx179_clamp_coarse(coarse_time, frame_length);
 
 		control.id = V4L2_CID_GAIN;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
@@ -662,18 +742,18 @@ static int imx179_s_stream(struct v4l2_subdev *sd, int enable)
 
 		dev_info(&client->dev,
 			 "%s: mode=%d frame_len=%u (mode_default=%u) "
-			 "coarse=%u gain=%u\n",
+			 "coarse=%u gain=%u line=%u ns\n",
 			 __func__, s_data->mode, frame_length, mode_fl,
-			 coarse_time, gain);
+			 coarse_time, gain, imx179_line_time_ns(priv));
 
 		/* Build override register list */
 		imx179_get_frame_length_regs(overrides, frame_length);
 		imx179_get_coarse_time_regs(overrides + 2, coarse_time);
 		imx179_get_gain_reg(overrides + 4, gain);
 
-		/* Track current FL so post-stream s_ctrl auto-extend
-		 * computes against the actual programmed value. */
+		/* What the sensor runs with, for the s_ctrl clamps. */
 		priv->cur_frame_length = frame_length;
+		priv->cur_coarse = coarse_time;
 
 		/* Write mode table with overrides (like stock driver) */
 		err = imx179_write_table_with_overrides(priv,
@@ -742,7 +822,7 @@ static int imx179_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *param)
 
 static struct v4l2_subdev_video_ops imx179_subdev_video_ops = {
 	.s_stream	= imx179_s_stream,
-	.s_mbus_fmt	= camera_common_s_fmt,
+	.s_mbus_fmt	= imx179_s_mbus_fmt,
 	.g_mbus_fmt	= camera_common_g_fmt,
 	.try_mbus_fmt	= camera_common_try_fmt,
 	.enum_mbus_fmt	= camera_common_enum_fmt,
@@ -765,6 +845,20 @@ static int imx179_get_fmt(struct v4l2_subdev *sd,
 	return camera_common_g_fmt(sd, &format->format);
 }
 
+/* Setting the format picks the mode; the timing controls' ranges follow
+ * it, so userspace reads them for the mode it configured. */
+static int imx179_s_mbus_fmt(struct v4l2_subdev *sd,
+			     struct v4l2_mbus_framefmt *mf)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+	int ret = camera_common_s_fmt(sd, mf);
+
+	if (!ret)
+		imx179_update_mode_ranges((struct imx179 *)s_data->priv);
+	return ret;
+}
+
 static int imx179_set_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_fh *fh,
 	struct v4l2_subdev_format *format)
@@ -774,7 +868,7 @@ static int imx179_set_fmt(struct v4l2_subdev *sd,
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
 		ret = camera_common_try_fmt(sd, &format->format);
 	else
-		ret = camera_common_s_fmt(sd, &format->format);
+		ret = imx179_s_mbus_fmt(sd, &format->format);
 
 	return ret;
 }
@@ -935,6 +1029,7 @@ static int imx179_set_coarse_time(struct imx179 *priv, s32 val)
 			goto fail;
 	}
 
+	priv->cur_coarse = coarse_time;
 	return 0;
 
 fail:
@@ -947,6 +1042,12 @@ static int imx179_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx179 *priv =
 		container_of(ctrl->handler, struct imx179, ctrl_handler);
+
+	/* No register read: the mode's table holds it. */
+	if (ctrl->id == V4L2_CID_LINE_TIME_NS) {
+		ctrl->val = imx179_line_time_ns(priv);
+		return 0;
+	}
 
 	if (priv->power.state == SWITCH_OFF)
 		return 0;
@@ -974,38 +1075,27 @@ static int imx179_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_GAIN:
 		err = imx179_set_gain(priv, ctrl->val);
 		break;
-	case V4L2_CID_FRAME_LENGTH:
+	case V4L2_CID_FRAME_LENGTH: {
+		/* Within the mode's range (the control's minimum). A shorter
+		 * frame cannot keep a coarse time longer than it holds. */
+		u32 coarse = imx179_clamp_coarse(priv->cur_coarse, ctrl->val);
+
 		err = imx179_set_frame_length(priv, ctrl->val);
-		break;
-	case V4L2_CID_EXPOSURE: {
-		/* µs → coarse_time (sensor lines).
-		 * Auto-extend frame_length when requested exposure exceeds
-		 * mode default. Shrinks back to mode_fl when exposure fits.
-		 * Drops fps only on the long-exposure frame; restored once
-		 * exposure shrinks. */
-		struct camera_common_data *s_data = priv->s_data;
-		const struct camera_common_frmfmt *fmt =
-			&s_data->frmfmt[s_data->mode];
-		u32 mode_fl = imx179_mode_frame_length[s_data->mode];
-		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
-					  (u64)fmt->line_length * 1000000ULL);
-		u32 needed_fl = coarse + IMX179_MAX_COARSE_DIFF;
-		if (needed_fl < mode_fl)
-			needed_fl = mode_fl;
-		if (needed_fl > IMX179_MAX_FRAME_LENGTH)
-			needed_fl = IMX179_MAX_FRAME_LENGTH;
-		if (coarse > needed_fl - IMX179_MAX_COARSE_DIFF)
-			coarse = needed_fl - IMX179_MAX_COARSE_DIFF;
-		if (needed_fl != priv->cur_frame_length) {
-			err = imx179_set_frame_length(priv, needed_fl);
-			if (err)
-				break;
-		}
-		err = imx179_set_coarse_time(priv, coarse);
+		if (!err && coarse != priv->cur_coarse)
+			err = imx179_set_coarse_time(priv, coarse);
 		break;
 	}
+	case V4L2_CID_EXPOSURE:
+		/* µs → lines within the current frame. The frame length is
+		 * userspace's to set, before the exposure in the same batch
+		 * (V4L2_CID_FRAME_LENGTH); the driver no longer stretches it. */
+		err = imx179_set_coarse_time(priv,
+			imx179_clamp_coarse(imx179_us_to_lines(priv, ctrl->val),
+					    priv->cur_frame_length));
+		break;
 	case V4L2_CID_COARSE_TIME:
-		err = imx179_set_coarse_time(priv, ctrl->val);
+		err = imx179_set_coarse_time(priv,
+			imx179_clamp_coarse(ctrl->val, priv->cur_frame_length));
 		break;
 	case V4L2_CID_GROUP_HOLD:
 		if (switch_ctrl_qmenu[ctrl->val] == SWITCH_ON) {
@@ -1164,6 +1254,8 @@ static int imx179_ctrls_init(struct imx179 *priv)
 			"Error %d setting default controls\n", err);
 		goto error;
 	}
+
+	imx179_update_mode_ranges(priv);
 
 	err = imx179_otp_setup(priv);
 	if (err)
@@ -1371,6 +1463,7 @@ static int imx179_probe(struct i2c_client *client,
 	common_data->numctrls		= ARRAY_SIZE(ctrl_config_list);
 	common_data->numfmts		= ARRAY_SIZE(imx179_frmfmt);
 	common_data->def_mode		= IMX179_DEFAULT_MODE;
+	common_data->mode		= IMX179_DEFAULT_MODE;
 	common_data->def_width		= IMX179_DEFAULT_WIDTH;
 	common_data->def_height		= IMX179_DEFAULT_HEIGHT;
 	common_data->fmt_width		= common_data->def_width;

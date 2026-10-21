@@ -53,6 +53,9 @@
 /* How long the VI channel waits for a frame to start or land, in µs.
  * Set by userspace, which knows the period of the frames in flight. */
 #define V4L2_CID_VI_CAPTURE_TIMEOUT	(V4L2_CID_TEGRA_CAMERA_BASE+10)
+/* The sensor's line time in the current mode, in ns, read-only: what
+ * userspace converts exposure and frame length with. */
+#define V4L2_CID_LINE_TIME_NS		(V4L2_CID_TEGRA_CAMERA_BASE+11)
 
 #define MAX_BUFFER_SIZE			32
 #define MAX_CID_CONTROLS		16
@@ -137,7 +140,6 @@ struct camera_common_frmfmt {
 	int	num_framerates;
 	bool	hdr_en;
 	int	mode;
-	u32	line_length;
 	u64	pix_clk_hz;
 };
 
@@ -267,6 +269,14 @@ int camera_common_enum_frameintervals(struct v4l2_subdev *sd,
 int camera_common_g_chip_ident(struct v4l2_subdev *sd,
 			     struct v4l2_dbg_chip_ident *id);
 int camera_common_s_power(struct v4l2_subdev *sd, int on);
+
+/* The value a register table last writes to a 16-bit register split over
+ * two 8-bit addresses (msb, lsb), or 0 when it writes neither; the walk
+ * stops at an entry whose address is `end`. A mode's timing is what its
+ * own table programs, so drivers read it back from there rather than
+ * keep a second copy. */
+u32 camera_common_table_reg16(const struct reg_8 *table,
+			      u16 msb, u16 lsb, u16 end);
 void camera_common_dpd_disable(struct camera_common_data *s_data);
 void camera_common_dpd_enable(struct camera_common_data *s_data);
 int camera_common_g_mbus_config(struct v4l2_subdev *sd,

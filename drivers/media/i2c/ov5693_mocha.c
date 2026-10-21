@@ -48,6 +48,8 @@ static struct tegra_io_dpd csie_io = {
 };
 
 #define OV5693_MAX_COARSE_DIFF		6
+#define OV5693_LINE_LENGTH_ADDR_MSB	0x380C
+#define OV5693_LINE_LENGTH_ADDR_LSB	0x380D
 
 #define OV5693_GAIN_SHIFT		8
 #define OV5693_REAL_GAIN_SHIFT		4
@@ -97,6 +99,7 @@ struct ov5693 {
 	struct regulator		*afvdd;
 
 	u32				cur_frame_length;
+	u32				cur_coarse;
 
 	struct v4l2_ctrl		*ctrls[];
 };
@@ -108,7 +111,6 @@ static struct regmap_config ov5693_regmap_config = {
 
 static int ov5693_g_volatile_ctrl(struct v4l2_ctrl *ctrl);
 static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl);
-static void ov5693_update_ctrl_range(struct ov5693 *priv, s32 frame_length);
 
 static const struct v4l2_ctrl_ops ov5693_ctrl_ops = {
 	.g_volatile_ctrl = ov5693_g_volatile_ctrl,
@@ -159,6 +161,17 @@ static struct v4l2_ctrl_config ctrl_config_list[] = {
 		.min = 1,
 		.max = 1000000,
 		.def = 33000,
+		.step = 1,
+	},
+	{
+		.ops = &ov5693_ctrl_ops,
+		.id = V4L2_CID_LINE_TIME_NS,
+		.name = "Line Time (ns)",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.flags = V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_VOLATILE,
+		.min = 0,
+		.max = 1000000,
+		.def = 0,
 		.step = 1,
 	},
 	{
@@ -266,6 +279,91 @@ static inline void ov5693_get_gain_regs(ov5693_reg *regs,
 
 	(regs + 1)->addr = OV5693_GAIN_ADDR_LSB;
 	(regs + 1)->val = (gain) & 0xff;
+}
+
+/* The current mode's entry in the format table, found by mode: the table
+ * leaves out the disabled modes, so its index is not the mode number. */
+static const struct camera_common_frmfmt *ov5693_mode_fmt(struct ov5693 *priv)
+{
+	struct camera_common_data *s_data = priv->s_data;
+	int i;
+
+	for (i = 0; i < s_data->numfmts; i++)
+		if (s_data->frmfmt[i].mode == s_data->mode)
+			return &s_data->frmfmt[i];
+	return &s_data->frmfmt[0];
+}
+
+/* The current mode's line length (HTS) in pixel clocks: what the mode's
+ * own register table LAST writes to 0x380c/0x380d -- the mocha 1-lane
+ * overrides at the end of each table raise it above the reference value
+ * written earlier. Read from there rather than kept as a second copy,
+ * which drifted: the copy stayed at the reference HTS while the tables
+ * were retuned for fps, and exposures ran 1.5x long (22.10.2026). */
+static u32 ov5693_line_length(struct ov5693 *priv)
+{
+	return camera_common_table_reg16(mode_table[priv->s_data->mode],
+					 OV5693_LINE_LENGTH_ADDR_MSB,
+					 OV5693_LINE_LENGTH_ADDR_LSB,
+					 OV5693_TABLE_END);
+}
+
+static u32 ov5693_line_time_ns(struct ov5693 *priv)
+{
+	return (u32)div_u64((u64)ov5693_line_length(priv) * 1000000000ULL,
+			    ov5693_mode_fmt(priv)->pix_clk_hz);
+}
+
+/* Exposure in µs to lines, rounded down: never longer than asked. */
+static u32 ov5693_us_to_lines(struct ov5693 *priv, u32 us)
+{
+	u32 ns = ov5693_line_time_ns(priv);
+
+	return ns ? (u32)div_u64((u64)us * 1000, ns) : 0;
+}
+
+/* Lines to µs, rounded up. */
+static u32 ov5693_lines_to_us(struct ov5693 *priv, u32 lines)
+{
+	return (u32)div_u64((u64)lines * ov5693_line_time_ns(priv) + 999, 1000);
+}
+
+/* What the sensor can integrate within a frame of `frame_length` lines:
+ * at least the minimum coarse time, at most the frame less its margin. */
+static u32 ov5693_clamp_coarse(u32 coarse, u32 frame_length)
+{
+	u32 max = OV5693_MIN_EXPOSURE_COARSE;
+
+	if (frame_length > OV5693_MIN_EXPOSURE_COARSE + OV5693_MAX_COARSE_DIFF)
+		max = frame_length - OV5693_MAX_COARSE_DIFF;
+	return clamp_t(u32, coarse, OV5693_MIN_EXPOSURE_COARSE, max);
+}
+
+/* The ranges of the timing controls in the current mode: a frame no
+ * shorter than the mode's, an exposure from the minimum coarse time to
+ * the longest frame. Run when the mode changes, so userspace reads the
+ * mode it configured. The frame length is userspace's to choose within
+ * them; the driver does not stretch it. */
+static void ov5693_update_mode_ranges(struct ov5693 *priv)
+{
+	u32 mode_fl = ov5693_mode_frame_length[priv->s_data->mode];
+	struct v4l2_ctrl *fl = v4l2_ctrl_find(&priv->ctrl_handler,
+					      V4L2_CID_FRAME_LENGTH);
+	struct v4l2_ctrl *exp = v4l2_ctrl_find(&priv->ctrl_handler,
+					       V4L2_CID_EXPOSURE);
+	u32 exp_min = ov5693_lines_to_us(priv, OV5693_MIN_EXPOSURE_COARSE);
+	u32 exp_max = ov5693_lines_to_us(priv,
+			OV5693_MAX_FRAME_LENGTH - OV5693_MAX_COARSE_DIFF);
+	u32 exp_def = ov5693_lines_to_us(priv,
+			ov5693_clamp_coarse(mode_fl, mode_fl));
+
+	if (fl && v4l2_ctrl_modify_range(fl, mode_fl, OV5693_MAX_FRAME_LENGTH,
+					 1, mode_fl))
+		dev_err(&priv->i2c_client->dev,
+			"%s: frame length range update failed\n", __func__);
+	if (exp && v4l2_ctrl_modify_range(exp, exp_min, exp_max, 1, exp_def))
+		dev_err(&priv->i2c_client->dev,
+			"%s: exposure range update failed\n", __func__);
 }
 
 
@@ -648,8 +746,6 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		 __func__, enable, s_data->mode);
 
 	if (!enable) {
-		ov5693_update_ctrl_range(priv, OV5693_MAX_FRAME_LENGTH);
-
 		return ov5693_write_table(priv,
 			mode_table[OV5693_MODE_STOP_STREAM]);
 	}
@@ -662,15 +758,14 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		goto exit;
 	}
 
-	/* Override gain, frame_length, coarse_time after mode table.
-	 * Auto-extend frame_length to fit requested CID_EXPOSURE so the
-	 * first frame already has the long-exposure FL. */
+	/* Override gain, frame_length, coarse_time after mode table. The
+	 * frame length is userspace's (V4L2_CID_FRAME_LENGTH, never below the
+	 * mode's); the exposure is fitted into it, not the other way round. */
 	{
 		u32 mode_fl = ov5693_mode_frame_length[s_data->mode];
-		const struct camera_common_frmfmt *fmt =
-			&s_data->frmfmt[s_data->mode];
-		u32 frame_length, max_coarse;
-		u32 desired_coarse = 0;
+		u32 frame_length, coarse;
+
+		ov5693_update_mode_ranges(priv);
 
 		control.id = V4L2_CID_GAIN;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
@@ -680,41 +775,23 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 				"%s: warning gain override failed\n",
 				__func__);
 
-		/* Resolve desired coarse_time. CID_EXPOSURE (µs) takes
-		 * priority over the raw CID_COARSE_TIME (lines). */
-		control.id = V4L2_CID_EXPOSURE;
+		control.id = V4L2_CID_FRAME_LENGTH;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-		if (!err && control.value > 0) {
-			desired_coarse = (u32)div_u64(
-				(u64)control.value * fmt->pix_clk_hz,
-				(u64)fmt->line_length * 1000000ULL);
-		} else {
-			control.id = V4L2_CID_COARSE_TIME;
-			err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
-			if (!err && control.value > 0)
-				desired_coarse = (u32)control.value;
-		}
-
-		/* Auto-extend frame_length to fit requested exposure;
-		 * never below mode default, never above register cap. */
-		frame_length = desired_coarse + OV5693_MAX_COARSE_DIFF;
+		frame_length = err ? mode_fl : (u32)control.value;
 		if (frame_length < mode_fl)
 			frame_length = mode_fl;
-		if (frame_length > OV5693_MAX_FRAME_LENGTH)
-			frame_length = OV5693_MAX_FRAME_LENGTH;
 		err = ov5693_set_frame_length(priv, frame_length);
 		if (err)
 			dev_dbg(&client->dev,
 				"%s: warning frame length override failed\n",
 				__func__);
 
-		max_coarse = frame_length - OV5693_MAX_COARSE_DIFF;
-
-		if (desired_coarse > max_coarse)
-			desired_coarse = max_coarse;
-		if (desired_coarse == 0)
-			desired_coarse = max_coarse;
-		err = ov5693_set_coarse_time(priv, desired_coarse);
+		control.id = V4L2_CID_EXPOSURE;
+		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
+		coarse = err ? frame_length :
+			ov5693_us_to_lines(priv, (u32)control.value);
+		coarse = ov5693_clamp_coarse(coarse, frame_length);
+		err = ov5693_set_coarse_time(priv, coarse);
 		if (err)
 			dev_dbg(&client->dev,
 				"%s: warning coarse time override failed\n",
@@ -723,7 +800,7 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 		control.id = V4L2_CID_COARSE_TIME_SHORT;
 		err = v4l2_g_ctrl(&priv->ctrl_handler, &control);
 		err |= ov5693_set_coarse_time_short(priv,
-			min((u32)control.value, max_coarse));
+			ov5693_clamp_coarse((u32)control.value, frame_length));
 		if (err)
 			dev_dbg(&client->dev,
 				"%s: warning coarse time short override "
@@ -731,9 +808,9 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 
 		dev_info(&client->dev,
 			 "%s: mode=%d frame_len=%u (mode_default=%u) "
-			 "coarse=%u\n",
+			 "coarse=%u line=%u ns\n",
 			 __func__, s_data->mode, frame_length, mode_fl,
-			 desired_coarse);
+			 coarse, ov5693_line_time_ns(priv));
 	}
 
 	err = ov5693_write_table(priv, mode_table[OV5693_MODE_START_STREAM]);
@@ -792,7 +869,7 @@ static int ov5693_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *param)
 
 static struct v4l2_subdev_video_ops ov5693_subdev_video_ops = {
 	.s_stream	= ov5693_s_stream,
-	.s_mbus_fmt	= camera_common_s_fmt,
+	.s_mbus_fmt	= ov5693_s_mbus_fmt,
 	.g_mbus_fmt	= camera_common_g_fmt,
 	.try_mbus_fmt	= camera_common_try_fmt,
 	.enum_mbus_fmt	= camera_common_enum_fmt,
@@ -815,6 +892,20 @@ static int ov5693_get_fmt(struct v4l2_subdev *sd,
 	return camera_common_g_fmt(sd, &format->format);
 }
 
+/* Setting the format picks the mode; the timing controls' ranges follow
+ * it, so userspace reads them for the mode it configured. */
+static int ov5693_s_mbus_fmt(struct v4l2_subdev *sd,
+			     struct v4l2_mbus_framefmt *mf)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+	int ret = camera_common_s_fmt(sd, mf);
+
+	if (!ret)
+		ov5693_update_mode_ranges((struct ov5693 *)s_data->priv);
+	return ret;
+}
+
 static int ov5693_set_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_fh *fh,
 	struct v4l2_subdev_format *format)
@@ -824,7 +915,7 @@ static int ov5693_set_fmt(struct v4l2_subdev *sd,
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
 		ret = camera_common_try_fmt(sd, &format->format);
 	else
-		ret = camera_common_s_fmt(sd, &format->format);
+		ret = ov5693_s_mbus_fmt(sd, &format->format);
 
 	return ret;
 }
@@ -948,43 +1039,6 @@ fail:
 	return err;
 }
 
-static void ov5693_update_ctrl_range(struct ov5693 *priv, s32 frame_length)
-{
-	struct v4l2_ctrl *ctrl = NULL;
-	int ctrl_ids[2] = {V4L2_CID_COARSE_TIME,
-			V4L2_CID_COARSE_TIME_SHORT};
-	s32 max, min, def;
-	int i, j;
-
-	for (i = 0; i < ARRAY_SIZE(ctrl_ids); i++) {
-		for (j = 0; j < priv->numctrls; j++) {
-			if (priv->ctrls[j]->id == ctrl_ids[i]) {
-				ctrl = priv->ctrls[j];
-				break;
-			}
-		}
-
-		if (j == priv->numctrls) {
-			dev_err(&priv->i2c_client->dev,
-				"could not find ctrl %x\n",
-				ctrl_ids[i]);
-			continue;
-		}
-
-		max = frame_length - OV5693_MAX_COARSE_DIFF;
-		/* clamp the value in case above is negative */
-		max = clamp_val(max, OV5693_MIN_EXPOSURE_COARSE,
-			OV5693_MAX_EXPOSURE_COARSE);
-		min = OV5693_MIN_EXPOSURE_COARSE;
-		def = clamp_val(OV5693_DEFAULT_EXPOSURE_COARSE, min, max);
-		if (__v4l2_ctrl_modify_range(ctrl, min, max, 1, def))
-			dev_err(&priv->i2c_client->dev,
-				"ctrl %x: range update failed\n",
-				ctrl_ids[i]);
-	}
-
-}
-
 static int ov5693_set_frame_length(struct ov5693 *priv, s32 val)
 {
 	ov5693_reg reg_list[2];
@@ -1009,7 +1063,6 @@ static int ov5693_set_frame_length(struct ov5693 *priv, s32 val)
 	}
 
 	priv->cur_frame_length = frame_length;
-	ov5693_update_ctrl_range(priv, val);
 	return 0;
 
 fail:
@@ -1041,6 +1094,7 @@ static int ov5693_set_coarse_time(struct ov5693 *priv, s32 val)
 			goto fail;
 	}
 
+	priv->cur_coarse = coarse_time;
 	return 0;
 
 fail:
@@ -1335,6 +1389,12 @@ static int ov5693_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		container_of(ctrl->handler, struct ov5693, ctrl_handler);
 	int err = 0;
 
+	/* No register read: the mode's table holds it. */
+	if (ctrl->id == V4L2_CID_LINE_TIME_NS) {
+		ctrl->val = ov5693_line_time_ns(priv);
+		return 0;
+	}
+
 	if (priv->power.state == SWITCH_OFF)
 		return 0;
 
@@ -1366,38 +1426,27 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_GAIN:
 		err = ov5693_set_gain(priv, ctrl->val);
 		break;
-	case V4L2_CID_FRAME_LENGTH:
+	case V4L2_CID_FRAME_LENGTH: {
+		/* Within the mode's range (the control's minimum). A shorter
+		 * frame cannot keep a coarse time longer than it holds. */
+		u32 coarse = ov5693_clamp_coarse(priv->cur_coarse, ctrl->val);
+
 		err = ov5693_set_frame_length(priv, ctrl->val);
-		break;
-	case V4L2_CID_EXPOSURE: {
-		/* µs → coarse_time (sensor lines, not shifted on OV5693).
-		 * Auto-extend frame_length when requested exposure exceeds
-		 * mode default. Shrinks back to mode_fl when exposure fits.
-		 * Drops fps only on the long-exposure frame; restored once
-		 * exposure shrinks. */
-		struct camera_common_data *s_data = priv->s_data;
-		const struct camera_common_frmfmt *fmt =
-			&s_data->frmfmt[s_data->mode];
-		u32 mode_fl = ov5693_mode_frame_length[s_data->mode];
-		u32 coarse = (u32)div_u64((u64)ctrl->val * fmt->pix_clk_hz,
-					  (u64)fmt->line_length * 1000000ULL);
-		u32 needed_fl = coarse + OV5693_MAX_COARSE_DIFF;
-		if (needed_fl < mode_fl)
-			needed_fl = mode_fl;
-		if (needed_fl > OV5693_MAX_FRAME_LENGTH)
-			needed_fl = OV5693_MAX_FRAME_LENGTH;
-		if (coarse > needed_fl - OV5693_MAX_COARSE_DIFF)
-			coarse = needed_fl - OV5693_MAX_COARSE_DIFF;
-		if (needed_fl != priv->cur_frame_length) {
-			err = ov5693_set_frame_length(priv, needed_fl);
-			if (err)
-				break;
-		}
-		err = ov5693_set_coarse_time(priv, coarse);
+		if (!err && coarse != priv->cur_coarse)
+			err = ov5693_set_coarse_time(priv, coarse);
 		break;
 	}
+	case V4L2_CID_EXPOSURE:
+		/* µs → lines within the current frame. The frame length is
+		 * userspace's to set, before the exposure in the same batch
+		 * (V4L2_CID_FRAME_LENGTH); the driver no longer stretches it. */
+		err = ov5693_set_coarse_time(priv,
+			ov5693_clamp_coarse(ov5693_us_to_lines(priv, ctrl->val),
+					    priv->cur_frame_length));
+		break;
 	case V4L2_CID_COARSE_TIME:
-		err = ov5693_set_coarse_time(priv, ctrl->val);
+		err = ov5693_set_coarse_time(priv,
+			ov5693_clamp_coarse(ctrl->val, priv->cur_frame_length));
 		break;
 	case V4L2_CID_COARSE_TIME_SHORT:
 		err = ov5693_set_coarse_time_short(priv, ctrl->val);
@@ -1484,6 +1533,8 @@ static int ov5693_ctrls_init(struct ov5693 *priv, bool eeprom_ctrl)
 			"Error %d setting default controls\n", err);
 		goto error;
 	}
+
+	ov5693_update_mode_ranges(priv);
 
 	err = ov5693_otp_setup(priv);
 	if (err) {
@@ -1678,6 +1729,7 @@ static int ov5693_probe(struct i2c_client *client,
 	common_data->numctrls		= ARRAY_SIZE(ctrl_config_list);
 	common_data->numfmts		= ARRAY_SIZE(ov5693_frmfmt);
 	common_data->def_mode		= OV5693_DEFAULT_MODE;
+	common_data->mode		= OV5693_DEFAULT_MODE;
 	common_data->def_width		= OV5693_DEFAULT_WIDTH;
 	common_data->def_height		= OV5693_DEFAULT_HEIGHT;
 	common_data->fmt_width		= common_data->def_width;

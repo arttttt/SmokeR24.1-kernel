@@ -107,6 +107,25 @@ int camera_common_g_ctrl(struct camera_common_data *s_data,
 }
 EXPORT_SYMBOL(camera_common_g_ctrl);
 
+u32 camera_common_table_reg16(const struct reg_8 *table,
+			      u16 msb, u16 lsb, u16 end)
+{
+	u32 hi = 0, lo = 0;
+	bool seen = false;
+
+	for (; table && table->addr != end; table++) {
+		if (table->addr == msb) {
+			hi = table->val;
+			seen = true;
+		} else if (table->addr == lsb) {
+			lo = table->val;
+			seen = true;
+		}
+	}
+	return seen ? (hi << 8) | lo : 0;
+}
+EXPORT_SYMBOL(camera_common_table_reg16);
+
 int camera_common_regulator_get(struct i2c_client *client,
 		       struct regulator **vreg, const char *vreg_name)
 {
