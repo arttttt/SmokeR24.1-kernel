@@ -55,7 +55,6 @@ static struct tegra_io_dpd csie_io = {
 #define OV5693_REAL_GAIN_SHIFT		4
 #define OV5693_MIN_GAIN		(1 << OV5693_GAIN_SHIFT)
 #define OV5693_MAX_GAIN		(16 << OV5693_GAIN_SHIFT)
-#define OV5693_MAX_UNREAL_GAIN	(0x0F80)
 #define OV5693_MIN_FRAME_LENGTH	(0x0)
 #define OV5693_MAX_FRAME_LENGTH	(0xffff)
 #define OV5693_MIN_EXPOSURE_COARSE	(0x0002)

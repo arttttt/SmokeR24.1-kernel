@@ -66,7 +66,10 @@ static struct tegra_io_dpd csib_io = {
  * for an arbitrary Q8 gain is done inside imx179_set_gain. */
 #define IMX179_GAIN_SHIFT		8
 #define IMX179_MIN_GAIN			(1 << IMX179_GAIN_SHIFT)   /* 256 = 1x */
-#define IMX179_MAX_GAIN			(64 << IMX179_GAIN_SHIFT)  /* 16384 = 64x */
+/* 16x, as the stock camera stack ran it. Above 16x the register's steps
+ * coarsen (256 / (256 - reg): 7-33 % per code past 0xF0), and both
+ * cameras now share one 1x-16x range (ISO 100-1600). */
+#define IMX179_MAX_GAIN			(16 << IMX179_GAIN_SHIFT)  /* 4096 = 16x */
 #define IMX179_MIN_FRAME_LENGTH		(0x0)
 #define IMX179_MAX_FRAME_LENGTH		(0xffff)
 #define IMX179_MIN_EXPOSURE_COARSE	(0x0002)
@@ -254,7 +257,8 @@ static inline void imx179_get_gain_reg(imx179_reg *regs, u16 gain)
 /* Register 0x0205 encodes the analog gain as
  * actual = IMX179_GAIN_REG_BASE / (IMX179_GAIN_REG_BASE - reg). */
 #define IMX179_GAIN_REG_BASE		256
-#define IMX179_GAIN_REG_MAX		255
+/* The code of IMX179_MAX_GAIN: 256 / (256 - 0xF0) = 16x. */
+#define IMX179_GAIN_REG_MAX		0xF0
 
 /* V4L2_CID_GAIN (Q8) to the register code, within the gain the driver
  * advertises: reg = BASE - BASE / gain = BASE - (BASE << Q8 shift) / val. */
