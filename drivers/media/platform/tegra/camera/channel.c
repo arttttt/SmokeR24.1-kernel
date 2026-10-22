@@ -434,6 +434,13 @@ int tegra_channel_enable_stream(struct tegra_channel *chan)
 		tegra_channel_write(chan, TEGRA_VI_CSI_BASE(0) + TEGRA_VI_CSI_ERROR_STATUS, 0xFFFFFFFF);
 		tegra_channel_write(chan, TEGRA_VI_CSI_BASE(1) + TEGRA_VI_CSI_ERROR_STATUS, 0xFFFFFFFF);
 
+		/* The CSI's frame start counters, one per pixel parser:
+		 * the sensor's frame count, captured or not. One word for
+		 * either port, and no clear -- the other port's count goes
+		 * on. */
+		tegra_channel_write(chan, T124_CSI_DEBUG_CONTROL,
+				    T124_CSI_DEBUG_FRAME_STARTS);
+
 		/* CIL pad config — port specific */
 		if (port_num == 0) {
 			/* PORT_A: CILA = CD_BK_MODE, CILB = 0 */

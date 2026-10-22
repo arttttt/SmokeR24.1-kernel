@@ -520,7 +520,7 @@ void tegra_csi_start_streaming(struct tegra_csi_device *csi,
 		 (port->lanes - 1));
 
 	/* Init debug counters for error-path diagnostics (tegra_csi_status) */
-	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, T124_CSI_DEBUG_COUNTER_CFG);
+	pp_write(port, TEGRA_CSI_DEBUG_CONTROL, TEGRA_CSI_DEBUG_COUNTER_CFG);
 
 	pp_write(port, TEGRA_CSI_PIXEL_STREAM_PP_COMMAND,
 		 (0xF << CSI_PP_START_MARKER_FRAME_MAX_OFFSET) |
@@ -541,11 +541,23 @@ int tegra_csi_error(struct tegra_csi_device *csi,
 	 * corrected automatically
 	*/
 	val = pp_read(port, TEGRA_CSI_PIXEL_PARSER_STATUS);
-	err |= val & T124_CIL_ESCAPE_MODE_CMD_ERR;
+	err |= val & T124_PP_HPA_UNC_HDR_ERR;
 	pp_write(port, TEGRA_CSI_PIXEL_PARSER_STATUS, val);
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	/* T124's one-lane port is on CIL E, not the brick next to its
+	 * pixel parser that port->cil points at; CIL E has its lane's
+	 * errors in its one status register. */
+	if (port->lanes == 1) {
+		val = csi_read(csi, T124_REL_CIL_E_STATUS, 0);
+		err |= val & T124_CIL_SOT_MB_ERR;
+		csi_write(csi, T124_REL_CIL_E_STATUS, val, 0);
+		return err;
+	}
+#endif
+
 	val = cil_read(port, TEGRA_CSI_CIL_STATUS);
-	err |= val & T124_CIL_SYNC_WORD_ERR;
+	err |= val & T124_CIL_SOT_MB_ERR;
 	cil_write(port, TEGRA_CSI_CIL_STATUS, val);
 
 	val = cil_read(port, TEGRA_CSI_CILX_STATUS);
@@ -572,10 +584,8 @@ void tegra_csi_status(struct tegra_csi_device *csi,
 #if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
 	/* Also dump CILE status for T124 CSI_C/CSI_E */
 	if (port->lanes == 1) {
-		dev_err(csi->dev, "CSI%d CILE_STATUS 0x%08x CILEX_STATUS 0x%08x\n",
-			port_num,
-			csi_read(csi, 0x1E0, 0),  /* CIL_E_STATUS */
-			csi_read(csi, 0x1E4, 0)); /* CIL_EX_STATUS */
+		dev_err(csi->dev, "CSI%d CIL_E_STATUS 0x%08x\n", port_num,
+			csi_read(csi, T124_REL_CIL_E_STATUS, 0));
 		/* Also check PP_A status — maybe data routes there */
 		dev_err(csi->dev, "CSI%d PP_A_STATUS 0x%08x PP_B_STATUS 0x%08x\n",
 			port_num,
@@ -584,12 +594,18 @@ void tegra_csi_status(struct tegra_csi_device *csi,
 	}
 #endif
 
+#if defined(CONFIG_ARCH_TEGRA_12x_SOC) || defined(CONFIG_ARCH_TEGRA_13x_SOC)
+	dev_err(csi->dev, "CSI%d frame starts PP_A %u PP_B %u\n", port_num,
+		csi_read(csi, T124_REL(T124_CSI_FRAME_COUNTER(0)), 0),
+		csi_read(csi, T124_REL(T124_CSI_FRAME_COUNTER(1)), 0));
+#else
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_0);
 	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_0 0x%08x\n", port_num, val);
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_1);
 	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_1 0x%08x\n", port_num, val);
 	val = pp_read(port, TEGRA_CSI_DEBUG_COUNTER_2);
 	dev_err(csi->dev, "CSI%d DEBUG_COUNTER_2 0x%08x\n", port_num, val);
+#endif
 }
 EXPORT_SYMBOL(tegra_csi_status);
 

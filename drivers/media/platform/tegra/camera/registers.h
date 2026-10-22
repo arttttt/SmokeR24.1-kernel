@@ -193,6 +193,10 @@
 #define TEGRA_CSI_DEBUG_COUNTER_0			0x220
 #define TEGRA_CSI_DEBUG_COUNTER_1			0x224
 #define TEGRA_CSI_DEBUG_COUNTER_2			0x228
+/* T210 (NVIDIA's value): counters on frame starts, line starts and
+ * HPA headers. T124's debug registers are elsewhere and laid out
+ * differently: t124_registers.h. */
+#define TEGRA_CSI_DEBUG_COUNTER_CFG			0x454340E1
 
 
 /* CSI Pixel Parser registers */

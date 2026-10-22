@@ -73,10 +73,13 @@
 #define T124_CIL_CMD_HI_MASK                    0xFFFF0000
 
 /*
- * T124 CIL status error bits
+ * T124 CSI error bits (TRM 26.16) that cannot be corrected
  */
-#define T124_CIL_ESCAPE_MODE_CMD_ERR            0x4000
-#define T124_CIL_SYNC_WORD_ERR                  0x02
+/* CSI_PIXEL_PARSER_A/B_STATUS: uncorrectable packet header error */
+#define T124_PP_HPA_UNC_HDR_ERR                 0x4000
+/* CSI_CSI_CIL_A..E_STATUS: start of transmission multi bit error */
+#define T124_CIL_SOT_MB_ERR                     0x02
+/* CSI_CSI_CILA_STATUS..: data lane 0 and 1 SOT multi bit errors */
 #define T124_CIL_DATA_LANE_ERR                  0x00020020
 
 /*
@@ -128,7 +131,8 @@
 #define T124_PHY_CILE_CONTROL0                  0xA10
 #define T124_CSI_CIL_E_INT_MASK                 0xA14
 #define T124_CSI_CIL_E_STATUS                   0xA18
-#define T124_CSI_CILE_STATUS                    0xA1C
+/* CIL E is a one-lane brick: its lane errors are in CIL_E_STATUS, and
+ * 0xA1C is CIL_E_ESCAPE_MODE_COMMAND, not a lane status. */
 #define T124_CSICIL_SW_SENSOR_E_RESET           0xA24
 
 /*
@@ -138,16 +142,33 @@
 #define T124_CSI_PG_CTRL_B                      0xA9C
 
 /*
- * T124 CSI misc registers (absolute from VI base)
+ * T124 CSI misc registers (absolute from VI base, TRM 26.16.85-92)
  */
-#define T124_CSI_CLKEN_OVERRIDE                 0xAF4
-#define T124_CSI_DEBUG_CONTROL_A                0xAE4
-#define T124_CSI_DEBUG_COUNTER_0                0xAE8
+#define T124_CSI_STALL_COUNTER                  0xAE8
 #define T124_CSI_READONLY_STATUS                0xAEC
 #define T124_CSI_SW_STATUS_RESET                0xAF0
+#define T124_CSI_CLKEN_OVERRIDE                 0xAF4
+#define T124_CSI_DEBUG_CONTROL                  0xAF8
+#define T124_CSI_DEBUG_COUNTER(n)               (0xAFC + 4 * (n))
 
-/* Debug counter config: tracks frame start, line starts, hpa headers */
-#define T124_CSI_DEBUG_COUNTER_CFG              0x454340E1
+/*
+ * CSI_DEBUG_CONTROL: one set of three counters for the CSI, each
+ * counting the event its select field names, of either pixel parser.
+ * DEBUG_EN powers them; CLR_DBG_CNT_n (bits 5-7) clears one, and is
+ * never set here -- a reader takes differences.
+ */
+#define T124_CSI_DEBUG_EN                       (1 << 0)
+#define T124_CSI_DBG_CNT_SEL(n, event)          ((event) << (8 + 8 * (n)))
+#define T124_CSI_DBG_PPA_FRAME_STARTS           67
+#define T124_CSI_DBG_PPB_FRAME_STARTS           73
+
+/* Counter n counts pixel parser n's frame starts: the sensor's frames,
+ * whether the VI captures them or not. */
+#define T124_CSI_FRAME_COUNTER(pp)              T124_CSI_DEBUG_COUNTER(pp)
+#define T124_CSI_DEBUG_FRAME_STARTS \
+	(T124_CSI_DEBUG_EN | \
+	 T124_CSI_DBG_CNT_SEL(0, T124_CSI_DBG_PPA_FRAME_STARTS) | \
+	 T124_CSI_DBG_CNT_SEL(1, T124_CSI_DBG_PPB_FRAME_STARTS))
 
 /*
  * T124 CIL offsets relative to csi->iomem[0] for csi_write/csi_read
@@ -157,13 +178,15 @@
  */
 #define T124_REL_CILC_PAD_CONFIG0               0x15C   /* 0x994 - 0x838 */
 #define T124_REL_PHY_CILC_CONTROL0              0x164   /* 0x99C - 0x838 */
-#define T124_REL_CILC_INT_MASK                  0x168   /* 0x9AC - 0x838 */
+#define T124_REL_CILC_INT_MASK                  0x168   /* 0x9A0 - 0x838 */
 #define T124_REL_CILD_PAD_CONFIG0               0x190   /* 0x9C8 - 0x838 */
 #define T124_REL_PHY_CILD_CONTROL0              0x198   /* 0x9D0 - 0x838 */
 #define T124_REL_CILD_INT_MASK                  0x19C   /* 0x9D4 - 0x838 */
 #define T124_REL_CILE_PAD_CONFIG0               0x1D0   /* 0xA08 - 0x838 */
 #define T124_REL_PHY_CILE_CONTROL0              0x1D8   /* 0xA10 - 0x838 */
 #define T124_REL_CILE_INT_MASK                  0x1DC   /* 0xA14 - 0x838 */
+#define T124_REL_CIL_E_STATUS                   0x1E0   /* 0xA18 - 0x838 */
+#define T124_REL(abs)                           ((abs) - 0x838)
 
 /*
  * T124 CSI-E DPD index override.
