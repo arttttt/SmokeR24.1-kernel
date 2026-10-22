@@ -19,6 +19,7 @@
 #include <linux/nvhost.h>
 
 #include <media/videobuf2-core.h>
+#include <media/v4l2-event.h>
 #include <media/camera_common.h>
 
 #include "camera/mc_common.h"
@@ -182,10 +183,23 @@ static int arm_wait_mw_ack(struct tegra_channel *chan,
 		tegra_channel_capture_timeout_jiffies(chan), NULL, ts);
 }
 
+/* Sensor frames the channel's pixel parser has seen start since the
+ * stream began: the CSI's frame start counter (t124_registers.h), which
+ * counts whether the VI has a buffer armed or not. */
+static u32 frame_count(struct tegra_channel *chan)
+{
+	return tegra_channel_read(chan, T124_CSI_FRAME_COUNTER(chan->port[0]))
+		- chan->frame_count_base;
+}
+
 static void buffer_done(struct tegra_channel *chan, struct vb2_buffer *vb,
 			struct timespec *ts, int state)
 {
-	vb->v4l2_buf.sequence = chan->sequence++;
+	/* The sensor's frame number, not the buffers': a frame the VI had
+	 * no buffer for leaves a gap. chan->sequence still counts the
+	 * buffers, for the logs. */
+	vb->v4l2_buf.sequence = to_tegra_channel_buffer(vb)->frame;
+	chan->sequence++;
 	vb->v4l2_buf.field = V4L2_FIELD_NONE;
 	vb->v4l2_buf.timestamp.tv_sec = ts->tv_sec;
 	vb->v4l2_buf.timestamp.tv_usec = ts->tv_nsec / NSEC_PER_USEC;
@@ -206,6 +220,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	/* What a buffer that fails here is stamped with (CLOCK_MONOTONIC,
 	 * as the queue declares); a timed-out wait leaves ts as it is. */
 	ktime_get_ts(&ts);
+	buf->frame = 0;
 
 	/* First frame: enable stream + set destination
 	 *
@@ -254,7 +269,13 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			return err;
 		}
 		chan->bfirst_fstart = true;
+		/* The stream's frames count from here; enable_stream has
+		 * the CSI counting them. */
+		chan->frame_count_base = tegra_channel_read(chan,
+				T124_CSI_FRAME_COUNTER(chan->port[0]));
 	}
+	/* A buffer that fails before its frame starts: the frame due. */
+	buf->frame = frame_count(chan);
 
 	/* Program surface address based on ISP mode */
 	for (index = 0; index < chan->valid_ports; index++) {
@@ -325,6 +346,20 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 			 * single late frame would end the stream. */
 			return 0;
 		}
+	}
+
+	/* The frame has started: the counter has counted it. Userspace
+	 * hears of its start now (V4L2_EVENT_FRAME_SYNC), numbered as its
+	 * buffer will be -- the moment to write what is to take effect a
+	 * sensor delay from it. */
+	buf->frame = frame_count(chan) - 1;
+	{
+		struct v4l2_event ev;
+
+		memset(&ev, 0, sizeof(ev));
+		ev.type = V4L2_EVENT_FRAME_SYNC;
+		ev.u.frame_sync.frame_sequence = buf->frame;
+		v4l2_event_queue(&chan->video, &ev);
 	}
 
 	/* DMA started — hand off to done-thread for MW_ACK */

@@ -53,6 +53,8 @@ enum channel_capture_state {
  * @queue: buffer list entry in the channel queued buffers list
  * @chan: channel that uses the buffer
  * @addr: Tegra IOVA buffer address for VI output
+ * @frame: the sensor frame captured into it, counted by the CSI from
+ *	the stream's start: its v4l2 sequence
  */
 struct tegra_channel_buffer {
 	struct vb2_buffer buf;
@@ -60,6 +62,7 @@ struct tegra_channel_buffer {
 	struct tegra_channel *chan;
 
 	dma_addr_t addr;
+	u32 frame;
 };
 
 #define to_tegra_channel_buffer(vb) \
@@ -159,6 +162,9 @@ struct tegra_channel {
 	unsigned int io_id;
 	unsigned int num_subdevs;
 	unsigned int sequence;
+	/* The CSI frame start counter at the stream's start: frames are
+	 * numbered from it (T124). */
+	u32 frame_count_base;
 	unsigned int saved_ctx_bypass;
 	unsigned int saved_ctx_pgmode;
 	unsigned int gang_mode;

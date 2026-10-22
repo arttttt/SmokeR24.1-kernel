@@ -1968,6 +1968,10 @@ static int tegra_channel_subscribe_event(struct v4l2_fh *fh,
 	switch (sub->type) {
 	case V4L2_EVENT_SOURCE_CHANGE:
 		return v4l2_event_subscribe(fh, sub, 4, NULL);
+	case V4L2_EVENT_FRAME_SYNC:
+		/* The start of each frame the VI captures (single shot on
+		 * T124): its frame number, as its buffer's sequence. */
+		return v4l2_event_subscribe(fh, sub, 4, NULL);
 	}
 	return v4l2_ctrl_subscribe_event(fh, sub);
 }
