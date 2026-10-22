@@ -354,6 +354,19 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	 * buffer will be -- the moment to write what is to take effect a
 	 * sensor delay from it. */
 	buf->frame = frame_count(chan) - 1;
+	/* The count is read as this thread wakes, not at the interrupt
+	 * (ts): a wake a frame late reads the next frame's number. */
+	{
+		struct timespec now;
+		s64 late;
+
+		ktime_get_ts(&now);
+		late = timespec_to_ns(&now) - timespec_to_ns(&ts);
+		if (late > 10 * NSEC_PER_MSEC)
+			dev_warn_ratelimited(&chan->video.dev,
+				"frame %u: numbered %lld us after its start\n",
+				buf->frame, late / NSEC_PER_USEC);
+	}
 	/* A counter that did not move counts nothing: frame numbers would
 	 * repeat, and userspace bind every request to the wrong frame. */
 	if (buf->frame == chan->last_frame)
