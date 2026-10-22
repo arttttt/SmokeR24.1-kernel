@@ -160,7 +160,14 @@
 #define T124_CSI_DEBUG_EN                       (1 << 0)
 #define T124_CSI_DBG_CNT_SEL(n, event)          ((event) << (8 + 8 * (n)))
 #define T124_CSI_DBG_PPA_FRAME_STARTS           67
-#define T124_CSI_DBG_PPB_FRAME_STARTS           73
+/* The TRM lists PP B's events at 70-74; they count at 80-84. Measured
+ * on mocha (22.10.2026, OV5693 on PP B at ~28 fps, every select 0-84
+ * tried for a second): 70-79 count nothing, 80 ~30160 (line packets),
+ * 81 56 (short packets), 82 ~30940 (all packets), 83 28 (frame
+ * starts: 75 against 73 FRAME_START syncpoints in a ~3 s trace), 84
+ * 29 (frame ends). PP A's are where the TRM has them: 64 counts lines
+ * and 67 frame starts on the IMX179. */
+#define T124_CSI_DBG_PPB_FRAME_STARTS           83
 
 /* Counter n counts pixel parser n's frame starts: the sensor's frames,
  * whether the VI captures them or not. */

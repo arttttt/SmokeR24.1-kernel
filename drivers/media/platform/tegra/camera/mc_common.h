@@ -163,8 +163,9 @@ struct tegra_channel {
 	unsigned int num_subdevs;
 	unsigned int sequence;
 	/* The CSI frame start counter at the stream's start: frames are
-	 * numbered from it (T124). */
+	 * numbered from it (T124); and the last frame a buffer got. */
 	u32 frame_count_base;
+	u32 last_frame;
 	unsigned int saved_ctx_bypass;
 	unsigned int saved_ctx_pgmode;
 	unsigned int gang_mode;

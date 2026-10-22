@@ -273,6 +273,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		 * the CSI counting them. */
 		chan->frame_count_base = tegra_channel_read(chan,
 				T124_CSI_FRAME_COUNTER(chan->port[0]));
+		chan->last_frame = (u32)-1;
 	}
 	/* A buffer that fails before its frame starts: the frame due. */
 	buf->frame = frame_count(chan);
@@ -353,6 +354,13 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	 * buffer will be -- the moment to write what is to take effect a
 	 * sensor delay from it. */
 	buf->frame = frame_count(chan) - 1;
+	/* A counter that did not move counts nothing: frame numbers would
+	 * repeat, and userspace bind every request to the wrong frame. */
+	if (buf->frame == chan->last_frame)
+		dev_warn_ratelimited(&chan->video.dev,
+			"frame start counter did not move: frame %u again\n",
+			buf->frame);
+	chan->last_frame = buf->frame;
 	{
 		struct v4l2_event ev;
 
