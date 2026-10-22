@@ -16,6 +16,7 @@
 
 #include <linux/kthread.h>
 #include <linux/freezer.h>
+#include <linux/math64.h>
 #include <linux/nvhost.h>
 
 #include <media/videobuf2-core.h>
@@ -365,7 +366,7 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 		if (late > 10 * NSEC_PER_MSEC)
 			dev_warn_ratelimited(&chan->video.dev,
 				"frame %u: numbered %lld us after its start\n",
-				buf->frame, late / NSEC_PER_USEC);
+				buf->frame, div_s64(late, NSEC_PER_USEC));
 	}
 	/* A counter that did not move counts nothing: frame numbers would
 	 * repeat, and userspace bind every request to the wrong frame. */
