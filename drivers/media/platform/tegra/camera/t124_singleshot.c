@@ -203,6 +203,10 @@ static int t124_ss_capture_start(struct tegra_channel *chan,
 	u32 thresh[TEGRA_CSI_BLOCKS] = { 0 };
 	struct timespec ts;
 
+	/* What a buffer that fails here is stamped with (CLOCK_MONOTONIC,
+	 * as the queue declares); a timed-out wait leaves ts as it is. */
+	ktime_get_ts(&ts);
+
 	/* First frame: enable stream + set destination
 	 *
 	 * EXPERIMENT LOG (2026-04-10):
@@ -341,10 +345,18 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 	int err = 0, index;
 	int state = VB2_BUF_STATE_DONE;
 
+	/* The buffer's timestamp is CLOCK_MONOTONIC, as the queue
+	 * declares: the MW_ACK wait below gives the time its interrupt
+	 * arrived -- the frame's end in memory. ISP streaming has no
+	 * MW_ACK and is stamped as the ISP finishes; a buffer whose wait
+	 * fails keeps this one. */
+	ktime_get_ts(&ts);
+
 	if (chan->use_isp && !isp_reprocess) {
 		/* ISP streaming: process_frame already submitted in
 		 * capture_start (before VI trigger). Just wait OP_DONE. */
 		err = isp_t124_wait_frame(chan->isp);
+		ktime_get_ts(&ts);
 		if (err) {
 			dev_err(&chan->video.dev,
 				"ISP wait_frame timeout\n");
@@ -415,8 +427,6 @@ static void t124_ss_capture_done(struct tegra_channel *chan,
 		}
 	}
 
-	if (!err)
-		getrawmonotonic(&ts);
 	buffer_done(chan, &buf->buf, &ts, state);
 }
 
