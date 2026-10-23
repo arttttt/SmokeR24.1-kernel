@@ -83,6 +83,13 @@ static struct tegra_io_dpd csib_io = {
 #define IMX179_DEFAULT_EXPOSURE_COARSE	\
 	(IMX179_DEFAULT_FRAME_LENGTH - IMX179_MAX_COARSE_DIFF)
 
+/* The effective pixel array, 3280×2464 (Sony's IMX179 figures; the
+ * full-resolution mode reads 3280 columns and rows 2..2461 of it). The
+ * analog crop registers address this array, so it is the coordinate
+ * space of every rectangle the selection API reports. */
+#define IMX179_PIXEL_ARRAY_WIDTH	3280
+#define IMX179_PIXEL_ARRAY_HEIGHT	2464
+
 #define IMX179_DEFAULT_MODE		IMX179_MODE_1920X1080
 #define IMX179_DEFAULT_WIDTH		1920
 #define IMX179_DEFAULT_HEIGHT		1080
@@ -892,6 +899,50 @@ static int imx179_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *param)
 	return 0;
 }
 
+/* The value a mode's table last writes to an 8-bit register, or `def`
+ * when it writes none. */
+static u32 imx179_table_reg(const imx179_reg *table, u16 addr, u32 def)
+{
+	for (; table->addr != IMX179_TABLE_END; table++)
+		if (table->addr == addr)
+			def = table->val;
+	return def;
+}
+
+/* The part of the pixel array a mode's frame shows, from what its table
+ * programs: the analog crop 0x0344..0x034B (inclusive ends), then, with
+ * the scaler on (0x0401: 1 horizontal, 2 both), the output 0x034C..0x034F
+ * taken from the window's top left at 16/M (M at 0x0404..0x0405) — where
+ * out·M/16 falls short of the window, the rest is not in the frame.
+ * Binning and skipping thin the window without narrowing it. No mode
+ * sets the digital crop (0x0408..0x040F), which stays at its full-frame
+ * reset. */
+static void imx179_mode_crop(int mode, struct v4l2_rect *r)
+{
+	const imx179_reg *t = mode_table[mode];
+	u32 x0 = camera_common_table_reg16(t, 0x0344, 0x0345, IMX179_TABLE_END);
+	u32 y0 = camera_common_table_reg16(t, 0x0346, 0x0347, IMX179_TABLE_END);
+	u32 x1 = camera_common_table_reg16(t, 0x0348, 0x0349, IMX179_TABLE_END);
+	u32 y1 = camera_common_table_reg16(t, 0x034A, 0x034B, IMX179_TABLE_END);
+	u32 out_w = camera_common_table_reg16(t, 0x034C, 0x034D,
+					      IMX179_TABLE_END);
+	u32 out_h = camera_common_table_reg16(t, 0x034E, 0x034F,
+					      IMX179_TABLE_END);
+	u32 scaling = imx179_table_reg(t, 0x0401, 0);
+	u32 m = imx179_table_reg(t, 0x0404, 0) << 8 |
+		imx179_table_reg(t, 0x0405, 16);
+
+	r->left = x0;
+	r->top = y0;
+	r->width = x1 - x0 + 1;
+	r->height = y1 - y0 + 1;
+	if (scaling >= 1)
+		r->width = min_t(u32, r->width, DIV_ROUND_CLOSEST(out_w * m, 16));
+	if (scaling == 2)
+		r->height = min_t(u32, r->height,
+				  DIV_ROUND_CLOSEST(out_h * m, 16));
+}
+
 /* Setting the format picks the mode; the timing controls' ranges follow
  * it, so userspace reads them for the mode it configured. */
 static int imx179_s_mbus_fmt(struct v4l2_subdev *sd,
@@ -928,27 +979,77 @@ static int imx179_get_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_fh *fh,
 		struct v4l2_subdev_format *format)
 {
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+		if (!fh)
+			return -EINVAL;
+		format->format = *v4l2_subdev_get_try_format(fh, format->pad);
+		return 0;
+	}
 	return camera_common_g_fmt(sd, &format->format);
 }
 
+/* A TRY format is kept with the file handle, its mode's crop beside it,
+ * so userspace learns every mode's field of view without switching the
+ * sensor. The channel tries formats without a file handle: nothing to
+ * keep then. */
 static int imx179_set_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_fh *fh,
 	struct v4l2_subdev_format *format)
 {
+	int mode;
 	int ret;
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		ret = camera_common_try_fmt(sd, &format->format);
-	else
-		ret = imx179_s_mbus_fmt(sd, &format->format);
+	if (format->which != V4L2_SUBDEV_FORMAT_TRY)
+		return imx179_s_mbus_fmt(sd, &format->format);
 
+	ret = camera_common_try_fmt_mode(sd, &format->format, &mode);
+	if (fh && mode >= 0) {
+		*v4l2_subdev_get_try_format(fh, format->pad) = format->format;
+		imx179_mode_crop(mode, v4l2_subdev_get_try_crop(fh, format->pad));
+	}
 	return ret;
+}
+
+/* CROP is the mode's window on the pixel array (the TRY format's, or
+ * the active mode's); NATIVE_SIZE and the crop bounds are the array. */
+static int imx179_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_fh *fh,
+				struct v4l2_subdev_selection *sel)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+
+	if (sel->pad != 0)
+		return -EINVAL;
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		if (sel->which == V4L2_SUBDEV_FORMAT_TRY) {
+			if (!fh)
+				return -EINVAL;
+			sel->r = *v4l2_subdev_get_try_crop(fh, sel->pad);
+		} else {
+			imx179_mode_crop(s_data->mode, &sel->r);
+		}
+		return 0;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = IMX179_PIXEL_ARRAY_WIDTH;
+		sel->r.height = IMX179_PIXEL_ARRAY_HEIGHT;
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
 
 static struct v4l2_subdev_pad_ops imx179_subdev_pad_ops = {
 	.enum_mbus_code = camera_common_enum_mbus_code,
 	.set_fmt = imx179_set_fmt,
 	.get_fmt = imx179_get_fmt,
+	.get_selection = imx179_get_selection,
 };
 
 static struct v4l2_subdev_ops imx179_subdev_ops = {
