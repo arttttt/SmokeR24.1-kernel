@@ -72,6 +72,16 @@ static struct tegra_io_dpd csie_io = {
 #define OV5693_DEFAULT_EXPOSURE_COARSE	\
 	(OV5693_DEFAULT_FRAME_LENGTH-OV5693_MAX_COARSE_DIFF)
 
+/* The pixel array the window registers address, 2624×1956, and within
+ * it the 2592×1944 active area at (16, 6) (the mainline ov5693 driver's
+ * figures). */
+#define OV5693_NATIVE_WIDTH		2624
+#define OV5693_NATIVE_HEIGHT		1956
+#define OV5693_ACTIVE_LEFT		16
+#define OV5693_ACTIVE_TOP		6
+#define OV5693_ACTIVE_WIDTH		2592
+#define OV5693_ACTIVE_HEIGHT		1944
+
 #define OV5693_DEFAULT_MODE	OV5693_MODE_1920X1080
 #define OV5693_DEFAULT_HDR_MODE	OV5693_MODE_1920X1080_HDR
 #define OV5693_DEFAULT_WIDTH	1920
@@ -930,6 +940,60 @@ static int ov5693_s_mbus_fmt(struct v4l2_subdev *sd,
 	return ret;
 }
 
+/* The value a mode's table last writes to an 8-bit register, or `def`
+ * when it writes none. */
+static u32 ov5693_table_reg(const ov5693_reg *table, u16 addr, u32 def)
+{
+	for (; table->addr != OV5693_TABLE_END; table++)
+		if (table->addr == addr)
+			def = table->val;
+	return def;
+}
+
+/* The pixel step an increment register makes: odd and even increments
+ * in its high and low nibbles (0x11 every pixel, 0x31 every second). */
+static u32 ov5693_inc_step(u32 inc)
+{
+	return ((inc >> 4) + (inc & 0xf)) / 2;
+}
+
+/* The part of the pixel array a mode's frame shows, from what its table
+ * programs: the crop 0x3800..0x3807 (start x, start y, end x, end y; the
+ * end exclusive), thinned by the increments 0x3814/0x3815, and within it
+ * the ISP window from the offset 0x3810..0x3813 (in thinned pixels).
+ * With the scaler off (0x5002 bit 7) the output 0x3808..0x380B takes
+ * that many thinned pixels from the offset; with it on, the rest of the
+ * crop from the offset is scaled into the output. */
+static void ov5693_mode_crop(int mode, struct v4l2_rect *r)
+{
+	const ov5693_reg *t = mode_table[mode];
+	u32 x0 = camera_common_table_reg16(t, 0x3800, 0x3801, OV5693_TABLE_END);
+	u32 y0 = camera_common_table_reg16(t, 0x3802, 0x3803, OV5693_TABLE_END);
+	u32 x1 = camera_common_table_reg16(t, 0x3804, 0x3805, OV5693_TABLE_END);
+	u32 y1 = camera_common_table_reg16(t, 0x3806, 0x3807, OV5693_TABLE_END);
+	u32 out_w = camera_common_table_reg16(t, 0x3808, 0x3809,
+					      OV5693_TABLE_END);
+	u32 out_h = camera_common_table_reg16(t, 0x380a, 0x380b,
+					      OV5693_TABLE_END);
+	u32 off_x = camera_common_table_reg16(t, 0x3810, 0x3811,
+					      OV5693_TABLE_END);
+	u32 off_y = camera_common_table_reg16(t, 0x3812, 0x3813,
+					      OV5693_TABLE_END);
+	u32 step_x = ov5693_inc_step(ov5693_table_reg(t, 0x3814, 0x11));
+	u32 step_y = ov5693_inc_step(ov5693_table_reg(t, 0x3815, 0x11));
+	bool scaled = ov5693_table_reg(t, 0x5002, 0) & 0x80;
+
+	r->left = x0 + off_x * step_x;
+	r->top = y0 + off_y * step_y;
+	if (scaled) {
+		r->width = x1 - r->left;
+		r->height = y1 - r->top;
+	} else {
+		r->width = out_w * step_x;
+		r->height = out_h * step_y;
+	}
+}
+
 static struct v4l2_subdev_video_ops ov5693_subdev_video_ops = {
 	.s_stream	= ov5693_s_stream,
 	.s_mbus_fmt	= ov5693_s_mbus_fmt,
@@ -952,27 +1016,83 @@ static int ov5693_get_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_fh *fh,
 		struct v4l2_subdev_format *format)
 {
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+		if (!fh)
+			return -EINVAL;
+		format->format = *v4l2_subdev_get_try_format(fh, format->pad);
+		return 0;
+	}
 	return camera_common_g_fmt(sd, &format->format);
 }
 
+/* A TRY format is kept with the file handle, its mode's crop beside it,
+ * so userspace learns every mode's field of view without switching the
+ * sensor. The channel tries formats without a file handle: nothing to
+ * keep then. */
 static int ov5693_set_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_fh *fh,
 	struct v4l2_subdev_format *format)
 {
+	int mode;
 	int ret;
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		ret = camera_common_try_fmt(sd, &format->format);
-	else
-		ret = ov5693_s_mbus_fmt(sd, &format->format);
+	if (format->which != V4L2_SUBDEV_FORMAT_TRY)
+		return ov5693_s_mbus_fmt(sd, &format->format);
 
+	ret = camera_common_try_fmt_mode(sd, &format->format, &mode);
+	if (fh && mode >= 0) {
+		*v4l2_subdev_get_try_format(fh, format->pad) = format->format;
+		ov5693_mode_crop(mode, v4l2_subdev_get_try_crop(fh, format->pad));
+	}
 	return ret;
+}
+
+/* CROP is the mode's window on the pixel array (the TRY format's, or
+ * the active mode's); NATIVE_SIZE is the array, the crop bounds its
+ * active area. */
+static int ov5693_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_fh *fh,
+				struct v4l2_subdev_selection *sel)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct camera_common_data *s_data = to_camera_common_data(client);
+
+	if (sel->pad != 0)
+		return -EINVAL;
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		if (sel->which == V4L2_SUBDEV_FORMAT_TRY) {
+			if (!fh)
+				return -EINVAL;
+			sel->r = *v4l2_subdev_get_try_crop(fh, sel->pad);
+		} else {
+			ov5693_mode_crop(s_data->mode, &sel->r);
+		}
+		return 0;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = OV5693_NATIVE_WIDTH;
+		sel->r.height = OV5693_NATIVE_HEIGHT;
+		return 0;
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+		sel->r.left = OV5693_ACTIVE_LEFT;
+		sel->r.top = OV5693_ACTIVE_TOP;
+		sel->r.width = OV5693_ACTIVE_WIDTH;
+		sel->r.height = OV5693_ACTIVE_HEIGHT;
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
 
 static struct v4l2_subdev_pad_ops ov5693_subdev_pad_ops = {
 	.enum_mbus_code = camera_common_enum_mbus_code,
 	.set_fmt = ov5693_set_fmt,
 	.get_fmt = ov5693_get_fmt,
+	.get_selection = ov5693_get_selection,
 };
 
 static struct v4l2_subdev_ops ov5693_subdev_ops = {
