@@ -238,6 +238,13 @@ int camera_common_enum_mbus_code(struct v4l2_subdev *sd,
 				struct v4l2_subdev_mbus_code_enum *code);
 int camera_common_enum_fmt(struct v4l2_subdev *sd, unsigned int index,
 			 enum v4l2_mbus_pixelcode *code);
+/* A format's mode: the frame size that matches with the HDR setting,
+ * preferring the requested frame rate; the default mode, and its size in
+ * `mf`, when none does. Only reports: the sensor's mode and format are
+ * set by camera_common_s_fmt alone, so a TRY leaves the active mode as
+ * it was. `mode` is -1 when the HDR setting could not be read. */
+int camera_common_try_fmt_mode(struct v4l2_subdev *sd,
+			       struct v4l2_mbus_framefmt *mf, int *mode);
 int camera_common_try_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_mbus_framefmt *mf);
 int camera_common_s_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf);

@@ -425,15 +425,19 @@ int camera_common_enum_fmt(struct v4l2_subdev *sd, unsigned int index,
 }
 EXPORT_SYMBOL(camera_common_enum_fmt);
 
-int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
+int camera_common_try_fmt_mode(struct v4l2_subdev *sd,
+			       struct v4l2_mbus_framefmt *mf, int *mode)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct camera_common_data *s_data = to_camera_common_data(client);
 	struct v4l2_control hdr_control;
 	const struct camera_common_frmfmt *frmfmt = s_data->frmfmt;
 	int hdr_en;
+	int fmt_width, fmt_height;
 	int err = 0;
 	int i;
+
+	*mode = -1;
 
 	dev_dbg(&client->dev, "%s: size %i x %i\n", __func__,
 		 mf->width, mf->height);
@@ -449,17 +453,17 @@ int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 
 	hdr_en = switch_ctrl_qmenu[hdr_control.value];
 
-	s_data->mode = s_data->def_mode;
-	s_data->fmt_width = s_data->def_width;
-	s_data->fmt_height = s_data->def_height;
+	*mode = s_data->def_mode;
+	fmt_width = s_data->def_width;
+	fmt_height = s_data->def_height;
 
 	for (i = 0; i < s_data->numfmts; i++) {
 		if (mf->width == frmfmt[i].size.width &&
 		    mf->height == frmfmt[i].size.height &&
 		    hdr_en == frmfmt[i].hdr_en) {
-			s_data->mode = frmfmt[i].mode;
-			s_data->fmt_width = mf->width;
-			s_data->fmt_height = mf->height;
+			*mode = frmfmt[i].mode;
+			fmt_width = mf->width;
+			fmt_height = mf->height;
 			/* If framerate requested, keep searching for better match */
 			if (s_data->requested_fps == 0)
 				break;
@@ -471,8 +475,8 @@ int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 	}
 
 	if (i == s_data->numfmts) {
-		mf->width = s_data->fmt_width;
-		mf->height = s_data->fmt_height;
+		mf->width = fmt_width;
+		mf->height = fmt_height;
 		dev_dbg(&client->dev,
 			"%s: invalid resolution supplied to set mode %d %d\n",
 			__func__, mf->width, mf->height);
@@ -506,12 +510,21 @@ int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 
 	return err;
 }
+EXPORT_SYMBOL(camera_common_try_fmt_mode);
+
+int camera_common_try_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
+{
+	int mode;
+
+	return camera_common_try_fmt_mode(sd, mf, &mode);
+}
 EXPORT_SYMBOL(camera_common_try_fmt);
 
 int camera_common_s_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct camera_common_data *s_data = to_camera_common_data(client);
+	int mode;
 	int ret;
 
 	dev_dbg(&client->dev, "%s(%u) size %i x %i\n", __func__,
@@ -521,8 +534,13 @@ int camera_common_s_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 	if (!camera_common_find_datafmt(mf->code))
 		return -EINVAL;
 
-	ret = camera_common_try_fmt(sd, mf);
+	ret = camera_common_try_fmt_mode(sd, mf, &mode);
+	if (mode < 0)
+		return ret;
 
+	s_data->mode = mode;
+	s_data->fmt_width = mf->width;
+	s_data->fmt_height = mf->height;
 	s_data->colorfmt = camera_common_find_datafmt(mf->code);
 
 	return ret;
