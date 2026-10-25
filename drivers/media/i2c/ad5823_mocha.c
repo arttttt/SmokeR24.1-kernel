@@ -17,6 +17,7 @@
 #include <linux/delay.h>
 #include <linux/fs.h>
 #include <linux/i2c.h>
+#include <linux/ktime.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/module.h>
@@ -45,9 +46,11 @@
 
 /* Parking before the rail drops, as the upstream VCM drivers do on
  * suspend (dw9714, dw9807, dw9768, ak7375): down to code 0, the
- * spring's rest, 16 codes a step, a millisecond apart. */
-#define AD5823_PARK_STEP		16
-#define AD5823_PARK_STEP_US		1000
+ * spring's rest. In ARC mode (MODE 0) the chip walks the lens to a new
+ * code itself and does not answer on I2C until it is there, so one
+ * write of 0 is the ramp and the first answer after it is the end. */
+#define AD5823_PARK_POLL_MS		2
+#define AD5823_PARK_TIMEOUT_MS		300
 
 #define FOCAL_LENGTH			47300
 #define MAX_APERTURE			22000
@@ -232,23 +235,32 @@ static int ad5823_load_config(struct camera_common_focuser_data *s_data)
  * knock heard on close. */
 static void ad5823_park(struct ad5823 *priv)
 {
-	int code;
+	struct device *dev = &priv->i2c_client->dev;
+	unsigned int mode;
+	ktime_t start;
+	int waited = 0;
+	u32 from;
 
 	if (!priv->position_valid)
 		return;
 
-	dev_info(&priv->i2c_client->dev, "parking the lens from %u\n",
-		 priv->position);
-
-	for (code = (int)priv->position - AD5823_PARK_STEP; code > 0;
-	     code -= AD5823_PARK_STEP) {
-		if (ad5823_set_position(priv, code))
-			return;
-		usleep_range(AD5823_PARK_STEP_US, AD5823_PARK_STEP_US + 200);
-	}
-	if (ad5823_set_position(priv, 0))
+	from = priv->position;
+	start = ktime_get();
+	if (ad5823_set_position(priv, 0)) {
+		dev_warn(dev, "parking from %u: the write failed\n", from);
 		return;
-	msleep(SETTLETIME_MS);
+	}
+	while (regmap_read(priv->regmap, AD5823_MODE, &mode)) {
+		if (waited >= AD5823_PARK_TIMEOUT_MS) {
+			dev_warn(dev, "parking from %u: no answer in %d ms\n",
+				 from, waited);
+			return;
+		}
+		msleep(AD5823_PARK_POLL_MS);
+		waited += AD5823_PARK_POLL_MS;
+	}
+	dev_info(dev, "lens parked from %u in %lld us\n", from,
+		 ktime_to_us(ktime_sub(ktime_get(), start)));
 }
 
 static int ad5823_power_off(struct camera_common_focuser_data *s_data)
