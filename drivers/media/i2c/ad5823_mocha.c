@@ -42,6 +42,13 @@
 #define AD5823_FOCUS_INFINITY		140
 
 #define SETTLETIME_MS			15
+
+/* Parking before the rail drops, as the upstream VCM drivers do on
+ * suspend (dw9714, dw9807, dw9768, ak7375): down to code 0, the
+ * spring's rest, 16 codes a step, a millisecond apart. */
+#define AD5823_PARK_STEP		16
+#define AD5823_PARK_STEP_US		1000
+
 #define FOCAL_LENGTH			47300
 #define MAX_APERTURE			22000
 #define FNUMBER				22000
@@ -59,6 +66,11 @@ struct ad5823 {
 	struct v4l2_ctrl_handler		ctrl_handler;
 	struct camera_common_focuser_data	*s_data;
 	struct regmap				*regmap;
+	/* The code last written since power-on; valid only once one
+	 * was written, so the power cycles of a capability probe
+	 * (no lens moved) park nothing. */
+	u32					position;
+	bool					position_valid;
 	int					numctrls;
 	struct v4l2_ctrl			*ctrls[];
 };
@@ -95,6 +107,10 @@ static int ad5823_set_position(struct ad5823 *priv, u32 position)
 			    ((position >> 8) & 0x3) | AD5823_RING_CTRL);
 	ret |= regmap_write(priv->regmap, AD5823_VCM_CODE_LSB,
 			    position & 0xFF);
+	if (!ret) {
+		priv->position = position;
+		priv->position_valid = true;
+	}
 
 	dev_dbg(&s_data->i2c_client->dev, "%s: position=%d\n", __func__, position);
 	return ret;
@@ -209,14 +225,43 @@ static int ad5823_load_config(struct camera_common_focuser_data *s_data)
 	return 0;
 }
 
+/* Bring the lens down to its rest before the rail is cut. The
+ * capture channel powers the lens off first, while the sensor still
+ * holds CAM_AF_PWDN up; cutting the coil current with the lens out at
+ * an AF position lets the spring throw it against the end stop — the
+ * knock heard on close. */
+static void ad5823_park(struct ad5823 *priv)
+{
+	int code;
+
+	if (!priv->position_valid)
+		return;
+
+	dev_info(&priv->i2c_client->dev, "parking the lens from %u\n",
+		 priv->position);
+
+	for (code = (int)priv->position - AD5823_PARK_STEP; code > 0;
+	     code -= AD5823_PARK_STEP) {
+		if (ad5823_set_position(priv, code))
+			return;
+		usleep_range(AD5823_PARK_STEP_US, AD5823_PARK_STEP_US + 200);
+	}
+	if (ad5823_set_position(priv, 0))
+		return;
+	msleep(SETTLETIME_MS);
+}
+
 static int ad5823_power_off(struct camera_common_focuser_data *s_data)
 {
+	struct ad5823 *priv = (struct ad5823 *)s_data->priv;
+
 	dev_dbg(&s_data->i2c_client->dev, "%s++\n", __func__);
 
-	/* No lens-position write here. The chip is about to lose
-	 * register state on the next power_on/init pair anyway,
-	 * and the userspace HAL owns the focus position — it will
-	 * re-issue V4L2_CID_FOCUS_ABSOLUTE on its next frame. */
+	/* The HAL owns the position while the camera is open; on the
+	 * way down only the parking writes one. */
+	if (s_data->pwr_dev == AD5823_PWR_DEV_ON)
+		ad5823_park(priv);
+	priv->position_valid = false;
 
 	s_data->pwr_dev = AD5823_PWR_DEV_OFF;
 	return 0;
@@ -229,6 +274,7 @@ static int ad5823_power_on(struct camera_common_focuser_data *s_data)
 
 	dev_dbg(&s_data->i2c_client->dev, "%s\n", __func__);
 
+	priv->position_valid = false;
 	err = ad5823_init(priv);
 	if (err)
 		return err;
