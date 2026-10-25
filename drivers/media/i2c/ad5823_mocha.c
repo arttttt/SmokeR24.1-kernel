@@ -46,12 +46,14 @@
 
 /* Parking before the rail drops, as the upstream VCM drivers do on
  * suspend (dw9714, dw9807, dw9768, ak7375): down to code 0, the
- * spring's rest, 16 codes a step, a millisecond apart. In the ARC mode
+ * spring's rest, a step a millisecond. Their 16 codes a step still
+ * knocked on this module, if quieter (25.10.2026, by ear): 4 codes, a
+ * quarter of the speed, ~85 ms from an AF position of 340. In the ARC mode
  * the moves use (MODE 0) the chip shapes each move over its own time
  * and stops answering on I2C about a millisecond into it, so the walk
  * runs in the direct mode, where a code is a current at once. */
 #define AD5823_MODE_DIRECT		0x04
-#define AD5823_PARK_STEP		16
+#define AD5823_PARK_STEP		4
 #define AD5823_PARK_STEP_US		1000
 
 #define FOCAL_LENGTH			47300
