@@ -46,11 +46,13 @@
 
 /* Parking before the rail drops, as the upstream VCM drivers do on
  * suspend (dw9714, dw9807, dw9768, ak7375): down to code 0, the
- * spring's rest. In ARC mode (MODE 0) the chip walks the lens to a new
- * code itself and does not answer on I2C until it is there, so one
- * write of 0 is the ramp and the first answer after it is the end. */
-#define AD5823_PARK_POLL_MS		2
-#define AD5823_PARK_TIMEOUT_MS		300
+ * spring's rest, 16 codes a step, a millisecond apart. In the ARC mode
+ * the moves use (MODE 0) the chip shapes each move over its own time
+ * and stops answering on I2C about a millisecond into it, so the walk
+ * runs in the direct mode, where a code is a current at once. */
+#define AD5823_MODE_DIRECT		0x04
+#define AD5823_PARK_STEP		16
+#define AD5823_PARK_STEP_US		1000
 
 #define FOCAL_LENGTH			47300
 #define MAX_APERTURE			22000
@@ -228,6 +230,19 @@ static int ad5823_load_config(struct camera_common_focuser_data *s_data)
 	return 0;
 }
 
+/* A code alone, in whatever mode the chip is in. */
+static int ad5823_write_code(struct ad5823 *priv, int code)
+{
+	int ret;
+
+	ret = regmap_write(priv->regmap, AD5823_VCM_CODE_MSB,
+			   (code >> 8) & 0x3);
+	if (!ret)
+		ret = regmap_write(priv->regmap, AD5823_VCM_CODE_LSB,
+				   code & 0xFF);
+	return ret;
+}
+
 /* Bring the lens down to its rest before the rail is cut. The
  * capture channel powers the lens off first, while the sensor still
  * holds CAM_AF_PWDN up; cutting the coil current with the lens out at
@@ -236,9 +251,8 @@ static int ad5823_load_config(struct camera_common_focuser_data *s_data)
 static void ad5823_park(struct ad5823 *priv)
 {
 	struct device *dev = &priv->i2c_client->dev;
-	unsigned int mode;
 	ktime_t start;
-	int waited = 0;
+	int code, ret;
 	u32 from;
 
 	if (!priv->position_valid)
@@ -246,19 +260,18 @@ static void ad5823_park(struct ad5823 *priv)
 
 	from = priv->position;
 	start = ktime_get();
-	if (ad5823_set_position(priv, 0)) {
-		dev_warn(dev, "parking from %u: the write failed\n", from);
+	ret = regmap_write(priv->regmap, AD5823_MODE, AD5823_MODE_DIRECT);
+	for (code = (int)from; !ret && code > 0; ) {
+		code = code > AD5823_PARK_STEP ? code - AD5823_PARK_STEP : 0;
+		ret = ad5823_write_code(priv, code);
+		usleep_range(AD5823_PARK_STEP_US, AD5823_PARK_STEP_US + 200);
+	}
+	if (ret) {
+		dev_warn(dev, "parking from %u: stopped at %d: %d\n",
+			 from, code, ret);
 		return;
 	}
-	while (regmap_read(priv->regmap, AD5823_MODE, &mode)) {
-		if (waited >= AD5823_PARK_TIMEOUT_MS) {
-			dev_warn(dev, "parking from %u: no answer in %d ms\n",
-				 from, waited);
-			return;
-		}
-		msleep(AD5823_PARK_POLL_MS);
-		waited += AD5823_PARK_POLL_MS;
-	}
+	msleep(SETTLETIME_MS);
 	dev_info(dev, "lens parked from %u in %lld us\n", from,
 		 ktime_to_us(ktime_sub(ktime_get(), start)));
 }
