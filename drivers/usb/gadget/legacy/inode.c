@@ -521,6 +521,7 @@ struct kiocb_priv {
 	const struct iovec	*iv;
 	unsigned long		nr_segs;
 	unsigned		actual;
+	int			status;
 };
 
 static int ep_aio_cancel(struct kiocb *iocb, struct io_event *e)
@@ -577,12 +578,23 @@ static void ep_user_copy_worker(struct work_struct *work)
 	struct kiocb *iocb = priv->iocb;
 	size_t ret;
 
-	use_mm(mm);
-	ret = ep_copy_to_user(priv);
-	unuse_mm(mm);
+	if (priv->actual == 0) {
+		/* nothing to copy: report the fault, as for a write */
+		iocb->private = NULL;
+		aio_complete(iocb, priv->status, priv->status);
+	} else {
+		if (atomic_inc_not_zero(&mm->mm_users)) {
+			use_mm(mm);
+			ret = ep_copy_to_user(priv);
+			unuse_mm(mm);
+			mmput(mm);
+		} else {
+			ret = -EFAULT;
+		}
+		aio_complete(iocb, ret, ret);
+	}
 
-	/* completing the iocb can drop the ctx and mm, don't touch mm after */
-	aio_complete(iocb, ret, ret);
+	mmdrop(mm);
 
 	kfree(priv->buf);
 	kfree(priv->iv);
@@ -600,11 +612,13 @@ static void ep_aio_complete(struct usb_ep *ep, struct usb_request *req)
 	priv->req = NULL;
 	priv->epdata = NULL;
 
-	/* if this was a write or a read returning no data then we
-	 * don't need to copy anything to userspace, so we can
-	 * complete the aio request immediately.
+	/* if this was a write we don't need to copy anything to
+	 * userspace, so we can complete the aio request immediately.
+	 * A read always goes to the worker, even one returning no data:
+	 * it holds a reference to the mm, and the last mmdrop() is not
+	 * for interrupt context.
 	 */
-	if (priv->iv == NULL || unlikely(req->actual == 0)) {
+	if (priv->iv == NULL) {
 		kfree(req->buf);
 		kfree(priv->iv);
 		kfree(priv);
@@ -620,6 +634,7 @@ static void ep_aio_complete(struct usb_ep *ep, struct usb_request *req)
 
 		priv->buf = req->buf;
 		priv->actual = req->actual;
+		priv->status = req->status;
 		schedule_work(&priv->work);
 	}
 
@@ -673,7 +688,14 @@ fail:
 	get_ep(epdata);
 	priv->epdata = epdata;
 	priv->actual = 0;
-	priv->mm = current->mm; /* mm teardown waits for iocbs in exit_aio() */
+	/*
+	 * exit_aio() on this kernel does not wait for the context's
+	 * requests, so the mm can be torn down under a pending read.
+	 * Pin it for the worker that copies the data into it.
+	 */
+	priv->mm = current->mm;
+	if (iv)
+		atomic_inc(&priv->mm->mm_count);
 
 	/* each kiocb is coupled to one usb_request, but we can't
 	 * allocate or submit those if the host disconnected.
@@ -699,6 +721,8 @@ fail:
 	mutex_unlock(&epdata->lock);
 
 	if (unlikely(value)) {
+		if (priv->iv)
+			mmdrop(priv->mm);
 		kfree(priv->iv);
 		kfree(priv);
 		put_ep(epdata);
