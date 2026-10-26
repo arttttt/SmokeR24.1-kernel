@@ -675,6 +675,7 @@ static void ffs_user_copy_worker(struct work_struct *work)
 						   work);
 	int ret = io_data->req->status ? io_data->req->status :
 					 io_data->req->actual;
+	bool kiocb_has_eventfd = io_data->kiocb->ki_eventfd != NULL;
 
 	if (io_data->read && ret > 0) {
 		int i;
@@ -705,7 +706,7 @@ static void ffs_user_copy_worker(struct work_struct *work)
 
 	aio_complete(io_data->kiocb, ret, ret);
 
-	if (io_data->ffs->ffs_eventfd && !io_data->kiocb->ki_eventfd)
+	if (io_data->ffs->ffs_eventfd && !kiocb_has_eventfd)
 		eventfd_signal(io_data->ffs->ffs_eventfd, 1);
 
 	usb_ep_free_request(io_data->ep, io_data->req);
