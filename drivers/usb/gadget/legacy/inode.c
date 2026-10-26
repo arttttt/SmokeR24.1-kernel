@@ -523,7 +523,7 @@ struct kiocb_priv {
 	unsigned		actual;
 };
 
-static int ep_aio_cancel(struct kiocb *iocb)
+static int ep_aio_cancel(struct kiocb *iocb, struct io_event *e)
 {
 	struct kiocb_priv	*priv = iocb->private;
 	struct ep_data		*epdata;
