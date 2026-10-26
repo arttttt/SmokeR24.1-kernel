@@ -451,12 +451,6 @@ static int vfp_pm_suspend(void)
 	struct thread_info *ti = current_thread_info();
 	u32 fpexc = fmrx(FPEXC);
 
-	/* If lazy disable, re-enable the VFP ready for it to be saved */
-	if (vfp_current_hw_state[ti->cpu] != &ti->vfpstate) {
-		fpexc |= FPEXC_EN;
-		fmxr(FPEXC, fpexc);
-	}
-
 	/* if vfp is on, then save state for resumption */
 	if (fpexc & FPEXC_EN) {
 		//pr_debug("%s: saving vfp state\n", __func__);
