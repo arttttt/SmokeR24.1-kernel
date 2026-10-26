@@ -582,6 +582,7 @@ struct mxt_data {
 	u16 product_info;
 	u8 read_buf[64];
 	u8 wakeup_gesture_mode;
+	bool irq_wake_enabled;
 
 	/* Slowscan parameters	*/
 	int slowscan_enabled;
@@ -4775,9 +4776,9 @@ static int mxt_ts_suspend(struct device *dev)
 {
 	struct mxt_data *data =  dev_get_drvdata(dev);
 
-	if (data->wakeup_gesture_mode) {
+	if (data->wakeup_gesture_mode && !data->irq_wake_enabled) {
 		dev_dbg(dev, "touch enable irq wake\n");
-		enable_irq_wake(data->client->irq);
+		data->irq_wake_enabled = !enable_irq_wake(data->client->irq);
 	}
 
 	return 0;
@@ -4787,9 +4788,10 @@ static int mxt_ts_resume(struct device *dev)
 {
 	struct mxt_data *data =  dev_get_drvdata(dev);
 
-	if (data->wakeup_gesture_mode) {
+	if (data->irq_wake_enabled) {
 		dev_dbg(dev, "touch disable irq wake\n");
 		disable_irq_wake(data->client->irq);
+		data->irq_wake_enabled = false;
 	}
 
 	return 0;
