@@ -527,7 +527,7 @@ retry:
 
 		/* unlocks spinlock */
 		ret = __ffs_ep0_queue_wait(ffs, data, len);
-		if (likely(ret > 0) && unlikely(__copy_to_user(buf, data, len)))
+		if (likely(ret > 0) && unlikely(__copy_to_user(buf, data, ret)))
 			ret = -EFAULT;
 		goto done_mutex;
 
