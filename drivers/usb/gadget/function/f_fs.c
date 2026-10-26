@@ -689,20 +689,25 @@ static void ffs_user_copy_worker(struct work_struct *work)
 		 */
 		ret = min_t(int, ret, io_data->len);
 
-		use_mm(io_data->mm);
-		for (i = 0; i < io_data->nr_segs; i++) {
-			size_t len = min_t(size_t, ret - pos,
-					io_data->iovec[i].iov_len);
-			if (!len)
-				break;
-			if (unlikely(copy_to_user(io_data->iovec[i].iov_base,
-						 &io_data->buf[pos], len))) {
-				ret = -EFAULT;
-				break;
+		if (atomic_inc_not_zero(&io_data->mm->mm_users)) {
+			use_mm(io_data->mm);
+			for (i = 0; i < io_data->nr_segs; i++) {
+				size_t len = min_t(size_t, ret - pos,
+						io_data->iovec[i].iov_len);
+				if (!len)
+					break;
+				if (unlikely(copy_to_user(io_data->iovec[i].iov_base,
+							 &io_data->buf[pos], len))) {
+					ret = -EFAULT;
+					break;
+				}
+				pos += len;
 			}
-			pos += len;
+			unuse_mm(io_data->mm);
+			mmput(io_data->mm);
+		} else {
+			ret = -EFAULT;
 		}
-		unuse_mm(io_data->mm);
 	}
 
 	aio_complete(io_data->kiocb, ret, ret);
@@ -714,6 +719,8 @@ static void ffs_user_copy_worker(struct work_struct *work)
 	usb_ep_free_request(io_data->ep, io_data->req);
 	io_data->req = NULL;
 	spin_unlock_irqrestore(&io_data->ffs->eps_lock, flags);
+
+	mmdrop(io_data->mm);
 
 	if (io_data->read)
 		kfree(io_data->iovec);
@@ -1022,11 +1029,14 @@ static ssize_t ffs_epfile_aio_write(struct kiocb *kiocb,
 
 	kiocb->private = io_data;
 
+	atomic_inc(&io_data->mm->mm_count);
 	kiocb_set_cancel_fn(kiocb, ffs_aio_cancel);
 
 	res = ffs_epfile_io(kiocb->ki_filp, io_data);
-	if (res != -EIOCBQUEUED)
+	if (res != -EIOCBQUEUED) {
+		mmdrop(io_data->mm);
 		kfree(io_data);
+	}
 	return res;
 }
 
@@ -1062,10 +1072,12 @@ static ssize_t ffs_epfile_aio_read(struct kiocb *kiocb,
 
 	kiocb->private = io_data;
 
+	atomic_inc(&io_data->mm->mm_count);
 	kiocb_set_cancel_fn(kiocb, ffs_aio_cancel);
 
 	res = ffs_epfile_io(kiocb->ki_filp, io_data);
 	if (res != -EIOCBQUEUED) {
+		mmdrop(io_data->mm);
 		kfree(io_data);
 		kfree(iovec_copy);
 	}
