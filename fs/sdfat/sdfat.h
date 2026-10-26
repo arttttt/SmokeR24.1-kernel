@@ -142,7 +142,7 @@ struct sdfat_sb_info {
 	struct mutex s_vlock;   /* volume lock */
 	int use_vmalloc;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 	struct rcu_head rcu;
 #endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
@@ -234,14 +234,7 @@ static inline bool sb_rdonly(const struct super_block *sb)
 }
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
-	/* EMPTY */
-#else
-static inline sdfat_timespec_t current_time(struct inode *inode)
-{
-	return CURRENT_TIME_SEC;
-}
-#endif
+/* this 3.10 kernel has the 4.9 current_time() */
 /*
  * FIXME : needs on-disk-slot in-memory data
  */

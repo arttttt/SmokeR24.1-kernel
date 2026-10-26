@@ -303,14 +303,7 @@ static inline int sdfat_remount_syncfs(struct super_block *sb)
 }
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0)
-       /* EMPTY */
-#else /* LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0) */
-static inline void truncate_inode_pages_final(struct address_space *mapping)
-{
-	truncate_inode_pages(mapping, 0);
-}
-#endif
+/* this 3.10 kernel has the 3.15 truncate_inode_pages_final() (91b0abe36a7b) */
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
@@ -4068,7 +4061,11 @@ static void sdfat_free_inode(struct inode *inode)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 /* Use free_inode instead of destroy_inode */
 #define sdfat_destroy_inode	(NULL)
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+/*
+ * RCU path walk reaches inodes and the sb info on 3.10 as well, and vfat
+ * and ext4 here free their inodes through call_rcu() too.
+ */
 static void sdfat_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
@@ -4173,7 +4170,7 @@ static void sdfat_free_sb_info(struct sdfat_sb_info *sbi)
 	kfree(sbi);
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 static void delayed_free(struct rcu_head *p)
 {
 	struct sdfat_sb_info *sbi = container_of(p, struct sdfat_sb_info, rcu);
@@ -5156,7 +5153,7 @@ static int __init sdfat_init_inodecache(void)
 
 static void sdfat_destroy_inodecache(void)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 	/*
 	 * Make sure all delayed rcu free inodes are flushed before we
 	 * destroy cache.
@@ -5311,7 +5308,7 @@ error:
 
 static void __exit exit_sdfat_fs(void)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 	/*
 	 * Make sure all delayed rcu free inodes are flushed before we
 	 * destroy cache.
