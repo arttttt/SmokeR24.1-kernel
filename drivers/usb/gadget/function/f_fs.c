@@ -1033,11 +1033,12 @@ static ssize_t ffs_epfile_aio_write(struct kiocb *kiocb,
 	kiocb_set_cancel_fn(kiocb, ffs_aio_cancel);
 
 	res = ffs_epfile_io(kiocb->ki_filp, io_data);
-	if (res != -EIOCBQUEUED) {
-		mmdrop(io_data->mm);
-		kfree(io_data);
-	}
-	return res;
+	if (res == -EIOCBQUEUED)
+		return res;
+	aio_complete(kiocb, res, 0);
+	mmdrop(io_data->mm);
+	kfree(io_data);
+	return -EIOCBQUEUED;
 }
 
 static ssize_t ffs_epfile_aio_read(struct kiocb *kiocb,
@@ -1076,12 +1077,13 @@ static ssize_t ffs_epfile_aio_read(struct kiocb *kiocb,
 	kiocb_set_cancel_fn(kiocb, ffs_aio_cancel);
 
 	res = ffs_epfile_io(kiocb->ki_filp, io_data);
-	if (res != -EIOCBQUEUED) {
-		mmdrop(io_data->mm);
-		kfree(io_data);
-		kfree(iovec_copy);
-	}
-	return res;
+	if (res == -EIOCBQUEUED)
+		return res;
+	aio_complete(kiocb, res, 0);
+	mmdrop(io_data->mm);
+	kfree(io_data);
+	kfree(iovec_copy);
+	return -EIOCBQUEUED;
 }
 
 static int
