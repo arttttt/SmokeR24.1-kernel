@@ -736,7 +736,7 @@ static void ffs_epfile_async_io_complete(struct usb_ep *_ep,
 	ENTER();
 
 	INIT_WORK(&io_data->work, ffs_user_copy_worker);
-	schedule_work(&io_data->work);
+	queue_work(io_data->ffs->io_completion_wq, &io_data->work);
 }
 
 static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
@@ -1425,6 +1425,13 @@ ffs_fs_mount(struct file_system_type *t, int flags,
 		return ERR_PTR(-ENOMEM);
 	}
 
+	ffs->io_completion_wq = alloc_ordered_workqueue("%s", WQ_MEM_RECLAIM,
+							 dev_name);
+	if (unlikely(!ffs->io_completion_wq)) {
+		ffs_data_put(ffs);
+		return ERR_PTR(-ENOMEM);
+	}
+
 	ffs_dev = ffs_acquire_dev(dev_name);
 	if (IS_ERR(ffs_dev)) {
 		ffs_data_put(ffs);
@@ -1524,6 +1531,8 @@ static void ffs_data_put(struct ffs_data *ffs)
 		ffs_data_clear(ffs);
 		BUG_ON(waitqueue_active(&ffs->ev.waitq) ||
 		       waitqueue_active(&ffs->ep0req_completion.wait));
+		if (ffs->io_completion_wq)
+			destroy_workqueue(ffs->io_completion_wq);
 		kfree(ffs->dev_name);
 		kfree(ffs);
 	}

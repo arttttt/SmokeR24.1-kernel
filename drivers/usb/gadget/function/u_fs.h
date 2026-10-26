@@ -276,6 +276,9 @@ struct ffs_data {
 	bool no_disconnect;
 	struct work_struct reset_work;
 
+	/* AIO completions are copied out and finished on this queue */
+	struct workqueue_struct		*io_completion_wq;
+
 	/*
 	 * The endpoint files, filled by ffs_epfiles_create(),
 	 * destroyed by ffs_epfiles_destroy().
