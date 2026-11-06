@@ -3167,7 +3167,21 @@ void cpuset_update_active_cpus(void)
 	 * We're inside cpu hotplug critical region which usually nests
 	 * inside cgroup synchronization.  Bounce actual hotplug processing
 	 * to a work item to avoid reverse locking order.
+	 *
+	 * We still need to do partition_sched_domains() synchronously;
+	 * otherwise, the scheduler will get confused and put tasks to the
+	 * dead CPU.  Fall back to the default single domain.
+	 * cpuset_hotplug_workfn() will rebuild it as necessary.
+	 *
+	 * Upstream dropped this in 4.14, once the scheduler itself kept
+	 * tasks off inactive CPUs. This one does not: idle_balance() on a
+	 * CPU that has just gone offline walks the domains it still has and
+	 * pulls a task back onto itself -- the task taking it down among
+	 * them, which then waits forever in _cpu_down() for the CPU it is
+	 * running on to go idle. The work above cannot rebuild the domains
+	 * in time, as it waits for the hotplug lock this path holds.
 	 */
+	partition_sched_domains(1, NULL, NULL);
 	schedule_work(&cpuset_hotplug_work);
 }
 
